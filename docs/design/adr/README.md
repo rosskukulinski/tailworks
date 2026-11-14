@@ -41,3 +41,4 @@ slug everywhere in that change (`git grep ADR-<slug>`). See `AGENTS.md` rule 5.
 | [031](031-pre-joined-node-pool.md) | Pre-joined node pool: assign an already-registered node to a new object by rename (and, if needed, retag) | 2026-11-13 | Accepted |
 | [032](032-containers-code-sandboxes.md) | Containers and code sandboxes: Cloudflare's `ctx.container` on the microVM tier, one VM per container, attached to its DO, no tailnet reach by default | 2026-11-13 | Accepted |
 | [033](033-smart-placement.md) | Smart placement: put a workload on the host with the best measured tailnet path to what it connects to | 2026-11-13 | Proposed |
+| [do-split](do-split.md) | Replicated Workers with single-homed Durable Objects; stubs forwarded to the owning host | 2026-11-14 | Proposed |

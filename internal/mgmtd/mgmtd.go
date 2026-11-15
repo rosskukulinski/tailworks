@@ -332,6 +332,7 @@ func Start(ctx context.Context, o Options) (rt *Runtime, err error) {
 	if issuer != nil {
 		self.Issuer = issuer.BaseURL
 	}
+	m.SetConsoleURL(self.ConsoleURL()) // notification deep links (mgmt/notify.go)
 	api := &mgmt.Server{M: m, Self: self, Version: o.Version}
 	if len(o.Admins) > 0 {
 		api.Admins = o.Admins

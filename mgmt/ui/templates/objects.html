@@ -1,0 +1,52 @@
+{{define "content"}}
+<h1>Objects</h1>
+<p class="hint">Every tailnet node twd has created, newest first. Filter by tenant, app, status, tag or the person an object acts for.</p>
+
+<section class="card toolbar">
+  <form method="get" action="/ui/objects" class="filters">
+    <label>Tenant
+      <select name="tenant">
+        <option value="">every tenant</option>
+        {{range .Tenants}}<option value="{{.TenantID}}"{{if eq .TenantID $.Tenant}} selected{{end}}>{{.Tailnet}}</option>{{end}}
+      </select>
+    </label>
+    <label>App (workload) <input type="text" name="workload" class="mono" value="{{.Workload}}" placeholder="any"></label>
+    <label>Status
+      <select name="status">
+        <option value="">any</option>
+        {{range .States}}<option value="{{.}}"{{if eq . $.State}} selected{{end}}>{{.}}</option>{{end}}
+      </select>
+    </label>
+    <label>Tag <input type="text" name="tag" class="mono" value="{{.Tag}}" placeholder="tag:agent"></label>
+    <label>Acting for <input type="text" name="caller" value="{{.Caller}}" placeholder="login (contains)"></label>
+    <button type="submit">Filter</button>
+    <a href="/ui/objects">Clear</a>
+  </form>
+  <p class="small muted">Tenant, app and status are filtered by the API. Tag and acting-for are filtered here{{if .Truncated}}, over the first 5000 objects: narrow by tenant, app or status for a complete answer{{end}}.</p>
+</section>
+
+{{range .Errors}}<div class="flash bad">{{.}}</div>{{end}}
+
+<section data-live="objects">
+  <div class="sect-head"><div>
+    <h2>Objects <span class="count">{{.Total}}</span></h2>
+    <p class="hint">{{if .Objects}}Showing {{.FirstShown}}–{{.LastShown}} of {{.Total}}{{if .Truncated}}+{{end}}.{{end}}</p>
+  </div></div>
+  <div class="tbl">
+  <table class="objects">
+    <thead><tr><th>Node</th><th>App</th><th>Kind / name</th><th>Status</th><th>Tags</th><th>Acting for</th><th>Tenant</th><th>Created</th></tr></thead>
+    <tbody>{{range .Objects}}<tr class="{{if not .Live}}dim{{end}}">
+      <td class="mono"><a href="/ui/objects/{{.ObjectID}}" title="{{.ObjectID}}">{{if .NodeName}}{{.NodeName}}{{else}}{{short .ObjectID}}{{end}}</a>{{if .Parent}}<div class="sub-line">child of <a href="/ui/objects/{{.Parent}}">{{short .Parent}}</a></div>{{end}}</td>
+      <td class="mono">{{.Workload}}</td>
+      <td>{{.DisplayNS}}</td>
+      <td>{{template "status" .Status}}</td>
+      <td class="small">{{if .Tags}}{{join .Tags}}{{else}}<span class="muted">—</span>{{end}}</td>
+      <td class="small">{{if .ActingFor}}{{.ActingFor}}{{else}}<span class="muted">—</span>{{end}}</td>
+      <td class="mono small"><a href="/ui/tenants/{{.TenantID}}">{{.TenantID}}</a></td>
+      <td class="small">{{since .CreatedAt}}</td>
+    </tr>{{else}}<tr><td colspan="8" class="empty">No objects match.</td></tr>{{end}}</tbody>
+  </table>
+  </div>
+  <p class="pager">{{if .PrevURL}}<a href="{{.PrevURL}}">← Newer</a>{{end}}{{if .NextURL}}<a href="{{.NextURL}}">Older →</a>{{end}}{{if not (or .PrevURL .NextURL)}}<span class="muted">All matches are on this page</span>{{end}}</p>
+</section>
+{{end}}

@@ -451,6 +451,10 @@ type pubWriter struct {
 	wrote   bool
 	swallow bool // upstream output is discarded (netd answered instead)
 	gate    func() *Error
+
+	// html: the client prefers text/html, so netd's errors are an HTML
+	// page (errors_html.go).
+	html bool
 }
 
 func (w *pubWriter) WriteHeader(c int) {
@@ -499,6 +503,10 @@ func (w *pubWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 // writeErr answers with e directly.
 func (w *pubWriter) writeErr(e *Error) {
 	w.wrote, w.status = true, e.Status()
+	if w.html {
+		WriteErrorHTML(w.ResponseWriter, e)
+		return
+	}
 	WriteError(w.ResponseWriter, e)
 }
 
@@ -546,7 +554,7 @@ func isUpgrade(r *http.Request) bool {
 func (o *Object) servePublic(w http.ResponseWriter, req *http.Request) {
 	t0 := time.Now()
 	p := o.pub
-	pw := &pubWriter{ResponseWriter: w}
+	pw := &pubWriter{ResponseWriter: w, html: WantsHTML(req)}
 	fc, _ := req.Context().Value(funnelCtxKey{}).(*ipn.FunnelConn)
 	if fc == nil { // unreachable: Accept admits only Funnel conns
 		w.Header().Set("Connection", "close")

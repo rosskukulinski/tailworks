@@ -159,12 +159,66 @@ refusals are made and recorded by hostd itself.
 ## Noticing a waiting approval
 
 `twd approvals` lists what is waiting, oldest first, with its age and
-params; the admin UI's approvals page shows the same. twd sends no email or
-chat messages. To notify someone, do it from a step in your Workflow
-before you wait: a `fetch()` to a notifier on your tailnet (Workers reach
-tailnet peers only):
+params; the admin UI's approvals page shows the same. Neither needs a
+tenant ID: both default to the tenants on your own tailnet, which
+`GET /v1/whoami` reports (`tenants`, with your `approveGrants`). Pass
+`--tenant` (or open `/ui/approvals?tenant=<tenant ID>`) only when your
+tailnet has several.
+
+### Notifications: a webhook per tenant
+
+A twd admin can have mgmt tell people as soon as a Workflow starts
+waiting ([ADR-approval-notifications](design/adr/approval-notifications.md)):
+
+```sh
+twd notify set --webhook -        # paste the URL: it is a secret, shown again only as its origin
+twd notify test                   # send a test event now
+twd notify                        # show (origin, header names, events)
+twd notify rm
+```
+
+mgmt then POSTs JSON to the URL for every `approval_requested`, usually
+within seconds of the wait starting:
+
+```json
+{"event": "approval_requested", "tenantID": "tn_…", "workload": "refunds", "workflow": "refund",
+ "instance": "…", "step": "wait-for-approval", "facts": {"amount": 120},
+ "link": "https://twd-mgmt.<tailnet>.ts.net/ui/approvals?tenant=tn_…#<instance>",
+ "cli": "twd approve refunds <instance> --workflow refund",
+ "text": "Approval needed: refunds/refund instance … (amount=120). Decide: https://…",
+ "sentAt": "2026-11-15T10:00:00Z"}
+```
+
+- **Slack, Mattermost, Google Chat:** an incoming-webhook URL works as is;
+  they show `text`, and the link opens the request's row in the admin UI.
+  Opening the link grants nothing: the approver still decides as their own
+  tailnet identity, with their own grant.
+- **Your own notifier** (email, paging, routing per app): point the
+  webhook at it and read the JSON. A tailnet name (`http://notifier/hook`),
+  a `*.ts.net` name or a `100.x` address is dialed over mgmt's tailnet
+  node; anything else over the twd host's network. Loopback and link-local
+  addresses are refused. Add a credential with
+  `--header authorization` (read from stdin, never shown again).
+- Each request has the header `Twd-Event: approval_requested`. Delivery is
+  tried 3 times; a final failure is in the audit log
+  (`notification_failed`), and the approval stays listed.
+
+### Notifying from the Workflow itself
+
+To notify per app, or someone specific, do it from a step before you wait:
+a `fetch()` to a notifier on your tailnet (Workers reach tailnet peers
+only). The approvals page link works from there too:
 
 ```ts
-await step.do("notify", () => fetch("http://chat-bot/notify", { method: "POST", body: JSON.stringify({ id: event.instanceId }) }));
+await step.do("notify", () => fetch("http://chat-bot/notify", {
+  method: "POST",
+  body: JSON.stringify({
+    text: `Refund of ${event.payload.amount} needs approval`,
+    link: `https://twd-mgmt.<tailnet>.ts.net/ui/approvals#${encodeURIComponent(event.instanceId)}`,
+  }),
+}));
 const approval = await this.waitForApproval(step, { timeout: "2 days" });
 ```
+
+For email, have the notifier (or a mail service's HTTP API reachable as a
+tailnet peer) send it; Workers on twd don't reach the public internet.

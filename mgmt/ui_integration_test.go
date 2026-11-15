@@ -262,7 +262,7 @@ func TestUISpecConformance(t *testing.T) {
 	api := val.Middleware(specReporter(t))(u.srv.Handler())
 	uiH := ui.Handler(&http.Client{Transport: uiTransport{api}}, uiBaseURL)
 	admin := Principal{Kind: "user", Login: "alice@example.com", NodeID: "nADM", Caps: []string{AdminCap}}
-	for _, p := range []string{"/ui/", "/ui/objects/" + root, "/ui/objects/" + kid, "/ui/deployments/" + dep, "/ui/hosts/h1", "/ui/tenants/" + u.tn, "/ui/audit", "/ui/audit?object=" + root + "&limit=2"} {
+	for _, p := range []string{"/ui/", "/ui/objects/" + root, "/ui/objects/" + kid, "/ui/deployments/" + dep, "/ui/hosts/h1", "/ui/tenants/" + u.tn, "/ui/audit", "/ui/audit?object=" + root + "&limit=2", "/ui/audit?tenant=" + u.tn + "&kind=create&workload=w", "/ui/objects", "/ui/objects?status=ready&tag=x", "/ui/approvals"} {
 		r := httptest.NewRequest("GET", "http://twd-mgmt.t.ts.net"+p, nil)
 		r = r.WithContext(WithPrincipal(r.Context(), admin))
 		w := httptest.NewRecorder()

@@ -56,18 +56,80 @@ func (a approval) Age() string {
 	return ago(a.RequestedAt.UnixMilli(), end)
 }
 
-// FactsText renders the instance's numeric params.
-func (a approval) FactsText() string {
+// fact is one of the instance's numeric params.
+type fact struct {
+	Name  string
+	Value string
+}
+
+// FactList is the instance's numeric params, sorted by name (rendered as
+// a definition list).
+func (a approval) FactList() []fact {
 	keys := make([]string, 0, len(a.Facts))
 	for k := range a.Facts {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	var parts []string
+	out := make([]fact, 0, len(keys))
 	for _, k := range keys {
-		parts = append(parts, fmt.Sprintf("%s=%v", k, a.Facts[k]))
+		out = append(out, fact{k, fmt.Sprint(a.Facts[k])})
+	}
+	return out
+}
+
+// FactsText renders the instance's numeric params on one line.
+func (a approval) FactsText() string {
+	var parts []string
+	for _, f := range a.FactList() {
+		parts = append(parts, f.Name+"="+f.Value)
 	}
 	return strings.Join(parts, " ")
+}
+
+// Anchor is the row's id: the deep link of an approval_requested
+// notification is /ui/approvals?tenant=…#<instance>.
+func (a approval) Anchor() string { return a.Instance }
+
+// whoTenant is a tenant GET /v1/whoami says the caller can act in.
+type whoTenant struct {
+	TenantID string `json:"tenantID"`
+	Tailnet  string `json:"tailnet"`
+}
+
+// approveGrant is one of the caller's twd.dev/cap/approve grant values.
+type approveGrant struct {
+	Workloads []string           `json:"workloads"`
+	Workflows []string           `json:"workflows"`
+	Steps     []string           `json:"steps"`
+	Decisions []string           `json:"decisions"`
+	Limits    map[string]float64 `json:"limits"`
+}
+
+// Text describes the grant in words ("any approval" when it does not
+// narrow).
+func (g approveGrant) Text() string {
+	var parts []string
+	list := func(what string, l []string) {
+		if len(l) > 0 && !(len(l) == 1 && l[0] == "*") {
+			parts = append(parts, what+" "+strings.Join(l, ", "))
+		}
+	}
+	list("apps", g.Workloads)
+	list("Workflows", g.Workflows)
+	list("steps", g.Steps)
+	list("decisions", g.Decisions)
+	keys := make([]string, 0, len(g.Limits))
+	for k := range g.Limits {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s ≤ %v", k, g.Limits[k]))
+	}
+	if len(parts) == 0 {
+		return "any approval"
+	}
+	return strings.Join(parts, "; ")
 }
 
 // DecidePath is the /v1 route that decides this approval.
@@ -77,23 +139,57 @@ func (a approval) DecidePath() string {
 
 type approvalsData struct {
 	base
-	Tenant    string // ?tenant=
-	All       bool   // ?all=1
+	Tenant    string      // ?tenant=
+	All       bool        // ?all=1
+	Tenants   []whoTenant // the tenants the page defaults to
+	Names     map[string]string
+	TenantBox bool // more (or fewer) than one tenant to choose from
 	Approvals []approval
 	Errors    []string
 }
 
+// TenantName is a tenant's tailnet when known, else its ID.
+func (d approvalsData) TenantName(id string) string {
+	if n := d.Names[id]; n != "" {
+		return n
+	}
+	return id
+}
+
+// approvals lists the approvals of ?tenant=, or by default of the tenants
+// the caller can act in: every tenant for an admin, else the tenants on
+// the caller's own tailnet (GET /v1/whoami), so an approver never needs
+// to know a tenant ID. The tenant box is hidden when there is exactly one.
 func (u *ui) approvals(w http.ResponseWriter, r *http.Request) {
-	d := approvalsData{base: u.base(r, "approvals"), Tenant: r.URL.Query().Get("tenant"), All: r.URL.Query().Get("all") != ""}
-	var ids []string
-	if d.Tenant != "" {
-		ids = []string{d.Tenant}
-	} else {
+	d := approvalsData{base: u.base(r, "approvals"), Tenant: r.URL.Query().Get("tenant"), All: r.URL.Query().Get("all") != "", Names: map[string]string{}}
+	if d.Who.Admin {
 		ts, err := listAll[tenant](u, r, "/v1/tenants?limit=500", 2000)
 		if err != nil {
-			d.Errors = append(d.Errors, "tenants: "+err.Error()+". Not a twd admin? Ask your admin for this page's link with your tenant (/ui/approvals?tenant=<tenant ID>), or enter the tenant ID above.")
+			d.Errors = append(d.Errors, "tenants: "+err.Error())
 		}
 		for _, t := range ts {
+			d.Tenants = append(d.Tenants, whoTenant{TenantID: t.TenantID, Tailnet: t.Tailnet})
+		}
+	}
+	if len(d.Tenants) == 0 {
+		d.Tenants = d.Who.Tenants
+	}
+	for _, t := range d.Tenants {
+		d.Names[t.TenantID] = t.Tailnet
+	}
+	d.TenantBox = len(d.Tenants) != 1
+	var ids []string
+	switch {
+	case d.Tenant != "":
+		ids = []string{d.Tenant}
+	case len(d.Tenants) == 0:
+		tn := d.Who.Tailnet
+		if tn == "" {
+			tn = "your tailnet"
+		}
+		d.Errors = append(d.Errors, "No tenant uses "+tn+", so there is nothing to show by default. Enter the tenant ID from your approval link or ask your twd admin for it.")
+	default:
+		for _, t := range d.Tenants {
 			ids = append(ids, t.TenantID)
 		}
 	}
@@ -107,12 +203,12 @@ func (u *ui) approvals(w http.ResponseWriter, r *http.Request) {
 			q = "?all=true"
 		}
 		if err := u.call(r, "GET", "/v1/tenants/"+url.PathEscape(id)+"/approvals"+q, &out); err != nil {
-			d.Errors = append(d.Errors, id+": "+err.Error())
+			d.Errors = append(d.Errors, d.TenantName(id)+": "+err.Error())
 			continue
 		}
 		d.Approvals = append(d.Approvals, out.Approvals...)
 		for _, h := range out.Unreachable {
-			d.Errors = append(d.Errors, id+": host "+h+" did not answer; its approvals are missing")
+			d.Errors = append(d.Errors, d.TenantName(id)+": host "+h+" did not answer; its approvals are missing")
 		}
 	}
 	sort.SliceStable(d.Approvals, func(i, j int) bool { return d.Approvals[i].RequestedAt.Before(d.Approvals[j].RequestedAt) })
@@ -142,6 +238,7 @@ func (u *ui) decideForm(w http.ResponseWriter, r *http.Request) {
 		q.Set("ok", fmt.Sprintf("%s/%s/%s: %s", a.Workload, a.Workflow, a.Instance, auditfmt.Decided(f.Get("decision"))))
 	}
 	to.RawQuery = q.Encode()
+	to.Fragment = a.Anchor()
 	http.Redirect(w, r, to.String(), http.StatusSeeOther)
 }
 

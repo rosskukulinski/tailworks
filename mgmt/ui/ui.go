@@ -49,6 +49,7 @@ func Handler(api *http.Client, baseURL string) http.Handler {
 	u := &ui{api: api, apiURL: strings.TrimSuffix(baseURL, "/"), pages: parsePages(), now: time.Now}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /ui/{$}", u.overview)
+	mux.HandleFunc("GET /ui/objects", u.objects) // search.go
 	mux.HandleFunc("GET /ui/objects/{id}", u.object)
 	mux.HandleFunc("POST /ui/objects/{id}/kill", u.killForm)
 	mux.HandleFunc("GET /ui/deployments/{id}", u.deployment)
@@ -235,7 +236,7 @@ func parsePages() map[string]*template.Template {
 	}
 	layout := template.Must(template.New("layout").Funcs(funcs).ParseFS(templateFS, "templates/layout.html"))
 	pages := map[string]*template.Template{}
-	for _, name := range []string{"overview", "object", "deployment", "host", "tenant", "audit", "approvals", "error"} {
+	for _, name := range []string{"overview", "object", "objects", "deployment", "host", "tenant", "audit", "approvals", "error"} {
 		t := template.Must(layout.Clone())
 		pages[name] = template.Must(t.ParseFS(templateFS, "templates/"+name+".html"))
 	}
@@ -348,30 +349,13 @@ func (u *ui) overview(w http.ResponseWriter, r *http.Request) {
 	u.render(w, 200, "overview", d)
 }
 
-// recentAudit returns the newest n records. The audit list is oldest
-// first with cursor paging, so this asks for the last 24 hours (one page
-// of 500) and keeps the tail, falling back to the unbounded first page.
+// recentAudit returns the newest n records, newest first.
 func (u *ui) recentAudit(r *http.Request, n int) ([]auditRecord, error) {
-	since := u.now().Add(-24 * time.Hour).UTC().Format(time.RFC3339)
 	var pg auditPage
-	if err := u.call(r, "GET", "/v1/audit?limit=500&since="+url.QueryEscape(since), &pg); err != nil {
+	if err := u.call(r, "GET", "/v1/audit?order=desc&limit="+strconv.Itoa(n), &pg); err != nil {
 		return nil, err
 	}
-	recs := pg.Items
-	if len(recs) == 0 {
-		if err := u.call(r, "GET", "/v1/audit?limit=500", &pg); err != nil {
-			return nil, err
-		}
-		recs = pg.Items
-	}
-	if len(recs) > n {
-		recs = recs[len(recs)-n:]
-	}
-	// newest first
-	for i, j := 0, len(recs)-1; i < j; i, j = i+1, j-1 {
-		recs[i], recs[j] = recs[j], recs[i]
-	}
-	return recs, nil
+	return pg.Items, nil
 }
 
 type objectData struct {
@@ -462,7 +446,7 @@ func (u *ui) object(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var ap auditPage
-	if err := u.call(r, "GET", "/v1/audit?limit=200&object="+url.QueryEscape(id), &ap); err == nil {
+	if err := u.call(r, "GET", "/v1/audit?limit=200&order=desc&object="+url.QueryEscape(id), &ap); err == nil { // newest first
 		d.Audit, d.Chains, d.Verified = ap.Items, ap.Chains, ap.Verified
 	}
 	u.render(w, 200, "object", d)
@@ -550,61 +534,6 @@ func (u *ui) tenant(w http.ResponseWriter, r *http.Request) {
 	}
 	d.Objects = buildTree(objs)
 	u.render(w, 200, "tenant", d)
-}
-
-type auditData struct {
-	base
-	Filter       string // object | human | trace | all
-	Value        string
-	Limit        int
-	Records      []auditRecord
-	Names        map[string]string
-	NextCursor   string
-	NextURL      string
-	Chains       []chainStatus
-	Verified     bool
-	Verification verification
-}
-
-func (u *ui) audit(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	d := auditData{base: u.base(r, "audit"), Filter: "all", Limit: 100, Names: map[string]string{}}
-	if n, err := strconv.Atoi(q.Get("limit")); err == nil && n > 0 && n <= 500 {
-		d.Limit = n
-	}
-	api := url.Values{"limit": {strconv.Itoa(d.Limit)}}
-	for _, f := range []string{"object", "human", "trace"} {
-		if v := q.Get(f); v != "" {
-			d.Filter, d.Value = f, v
-			api.Set(f, v)
-			break
-		}
-	}
-	if c := q.Get("cursor"); c != "" {
-		api.Set("cursor", c)
-	}
-	var ap auditPage
-	if err := u.call(r, "GET", "/v1/audit?"+api.Encode(), &ap); err != nil {
-		u.fail(w, r, err)
-		return
-	}
-	d.Records, d.Chains, d.Verified = ap.Items, ap.Chains, ap.Verified
-	if ap.NextCursor != nil && *ap.NextCursor != "" {
-		d.NextCursor = *ap.NextCursor
-		nq := url.Values{"limit": {strconv.Itoa(d.Limit)}, "cursor": {d.NextCursor}}
-		if d.Filter != "all" {
-			nq.Set(d.Filter, d.Value)
-		}
-		d.NextURL = "/ui/audit?" + nq.Encode()
-	}
-	u.call(r, "GET", "/v1/audit/verification", &d.Verification)
-	// Node names for the records' objects (one listing; best effort).
-	if objs, err := listAll[object](u, r, "/v1/objects?limit=500", 2000); err == nil {
-		for _, o := range objs {
-			d.Names[o.ObjectID] = o.NodeName()
-		}
-	}
-	u.render(w, 200, "audit", d)
 }
 
 // ---- no-JS form fallbacks: the same /v1 call, then a redirect back ----

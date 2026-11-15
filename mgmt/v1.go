@@ -297,8 +297,10 @@ func (a *v1api) WhoAmI(w http.ResponseWriter, r *http.Request) {
 	if p.Kind == "local" {
 		self.Transport = "local-dev"
 	}
-	writeJSON(w, 200, WhoAmI{Kind: kind, Login: p.Login, NodeID: p.NodeID, Tags: p.Tags, HostID: p.HostID,
-		Admin: a.s.allowed(p, roleAdmin), Actor: p.Actor(r), Mgmt: self})
+	who := WhoAmI{Kind: kind, Login: p.Login, NodeID: p.NodeID, Tags: p.Tags, HostID: p.HostID,
+		Admin: a.s.allowed(p, roleAdmin), Actor: p.Actor(r), Mgmt: self}
+	a.s.whoamiScope(r.Context(), p, &who) // whoami_tenants.go
+	writeJSON(w, 200, who)
 }
 
 func (a *v1api) GetStatus(w http.ResponseWriter, r *http.Request) {
@@ -1301,6 +1303,7 @@ func (a *v1api) ListAudit(w http.ResponseWriter, r *http.Request, params v1.List
 	}
 	f := AuditFilter{ObjectID: str(params.Object), ActingFor: str(params.Human), TraceID: str(params.Trace), TenantID: str(params.Tenant),
 		Chain: str(params.Chain), Since: normTS(str(params.Since)), Until: normTS(str(params.Until)), Page: pg}
+	f.Desc = params.Order != nil && *params.Order == v1.Desc
 	if params.Kind != nil {
 		for _, k := range *params.Kind {
 			f.Kinds = append(f.Kinds, string(k))

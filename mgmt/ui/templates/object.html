@@ -76,7 +76,7 @@
 <section data-live="audit">
   <div class="sect-head"><div>
     <h2>Activity <span class="count">{{len .Audit}}</span> {{if .Verified}}<span class="badge ok">verified</span>{{else}}<span class="badge bad">NOT VERIFIED</span>{{end}}</h2>
-    <p class="hint">Audit log entries for this object. <a href="/ui/audit?object={{.Obj.ObjectID}}">See all of them →</a></p>
+    <p class="hint">Audit log entries for this object, newest first. <a href="/ui/audit?object={{.Obj.ObjectID}}">See all of them →</a></p>
   </div></div>
   <div class="tbl">
   <table>

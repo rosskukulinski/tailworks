@@ -1778,9 +1778,19 @@ func (s *SQLStore) ListAudit(ctx context.Context, f AuditFilter) ([]AuditRecord,
 	if f.Chain != "" && f.Page.After == nil {
 		order = " ORDER BY chain, seq"
 	}
-	if k := f.Page.After; k != nil {
+	if k := f.Page.After; k != nil && !f.Desc {
 		where = append(where, "(ts > ? OR (ts = ? AND chain > ?) OR (ts = ? AND chain = ? AND seq > ?))")
 		args = append(args, k.TS, k.TS, k.Chain, k.TS, k.Chain, k.Seq)
+	}
+	if f.Desc { // newest first; the cursor is an upper bound
+		order = " ORDER BY ts DESC, chain DESC, seq DESC"
+		if f.Chain != "" && f.Page.After == nil {
+			order = " ORDER BY chain DESC, seq DESC"
+		}
+		if k := f.Page.After; k != nil {
+			where = append(where, "(ts < ? OR (ts = ? AND chain < ?) OR (ts = ? AND chain = ? AND seq < ?))")
+			args = append(args, k.TS, k.TS, k.Chain, k.TS, k.Chain, k.Seq)
+		}
 	}
 	q := "SELECT chain, seq, ts, tenant_id, object_id, kind, trace_id, acting_for, prev_hash, hash, host_sig, raw FROM audit"
 	if len(where) > 0 {

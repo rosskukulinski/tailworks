@@ -154,7 +154,7 @@ func get(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
 	return w
 }
 
-var pages = []string{"/ui/", "/ui/objects/obj_root", "/ui/objects/obj_kid", "/ui/objects/obj_dead", "/ui/deployments/dep_1", "/ui/hosts/h1", "/ui/tenants/tn_1", "/ui/audit", "/ui/audit?object=obj_root", "/ui/audit?human=ross@x", "/ui/audit?trace=tr_1&limit=5"}
+var pages = []string{"/ui/", "/ui/objects", "/ui/objects?tenant=tn_1&workload=w&status=ready&tag=a&caller=ross&page=2", "/ui/approvals", "/ui/approvals?tenant=tn_1&all=1", "/ui/audit?tenant=tn_1&kind=kill&workload=w&cursor=c1", "/ui/objects/obj_root", "/ui/objects/obj_kid", "/ui/objects/obj_dead", "/ui/deployments/dep_1", "/ui/hosts/h1", "/ui/tenants/tn_1", "/ui/audit", "/ui/audit?object=obj_root", "/ui/audit?human=ross@x", "/ui/audit?trace=tr_1&limit=5"}
 
 // TestPagesRenderEmpty: every page template executes over an empty mgmt
 // (the overview and audit list are 200; records that do not exist are the

@@ -235,6 +235,13 @@ type WhoAmI struct {
 	Login  string   `json:"login,omitempty"`
 	NodeID string   `json:"nodeID,omitempty"`
 	Tags   []string `json:"tags,omitempty"`
+
+	// whoami_tenants.go: the caller's tailnet, the tenants it can act in
+	// without knowing their IDs, and its twd.dev/cap/approve grants.
+	Tailnet       string         `json:"tailnet,omitempty"`
+	Tenants       []WhoAmITenant `json:"tenants"`
+	ApproveGrants []ApproveGrant `json:"approveGrants"`
+
 	HostID string   `json:"hostID,omitempty"`
 	Admin  bool     `json:"admin"`
 	Actor  string   `json:"actor"`

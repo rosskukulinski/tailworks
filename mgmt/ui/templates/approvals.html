@@ -1,21 +1,43 @@
 {{define "content"}}
 <h1>Approvals</h1>
-<p class="small muted">Requests that are waiting for a person to approve or reject them. You decide as yourself: your tailnet identity is recorded with the decision and passed to the app. To decide, you need an approve grant (<span class="mono">twd.dev/cap/approve</span>) for that app; being a twd admin is not enough. From a terminal: <span class="mono">twd approvals</span> and <span class="mono">twd approve</span>.</p>
-<form method="get" action="/ui/approvals" class="filters">
-  <label>Tenant <input type="text" name="tenant" class="mono" value="{{.Tenant}}" placeholder="tenant ID (default: every tenant you can list)"></label>
-  <label><input type="checkbox" name="all" value="1"{{if .All}} checked{{end}}> Show decided ones too</label>
-  <button type="submit">Show</button>
-</form>
+<p class="hint">Requests that are waiting for a person to approve or reject them. You decide as yourself: your tailnet identity is recorded with the decision and passed to the app. To decide, you need an approve grant (<span class="mono">twd.dev/cap/approve</span>) for that app; being a twd admin is not enough. From a terminal: <span class="mono">twd approvals</span> and <span class="mono">twd approve</span>.</p>
+
+<section class="card toolbar">
+  <form method="get" action="/ui/approvals" class="filters inline-filters">
+    {{if .TenantBox}}<label>Tenant
+      <input type="text" name="tenant" class="mono" value="{{.Tenant}}" list="approval-tenants" placeholder="{{if .Tenants}}default: {{len .Tenants}} tenants{{else}}tenant ID{{end}}">
+      {{if .Tenants}}<datalist id="approval-tenants">{{range .Tenants}}<option value="{{.TenantID}}">{{.Tailnet}}</option>{{end}}</datalist>{{end}}
+    </label>{{else}}{{with index .Tenants 0}}<span class="small muted">Tenant <span class="mono" title="{{.TenantID}}">{{.Tailnet}}</span></span>{{end}}{{if .Tenant}}<input type="hidden" name="tenant" value="{{.Tenant}}">{{end}}{{end}}
+    <label class="check"><input type="checkbox" name="all" value="1"{{if .All}} checked{{end}}> Show decided ones too</label>
+    <button type="submit">Show</button>
+  </form>
+  {{if .Who.ApproveGrants}}<details class="grants">
+    <summary>What you may decide</summary>
+    <ul class="small">{{range .Who.ApproveGrants}}<li>{{.Text}}</li>{{end}}</ul>
+  </details>{{else if not .Who.Admin}}<p class="small muted">Your connection holds no approve grant toward twd-mgmt, so you can see requests but not decide them here.</p>{{end}}
+</section>
+
 {{range .Errors}}<div class="flash bad">{{.}}</div>{{end}}
+
 <section>
-  <h2>{{if .All}}All requests{{else}}Waiting for a decision{{end}} <span class="count">{{len .Approvals}}</span></h2>
-  <table>
-    <thead><tr><th>App</th><th>Workflow</th><th>Instance</th><th>Step</th><th>Details</th><th>Waiting</th><th>Status</th><th>Host</th><th>Decision</th></tr></thead>
-    <tbody>{{range .Approvals}}<tr>
-      <td class="mono">{{.Workload}}</td><td class="mono">{{.Workflow}}</td><td class="mono">{{.Instance}}</td><td class="mono small">{{.Step}}</td>
-      <td class="mono small">{{.FactsText}}</td><td class="mono">{{.Age}}</td><td>{{template "status" .Status}}</td><td class="mono small">{{.Host}}</td>
+  <div class="sect-head"><div>
+    <h2>{{if .All}}All requests{{else}}Waiting for a decision{{end}} <span class="count">{{len .Approvals}}</span></h2>
+    <p class="hint">Oldest first: the longest wait is at the top.</p>
+  </div></div>
+  <div class="tbl">
+  <table class="approvals">
+    <thead><tr><th>Request</th><th>Details</th><th>Waiting</th><th>Status</th><th>Decision</th></tr></thead>
+    <tbody>{{range .Approvals}}<tr id="{{.Anchor}}">
+      <td>
+        <div><b class="mono">{{.Workload}}</b> <span class="muted">/</span> <span class="mono">{{.Workflow}}</span> <a class="anchor" href="#{{.Anchor}}" title="Link to this request">#</a></div>
+        <div class="sub-line mono" title="instance">{{.Instance}}</div>
+        <div class="sub-line">step <span class="mono">{{.Step}}</span>{{if $.TenantBox}} · {{$.TenantName .TenantID}}{{end}}{{if .Host}} · host <span class="mono">{{.Host}}</span>{{end}}</div>
+      </td>
+      <td>{{with .FactList}}<dl class="facts">{{range .}}<dt>{{.Name}}</dt><dd class="mono">{{.Value}}</dd>{{end}}</dl>{{else}}<span class="muted">—</span>{{end}}</td>
+      <td class="mono nowrap">{{.Age}}</td>
+      <td>{{template "status" .Status}}</td>
       <td>{{if eq .Status "pending"}}
-        <form method="post" action="/ui/approvals/decide" class="inline">
+        <form method="post" action="/ui/approvals/decide" class="decide">
           <input type="hidden" name="tenant" value="{{.TenantID}}"><input type="hidden" name="workload" value="{{.Workload}}">
           <input type="hidden" name="workflow" value="{{.Workflow}}"><input type="hidden" name="instance" value="{{.Instance}}">
           <input type="hidden" name="back_tenant" value="{{$.Tenant}}">
@@ -23,8 +45,9 @@
           <button type="submit" name="decision" value="approve" data-confirm="Approve {{.Workload}}/{{.Workflow}}/{{.Instance}} as yourself?">Approve</button>
           <button type="submit" name="decision" value="reject" class="danger" data-confirm="Reject {{.Workload}}/{{.Workflow}}/{{.Instance}} as yourself?">Reject</button>
         </form>
-      {{else if .Approver}}<span class="small">{{or .Approver.User .Approver.Node}} via {{.Approver.Via}}{{if .Comment}}: {{.Comment}}{{end}}</span>{{else}}-{{end}}</td>
-    </tr>{{else}}<tr><td colspan="9" class="muted">Nothing is waiting for a decision.</td></tr>{{end}}</tbody>
+      {{else if .Approver}}<span class="small">{{or .Approver.User .Approver.Node}} via {{.Approver.Via}}{{if .Comment}}: {{.Comment}}{{end}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+    </tr>{{else}}<tr><td colspan="5" class="empty">Nothing is waiting for a decision.</td></tr>{{end}}</tbody>
   </table>
+  </div>
 </section>
 {{end}}

@@ -175,6 +175,15 @@ netd enforces these on the public listener. Each is overridable in
 Upgrades on a route not listed in `upgrade` get `403 upgrade_not_allowed`.
 Funnel has its own bandwidth limits, which Tailscale doesn't publish.
 
+**Error bodies.** netd's refusals are the typed JSON error (`code`,
+`detail`, `doc_url`, and the `twd-error` header). A request whose `Accept`
+prefers `text/html` to JSON (a browser) gets a minimal HTML page instead,
+with the same status and `twd-error` header: the status, the code, one
+fixed sentence per code, `Retry-After` when there is one, and the docs
+link. The page never includes the request's path, the detail or anything
+about the workload. A wildcard `Accept: */*` (curl) or a tie keeps JSON.
+Errors your own code returns are passed through unchanged.
+
 ## Exposing and unexposing
 
 ```sh

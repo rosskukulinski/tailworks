@@ -11,8 +11,9 @@
 <header class="top">
   <a class="brand" href="/ui/">twd</a>
   <nav>
-    <a href="/ui/"{{if eq .Path "/ui/"}} class="cur"{{end}}>Overview</a>
-    <a href="/ui/audit"{{if eq .Path "/ui/audit"}} class="cur"{{end}}>Audit log</a>
+    {{if or .Who.Admin (not .Who.Kind)}}<a href="/ui/"{{if eq .Path "/ui/"}} class="cur"{{end}}>Overview</a>
+    <a href="/ui/objects"{{if eq .Path "/ui/objects"}} class="cur"{{end}}>Objects</a>
+    <a href="/ui/audit"{{if eq .Path "/ui/audit"}} class="cur"{{end}}>Audit log</a>{{end}}
     <a href="/ui/approvals"{{if eq .Path "/ui/approvals"}} class="cur"{{end}}>Approvals</a>
   </nav>
   <div class="who" title="The tailnet identity of this connection (WhoIs)">

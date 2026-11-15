@@ -209,4 +209,8 @@ type AuditFilter struct {
 	Until     string
 	Limit     int // deprecated: use Page.Limit
 	Page      Page
+
+	// Desc lists newest first (GET /v1/audit?order=desc); Page.After is
+	// then an upper bound.
+	Desc bool
 }

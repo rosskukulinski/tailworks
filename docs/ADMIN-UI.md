@@ -21,7 +21,7 @@ Admission is the connection's WhoIs identity, exactly as for the API
 |---|---|
 | a user or tagged node holding `twd.dev/cap/admin` (granted to `tag:twd-mgmt`; `autogroup:admin` gets it from the base snippet), or a login in `-admins` | 200, the UI |
 | mgmt's own node (the operator console on the host machine) | 200, the UI |
-| a user or tagged node holding only `twd.dev/cap/approve` (toward `tag:twd-mgmt`) | the **approvals** page only (with `?tenant=<tenant ID>`); 403 `forbidden` elsewhere |
+| a user or tagged node holding only `twd.dev/cap/approve` (toward `tag:twd-mgmt`) | the **approvals** page only, defaulting to the tenants on its own tailnet (`GET /v1/whoami` `tenants`; `?tenant=<tenant ID>` for another); 403 `forbidden` elsewhere |
 | any other tailnet user | 403 `not_admin`, with the grant snippet to add |
 | a `tag:twd-host` node (registered or not) | 403 `forbidden` (or `host_not_registered`); hosts never reach the UI or its assets |
 
@@ -79,7 +79,7 @@ spec.
 - **`/ui/objects/{id}`**: every field of the object, the lineage up (root
   to parent), the subtree below (this object and its descendants), caps,
   the node certificate when the object has a node, the object's audit
-  records with chain status, and the **Kill** form (cascade checkbox,
+  records (newest first) with chain status, and the **Kill** form (cascade checkbox,
   reason). A killed object renders its tombstone / kill record (the
   `/v1` 410 body: killed at, by, reason, cascade root, device deletion)
   and offers no kill form.
@@ -95,20 +95,40 @@ spec.
   mode, client IDs and file paths, quotas, OBO public key; secrets are
   never returned by the API and so never shown), object counts by status,
   deployments, objects, and **Delete tenant** (force checkbox).
-- **`/ui/approvals`**: the Workflow approvals waiting in every tenant the
-  caller can list (or `?tenant=`), oldest first: workload, Workflow,
-  instance, step, the instance's numeric params, age, host; `all` adds the
-  decided ones with who decided. Each waiting row has **Approve** and
-  **Reject** forms with a comment. The decision is made with the browser's
-  own tailnet identity and checked against its `twd.dev/cap/approve` grants
-  by the host running the Workflow; an admin without a grant gets
-  `cap_missing`, and the operator console `no_identity`
-  ([approvals](approvals.md)).
-- **`/ui/audit`**: one filter at a time, like `twd audit`: object, human
-  (acting-for login), trace, or all; page size; `nextCursor` paging that
-  keeps the filter; the verification report and the per-chain status
-  (`ok`, `signature ok` for host chains, `BROKEN at <seq>`). Tenant-written
-  notes are rendered as `~tenant_note` and labelled unverified (RT-02).
+- **`/ui/objects`**: every object, newest first, 50 a page (Newer / Older
+  links). Filters: tenant, app (workload) and status go to
+  `GET /v1/objects` (`tenant`, `workload`, `state`); tag and acting-for
+  are filtered by the UI, over the first 5000 matches (the page says when
+  that limit was reached).
+- **`/ui/approvals`**: the Workflow approvals waiting, oldest first (the
+  longest wait on top). By default: every tenant for an admin; for anyone
+  else the tenants on the caller's own tailnet, from `GET /v1/whoami`
+  (`tenants`), so an approver never needs a tenant ID. `?tenant=` picks
+  one. The tenant box is shown only when there is not exactly one tenant
+  to choose from. Each row shows workload / Workflow, the instance, step,
+  host, the instance's numeric params as a definition list, age and
+  status, and has an anchor (`id="<instance>"`, a `#` link): the deep link
+  of an `approval_requested` notification is
+  `/ui/approvals?tenant=<tenant ID>#<instance>` and highlights the row.
+  "What you may decide" lists the caller's `twd.dev/cap/approve` grants
+  (`approveGrants`). `all` adds the decided ones with who decided. Each
+  waiting row has **Approve** and **Reject** buttons sharing one comment.
+  The decision is made with the browser's own tailnet identity and checked
+  against its `twd.dev/cap/approve` grants by the host running the
+  Workflow; an admin without a grant gets `cap_missing`, and the operator
+  console `no_identity` ([approvals](approvals.md)). Approvers who are not
+  admins don't see the Overview, Objects and Audit links.
+- **`/ui/audit`**: newest first (`GET /v1/audit?order=desc`), with
+  `nextCursor` paging (Older →, ← Newest) that keeps the filters. Filters
+  combine: tenant, event kind, caller (the `human` the records act for),
+  object and trace go to the API; app (workload) is filtered by the UI
+  within each page, which says how many records it hid. Page size; the
+  verification report and the per-chain status (`ok`, `signature ok` for
+  host chains, `BROKEN at <seq>`). Tenant-written notes are rendered as
+  `~tenant_note` and labelled unverified (RT-02).
+
+Every activity list (overview, object page, audit) is newest first; the
+approvals list is oldest first because the oldest wait is the most urgent.
 
 Vocabulary and status colours follow the CLI: ready / live / running
 green, pending / minted / stale amber, killed / stopped / superseded grey,
@@ -189,5 +209,10 @@ client-side: no cookies, no localStorage, no tokens.
 - `mgmt/approvals_test.go`: the approvals page per principal (approver,
   admin, no grant), and the Approve / Reject form forwarding the browser's
   identity to the host.
+- `mgmt/whoami_tenants_test.go`: `whoami`'s `tailnet`, `tenants` and
+  `approveGrants`, and the approvals page defaulting to them (no tenant
+  box for one tenant; words for none). `mgmt/ui/search_test.go`: the
+  objects and audit filters and paging, and the approvals page's anchors,
+  facts list and tenant box.
 
     go test -race -count=1 ./mgmt/...

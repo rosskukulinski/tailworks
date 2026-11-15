@@ -39,9 +39,15 @@ type whoAmI struct {
 	Login  string   `json:"login"`
 	NodeID string   `json:"nodeID"`
 	Tags   []string `json:"tags"`
-	Admin  bool     `json:"admin"`
-	Actor  string   `json:"actor"`
-	Mgmt   struct {
+
+	// approvals.go: the caller's tailnet, its tenants and approve grants.
+	Tailnet       string         `json:"tailnet"`
+	Tenants       []whoTenant    `json:"tenants"`
+	ApproveGrants []approveGrant `json:"approveGrants"`
+
+	Admin bool   `json:"admin"`
+	Actor string `json:"actor"`
+	Mgmt  struct {
 		DNSName   string `json:"dnsName"`
 		Tailnet   string `json:"tailnet"`
 		HTTPS     bool   `json:"https"`

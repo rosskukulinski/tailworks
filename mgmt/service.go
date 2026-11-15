@@ -148,6 +148,9 @@ type Mgmt struct {
 	wg            sync.WaitGroup
 
 	upgradeKick chan struct{} // wakes the upgrade-run driver (upgrades.go)
+
+	// notify.go: the tenants' notification webhooks.
+	notifs notifyState
 }
 
 // New returns a Mgmt; call Start to run the mint workers and reaper.
@@ -3112,17 +3115,19 @@ func (m *Mgmt) IngestAudit(ctx context.Context, hostID string, recs []json.RawMe
 	for i := start; i < len(parsed); i++ {
 		r := parsed[i]
 		tenant := ""
+		var obj *Object
 		if o, err := m.store.GetObject(ctx, r.ObjectID); err == nil {
 			if !servedBy(o) {
 				return i, ChainStatus{}, errf(403, "audit_object_foreign", "record %d: object %s belongs to workload %s/%s, which host %s has never served", i, o.ID, o.TenantID, o.Workload, hostID)
 			}
-			tenant = o.TenantID
+			tenant, obj = o.TenantID, &o
 		}
 		if _, err := m.store.AppendAudit(ctx, AuditRecord{Chain: chain, TS: fmt.Sprint(r.TS), TenantID: tenant, ObjectID: r.ObjectID,
 			Kind: r.Kind, TraceID: r.TraceID, ActingFor: r.ActingFor, PrevHash: r.PrevHash, Hash: r.Hash, HostSig: r.HostSig,
 			Raw: canons[i]}); err != nil {
 			return i, ChainStatus{}, err
 		}
+		m.notifyHostRecord(obj, r.Kind, recs[i]) // notify.go
 	}
 	return len(recs), m.VerifyChain(ctx, chain), nil
 }

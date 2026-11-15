@@ -1971,6 +1971,58 @@
         "approval"
       ]
     },
+    "notify": {
+      "description": "twd notify [show], set, test and rm: the tenant's notification webhook (only its origin and header names are shown; test adds the delivery outcome; rm prints only tenantID)",
+      "type": "object",
+      "properties": {
+        "tenantID": {
+          "type": "string"
+        },
+        "webhook": {
+          "type": "object",
+          "properties": {
+            "origin": {
+              "type": "string"
+            },
+            "headerNames": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "events": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "origin",
+            "headerNames",
+            "events"
+          ]
+        },
+        "updatedAt": {
+          "type": "integer"
+        },
+        "updatedBy": {
+          "type": "string"
+        },
+        "delivered": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "integer"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tenantID"
+      ]
+    },
     "audit": {
       "$ref": "#/$defs/auditRecords"
     },

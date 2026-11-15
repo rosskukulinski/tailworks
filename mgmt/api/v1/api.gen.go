@@ -131,6 +131,10 @@ const (
 	AuditKindKvDelete            AuditKind = "kv_delete"
 	AuditKindKvPut               AuditKind = "kv_put"
 	AuditKindMint                AuditKind = "mint"
+	AuditKindNotificationDelete  AuditKind = "notification_delete"
+	AuditKindNotificationFailed  AuditKind = "notification_failed"
+	AuditKindNotificationPut     AuditKind = "notification_put"
+	AuditKindNotificationTest    AuditKind = "notification_test"
 	AuditKindObjectUpdate        AuditKind = "object_update"
 	AuditKindOboRoot             AuditKind = "obo_root"
 	AuditKindPreflight           AuditKind = "preflight"
@@ -235,6 +239,14 @@ func (e AuditKind) Valid() bool {
 	case AuditKindKvPut:
 		return true
 	case AuditKindMint:
+		return true
+	case AuditKindNotificationDelete:
+		return true
+	case AuditKindNotificationFailed:
+		return true
+	case AuditKindNotificationPut:
+		return true
+	case AuditKindNotificationTest:
 		return true
 	case AuditKindObjectUpdate:
 		return true
@@ -773,6 +785,24 @@ func (e NodeCertificatePayloadV) Valid() bool {
 	}
 }
 
+// Defines values for NotificationEventKind.
+const (
+	NotificationEventKindApprovalRequested NotificationEventKind = "approval_requested"
+	NotificationEventKindTest              NotificationEventKind = "test"
+)
+
+// Valid indicates whether the value is a known member of the NotificationEventKind enum.
+func (e NotificationEventKind) Valid() bool {
+	switch e {
+	case NotificationEventKindApprovalRequested:
+		return true
+	case NotificationEventKindTest:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ObjectPatchStatus.
 const (
 	ObjectPatchStatusReady ObjectPatchStatus = "ready"
@@ -1271,6 +1301,24 @@ func (e WhoAmIKind) Valid() bool {
 	}
 }
 
+// Defines values for ListAuditParamsOrder.
+const (
+	Asc  ListAuditParamsOrder = "asc"
+	Desc ListAuditParamsOrder = "desc"
+)
+
+// Valid indicates whether the value is a known member of the ListAuditParamsOrder enum.
+func (e ListAuditParamsOrder) Valid() bool {
+	switch e {
+	case Asc:
+		return true
+	case Desc:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CreateObjectCredentialParamsReason.
 const (
 	RejoinRejected CreateObjectCredentialParamsReason = "rejoin_rejected"
@@ -1408,6 +1456,15 @@ type ApprovalList struct {
 	Unreachable *[]string `json:"unreachable,omitempty"`
 }
 
+// ApproveGrant One value of a `twd.dev/cap/approve` grant. A missing field does not narrow; `"*"` in a list matches anything.
+type ApproveGrant struct {
+	Decisions *[]string           `json:"decisions,omitempty"`
+	Limits    *map[string]float32 `json:"limits,omitempty"`
+	Steps     *[]string           `json:"steps,omitempty"`
+	Workflows *[]string           `json:"workflows,omitempty"`
+	Workloads *[]string           `json:"workloads,omitempty"`
+}
+
 // Approver The verified tailnet identity that decided an approval (WireGuard, never the request body).
 type Approver struct {
 	// Node MagicDNS name.
@@ -1537,6 +1594,10 @@ type AuditBatch struct {
 // `telemetry_put` (the tenant's OTLP export set; endpoint and header names only),
 // `telemetry_delete`,
 // `telemetry_release` (the OTLP export config released to a workload's lease holder; once per host, workload and version),
+// `notification_put` (the tenant's notification webhook set; its host and header names only),
+// `notification_delete`,
+// `notification_failed` (a notification was not delivered; the webhook's host and the error),
+// `notification_test` (`twd notify test`; the origin and the outcome),
 // `reap`,
 // `preflight` (optional; dryRun deploys),
 // `host_add`,
@@ -1645,6 +1706,10 @@ type AuditRecord struct {
 	// `telemetry_put` (the tenant's OTLP export set; endpoint and header names only),
 	// `telemetry_delete`,
 	// `telemetry_release` (the OTLP export config released to a workload's lease holder; once per host, workload and version),
+	// `notification_put` (the tenant's notification webhook set; its host and header names only),
+	// `notification_delete`,
+	// `notification_failed` (a notification was not delivered; the webhook's host and the error),
+	// `notification_test` (`twd notify test`; the origin and the outcome),
 	// `reap`,
 	// `preflight` (optional; dryRun deploys),
 	// `host_add`,
@@ -2691,6 +2756,34 @@ type NodeCertificatePayload struct {
 
 // NodeCertificatePayloadV defines model for NodeCertificatePayload.V.
 type NodeCertificatePayloadV int
+
+// NotificationConfig defines model for NotificationConfig.
+type NotificationConfig struct {
+	TenantID  string  `json:"tenantID"`
+	UpdatedAt *int64  `json:"updatedAt,omitempty"`
+	UpdatedBy *string `json:"updatedBy,omitempty"`
+
+	// Webhook A tenant's notification webhook, without its secrets.
+	Webhook *WebhookView `json:"webhook,omitempty"`
+}
+
+// NotificationEventKind `approval_requested` (a Workflow instance started waiting for an approval),
+// `test` (`twd notify test`; never subscribed to).
+type NotificationEventKind string
+
+// NotificationTestResult defines model for NotificationTestResult.
+type NotificationTestResult struct {
+	Delivered bool    `json:"delivered"`
+	Error     *string `json:"error,omitempty"`
+
+	// Status The webhook's HTTP status, when it answered.
+	Status *int `json:"status,omitempty"`
+}
+
+// NotificationsPut defines model for NotificationsPut.
+type NotificationsPut struct {
+	Webhook WebhookPut `json:"webhook"`
+}
 
 // OIDCConfiguration defines model for OIDCConfiguration.
 type OIDCConfiguration struct {
@@ -4068,20 +4161,63 @@ type WIFInfo struct {
 	MintSubject string `json:"mintSubject"`
 }
 
+// WebhookPut defines model for WebhookPut.
+type WebhookPut struct {
+	// Events What to send. Default `[approval_requested]`.
+	Events *[]NotificationEventKind `json:"events,omitempty"`
+
+	// Headers Headers sent with every notification (at most 16; values at most 4 KiB). Never logged, audited or returned.
+	Headers *map[string]string `json:"headers,omitempty"`
+
+	// URL http:// or https:// URL (no user info or fragment). Treated as a secret: a chat webhook's path is its credential.
+	URL *string `json:"url,omitempty"`
+}
+
+// WebhookView A tenant's notification webhook, without its secrets.
+type WebhookView struct {
+	Events      []NotificationEventKind `json:"events"`
+	HeaderNames []string                `json:"headerNames"`
+
+	// Origin The URL's scheme and host (`https://hooks.slack.com`); its path and query are never returned.
+	Origin string `json:"origin"`
+}
+
 // WhoAmI defines model for WhoAmI.
 type WhoAmI struct {
-	Actor  string     `json:"actor"`
-	Admin  bool       `json:"admin"`
-	HostID *string    `json:"hostID,omitempty"`
-	Kind   WhoAmIKind `json:"kind"`
-	Login  *string    `json:"login,omitempty"`
-	Mgmt   SelfInfo   `json:"mgmt"`
-	NodeID *string    `json:"nodeID,omitempty"`
-	Tags   *[]string  `json:"tags,omitempty"`
+	Actor string `json:"actor"`
+	Admin bool   `json:"admin"`
+
+	// ApproveGrants The values of the caller's `twd.dev/cap/approve` grants toward
+	// `tag:twd-mgmt` (docs/approvals.md): what it may decide through
+	// `twd approve` and the admin UI. Empty when it holds none.
+	ApproveGrants *[]ApproveGrant `json:"approveGrants,omitempty"`
+	HostID        *string         `json:"hostID,omitempty"`
+	Kind          WhoAmIKind      `json:"kind"`
+	Login         *string         `json:"login,omitempty"`
+	Mgmt          SelfInfo        `json:"mgmt"`
+	NodeID        *string         `json:"nodeID,omitempty"`
+	Tags          *[]string       `json:"tags,omitempty"`
+
+	// Tailnet The caller's own tailnet (the MagicDNS suffix of its node, from WhoIs). Absent for the local operator and hosts.
+	Tailnet *string `json:"tailnet,omitempty"`
+
+	// Tenants The tenants the caller can act in without knowing their IDs:
+	// those whose `tailnet` is the caller's own tailnet. The local
+	// operator gets every tenant; hosts get none. The admin UI's
+	// approvals page and `twd approvals` / `twd approve` default to
+	// these. A tailnet admin can still list every tenant
+	// (`GET /v1/tenants`).
+	Tenants *[]WhoAmITenant `json:"tenants,omitempty"`
 }
 
 // WhoAmIKind defines model for WhoAmI.Kind.
 type WhoAmIKind string
+
+// WhoAmITenant defines model for WhoAmITenant.
+type WhoAmITenant struct {
+	Tailnet  string `json:"tailnet"`
+	TenantID string `json:"tenantID"`
+}
 
 // WorkloadPublic defines model for WorkloadPublic.
 type WorkloadPublic struct {
@@ -4249,7 +4385,15 @@ type ListAuditParams struct {
 	// Since Records at or after this time (RFC 3339 or unix ms).
 	Since *string `form:"since,omitempty" json:"since,omitempty"`
 	Until *string `form:"until,omitempty" json:"until,omitempty"`
+
+	// Order `asc` (default): oldest first. `desc`: newest first, as the admin
+	// UI shows activity. A cursor continues in the order of the page
+	// that returned it, so repeat `order` with the cursor.
+	Order *ListAuditParamsOrder `form:"order,omitempty" json:"order,omitempty"`
 }
+
+// ListAuditParamsOrder defines parameters for ListAudit.
+type ListAuditParamsOrder string
 
 // GetCertificateParams defines parameters for GetCertificate.
 type GetCertificateParams struct {
@@ -4693,6 +4837,9 @@ type UpdateTenantJSONRequestBody = TenantPatch
 
 // UpdateTenantApplicationMergePatchPlusJSONRequestBody defines body for UpdateTenant for application/merge-patch+json ContentType.
 type UpdateTenantApplicationMergePatchPlusJSONRequestBody = TenantPatch
+
+// PutTenantNotificationsJSONRequestBody defines body for PutTenantNotifications for application/json ContentType.
+type PutTenantNotificationsJSONRequestBody = NotificationsPut
 
 // SendQueueMessagesJSONRequestBody defines body for SendQueueMessages for application/json ContentType.
 type SendQueueMessagesJSONRequestBody = QueueSend
@@ -5154,6 +5301,18 @@ type ServerInterface interface {
 	// ListApprovals The Workflow approvals waiting in a tenant (`twd approvals`, the admin UI)
 	// (GET /v1/tenants/{id}/approvals)
 	ListApprovals(w http.ResponseWriter, r *http.Request, id TenantID, params ListApprovalsParams)
+	// DeleteTenantNotifications Stop the tenant's notifications (`twd notify rm`)
+	// (DELETE /v1/tenants/{id}/notifications)
+	DeleteTenantNotifications(w http.ResponseWriter, r *http.Request, id TenantID)
+	// GetTenantNotifications Read the tenant's notification webhook (`twd notify`), without secrets
+	// (GET /v1/tenants/{id}/notifications)
+	GetTenantNotifications(w http.ResponseWriter, r *http.Request, id TenantID)
+	// PutTenantNotifications Set the tenant's notification webhook (`twd notify set`)
+	// (PUT /v1/tenants/{id}/notifications)
+	PutTenantNotifications(w http.ResponseWriter, r *http.Request, id TenantID)
+	// TestTenantNotifications Send a test notification now (`twd notify test`)
+	// (POST /v1/tenants/{id}/notifications/test)
+	TestTenantNotifications(w http.ResponseWriter, r *http.Request, id TenantID)
 	// PurgeTenantObjects Purge terminal objects of a tenant
 	// (DELETE /v1/tenants/{id}/objects)
 	PurgeTenantObjects(w http.ResponseWriter, r *http.Request, id TenantID, params PurgeTenantObjectsParams)
@@ -5503,6 +5662,19 @@ func (siw *ServerInterfaceWrapper) ListAudit(w http.ResponseWriter, r *http.Requ
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "until"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "until", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "order" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "order", r.URL.Query(), &params.Order, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "order"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "order", Err: err})
 		}
 		return
 	}
@@ -7310,6 +7482,110 @@ func (siw *ServerInterfaceWrapper) ListApprovals(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListApprovals(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteTenantNotifications operation middleware
+func (siw *ServerInterfaceWrapper) DeleteTenantNotifications(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteTenantNotifications(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetTenantNotifications operation middleware
+func (siw *ServerInterfaceWrapper) GetTenantNotifications(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetTenantNotifications(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutTenantNotifications operation middleware
+func (siw *ServerInterfaceWrapper) PutTenantNotifications(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutTenantNotifications(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TestTenantNotifications operation middleware
+func (siw *ServerInterfaceWrapper) TestTenantNotifications(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TestTenantNotifications(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -9521,6 +9797,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/logs", wrapper.GetWorkloadLogs)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/approvals", wrapper.ListApprovals)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/approvals/{workflow}/{instance}", wrapper.DecideApproval)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/tenants/{id}/notifications", wrapper.DeleteTenantNotifications)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/notifications", wrapper.GetTenantNotifications)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/tenants/{id}/notifications", wrapper.PutTenantNotifications)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/tenants/{id}/notifications/test", wrapper.TestTenantNotifications)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/public", wrapper.GetWorkloadPublic)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/public", wrapper.UpdateWorkloadPublic)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/secrets", wrapper.ListWorkloadSecrets)
@@ -14507,6 +14787,326 @@ func (response ListApprovalsdefaultJSONResponse) VisitListApprovalsResponse(w ht
 	return err
 }
 
+type DeleteTenantNotificationsRequestObject struct {
+	ID TenantID `json:"id"`
+}
+
+type DeleteTenantNotificationsResponseObject interface {
+	VisitDeleteTenantNotificationsResponse(w http.ResponseWriter) error
+}
+
+type DeleteTenantNotifications204Response struct {
+}
+
+func (response DeleteTenantNotifications204Response) VisitDeleteTenantNotificationsResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteTenantNotifications403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeleteTenantNotifications403JSONResponse) VisitDeleteTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwdError != nil {
+		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteTenantNotifications404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteTenantNotifications404JSONResponse) VisitDeleteTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwdError != nil {
+		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteTenantNotificationsdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response DeleteTenantNotificationsdefaultJSONResponse) VisitDeleteTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwdError != nil {
+		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTenantNotificationsRequestObject struct {
+	ID TenantID `json:"id"`
+}
+
+type GetTenantNotificationsResponseObject interface {
+	VisitGetTenantNotificationsResponse(w http.ResponseWriter) error
+}
+
+type GetTenantNotifications200JSONResponse NotificationConfig
+
+func (response GetTenantNotifications200JSONResponse) VisitGetTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTenantNotifications403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetTenantNotifications403JSONResponse) VisitGetTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwdError != nil {
+		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTenantNotifications404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetTenantNotifications404JSONResponse) VisitGetTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwdError != nil {
+		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTenantNotificationsdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response GetTenantNotificationsdefaultJSONResponse) VisitGetTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwdError != nil {
+		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutTenantNotificationsRequestObject struct {
+	ID   TenantID `json:"id"`
+	Body *PutTenantNotificationsJSONRequestBody
+}
+
+type PutTenantNotificationsResponseObject interface {
+	VisitPutTenantNotificationsResponse(w http.ResponseWriter) error
+}
+
+type PutTenantNotifications200JSONResponse NotificationConfig
+
+func (response PutTenantNotifications200JSONResponse) VisitPutTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutTenantNotifications400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response PutTenantNotifications400JSONResponse) VisitPutTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwdError != nil {
+		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutTenantNotifications403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response PutTenantNotifications403JSONResponse) VisitPutTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwdError != nil {
+		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutTenantNotifications404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response PutTenantNotifications404JSONResponse) VisitPutTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwdError != nil {
+		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutTenantNotificationsdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response PutTenantNotificationsdefaultJSONResponse) VisitPutTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwdError != nil {
+		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TestTenantNotificationsRequestObject struct {
+	ID TenantID `json:"id"`
+}
+
+type TestTenantNotificationsResponseObject interface {
+	VisitTestTenantNotificationsResponse(w http.ResponseWriter) error
+}
+
+type TestTenantNotifications200JSONResponse NotificationTestResult
+
+func (response TestTenantNotifications200JSONResponse) VisitTestTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TestTenantNotifications403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response TestTenantNotifications403JSONResponse) VisitTestTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwdError != nil {
+		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TestTenantNotifications404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response TestTenantNotifications404JSONResponse) VisitTestTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwdError != nil {
+		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TestTenantNotificationsdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response TestTenantNotificationsdefaultJSONResponse) VisitTestTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwdError != nil {
+		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type PurgeTenantObjectsRequestObject struct {
 	ID     TenantID `json:"id"`
 	Params PurgeTenantObjectsParams
@@ -18790,6 +19390,18 @@ type StrictServerInterface interface {
 	// ListApprovals The Workflow approvals waiting in a tenant (`twd approvals`, the admin UI)
 	// (GET /v1/tenants/{id}/approvals)
 	ListApprovals(ctx context.Context, request ListApprovalsRequestObject) (ListApprovalsResponseObject, error)
+	// DeleteTenantNotifications Stop the tenant's notifications (`twd notify rm`)
+	// (DELETE /v1/tenants/{id}/notifications)
+	DeleteTenantNotifications(ctx context.Context, request DeleteTenantNotificationsRequestObject) (DeleteTenantNotificationsResponseObject, error)
+	// GetTenantNotifications Read the tenant's notification webhook (`twd notify`), without secrets
+	// (GET /v1/tenants/{id}/notifications)
+	GetTenantNotifications(ctx context.Context, request GetTenantNotificationsRequestObject) (GetTenantNotificationsResponseObject, error)
+	// PutTenantNotifications Set the tenant's notification webhook (`twd notify set`)
+	// (PUT /v1/tenants/{id}/notifications)
+	PutTenantNotifications(ctx context.Context, request PutTenantNotificationsRequestObject) (PutTenantNotificationsResponseObject, error)
+	// TestTenantNotifications Send a test notification now (`twd notify test`)
+	// (POST /v1/tenants/{id}/notifications/test)
+	TestTenantNotifications(ctx context.Context, request TestTenantNotificationsRequestObject) (TestTenantNotificationsResponseObject, error)
 	// PurgeTenantObjects Purge terminal objects of a tenant
 	// (DELETE /v1/tenants/{id}/objects)
 	PurgeTenantObjects(ctx context.Context, request PurgeTenantObjectsRequestObject) (PurgeTenantObjectsResponseObject, error)
@@ -20414,6 +21026,117 @@ func (sh *strictHandler) ListApprovals(w http.ResponseWriter, r *http.Request, i
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListApprovalsResponseObject); ok {
 		if err := validResponse.VisitListApprovalsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteTenantNotifications operation middleware
+func (sh *strictHandler) DeleteTenantNotifications(w http.ResponseWriter, r *http.Request, id TenantID) {
+	var request DeleteTenantNotificationsRequestObject
+
+	request.ID = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteTenantNotifications(ctx, request.(DeleteTenantNotificationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteTenantNotifications")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteTenantNotificationsResponseObject); ok {
+		if err := validResponse.VisitDeleteTenantNotificationsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetTenantNotifications operation middleware
+func (sh *strictHandler) GetTenantNotifications(w http.ResponseWriter, r *http.Request, id TenantID) {
+	var request GetTenantNotificationsRequestObject
+
+	request.ID = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetTenantNotifications(ctx, request.(GetTenantNotificationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetTenantNotifications")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetTenantNotificationsResponseObject); ok {
+		if err := validResponse.VisitGetTenantNotificationsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PutTenantNotifications operation middleware
+func (sh *strictHandler) PutTenantNotifications(w http.ResponseWriter, r *http.Request, id TenantID) {
+	var request PutTenantNotificationsRequestObject
+
+	request.ID = id
+
+	var body PutTenantNotificationsJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PutTenantNotifications(ctx, request.(PutTenantNotificationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutTenantNotifications")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PutTenantNotificationsResponseObject); ok {
+		if err := validResponse.VisitPutTenantNotificationsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// TestTenantNotifications operation middleware
+func (sh *strictHandler) TestTenantNotifications(w http.ResponseWriter, r *http.Request, id TenantID) {
+	var request TestTenantNotificationsRequestObject
+
+	request.ID = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.TestTenantNotifications(ctx, request.(TestTenantNotificationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "TestTenantNotifications")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(TestTenantNotificationsResponseObject); ok {
+		if err := validResponse.VisitTestTenantNotificationsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -83,6 +83,18 @@ func Describe(kind, objectID, actingFor, code string, d map[string]any, name fun
 		return fmt.Sprintf("OTLP export removed by %s", orDash(actingFor))
 	case "telemetry_release":
 		return fmt.Sprintf("OTLP export to %v released to host %v for %v (epoch %v)", d["endpoint"], d["host"], d["workload"], d["epoch"])
+	// Notification webhooks (ADR-approval-notifications): the origin only.
+	case "notification_put":
+		return fmt.Sprintf("notifications (%s) to %v set by %s", compact(d["events"]), d["origin"], orDash(actingFor))
+	case "notification_delete":
+		return fmt.Sprintf("notifications removed by %s", orDash(actingFor))
+	case "notification_failed":
+		return fmt.Sprintf("%v notification for %v/%v NOT delivered to %v: %v", d["event"], d["workload"], d["instance"], d["origin"], d["error"])
+	case "notification_test":
+		if d["delivered"] == true {
+			return fmt.Sprintf("test notification delivered to %v (by %s)", d["origin"], orDash(actingFor))
+		}
+		return fmt.Sprintf("test notification NOT delivered to %v: %v (by %s)", d["origin"], d["error"], orDash(actingFor))
 	// Public ingress (ADR-029). Host records are best-effort rendered from
 	// whichever of these fields they carry; the rest is shown compactly.
 	case "public_request":

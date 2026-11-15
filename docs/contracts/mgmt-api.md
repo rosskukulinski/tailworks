@@ -151,6 +151,10 @@ hostd's API, not this document's.
 | `PATCH` | `/v1/tenants/{id}` | admin | yes | `UpdateTenant` | Update a tenant (JSON Merge Patch) |
 | `DELETE` | `/v1/tenants/{id}` | admin | yes | `DeleteTenant` | Delete a tenant |
 | `GET` | `/v1/tenants/{id}/approvals` | admin\|approver | no | `ListApprovals` | The Workflow approvals waiting in a tenant (`twd approvals`, the admin UI) |
+| `GET` | `/v1/tenants/{id}/notifications` | admin | no | `GetTenantNotifications` | Read the tenant's notification webhook (`twd notify`), without secrets |
+| `PUT` | `/v1/tenants/{id}/notifications` | admin | yes | `PutTenantNotifications` | Set the tenant's notification webhook (`twd notify set`) |
+| `DELETE` | `/v1/tenants/{id}/notifications` | admin | yes | `DeleteTenantNotifications` | Stop the tenant's notifications (`twd notify rm`) |
+| `POST` | `/v1/tenants/{id}/notifications/test` | admin | yes | `TestTenantNotifications` | Send a test notification now (`twd notify test`) |
 | `DELETE` | `/v1/tenants/{id}/objects` | admin | yes | `PurgeTenantObjects` | Purge terminal objects of a tenant |
 | `GET` | `/v1/tenants/{id}/queues` | admin | no | `ListQueues` | List a tenant's queues |
 | `GET` | `/v1/tenants/{id}/queues/{queue}` | admin\|host | no | `GetQueue` | Get one queue and its backlog |
@@ -344,6 +348,96 @@ grants let it decide. A read, so not audited.
 | Status | Body | Description |
 |---|---|---|
 | 200 | `ApprovalList` | The approvals. |
+| 403 | `Error` | The caller is authenticated but lacks the role, or a host acts outside its own records/namespaces. |
+| 404 | `Error` | No such resource (or none the caller may see). |
+| default | `Error` | Unexpected error. The body is always the typed catalog shape; `Twd-Error` carries the code. |
+
+### `GET /v1/tenants/{id}/notifications` — Read the tenant's notification webhook (`twd notify`), without secrets
+
+`GetTenantNotifications` · role **admin** · audited: no
+
+ADR-approval-notifications. The webhook URL is shown as its origin
+only (scheme and host): a chat webhook's path or query is its
+credential. Header names only. A tenant that sends nothing has no
+`webhook`. `404 unknown_tenant`.
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | string | yes | Tenant ID (`tn_…` when generated; one safe path element). |
+
+| Status | Body | Description |
+|---|---|---|
+| 200 | `NotificationConfig` | The tenant's notification config. |
+| 403 | `Error` | The caller is authenticated but lacks the role, or a host acts outside its own records/namespaces. |
+| 404 | `Error` | No such resource (or none the caller may see). |
+| default | `Error` | Unexpected error. The body is always the typed catalog shape; `Twd-Error` carries the code. |
+
+### `PUT /v1/tenants/{id}/notifications` — Set the tenant's notification webhook (`twd notify set`)
+
+`PutTenantNotifications` · role **admin** · audited: yes
+
+ADR-approval-notifications. When one of `events` happens in the
+tenant, mgmt POSTs a JSON `NotificationEvent` to `url` (header
+`Twd-Event`), with a deep link to the admin UI. `approval_requested`
+fires when a Workflow starts waiting for an approval (when mgmt
+receives the host's audit record, usually within seconds). mgmt
+dials the URL itself: a tailnet name, a `100.x` address or a
+`*.ts.net` name over mgmt's tailnet node, anything else over the
+host's network; loopback and link-local addresses are refused.
+Delivery is tried 3 times; a final failure is audited
+(`notification_failed`). The config is stored encrypted in mgmt
+custody (custody name `twd/<tenant>/notifications`); the URL's path
+and query and the header values are never logged, audited or
+returned. Audited (`kind: notification_put`, the URL's host and
+header names).
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | string | yes | Tenant ID (`tn_…` when generated; one safe path element). |
+
+**Request** `application/json`: `NotificationsPut`
+
+| Status | Body | Description |
+|---|---|---|
+| 200 | `NotificationConfig` | The new config (origin and header names only). |
+| 400 | `Error` | Malformed request, body, filter or cursor. |
+| 403 | `Error` | The caller is authenticated but lacks the role, or a host acts outside its own records/namespaces. |
+| 404 | `Error` | No such resource (or none the caller may see). |
+| default | `Error` | Unexpected error. The body is always the typed catalog shape; `Twd-Error` carries the code. |
+
+### `DELETE /v1/tenants/{id}/notifications` — Stop the tenant's notifications (`twd notify rm`)
+
+`DeleteTenantNotifications` · role **admin** · audited: yes
+
+Idempotent. Audited (`kind: notification_delete`).
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | string | yes | Tenant ID (`tn_…` when generated; one safe path element). |
+
+| Status | Body | Description |
+|---|---|---|
+| 204 | — | Deleted (or there was nothing to delete). |
+| 403 | `Error` | The caller is authenticated but lacks the role, or a host acts outside its own records/namespaces. |
+| 404 | `Error` | No such resource (or none the caller may see). |
+| default | `Error` | Unexpected error. The body is always the typed catalog shape; `Twd-Error` carries the code. |
+
+### `POST /v1/tenants/{id}/notifications/test` — Send a test notification now (`twd notify test`)
+
+`TestTenantNotifications` · role **admin** · audited: yes
+
+POSTs a `NotificationEvent` with `event: test` to the configured
+webhook once, synchronously, and reports the outcome. Not retried.
+Audited (`kind: notification_test`, the origin and the outcome).
+`404 not_found` when no webhook is set.
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | string | yes | Tenant ID (`tn_…` when generated; one safe path element). |
+
+| Status | Body | Description |
+|---|---|---|
+| 200 | `NotificationTestResult` | The delivery attempt. |
 | 403 | `Error` | The caller is authenticated but lacks the role, or a host acts outside its own records/namespaces. |
 | 404 | `Error` | No such resource (or none the caller may see). |
 | default | `Error` | Unexpected error. The body is always the typed catalog shape; `Twd-Error` carries the code. |
@@ -2045,10 +2139,11 @@ Hash-chained, append-only audit log.
 | `kind` | query | array of `AuditKind` | no |  |
 | `since` | query | string | no | Records at or after this time (RFC 3339 or unix ms). |
 | `until` | query | string | no |  |
+| `order` | query | string: `asc` \| `desc` | no | `asc` (default): oldest first. `desc`: newest first, as the admin UI shows activity. A cursor continues in the order of the page that returned it, so repeat `order` with the cursor. |
 
 | Status | Body | Description |
 |---|---|---|
-| 200 | `AuditPage` | One page, ordered by `(ts, chain, seq)`, with per-chain verification of the records returned. |
+| 200 | `AuditPage` | One page, ordered by `(ts, chain, seq)` (reversed with `order=desc`), with per-chain verification of the records returned. |
 | 400 | `Error` | Malformed request, body, filter or cursor. |
 | 403 | `Error` | The caller is authenticated but lacks the role, or a host acts outside its own records/namespaces. |
 | default | `Error` | Unexpected error. The body is always the typed catalog shape; `Twd-Error` carries the code. |
@@ -2824,6 +2919,18 @@ One approval wait of one Workflow instance, as the host running it records it.
 | `approvals` | array of `Approval` | yes |  |
 | `unreachable` | array of string | no | Hosts that did not answer (their approvals are missing). |
 
+#### `ApproveGrant`
+
+One value of a `twd.dev/cap/approve` grant. A missing field does not narrow; `"*"` in a list matches anything.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `decisions` | array of string | no |  |
+| `limits` | object | no |  |
+| `steps` | array of string | no |  |
+| `workflows` | array of string | no |  |
+| `workloads` | array of string | no |  |
+
 #### `Approver`
 
 The verified tailnet identity that decided an approval (WireGuard, never the request body).
@@ -2941,6 +3048,10 @@ mgmt chain:
 `telemetry_put` (the tenant's OTLP export set; endpoint and header names only),
 `telemetry_delete`,
 `telemetry_release` (the OTLP export config released to a workload's lease holder; once per host, workload and version),
+`notification_put` (the tenant's notification webhook set; its host and header names only),
+`notification_delete`,
+`notification_failed` (a notification was not delivered; the webhook's host and the error),
+`notification_test` (`twd notify test`; the origin and the outcome),
 `reap`,
 `preflight` (optional; dryRun deploys),
 `host_add`,
@@ -2966,7 +3077,7 @@ Workflow approvals (ADR-040), host chain:
 Both chains:
 `expose_on` / `expose_off` (mgmt: the operator's change; host: the listener opened/closed).
 
-Enum: `allow`, `deny`, `egress`, `spawn`, `kill`, `principal`, `tenant_note`, `container_start`, `container_stop`, `tenant_create`, `tenant_update`, `tenant_delete`, `host_register`, `host_delete`, `host_cordon`, `host_uncordon`, `host_drain`, `release_import`, `release_artifact`, `upgrade_start`, `upgrade_step`, `upgrade_pause`, `upgrade_resume`, `upgrade_abort`, `deploy`, `undeploy`, `create`, `mint`, `remint`, `ready`, `device_delete`, `purge`, `volume_key`, `secret_put`, `secret_delete`, `secret_release`, `store_create`, `store_delete`, `queue_create`, `queue_delete`, `queue_purge`, `d1_write`, `kv_put`, `kv_delete`, `telemetry_put`, `telemetry_delete`, `telemetry_release`, `reap`, `preflight`, `host_add`, `credential`, `obo_root`, `object_update`, `container_reserve`, `container_release`, `image_push`, `image_pin`, `image_public`, `transfer`, `revoke`, `public_request`, `public_rejected`, `public_object_created`, `approval_requested`, `approval_decision`, `approval_denied`, `approval_timeout`, `expose_on`, `expose_off`
+Enum: `allow`, `deny`, `egress`, `spawn`, `kill`, `principal`, `tenant_note`, `container_start`, `container_stop`, `tenant_create`, `tenant_update`, `tenant_delete`, `host_register`, `host_delete`, `host_cordon`, `host_uncordon`, `host_drain`, `release_import`, `release_artifact`, `upgrade_start`, `upgrade_step`, `upgrade_pause`, `upgrade_resume`, `upgrade_abort`, `deploy`, `undeploy`, `create`, `mint`, `remint`, `ready`, `device_delete`, `purge`, `volume_key`, `secret_put`, `secret_delete`, `secret_release`, `store_create`, `store_delete`, `queue_create`, `queue_delete`, `queue_purge`, `d1_write`, `kv_put`, `kv_delete`, `telemetry_put`, `telemetry_delete`, `telemetry_release`, `notification_put`, `notification_delete`, `notification_failed`, `notification_test`, `reap`, `preflight`, `host_add`, `credential`, `obo_root`, `object_update`, `container_reserve`, `container_release`, `image_push`, `image_pin`, `image_public`, `transfer`, `revoke`, `public_request`, `public_rejected`, `public_object_created`, `approval_requested`, `approval_decision`, `approval_denied`, `approval_timeout`, `expose_on`, `expose_off`
 
 #### `AuditPage`
 
@@ -2994,7 +3105,7 @@ written, no HTML escaping. `seq` and `chain` are assigned by mgmt.
 | `grant` | string | no |  |
 | `hash` | string | yes |  |
 | `hostSig` | string | no | base64 ed25519 over utf8(hash); host chains only. |
-| `kind` | `AuditKind` | yes | Host chain (netd/hostd): `allow`, `deny`, `egress`, `spawn`, `kill`, `principal`, `tenant_note` (source `tenant`, unverified), `container_start` (an object's container, ADR-032), `container_stop` (an object's container, ADR-032). mgmt chain: `tenant_create`, `tenant_update`, `tenant_delete`, `host_register`, `host_delete`, `host_cordon`, `host_uncordon`, `host_drain`, `release_import`, `release_artifact`, `upgrade_start`, `upgrade_step`, `upgrade_pause`, `upgrade_resume`, `upgrade_abort`, `deploy`, `undeploy`, `create`, `mint`, `remint`, `ready`, `kill`, `device_delete`, `purge`, `volume_key`, `secret_put` (a workload secret set; name only), `secret_delete`, `secret_release` (a workload's secrets released to its lease holder; names only), `store_create` (a platform store created, by its first write or an admin), `store_delete` (a platform store and its data key deleted), `queue_create` (a queue created, by its first use or an admin), `queue_delete` (a queue, its messages and its data key deleted), `queue_purge` (every message of a queue deleted), `d1_write` (an operator's SQL changed a D1 database; statement count only), `kv_put` (an admin wrote a Workers KV key; the namespace only, never the key), `kv_delete` (an admin deleted a Workers KV key; the namespace only), `telemetry_put` (the tenant's OTLP export set; endpoint and header names only), `telemetry_delete`, `telemetry_release` (the OTLP export config released to a workload's lease holder; once per host, workload and version), `reap`, `preflight` (optional; dryRun deploys), `host_add`, `credential`, `obo_root`, `object_update`, `container_reserve`, `container_release`, `image_push` (a manifest pushed to the registry), `image_pin` (a deploy resolved its container images to digests, mirroring external ones), `image_public` (a public base image added or removed), `transfer` (a `_pool` node went to an object, ADR-031), `revoke` (an unused pooled key revoked). Public ingress (ADR-029), host chain: `public_request` (one per public request), `public_rejected` (per-minute summary of requests the limits refused), `public_object_created` (a name admitted for a public create). Workflow approvals (ADR-040), host chain: `approval_requested` (a Workflow instance waits for an approval), `approval_decision` (approved or rejected, with the approver's identity), `approval_denied` (a decision refused, e.g. `cap_missing`), `approval_timeout` (the wait timed out: rejected by default). Both chains: `expose_on` / `expose_off` (mgmt: the operator's change; host: the listener opened/closed). |
+| `kind` | `AuditKind` | yes | Host chain (netd/hostd): `allow`, `deny`, `egress`, `spawn`, `kill`, `principal`, `tenant_note` (source `tenant`, unverified), `container_start` (an object's container, ADR-032), `container_stop` (an object's container, ADR-032). mgmt chain: `tenant_create`, `tenant_update`, `tenant_delete`, `host_register`, `host_delete`, `host_cordon`, `host_uncordon`, `host_drain`, `release_import`, `release_artifact`, `upgrade_start`, `upgrade_step`, `upgrade_pause`, `upgrade_resume`, `upgrade_abort`, `deploy`, `undeploy`, `create`, `mint`, `remint`, `ready`, `kill`, `device_delete`, `purge`, `volume_key`, `secret_put` (a workload secret set; name only), `secret_delete`, `secret_release` (a workload's secrets released to its lease holder; names only), `store_create` (a platform store created, by its first write or an admin), `store_delete` (a platform store and its data key deleted), `queue_create` (a queue created, by its first use or an admin), `queue_delete` (a queue, its messages and its data key deleted), `queue_purge` (every message of a queue deleted), `d1_write` (an operator's SQL changed a D1 database; statement count only), `kv_put` (an admin wrote a Workers KV key; the namespace only, never the key), `kv_delete` (an admin deleted a Workers KV key; the namespace only), `telemetry_put` (the tenant's OTLP export set; endpoint and header names only), `telemetry_delete`, `telemetry_release` (the OTLP export config released to a workload's lease holder; once per host, workload and version), `notification_put` (the tenant's notification webhook set; its host and header names only), `notification_delete`, `notification_failed` (a notification was not delivered; the webhook's host and the error), `notification_test` (`twd notify test`; the origin and the outcome), `reap`, `preflight` (optional; dryRun deploys), `host_add`, `credential`, `obo_root`, `object_update`, `container_reserve`, `container_release`, `image_push` (a manifest pushed to the registry), `image_pin` (a deploy resolved its container images to digests, mirroring external ones), `image_public` (a public base image added or removed), `transfer` (a `_pool` node went to an object, ADR-031), `revoke` (an unused pooled key revoked). Public ingress (ADR-029), host chain: `public_request` (one per public request), `public_rejected` (per-minute summary of requests the limits refused), `public_object_created` (a name admitted for a public create). Workflow approvals (ADR-040), host chain: `approval_requested` (a Workflow instance waits for an approval), `approval_decision` (approved or rejected, with the approver's identity), `approval_denied` (a decision refused, e.g. `cap_missing`), `approval_timeout` (the wait timed out: rejected by default). Both chains: `expose_on` / `expose_off` (mgmt: the operator's change; host: the listener opened/closed). |
 | `objectID` | string | no |  |
 | `prevHash` | string | yes | `""` for the first record of a chain. |
 | `seq` | integer (int64) | no | (read-only) |
@@ -3663,6 +3774,58 @@ Enum: `oauth`, `wif`, `apikey`, `headscale`, `static`
 | `tags` | array of string | yes |  |
 | `tenant` | string | yes |  |
 | `v` | integer | yes |  |
+
+#### `NotificationConfig`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tenantID` | string | yes |  |
+| `updatedAt` | integer (int64) | no |  |
+| `updatedBy` | string | no |  |
+| `webhook` | `WebhookView` | no | A tenant's notification webhook, without its secrets. |
+
+#### `NotificationEvent`
+
+The JSON body mgmt POSTs to a tenant's webhook. `text` is one line
+for chat tools that read it (Slack, Mattermost, Google Chat
+incoming webhooks). `link` opens the row in the admin UI's
+approvals page; whoever opens it still decides with their own
+tailnet identity and grants.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `cli` | string | no | The `twd approve` command line. |
+| `event` | `NotificationEventKind` | yes | `approval_requested` (a Workflow instance started waiting for an approval), `test` (`twd notify test`; never subscribed to). |
+| `facts` | object | no |  |
+| `instance` | string | no |  |
+| `link` | string | no | `https://<mgmt>/ui/approvals?tenant=<tenant>#<instance>` |
+| `sentAt` | string (date-time) | yes |  |
+| `step` | string | no |  |
+| `tenantID` | string | yes |  |
+| `text` | string | yes |  |
+| `workflow` | string | no |  |
+| `workload` | string | no |  |
+
+#### `NotificationEventKind`
+
+`approval_requested` (a Workflow instance started waiting for an approval),
+`test` (`twd notify test`; never subscribed to).
+
+Enum: `approval_requested`, `test`
+
+#### `NotificationTestResult`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `delivered` | boolean | yes |  |
+| `error` | string | no |  |
+| `status` | integer | no | The webhook's HTTP status, when it answered. |
+
+#### `NotificationsPut`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `webhook` | `WebhookPut` | yes |  |
 
 #### `OIDCConfiguration`
 
@@ -4620,18 +4783,46 @@ Present in wif mode.
 | `lifecycleSubject` | string | yes |  |
 | `mintSubject` | string | yes |  |
 
+#### `WebhookPut`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `events` | array of `NotificationEventKind` | no | What to send. Default `[approval_requested]`. |
+| `headers` | object | no | Headers sent with every notification (at most 16; values at most 4 KiB). Never logged, audited or returned. |
+| `url` | string (uri) | yes | http:// or https:// URL (no user info or fragment). Treated as a secret: a chat webhook's path is its credential. |
+
+#### `WebhookView`
+
+A tenant's notification webhook, without its secrets.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `events` | array of `NotificationEventKind` | yes |  |
+| `headerNames` | array of string | yes |  |
+| `origin` | string | yes | The URL's scheme and host (`https://hooks.slack.com`); its path and query are never returned. |
+
 #### `WhoAmI`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `actor` | string | yes |  |
 | `admin` | boolean | yes |  |
+| `approveGrants` | array of `ApproveGrant` | no | The values of the caller's `twd.dev/cap/approve` grants toward `tag:twd-mgmt` (docs/approvals.md): what it may decide through `twd approve` and the admin UI. Empty when it holds none. |
 | `hostID` | string | no |  |
 | `kind` | string: `user` \| `node` \| `host` \| `local` | yes |  |
 | `login` | string | no |  |
 | `mgmt` | `SelfInfo` | yes |  |
 | `nodeID` | string | no |  |
 | `tags` | array of string | no |  |
+| `tailnet` | string | no | The caller's own tailnet (the MagicDNS suffix of its node, from WhoIs). Absent for the local operator and hosts. |
+| `tenants` | array of `WhoAmITenant` | no | The tenants the caller can act in without knowing their IDs: those whose `tailnet` is the caller's own tailnet. The local operator gets every tenant; hosts get none. The admin UI's approvals page and `twd approvals` / `twd approve` default to these. A tailnet admin can still list every tenant (`GET /v1/tenants`). |
+
+#### `WhoAmITenant`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tailnet` | string | yes |  |
+| `tenantID` | string | yes |  |
 
 #### `WorkloadPublic`
 

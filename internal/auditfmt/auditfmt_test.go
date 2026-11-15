@@ -29,6 +29,10 @@ func TestDescribe(t *testing.T) {
 		{"revoke", map[string]any{"keyID": "k1", "pool": "tag:a|persistent", "reason": "warm key expired unused"}, "key k1 (pool tag:a|persistent): warm key expired unused"},
 		{"credential", map[string]any{"keyID": "k2", "host": "h-mini", "epoch": 1}, "key k2 for host h-mini, epoch 1"},
 		{"secret_put", map[string]any{"name": "API_KEY", "workload": "w"}, "secret API_KEY of w set by -"},
+		{"notification_put", map[string]any{"origin": "https://hooks.slack.com", "events": []any{"approval_requested"}}, `notifications (["approval_requested"]) to https://hooks.slack.com set by -`},
+		{"notification_failed", map[string]any{"event": "approval_requested", "workload": "refunds", "instance": "i1", "origin": "https://x", "error": "webhook answered 500"},
+			"approval_requested notification for refunds/i1 NOT delivered to https://x: webhook answered 500"},
+		{"notification_test", map[string]any{"origin": "https://x", "delivered": true}, "test notification delivered to https://x (by -)"},
 	} {
 		got := Describe(c.kind, "o1", "", "", c.d, nil)
 		if got != c.want || strings.Contains(got, "%!") {

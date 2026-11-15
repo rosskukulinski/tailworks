@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rosskukulinski/twd/mgmt"
 	v1 "github.com/rosskukulinski/twd/mgmt/api/v1"
 )
 
@@ -24,10 +25,23 @@ import (
 // approve is refused there; listing works.
 
 // approvalTenant resolves --tenant. An approver who is not a twd admin
-// cannot list tenants, so a tenant ID ("tn_…") is taken as is.
+// cannot list tenants, so a tenant ID ("tn_…") is taken as is, and from a
+// linked machine the default (and any tailnet name) comes from GET
+// /v1/whoami: the tenants on this machine's own tailnet (issue #50).
 func approvalTenant(s *state, ref string) (string, error) {
 	if strings.HasPrefix(ref, "tn_") {
 		return ref, nil
+	}
+	if s.remote() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		w, err := s.whoami(ctx)
+		cancel()
+		if err != nil {
+			return "", err
+		}
+		if id, ok, err := pickWhoTenant(w.Tenants, ref); ok || err != nil {
+			return id, err
+		}
 	}
 	tn, err := s.tenant(ref)
 	if err != nil {
@@ -37,6 +51,33 @@ func approvalTenant(s *state, ref string) (string, error) {
 		return "", err
 	}
 	return tn.TenantID, nil
+}
+
+// pickWhoTenant chooses among whoami's tenants: the only one when ref is
+// "", else the one ref names (tailnet, its first label, or ID). ok is false
+// when whoami's list doesn't decide it (then the caller falls back).
+func pickWhoTenant(ts []mgmt.WhoAmITenant, ref string) (id string, ok bool, err error) {
+	ref = strings.TrimSuffix(ref, ".")
+	if ref == "" {
+		switch len(ts) {
+		case 0:
+			return "", false, nil
+		case 1:
+			return ts[0].TenantID, true, nil
+		}
+		var names []string
+		for _, t := range ts {
+			names = append(names, t.Tailnet+" ("+t.TenantID+")")
+		}
+		return "", true, fail("bad_request", "your tailnet has several tenants: "+strings.Join(names, ", ")).withFix("twd approvals --tenant <tailnet or tenant ID>")
+	}
+	for _, t := range ts {
+		label, _, _ := strings.Cut(t.Tailnet, ".")
+		if ref == t.Tailnet || ref == t.TenantID || ref == label {
+			return t.TenantID, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 func listApprovals(ctx context.Context, s *state, tenantID, workload string, all bool) (v1.ApprovalList, error) {

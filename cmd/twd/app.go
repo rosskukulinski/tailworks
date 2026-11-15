@@ -477,6 +477,9 @@ func cmdDeploy(args []string) error {
 		if v.Status == "failed" {
 			return fail("deploy_failed", "the host could not start "+a.Name, strings.Split(v.Error, "\n")...).withFix("twd logs " + a.Name)
 		}
+		if v.Status == "crashloop" { // it served, then kept exiting (hostd/restart.go)
+			return fail("deploy_crashloop", a.Name+" started, then its workerd kept exiting; the host keeps restarting it with backoff", strings.Split(v.Error, "\n")...).withFix("twd logs " + a.Name)
+		}
 		if v.Status == "active" && activeAt == 0 {
 			activeAt = time.Since(ds)
 			res.Timings["active"] = ms(activeAt)

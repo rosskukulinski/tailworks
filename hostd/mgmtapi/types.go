@@ -177,7 +177,7 @@ type Lease struct {
 
 type DeploymentStatus struct {
 	DeploymentID string `json:"deploymentID"`
-	Status       string `json:"status"` // "starting" | "active" | "draining" | "stopped" | "failed"
+	Status       string `json:"status"` // "starting" | "active" | "crashloop" | "draining" | "stopped" | "failed"
 	Error        string `json:"error,omitempty"`
 }
 

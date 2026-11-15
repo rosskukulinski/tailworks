@@ -345,7 +345,7 @@ func TestHelpers(t *testing.T) {
 	if short("abcdefghijklmnopqrstuvwxyz") != "abcdefghijkl…" || short("short") != "short" {
 		t.Error("short")
 	}
-	for st, want := range map[string]string{"ready": "ok", "live": "ok", "pending": "warn", "minted": "warn", "stale": "warn", "killed": "off", "stopped": "off", "superseded": "off", "failed": "bad", "other": "neutral"} {
+	for st, want := range map[string]string{"ready": "ok", "live": "ok", "pending": "warn", "minted": "warn", "stale": "warn", "killed": "off", "stopped": "off", "superseded": "off", "failed": "bad", "crashloop": "bad", "other": "neutral"} {
 		if badge(st) != want {
 			t.Errorf("badge(%s) = %s", st, badge(st))
 		}

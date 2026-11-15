@@ -644,6 +644,10 @@ type WorkloadStatus struct {
 	RequestLog string `json:",omitempty"`
 	// Public is the workload's public ingress (ADR-029), if any.
 	Public *PublicStatus `json:",omitempty"`
+
+	// Restarts counts the workerd's exits in a row (restart.go; reset after
+	// it ran 30 s). Status is "crashloop" from the second.
+	Restarts int `json:",omitempty"`
 }
 
 // PublicStatus is a workload's public node as this host runs it.
@@ -741,6 +745,7 @@ func (h *Host) Status() StatusView {
 			if w.active.cmd != nil && w.active.cmd.Process != nil {
 				ws.PID = w.active.cmd.Process.Pid
 			}
+			ws.Restarts = w.active.restarts
 			if w.active.tier != "microvm" {
 				ws.Sandbox, ws.SandboxProfile = sandboxOf(w.active.profile), w.active.profile
 				ws.LoopbackPorts = w.active.loopPorts

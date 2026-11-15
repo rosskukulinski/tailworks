@@ -94,7 +94,7 @@ func (w *workload) epochNow() int64 {
 func (w *workload) isActive() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.status == "active" || w.status == "starting"
+	return liveStatus(w.status) // restart.go: crashloop too
 }
 
 func (w *workload) currentWL() *object {
@@ -490,6 +490,12 @@ type instance struct {
 	nonces   gen.NonceCache // egress MAC replay cache (RT-05)
 	restarts int
 	started  time.Time
+
+	// Restart policy (restart.go): ready once the instance was healthy;
+	// gaveUp/startErr when it kept exiting before that.
+	ready    atomic.Bool
+	gaveUp   atomic.Bool
+	startErr error
 }
 
 // tierFor picks a deployment's isolation tier: the bundle's twd.jsonc
@@ -706,6 +712,7 @@ func (h *Host) startInstance(w *workload, depID string, app *bundle.App, tier st
 		inst.stop()
 		return nil, err
 	}
+	inst.ready.Store(true) // from now on a crash restarts forever (restart.go)
 	inst.phases["health"] = time.Since(th).Milliseconds()
 	return inst, nil
 }
@@ -895,6 +902,7 @@ func (inst *instance) spawn() error {
 	}
 	cmd.Stdout, cmd.Stderr = logf, logf
 	cmd.Dir = inst.dir
+	cmd.WaitDelay = exitPipeWait // restart.go: a surviving child can't hide the exit
 	// Its own process group: a sandboxed workerd may signal only itself and
 	// its group (seccomp), never hostd's.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -913,43 +921,14 @@ func (inst *instance) spawn() error {
 	go func() {
 		cmd.Wait()
 		logf.Close()
+		// Nothing of the old workerd may outlive it (restart.go, #43).
+		if err := reapGroup(cmd.Process.Pid); err != nil {
+			inst.h.log.Warn("workerd's process group", "workload", inst.w.name, "err", err)
+		}
 		close(ex)
 		inst.onExit()
 	}()
 	return nil
-}
-
-// onExit restarts a workerd that died unexpectedly (bounded).
-func (inst *instance) onExit() {
-	if inst.stopping.Load() || inst.h.ctx.Err() != nil {
-		return
-	}
-	inst.mu.Lock()
-	if time.Since(inst.started) > 30*time.Second {
-		inst.restarts = 0
-	}
-	inst.restarts++
-	n := inst.restarts
-	inst.mu.Unlock()
-	tail := inst.logTail(2048)
-	if n > 5 {
-		inst.h.log.Error("workerd keeps exiting; giving up", "workload", inst.w.name, "log", tail)
-		inst.w.fail(inst.depID, fmt.Errorf("workerd exited %d times: %s", n, tail))
-		return
-	}
-	inst.h.log.Warn("workerd exited; restarting", "workload", inst.w.name, "attempt", n, "log", tail)
-	time.Sleep(time.Duration(n) * 200 * time.Millisecond)
-	if inst.stopping.Load() {
-		return
-	}
-	if inst.tier != bundle.TierMicroVM && inst.ingressLn == nil {
-		// workerd bound the ingress socket itself; a crash leaves the
-		// file behind, and the restart's bind would fail (EADDRINUSE).
-		os.Remove(inst.res.Sockets.Ingress)
-	}
-	if err := inst.spawn(); err != nil {
-		inst.w.fail(inst.depID, err)
-	}
 }
 
 func (inst *instance) logTail(n int) string {
@@ -976,6 +955,9 @@ func (inst *instance) waitHealthy(d time.Duration) error {
 				time.Sleep(50 * time.Millisecond)
 			}
 		default:
+		}
+		if err := inst.startupError(); err != nil { // restart.go: kept exiting
+			return err
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("workerd did not become healthy: %s", inst.logTail(4096))

@@ -240,6 +240,7 @@ func (inst *instance) spawnNode() error {
 	}
 	cmd.Dir = inst.dir
 	cmd.Stdout, cmd.Stderr = logf, logf
+	cmd.WaitDelay = exitPipeWait // restart.go: a surviving child can't hide the exit
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	for k, v := range env {
 		cmd.Env = append(cmd.Env, k+"="+v)

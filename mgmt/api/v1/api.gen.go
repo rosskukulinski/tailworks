@@ -378,6 +378,7 @@ func (e ContainerImagePinArch) Valid() bool {
 const (
 	DeploymentStatusActive     DeploymentStatus = "active"
 	DeploymentStatusAssigned   DeploymentStatus = "assigned"
+	DeploymentStatusCrashloop  DeploymentStatus = "crashloop"
 	DeploymentStatusDraining   DeploymentStatus = "draining"
 	DeploymentStatusFailed     DeploymentStatus = "failed"
 	DeploymentStatusStarting   DeploymentStatus = "starting"
@@ -391,6 +392,8 @@ func (e DeploymentStatus) Valid() bool {
 	case DeploymentStatusActive:
 		return true
 	case DeploymentStatusAssigned:
+		return true
+	case DeploymentStatusCrashloop:
 		return true
 	case DeploymentStatusDraining:
 		return true
@@ -1916,7 +1919,20 @@ type Deployment struct {
 	Public *DeploymentPublic `json:"public,omitempty"`
 
 	// Replicas A workload with `twd.jsonc` `replicas` > 1 (stateless only): every copy, this deployment first, each on a distinct host. Undeploying the workload undeploys its replicas.
-	Replicas     *[]ReplicaRef    `json:"replicas,omitempty"`
+	Replicas *[]ReplicaRef `json:"replicas,omitempty"`
+
+	// Status - `assigned`: mgmt placed it; the host has not reported yet.
+	// - `starting`: the host is starting it.
+	// - `active`: serving.
+	// - `crashloop`: it served, then its workerd kept exiting; the host
+	//   keeps restarting it with exponential backoff (200 ms doubling to
+	//   5 min) and reports `active` again once it answers. `error` holds
+	//   the attempt count, the next delay and the last log lines.
+	// - `draining`: being replaced or undeployed.
+	// - `stopped`: stopped (undeployed, fenced or unassigned).
+	// - `failed`: the deploy failed (bad bundle or config, or it never
+	//   became healthy); the host does not retry it. `error` says why.
+	// - `superseded`: a newer deployment of the workload replaced it.
 	Status       DeploymentStatus `json:"status"`
 	TenantID     string           `json:"tenantID"`
 	Tier         *Tier            `json:"tier,omitempty"`
@@ -1973,12 +1989,36 @@ type DeploymentPublic struct {
 
 // DeploymentReport defines model for DeploymentReport.
 type DeploymentReport struct {
-	DeploymentID string           `json:"deploymentID"`
-	Error        *string          `json:"error,omitempty"`
-	Status       DeploymentStatus `json:"status"`
+	DeploymentID string  `json:"deploymentID"`
+	Error        *string `json:"error,omitempty"`
+
+	// Status - `assigned`: mgmt placed it; the host has not reported yet.
+	// - `starting`: the host is starting it.
+	// - `active`: serving.
+	// - `crashloop`: it served, then its workerd kept exiting; the host
+	//   keeps restarting it with exponential backoff (200 ms doubling to
+	//   5 min) and reports `active` again once it answers. `error` holds
+	//   the attempt count, the next delay and the last log lines.
+	// - `draining`: being replaced or undeployed.
+	// - `stopped`: stopped (undeployed, fenced or unassigned).
+	// - `failed`: the deploy failed (bad bundle or config, or it never
+	//   became healthy); the host does not retry it. `error` says why.
+	// - `superseded`: a newer deployment of the workload replaced it.
+	Status DeploymentStatus `json:"status"`
 }
 
-// DeploymentStatus defines model for DeploymentStatus.
+// DeploymentStatus - `assigned`: mgmt placed it; the host has not reported yet.
+//   - `starting`: the host is starting it.
+//   - `active`: serving.
+//   - `crashloop`: it served, then its workerd kept exiting; the host
+//     keeps restarting it with exponential backoff (200 ms doubling to
+//     5 min) and reports `active` again once it answers. `error` holds
+//     the attempt count, the next delay and the last log lines.
+//   - `draining`: being replaced or undeployed.
+//   - `stopped`: stopped (undeployed, fenced or unassigned).
+//   - `failed`: the deploy failed (bad bundle or config, or it never
+//     became healthy); the host does not retry it. `error` says why.
+//   - `superseded`: a newer deployment of the workload replaced it.
 type DeploymentStatus string
 
 // DeviceDeleteRun defines model for DeviceDeleteRun.
@@ -3286,9 +3326,22 @@ type ReleaseNoteKind string
 
 // ReplicaRef One replica of a workload with `twd.jsonc` `replicas` > 1.
 type ReplicaRef struct {
-	DeploymentID string            `json:"deploymentID"`
-	Host         string            `json:"host"`
-	Status       *DeploymentStatus `json:"status,omitempty"`
+	DeploymentID string `json:"deploymentID"`
+	Host         string `json:"host"`
+
+	// Status - `assigned`: mgmt placed it; the host has not reported yet.
+	// - `starting`: the host is starting it.
+	// - `active`: serving.
+	// - `crashloop`: it served, then its workerd kept exiting; the host
+	//   keeps restarting it with exponential backoff (200 ms doubling to
+	//   5 min) and reports `active` again once it answers. `error` holds
+	//   the attempt count, the next delay and the last log lines.
+	// - `draining`: being replaced or undeployed.
+	// - `stopped`: stopped (undeployed, fenced or unassigned).
+	// - `failed`: the deploy failed (bad bundle or config, or it never
+	//   became healthy); the host does not retry it. `error` says why.
+	// - `superseded`: a newer deployment of the workload replaced it.
+	Status *DeploymentStatus `json:"status,omitempty"`
 
 	// Workload Examples: web--r2
 	Workload string `json:"workload"`

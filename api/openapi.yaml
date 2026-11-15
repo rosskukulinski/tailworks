@@ -4813,7 +4813,28 @@ components:
     # --------------------------------------------------------- deployments
     DeploymentStatus:
       type: string
-      enum: [assigned, starting, active, draining, stopped, failed, superseded]
+      description: |
+        - `assigned`: mgmt placed it; the host has not reported yet.
+        - `starting`: the host is starting it.
+        - `active`: serving.
+        - `crashloop`: it served, then its workerd kept exiting; the host
+          keeps restarting it with exponential backoff (200 ms doubling to
+          5 min) and reports `active` again once it answers. `error` holds
+          the attempt count, the next delay and the last log lines.
+        - `draining`: being replaced or undeployed.
+        - `stopped`: stopped (undeployed, fenced or unassigned).
+        - `failed`: the deploy failed (bad bundle or config, or it never
+          became healthy); the host does not retry it. `error` says why.
+        - `superseded`: a newer deployment of the workload replaced it.
+      enum:
+        - assigned
+        - starting
+        - active
+        - crashloop
+        - draining
+        - stopped
+        - failed
+        - superseded
     ClassConfig:
       type: object
       description: One DO namespace from `twd.jsonc` `tailnet.objects`.

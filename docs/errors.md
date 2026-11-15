@@ -85,8 +85,11 @@ Thrown in the Worker · platform. **When:** app code sent an event of type `appr
 ### delegation_invalid
 403 · mgmt, hostd, netd. **When:** a spawn names a child tag not owned by the parent's tags, the parent is unknown (404) or dead (410), or an object tried to kill something that is not itself or a descendant. **Fix:** fix the `tagOwners` so the parent's tag owns the child's; kill through an ancestor or the CLI.
 
+### deploy_crashloop
+500 · cli. **When:** `twd deploy` was waiting for the deployment and its workerd, after it had answered its health check once, kept exiting: the deployment is `crashloop`. The host keeps restarting it with exponential backoff (200 ms doubling to 5 min) and never gives up; it reports `active` again once a restart answers. The detail lines are the attempt count and workerd's last log lines. **Fix:** `twd logs <workload>`; fix the Worker and deploy again. See [observability.md](observability.md#crash-loops).
+
 ### deploy_failed
-500 · cli. **When:** the host could not start the workload (workerd or node exited); `twd dev` prints workerd's output. **Fix:** read the detail lines; `twd logs <workload>` on the host.
+500 · cli. **When:** the host could not start the workload (bad bundle or config, or workerd or node exited before it ever answered its health check); the host does not retry it. `twd dev` prints workerd's output. **Fix:** read the detail lines; `twd logs <workload>` on the host.
 
 ### derp_unreachable
 502 · netd (SDK). **When:** no direct path to the peer and no reachable DERP relay. **Fix:** check the host's outbound connectivity (UDP 3478, TCP 443 to DERP).

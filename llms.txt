@@ -13,11 +13,13 @@ Coding agents: start with the skills. `twd agent setup` installs them for Claude
 - [Agent skills](https://github.com/rosskukulinski/twd/blob/master/agent/skills/twd/SKILL.md): the core skill; the others are next to it in agent/skills/
 - [Installing twd](https://github.com/rosskukulinski/twd/blob/master/docs/INSTALL.md): macOS and Linux, OAuth client, `twd link`, hosts, troubleshooting
 - [Upgrading twd](https://github.com/rosskukulinski/twd/blob/master/docs/upgrading.md): what may run together, `twd upgrade`, fleet upgrade runs, cordon and drain
+- [Changelog](https://github.com/rosskukulinski/twd/blob/master/CHANGELOG.md): what changed in each release, breaking changes and upgrade actions first
 - [Releasing twd](https://github.com/rosskukulinski/twd/blob/master/docs/RELEASING.md): versions, release-note fragments, the release gates
 - [Running twd on Headscale](https://github.com/rosskukulinski/twd/blob/master/docs/headscale.md): the Headscale profile, `twd up --control=headscale`, what's different from Tailscale
 
 ## Building apps
 
+- [Recipes](https://github.com/rosskukulinski/twd/blob/master/docs/recipes.md): short, runnable how-tos: tailnet gateways for internet APIs and LLMs, a Durable Object per user, a signed public webhook, cron into KV
 - [twd.jsonc reference](https://github.com/rosskukulinski/twd/blob/master/docs/twd-jsonc.md): every key, tags and `twd init`
 - [Using wrangler with twd](https://github.com/rosskukulinski/twd/blob/master/docs/wrangler.md): wrangler.toml/json/jsonc, `--env`, bundling, what's ignored
 - [Cloudflare Workers compatibility](https://github.com/rosskukulinski/twd/blob/master/docs/COMPAT.md): what works, surface by surface, with the tests behind it
@@ -42,6 +44,7 @@ Coding agents: start with the skills. `twd agent setup` installs them for Claude
 - [CLI --json schema](https://github.com/rosskukulinski/twd/blob/master/schema/cli.schema.json): JSON Schema of every command's output
 - [Observability](https://github.com/rosskukulinski/twd/blob/master/docs/observability.md): request records (`twd logs`), Prometheus `/metrics`, OTLP export (`twd telemetry`), traces
 - [Error catalog](https://github.com/rosskukulinski/twd/blob/master/docs/errors.md): every error code and its fix
+- [Limits](https://github.com/rosskukulinski/twd/blob/master/docs/limits.md): every size, count, rate and timeout, with the flag or constant it comes from, and the limits that don't exist
 - [Admin UI](https://github.com/rosskukulinski/twd/blob/master/docs/ADMIN-UI.md): the operator console
 - [twd.jsonc JSON Schema](https://github.com/rosskukulinski/twd/blob/master/schema/twd.schema.json): for editor completion
 
@@ -56,4 +59,6 @@ Coding agents: start with the skills. `twd agent setup` installs them for Claude
 ## Optional
 
 - [Build status](https://github.com/rosskukulinski/twd/blob/master/status/README.md): one file per workstream, with measured results
+- [Security model](https://github.com/rosskukulinski/twd/blob/master/docs/security-model.md): identity, isolation tiers and trust boundaries on one page
+- [Security policy](https://github.com/rosskukulinski/twd/blob/master/SECURITY.md): how to report a vulnerability privately
 - [Threat model](https://github.com/rosskukulinski/twd/blob/master/security/THREAT-MODEL.md)

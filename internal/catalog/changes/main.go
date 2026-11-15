@@ -4,6 +4,7 @@
 //	changes validate FILE...                 check every fragment's front matter
 //	changes kinds FILE                       print the fragment's upgrade kinds, one per line
 //	changes notes [-title T] FILE...         print the assembled release notes (markdown)
+//	changes changelog                        print CHANGELOG.md, from the embedded release catalog
 //	changes entry -version V -date D -workerd W [-schema S] [-contract a,b] [-protocols JSON] FILE...
 //	                                         print the release catalog entry (JSON)
 package main
@@ -75,6 +76,9 @@ func run(args []string) error {
 			return err
 		}
 		fmt.Print(catalog.Markdown(*title, notes))
+		return nil
+	case "changelog":
+		fmt.Print(catalog.Changelog(catalog.Embedded()))
 		return nil
 	case "entry":
 		f := flag.NewFlagSet("entry", flag.ContinueOnError)

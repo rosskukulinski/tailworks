@@ -164,3 +164,23 @@ twd host uncordon h1
   node `object.json`, `twd.json`, and the KV, D1 and R2 journals. A twd reads
   every older format and refuses a newer one with "written by a newer twd;
   upgrade".
+
+## Versions, compatibility dates and the changelog
+
+- **What changed:** [CHANGELOG.md](../CHANGELOG.md), newest release first,
+  and the same notes on each
+  [GitHub release](https://github.com/rosskukulinski/twd/releases).
+  Breaking changes and the steps an operator must take are in each
+  release's "Breaking" and "Upgrade actions" sections.
+- **What a version promises:** before 1.0 a minor release may break things
+  (with a migration path and a "Breaking" note) and a patch only fixes
+  bugs; from 1.0 on, twd follows SemVer. Details:
+  [RELEASING.md](RELEASING.md#versions).
+- **Your app's `compatibility_date` and `compatibility_flags`** go to
+  workerd unchanged, so a Worker behaves as it would on Cloudflare at that
+  date, within the workerd version the release pins (CHANGELOG.md names
+  it). twd adds one flag, `nodejs_als`, unless you already set
+  `nodejs_als`, `nodejs_compat` or `nodejs_compat_v2`
+  (`hostd/gen/observe.go`). twd's own
+  platform worker has its own pinned date; a release that moves it, or
+  bumps workerd, says so under "Upgrade actions".

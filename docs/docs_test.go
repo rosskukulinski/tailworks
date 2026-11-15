@@ -22,6 +22,12 @@ func TestShowAndSearch(t *testing.T) {
 	if len(hits) == 0 || hits[0].Ref() != "errors.md#acl_denied" {
 		t.Fatalf("Search(acl_denied) best hit: %+v", hits)
 	}
+	if s, ok := Show("../README.md#quick-start-deploy-your-first-durable-object"); !ok || !strings.Contains(s, "twd deploy") {
+		t.Fatalf("Show(../README.md#quick-start…) = %q, %v", s, ok)
+	}
+	if _, ok := Show("../go.mod"); ok {
+		t.Fatal("Show read a repo-root file that isn't a doc")
+	}
 	if Search("zzz-no-such-word", 5) != nil {
 		t.Fatal("Search found a word that isn't there")
 	}
@@ -56,8 +62,8 @@ func TestLLMsTxt(t *testing.T) {
 		if strings.HasPrefix(d.Path, "design/adr/") && d.Path != "design/adr/README.md" {
 			continue // the ADR index links them
 		}
-		if !linked["docs/"+d.Path] {
-			t.Errorf("llms.txt doesn't list docs/%s", d.Path)
+		if !linked[RepoPath(d.Path)] {
+			t.Errorf("llms.txt doesn't list %s", RepoPath(d.Path))
 		}
 	}
 }
@@ -65,7 +71,7 @@ func TestLLMsTxt(t *testing.T) {
 // TestSearchRanksGuides: a word that names a guide finds that guide first,
 // not the API contract or a design record that mentions it.
 func TestSearchRanksGuides(t *testing.T) {
-	for q, want := range map[string]string{"secret": "secrets.md", "kv": "kv.md", "logs": "observability.md", "upgrade": "upgrading.md", "public webhook": "public-ingress.md"} {
+	for q, want := range map[string]string{"secret": "secrets.md", "kv": "kv.md", "logs": "observability.md", "upgrade": "upgrading.md", "public webhook": "public-ingress.md", "quick start": "../README.md", "changelog": "../CHANGELOG.md"} {
 		hits := Search(q, 3)
 		found := false
 		for _, h := range hits {

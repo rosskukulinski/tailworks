@@ -9,12 +9,20 @@ import (
 	"io/fs"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
+
+	twd "github.com/rosskukulinski/twd"
 )
 
 //go:embed *.md contracts/*.md design/RFC.md design/adr/*.md
 var files embed.FS
+
+// rootPrefix names the repo-root docs (README.md with the quick start,
+// CHANGELOG.md, SECURITY.md) relative to docs/: "../README.md". go:embed
+// can't reach them from here; the root package embeds them.
+const rootPrefix = "../"
 
 // Doc is one embedded doc.
 type Doc struct {
@@ -50,6 +58,10 @@ func List() []Doc {
 		out = append(out, Doc{Path: p, Title: title(string(b), p)})
 		return nil
 	})
+	for _, n := range twd.RootDocNames {
+		b, _ := twd.RootDocs.ReadFile(n)
+		out = append(out, Doc{Path: rootPrefix + n, Title: title(string(b), n)})
+	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out
 }
@@ -63,12 +75,24 @@ func title(s, p string) string {
 	return path.Base(p)
 }
 
-// Read returns a doc's Markdown. name may carry a "docs/" prefix.
+// Read returns a doc's Markdown. name may carry a "docs/" prefix; a
+// repo-root doc is "../README.md".
 func Read(name string) (string, bool) {
 	name = strings.TrimPrefix(path.Clean(strings.TrimPrefix(name, "./")), "docs/")
+	if n, ok := strings.CutPrefix(name, rootPrefix); ok {
+		if !slices.Contains(twd.RootDocNames, n) {
+			return "", false
+		}
+		b, err := twd.RootDocs.ReadFile(n)
+		return string(b), err == nil
+	}
 	b, err := files.ReadFile(name)
 	return string(b), err == nil
 }
+
+// RepoPath is a doc's (or doc#anchor's) path from the repo root:
+// "docs/errors.md", "README.md#quick-start-…".
+func RepoPath(doc string) string { return path.Join("docs", doc) }
 
 var anchorStrip = regexp.MustCompile(`[^\p{L}\p{N} _-]`)
 

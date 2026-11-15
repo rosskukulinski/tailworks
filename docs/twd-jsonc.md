@@ -68,7 +68,7 @@ schema. `twd init` writes this line for you:
 | `tags` | `["tag:…"]` | **Required.** Tags of the workload's own node. Your policy must let `tag:twd` own them; `twd deploy` prints the snippet if it doesn't |
 | `connects` | `["tag:…" or name]` | what the workload calls. `twd deploy` preflights these grants, and smart placement measures paths to them |
 | `service` | `true` or `"svc:<name>"` | a Tailscale Service: a stable name and VIP in front of the workload ([services.md](services.md)) |
-| `egress.internet` | `[host, "*.suffix", IP, CIDR]` | internet destinations the workload may reach (`enableInternet`); everything else is tailnet-only ([COMPAT.md](COMPAT.md)) |
+| `egress.internet` | `[host, "*.suffix", IP, CIDR]` | internet destinations the workload's **containers** may reach when started with `enableInternet: true` ([containers.md](containers.md)). Worker code stays tailnet-only either way; for internet APIs, see [recipes.md](recipes.md#call-an-internet-api) |
 | `spawn.maxLive` | integer | the most live sub-agents (`ctx.tailnet.spawn`) |
 | `spawn.maxDepth` | integer | the deepest spawn chain |
 | `objects` | map of class → [object](#tailnetobjectsclass) | the Durable Object classes that get a tailnet node per instance |

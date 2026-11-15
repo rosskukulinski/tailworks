@@ -57,7 +57,10 @@ scripts/release-notes.sh v0.1.0 v0.2.0
    writes `internal/catalog/releases/v0.2.0.json`, the catalog entry that
    twd-mgmt embeds for offline upgrade plans. The entry records the notes,
    the workerd pin, the newest migration, contract migrations and protocol
-   versions.
+   versions. Last, it re-renders the user-facing
+   [CHANGELOG.md](../CHANGELOG.md) from the catalog
+   (`go run ./internal/catalog/changes changelog`; a test fails when it is
+   stale).
 3. **Bump `VERSION`**, and the `@twd/*` and `create-twd` package versions,
    to `0.2.0`. Commit all of it as `Release v0.2.0`.
 4. **Tag and push.**

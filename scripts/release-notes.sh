@@ -6,7 +6,8 @@
 #
 #   scripts/release-notes.sh v0.1.0 v0.2.0              preview
 #   scripts/release-notes.sh --finalize v0.1.0 v0.2.0   also: move the fragments to
-#        changes/released/v0.2.0/ and write internal/catalog/releases/v0.2.0.json
+#        changes/released/v0.2.0/, write internal/catalog/releases/v0.2.0.json
+#        and re-render CHANGELOG.md from the catalog
 #
 # Once <tag> is finalized (changes/released/<tag>/ exists), the preview
 # prints that release's fragments instead (release.yml uses this for the
@@ -60,6 +61,10 @@ PROTOCOLS=$(go run ./internal/version/protocols)
 go run ./internal/catalog/changes entry -version "$TAG" -date "$(date -u +%Y-%m-%d)" -workerd "$WORKERD" \
 	-schema "$SCHEMA" -contract "$CONTRACT" -protocols "$PROTOCOLS" $frags >"$out.tmp"
 mv "$out.tmp" "$out"
+# CHANGELOG.md is rendered from the catalog, now including this entry
+# (TestChangelogUpToDate checks it).
+go run ./internal/catalog/changes changelog >CHANGELOG.md.tmp
+mv CHANGELOG.md.tmp CHANGELOG.md
 mkdir -p "changes/released/$TAG"
 for f in $frags; do
 	if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then git mv "$f" "changes/released/$TAG/"; else mv "$f" "changes/released/$TAG/"; fi

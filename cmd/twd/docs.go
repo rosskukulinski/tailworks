@@ -4,7 +4,7 @@ package main
 // coding agents with no network or no repo checkout.
 //
 //	twd docs search <words…> [--limit 10]
-//	twd docs show <doc>[#<anchor>]      e.g. errors.md#acl_denied
+//	twd docs show <doc>[#<anchor>]      e.g. errors.md#acl_denied, ../README.md
 //	twd docs ls
 
 import (
@@ -64,7 +64,7 @@ func cmdDocs(args []string) error {
 		out := make([]hit, 0, len(hits))
 		for _, h := range hits {
 			out = append(out, hit{Ref: h.Ref(), Doc: h.Doc, Heading: h.Heading, Excerpt: h.Excerpt, Score: h.Score,
-				URL: "https://github.com/rosskukulinski/twd/blob/master/docs/" + h.Ref()})
+				URL: "https://github.com/rosskukulinski/twd/blob/master/" + twddocs.RepoPath(h.Ref())})
 		}
 		emit(f, map[string]any{"query": q, "results": out}, func() {
 			if len(out) == 0 {

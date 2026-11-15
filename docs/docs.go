@@ -181,6 +181,7 @@ func Search(query string, limit int) []Hit {
 	}
 	var hits []Hit
 	for _, d := range List() {
+		docName := strings.ToLower(strings.TrimSuffix(path.Base(d.Path), ".md") + " " + d.Title)
 		for _, s := range Sections(d.Path) {
 			h, t := strings.ToLower(s.Heading), strings.ToLower(s.Text)
 			score := 0
@@ -194,8 +195,14 @@ func Search(query string, limit int) []Hit {
 				if h == term || s.Anchor == term {
 					score += 50
 				}
+				// The doc is about the term (secrets.md for "secret"):
+				// its sections beat passing mentions elsewhere.
+				if strings.Contains(docName, stem(term)) {
+					score += 25
+				}
 			}
 			if score > 0 {
+				score = score * docWeight(d.Path) / 4
 				hits = append(hits, Hit{Section: s, Score: score, Excerpt: excerpt(s.Text, terms)})
 			}
 		}
@@ -210,6 +217,27 @@ func Search(query string, limit int) []Hit {
 		hits = hits[:limit]
 	}
 	return hits
+}
+
+// stem drops a plural or verb ending, for matching doc names only
+// ("upgrade" finds upgrading.md, "secrets" finds secrets.md).
+func stem(term string) string {
+	for _, suf := range []string{"ing", "es", "s", "e"} {
+		if len(term) > len(suf)+3 && strings.HasSuffix(term, suf) {
+			return strings.TrimSuffix(term, suf)
+		}
+	}
+	return term
+}
+
+// docWeight ranks the user guides above the API contract and the design
+// records (in quarters): "secret" should find secrets.md before the
+// mgmt API's secret operations or an ADR.
+func docWeight(p string) int {
+	if strings.HasPrefix(p, "contracts/") || strings.HasPrefix(p, "design/") {
+		return 2
+	}
+	return 4
 }
 
 // excerpt is the first non-heading line with a query word (else the

@@ -31,10 +31,13 @@ at start with `deploy_failed`.
 ## Long-running dev server
 
 ```sh
-twd dev --json                    # NDJSON on stdout: {"event": "ready", "url", ...}, then "reload" / "error"
+twd dev --json                    # NDJSON on stdout: {"event": "ready", "url", ...}, then "reload" / "error" / "request"
 ```
 
 It reloads on every file change and runs until it's stopped (Ctrl-C).
+Each request the app serves is printed with its `console.*` lines and
+any uncaught exception's stack (a `request` event with a `record` in
+`--json`), so read that output when a request returns 500.
 Run it in the background, wait for the `ready` event, then call the `url`
 it printed. A failed rebuild prints an `error` event and keeps the last
 good version running.

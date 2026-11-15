@@ -221,38 +221,3 @@ func shortAge(d time.Duration) string {
 	}
 	return fmt.Sprintf("%dd", int(d.Hours()/24))
 }
-
-// describeApproval renders the approval audit kinds (twd audit).
-func describeApproval(kind string, d map[string]any) (string, bool) {
-	if !strings.HasPrefix(kind, "approval_") {
-		return "", false
-	}
-	what := fmt.Sprintf("%v/%v/%v step %v", d["workload"], d["workflow"], d["instance"], d["step"])
-	who := ""
-	if ap, ok := d["approver"].(map[string]any); ok {
-		who = fmt.Sprint(orAny(ap["user"], ap["node"]))
-		if u, _ := ap["user"].(string); u == "" {
-			who = fmt.Sprintf("%v %v", ap["node"], ap["tags"])
-		}
-		who += fmt.Sprintf(" via %v", ap["via"])
-	}
-	switch kind {
-	case "approval_requested":
-		s := what + " waits for approval"
-		if f := d["facts"]; f != nil {
-			s += " " + compact(f)
-		}
-		return s, true
-	case "approval_decision":
-		s := fmt.Sprintf("%s %vd by %s", what, d["decision"], who)
-		if c := d["comment"]; c != nil {
-			s += fmt.Sprintf(" %q", c)
-		}
-		return s, true
-	case "approval_denied":
-		return fmt.Sprintf("%s: %v by %s refused (%v)", what, d["decision"], who, d["code"]), true
-	case "approval_timeout":
-		return what + " timed out: rejected", true
-	}
-	return "", false
-}

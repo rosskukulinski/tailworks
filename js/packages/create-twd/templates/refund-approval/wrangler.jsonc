@@ -2,6 +2,8 @@
   "name": "refunds",
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
+  // the workload name, for the `twd approve` hint (twd init sets it)
+  "vars": { "APP_NAME": "refunds" },
   "durable_objects": {
     "bindings": [{ "name": "RefundAgent", "class_name": "RefundAgent" }]
   },

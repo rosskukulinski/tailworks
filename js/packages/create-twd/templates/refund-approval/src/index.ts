@@ -18,6 +18,7 @@ import { NonRetryableError } from "cloudflare:workflows";
 import { getCaller } from "@twd/tailnet";
 
 interface Env {
+  APP_NAME: string;
   RefundAgent: any;
   REFUND_WORKFLOW: any;
 }
@@ -49,7 +50,7 @@ export class RefundAgent extends Agent<Env> {
       };
       const id = await this.runWorkflow("REFUND_WORKFLOW", params, { agentBinding: "RefundAgent" });
       this.sql`insert into refunds (id, order_id, amount, state) values (${id}, ${params.order}, ${params.amount}, 'waiting for approval')`;
-      return Response.json({ id, approve: `twd approve refunds ${id}` });
+      return Response.json({ id, approve: `twd approve ${this.env.APP_NAME} ${id}` });
     }
     // GET /agents/refund-agent/<customer>/refunds
     const rows = this.sql`select * from refunds order by rowid`;

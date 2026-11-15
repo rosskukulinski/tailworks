@@ -138,14 +138,3 @@ func TestApproveCLI(t *testing.T) {
 		t.Fatalf("missing instance: %v", err)
 	}
 }
-
-func TestDescribeApproval(t *testing.T) {
-	d := map[string]any{"workload": "refunds", "workflow": "refund", "instance": "wf_1", "step": "wait-for-approval", "decision": "approve",
-		"comment": "ok", "approver": map[string]any{"user": "bob@example.com", "node": "bob-laptop.a.ts.net.", "via": "tailnet"}}
-	if s, ok := describeApproval("approval_decision", d); !ok || s != `refunds/refund/wf_1 step wait-for-approval approved by bob@example.com via tailnet "ok"` {
-		t.Fatalf("%q", s)
-	}
-	if _, ok := describeApproval("kill", d); ok {
-		t.Fatal("kill is not an approval")
-	}
-}

@@ -7,6 +7,8 @@ Coding agents: start with the skills. `twd agent setup` installs them for Claude
 ## Start here
 
 - [README](https://github.com/rosskukulinski/twd/blob/master/README.md): what twd is, the quick start, and the compatibility table
+- [Docs map](https://github.com/rosskukulinski/twd/blob/master/docs/README.md): every doc by role and by task (learn, do, look up, understand)
+- CLI reference: `twd help` lists every command with its flags; `twd <command> --help` shows one
 - [Using twd with a coding agent](https://github.com/rosskukulinski/twd/blob/master/docs/agents.md): skills, `twd agent setup`, safety rules
 - [Agent skills](https://github.com/rosskukulinski/twd/blob/master/agent/skills/twd/SKILL.md): the core skill; the others are next to it in agent/skills/
 - [Installing twd](https://github.com/rosskukulinski/twd/blob/master/docs/INSTALL.md): macOS and Linux, OAuth client, `twd link`, hosts, troubleshooting

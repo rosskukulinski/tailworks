@@ -61,3 +61,22 @@ func TestLLMsTxt(t *testing.T) {
 		}
 	}
 }
+
+// TestSearchRanksGuides: a word that names a guide finds that guide first,
+// not the API contract or a design record that mentions it.
+func TestSearchRanksGuides(t *testing.T) {
+	for q, want := range map[string]string{"secret": "secrets.md", "kv": "kv.md", "logs": "observability.md", "upgrade": "upgrading.md", "public webhook": "public-ingress.md"} {
+		hits := Search(q, 3)
+		found := false
+		for _, h := range hits {
+			found = found || h.Doc == want
+		}
+		if !found || strings.HasPrefix(hits[0].Doc, "contracts/") || strings.HasPrefix(hits[0].Doc, "design/") {
+			var got []string
+			for _, h := range hits {
+				got = append(got, h.Ref())
+			}
+			t.Errorf("search %q: want %s in the top 3 and a guide first, got %v", q, want, got)
+		}
+	}
+}

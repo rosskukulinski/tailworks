@@ -2,7 +2,7 @@
   "name": "twd-node-workflow",
   "private": true,
   "type": "module",
-  "scripts": { "build": "create-twd build-node .", "deploy": "twd deploy" },
+  "scripts": { "build": "create-twd build-node .", "dev": "twd dev", "deploy": "twd deploy" },
   "dependencies": {
     "@twd/node": "^0.2.0",
     "workflow": "5.4.0",

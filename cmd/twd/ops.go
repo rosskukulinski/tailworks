@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/rosskukulinski/twd/internal/auditfmt"
 	"io"
 	"net/url"
 	"os"
@@ -206,6 +207,9 @@ func cmdLs(args []string) error {
 			if d.Placement != nil && d.Placement.Summary != "" {
 				fmt.Printf("  %-12s placement: %s\n", "", d.Placement.Summary)
 			}
+			if d.Error != "" {
+				fmt.Printf("  %-12s error: %s\n", "", deployErrorLine(d.Workload, d.Error)) // lserror.go
+			}
 		}
 		fmt.Println("OBJECTS")
 		fmt.Printf("  %-36s %-34s %-8s %-30s %s\n", "NODE", "CLASS/NAME", "STATUS", "TAGS", "PARENT")
@@ -373,95 +377,7 @@ func describe(r mgmt.AuditRecord, names map[string]string) string {
 	if d == nil {
 		return text
 	}
-	if s, ok := describeApproval(r.Kind, d); ok { // approve.go
-		return s
-	}
-	switch r.Kind {
-	case "create":
-		return fmt.Sprintf("%s/%s tags %s for %s", d["namespace"], d["name"], compact(d["tags"]), orDash(r.ActingFor))
-	case "spawn":
-		s := fmt.Sprintf("by %s for %s", name(d["parent"]), orDash(r.ActingFor))
-		if d["lim"] != nil {
-			s += " lim " + compact(d["lim"])
-		}
-		if d["ttl"] != nil {
-			s += fmt.Sprintf(" ttl %v", d["ttl"])
-		}
-		return s + " tags " + compact(d["tags"])
-	case "mint":
-		return fmt.Sprintf("key %v tags %s (%v)", d["keyID"], compact(d["tags"]), d["mode"])
-	case "ready":
-		return fmt.Sprintf("node %v on %v", d["magicDNS"], d["host"])
-	case "kill":
-		s := fmt.Sprintf("by %s %q", orDash(r.ActingFor), d["reason"])
-		if req := fmt.Sprint(d["requested"]); req != r.ObjectID {
-			s += " (cascade from " + name(req) + ")"
-		}
-		if d["pushed"] == true {
-			s += " · pushed"
-		}
-		return s
-	case "device_delete":
-		if d["error"] != nil {
-			return fmt.Sprintf("device %v delete FAILED: %v", d["nodeID"], d["error"])
-		}
-		return fmt.Sprintf("device %v deleted (%v ms)", d["nodeID"], d["ms"])
-	case "deny":
-		return fmt.Sprintf("%s %v", r.Code, d["message"])
-	// Worker secrets: names only, never values.
-	case "secret_put":
-		return fmt.Sprintf("secret %v of %v set by %s", d["name"], d["workload"], orDash(r.ActingFor))
-	case "secret_delete":
-		return fmt.Sprintf("secret %v of %v deleted by %s", d["name"], d["workload"], orDash(r.ActingFor))
-	case "secret_release":
-		return fmt.Sprintf("secrets %s of %v released to host %v (epoch %v)", compact(d["names"]), d["workload"], d["host"], d["epoch"])
-	// Workers KV writes by an admin: the namespace only, never the key.
-	case "kv_put":
-		return fmt.Sprintf("KV namespace %v of %v: a key written by %s", d["name"], d["workload"], orDash(r.ActingFor))
-	case "kv_delete":
-		return fmt.Sprintf("KV namespace %v of %v: a key deleted by %s", d["name"], d["workload"], orDash(r.ActingFor))
-	// OTLP export (ADR-observability): endpoint and header names only.
-	case "telemetry_put":
-		return fmt.Sprintf("OTLP export to %v (headers %s, signals %s) set by %s", d["endpoint"], compact(d["headers"]), compact(d["signals"]), orDash(r.ActingFor))
-	case "telemetry_delete":
-		return fmt.Sprintf("OTLP export removed by %s", orDash(r.ActingFor))
-	case "telemetry_release":
-		return fmt.Sprintf("OTLP export to %v released to host %v for %v (epoch %v)", d["endpoint"], d["host"], d["workload"], d["epoch"])
-	// Public ingress (ADR-029). Host records are best-effort rendered from
-	// whichever of these fields they carry; the rest is shown compactly.
-	case "public_request":
-		s := fmt.Sprintf("%v %v → %v", orAny(d["method"], "?"), orAny(d["path"], "?"), orAny(d["status"], "?"))
-		if c := d["code"]; c != nil && c != "" {
-			s += fmt.Sprintf(" (%v)", c)
-		}
-		if ip := orAny(d["ip"], d["clientIP"]); ip != nil {
-			s += fmt.Sprintf(" from %v", ip)
-		}
-		if ms := orAny(d["ms"], d["durationMs"]); ms != nil {
-			s += fmt.Sprintf(" %v ms", ms)
-		}
-		return "public " + s
-	case "public_rejected":
-		s := fmt.Sprintf("public refused: %v rate-limited, %v too large, %v connections", orAny(d["rateLimited"], 0), orAny(d["tooLarge"], 0), orAny(d["connsRefused"], 0))
-		if u := d["uniqueIPApprox"]; u != nil {
-			s += fmt.Sprintf(" · ~%v IPs", u)
-		}
-		if top := d["topIPs"]; top != nil {
-			s += " · top " + compact(top)
-		}
-		return s
-	case "public_object_created":
-		s := fmt.Sprintf("%v/%v created by a public request", orAny(d["class"], d["namespace"]), d["name"])
-		if ip := orAny(d["ip"], d["clientIP"]); ip != nil {
-			s += fmt.Sprintf(" from %v", ip)
-		}
-		return s
-	case "expose_on":
-		return fmt.Sprintf("%v public routes exposed by %s", d["workload"], orDash(r.ActingFor))
-	case "expose_off":
-		return fmt.Sprintf("%v public routes unexposed by %s", d["workload"], orDash(r.ActingFor))
-	}
-	return compact(d)
+	return auditfmt.Describe(r.Kind, r.ObjectID, r.ActingFor, r.Code, d, name)
 }
 
 // orAny returns the first non-nil value.

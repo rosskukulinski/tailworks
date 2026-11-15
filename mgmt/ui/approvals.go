@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/rosskukulinski/twd/internal/auditfmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -90,7 +91,7 @@ func (u *ui) approvals(w http.ResponseWriter, r *http.Request) {
 	} else {
 		ts, err := listAll[tenant](u, r, "/v1/tenants?limit=500", 2000)
 		if err != nil {
-			d.Errors = append(d.Errors, "tenants: "+err.Error()+" (an approver who is not a twd admin: open /ui/approvals?tenant=<tenant ID>)")
+			d.Errors = append(d.Errors, "tenants: "+err.Error()+". Not a twd admin? Ask your admin for this page's link with your tenant (/ui/approvals?tenant=<tenant ID>), or enter the tenant ID above.")
 		}
 		for _, t := range ts {
 			ids = append(ids, t.TenantID)
@@ -138,7 +139,7 @@ func (u *ui) decideForm(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		q.Set("err", err.Error())
 	} else {
-		q.Set("ok", fmt.Sprintf("%s %s/%s: %sd", a.Workload, a.Workflow, a.Instance, f.Get("decision")))
+		q.Set("ok", fmt.Sprintf("%s/%s/%s: %s", a.Workload, a.Workflow, a.Instance, auditfmt.Decided(f.Get("decision"))))
 	}
 	to.RawQuery = q.Encode()
 	http.Redirect(w, r, to.String(), http.StatusSeeOther)

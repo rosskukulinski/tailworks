@@ -269,11 +269,14 @@ func cmdDev(args []string) error {
 		where = res.Serves + "  (MCP server; / answers 404)"
 	}
 	fmt.Fprintf(hout, "ready on %s  (as user %s) in %.1fs · edits reload · Ctrl-C to stop\n", where, res.As, res.Timings["ready"]/1000)
+	go followDevRecords(ctx, h.RequestLogPath(tr.TenantID, a.Name), hout, ev) // devrecords.go
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	last := snapshot(a.Dir)
-	tick := time.NewTicker(500 * time.Millisecond)
+	// 150 ms: a reload shows within ~0.2 s (500 ms added 0.25 s on average).
+	// snapshot skips node_modules, dist and dot dirs, so a poll is cheap.
+	tick := time.NewTicker(150 * time.Millisecond)
 	defer tick.Stop()
 	for {
 		select {

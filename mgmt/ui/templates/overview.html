@@ -38,8 +38,8 @@
     <tbody>
     {{range .Deployments}}<tr>
       <td><a href="/ui/deployments/{{.DeploymentID}}"><b>{{.Workload}}</b></a></td>
-      <td>{{template "status" .Status}}{{if .Error}}<div class="small bad-text">{{.Error}}</div>{{end}}</td>
-      <td class="mono">{{if .Endpoint.MagicDNS}}<a href="http://{{.Endpoint.MagicDNS}}/" rel="noreferrer">{{.Endpoint.MagicDNS}}</a> {{template "status" .Endpoint.Status}}{{else}}<span class="muted">—</span>{{end}}</td>
+      <td>{{template "status" .Status}}{{if .Error}}<div class="small bad-text" title="{{.Error}}">{{errSummary .Error}}</div>{{end}}</td>
+      <td class="mono">{{if .Endpoint.MagicDNS}}<a href="http://{{.Endpoint.MagicDNS}}/" rel="noreferrer">{{.Endpoint.MagicDNS}}</a> {{template "status" .Endpoint.Status}}{{if eq .Status "failed"}}<div class="small muted">node up; the deployment failed</div>{{end}}{{else}}<span class="muted">—</span>{{end}}</td>
       <td class="mono"><a href="/ui/tenants/{{.TenantID}}">{{.TenantID}}</a></td>
       <td class="mono"><a href="/ui/hosts/{{.Host}}">{{.Host}}</a></td>
       <td>{{or .DeployedBy "—"}}</td>

@@ -85,10 +85,13 @@
   // ---- mutations: confirm, then let the form POST to /ui/... ----
   document.addEventListener('submit', function (ev) {
     var form = ev.target;
-    var msg = form && form.getAttribute && form.getAttribute('data-confirm');
+    // The clicked button may carry its own message (Approve / Reject).
+    var sub = ev.submitter;
+    var msg = (sub && sub.getAttribute('data-confirm')) || (form && form.getAttribute && form.getAttribute('data-confirm'));
     if (!msg) return;
     if (!window.confirm(msg)) { ev.preventDefault(); return; }
-    var btn = $('button[type=submit]', form);
-    if (btn) btn.disabled = true; // no double submit
+    // No double submit. Disable after this tick: a button disabled now
+    // would drop its name=value (the decision) from the submitted form.
+    setTimeout(function () { $$('button[type=submit]', form).forEach(function (b) { b.disabled = true; }); }, 0);
   });
 })();

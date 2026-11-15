@@ -977,13 +977,14 @@
     },
     "dev.event": {
       "type": "object",
-      "description": "twd dev --json without --once: one per line on stdout. ready (first, with url, serves, workload, node, as, tags), then reload or error on each change, stopping on Ctrl-C",
+      "description": "twd dev --json without --once: one per line on stdout. ready (first, with url, serves, workload, node, as, tags), then reload or error on each change, request (record) for each request the app serves, stopping on Ctrl-C",
       "properties": {
         "event": {
           "type": "string",
           "enum": [
             "ready",
             "reload",
+            "request",
             "error",
             "stopping"
           ]
@@ -1011,6 +1012,9 @@
         },
         "ms": {
           "type": "number"
+        },
+        "record": {
+          "$ref": "#/$defs/logs.record"
         },
         "error": {
           "$ref": "#/$defs/errorObject"

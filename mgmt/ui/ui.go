@@ -211,6 +211,9 @@ func parsePages() map[string]*template.Template {
 		"join":     func(s []string) string { return strings.Join(s, ", ") },
 		"pretty":   prettyJSON,
 		"describe": describe,
+		// errtext.go: a deployment error folded for display.
+		"errLines":   errLines,
+		"errSummary": errSummary,
 		"seq": func(n int) []int {
 			out := make([]int, n)
 			for i := range out {

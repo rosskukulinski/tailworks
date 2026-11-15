@@ -3,6 +3,7 @@ package ui
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/rosskukulinski/twd/internal/auditfmt"
 	"html/template"
 	"sort"
 	"strings"
@@ -463,40 +464,7 @@ func describe(r auditRecord, names map[string]string) string {
 	if d == nil {
 		return text
 	}
-	switch r.Kind {
-	case "create":
-		return fmt.Sprintf("%s/%s tags %s for %s", d["namespace"], d["name"], compact(d["tags"]), orDash(r.ActingFor))
-	case "spawn":
-		s := fmt.Sprintf("by %s for %s", name(d["parent"]), orDash(r.ActingFor))
-		if d["lim"] != nil {
-			s += " lim " + compact(d["lim"])
-		}
-		if d["ttl"] != nil {
-			s += fmt.Sprintf(" ttl %v", d["ttl"])
-		}
-		return s + " tags " + compact(d["tags"])
-	case "mint":
-		return fmt.Sprintf("key %v tags %s (%v)", d["keyID"], compact(d["tags"]), d["mode"])
-	case "ready":
-		return fmt.Sprintf("node %v on %v", d["magicDNS"], d["host"])
-	case "kill":
-		s := fmt.Sprintf("by %s %q", orDash(r.ActingFor), d["reason"])
-		if req := fmt.Sprint(d["requested"]); d["requested"] != nil && req != r.ObjectID {
-			s += " (cascade from " + name(req) + ")"
-		}
-		if d["pushed"] == true {
-			s += " · pushed"
-		}
-		return s
-	case "device_delete":
-		if d["error"] != nil {
-			return fmt.Sprintf("device %v delete FAILED: %v", d["nodeID"], d["error"])
-		}
-		return fmt.Sprintf("device %v deleted (%v ms)", d["nodeID"], d["ms"])
-	case "deny":
-		return fmt.Sprintf("%s %v", r.Code, d["message"])
-	}
-	return compact(d)
+	return auditfmt.Describe(r.Kind, r.ObjectID, r.ActingFor, r.Code, d, name)
 }
 
 func detailMap(r auditRecord) (map[string]any, string) {

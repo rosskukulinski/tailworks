@@ -2,7 +2,7 @@
   "name": "twd-refund-approval",
   "private": true,
   "type": "module",
-  "scripts": { "build": "create-twd build .", "deploy": "twd deploy" },
+  "scripts": { "dev": "twd dev", "deploy": "twd deploy" },
   "dependencies": {
     "@twd/tailnet": "^0.2.0",
     "agents": "0.33.0"

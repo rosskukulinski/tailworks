@@ -1,7 +1,7 @@
 {{define "content"}}
 <h1>{{.Dep.Workload}} {{template "status" .Dep.Status}}</h1>
 <p class="crumbs">Deployment <span class="mono">{{.Dep.DeploymentID}}</span> · tenant <a class="mono" href="/ui/tenants/{{.Dep.TenantID}}">{{if .Tenant.Tailnet}}{{.Tenant.Tailnet}}{{else}}{{.Dep.TenantID}}{{end}}</a> · host <a class="mono" href="/ui/hosts/{{.Dep.Host}}">{{.Dep.Host}}</a></p>
-{{if .Dep.Error}}<div class="flash bad">{{.Dep.Error}}</div>{{end}}
+{{if .Dep.Error}}<div class="flash bad">{{range errLines .Dep.Error}}<div class="mono small">{{.}}</div>{{end}}</div>{{end}}
 
 <div class="grid">
   <div class="card">
@@ -18,7 +18,7 @@
     <h2>Endpoint</h2>
     <dl class="kv">
       <dt>Address</dt><dd class="mono">{{if .Dep.Endpoint.MagicDNS}}<a href="http://{{.Dep.Endpoint.MagicDNS}}/" rel="noreferrer">{{.Dep.Endpoint.MagicDNS}}</a>{{else}}—{{end}}</dd>
-      <dt>Status</dt><dd>{{template "status" .Dep.Endpoint.Status}}</dd>
+      <dt>Status</dt><dd>{{template "status" .Dep.Endpoint.Status}}{{if eq .Dep.Status "failed"}} <span class="small muted">(the node is up, but this deployment failed: requests get an error unless an earlier version still serves)</span>{{end}}</dd>
       <dt>Node</dt><dd class="mono">{{or .Dep.Endpoint.Node "—"}}</dd>
       {{if .Dep.Endpoint.ObjectID}}<dt>Object</dt><dd class="mono"><a href="/ui/objects/{{.Dep.Endpoint.ObjectID}}">{{.Dep.Endpoint.ObjectID}}</a></dd>{{end}}
     </dl>

@@ -12,9 +12,14 @@ Tailscale tailnet, with its own MagicDNS name, tags and grants:
 
 It runs Cloudflare Agents SDK agents, MCP servers and Vercel AI SDK agents
 unmodified. What works and what doesn't, surface by surface:
-[Compatibility at a glance](#compatibility-at-a-glance).
+[Compatibility at a glance](#compatibility-at-a-glance). All the docs, by
+role and by task: [docs/README.md](docs/README.md).
 
 ## Quick start: deploy your first Durable Object
+
+Only want to run the code first? After step 1, `twd init hello && cd hello
+&& twd dev` serves the app on `127.0.0.1:8787` with no tailnet and no
+credentials ([Try it without a tailnet](docs/INSTALL.md#try-it-without-a-tailnet)).
 
 You need:
 - a Mac (Apple silicon) or a Linux machine (arm64 or amd64);
@@ -106,15 +111,16 @@ your policy has no `tagOwners` line for them, it prints the exact snippet
 to add; add it and run `twd deploy` again. Every key of `twd.jsonc` is in
 [docs/twd-jsonc.md](docs/twd-jsonc.md), and `twd dev` / `twd deploy`
 refuse a key they don't know. When it's done, it prints the workload's address,
-e.g. `http://support-<host>.<tailnet>.ts.net/`.
+e.g. `http://twd-support-<id>.<tailnet>.ts.net/` (`<id>` is a short hash;
+copy the URL from the `✓ deployed` line).
 
 **5. Call it** from any device on your tailnet. Each name is a separate
 Durable Object instance. The JSON reply shows its verified `caller` (your
 tailnet identity) and its persisted `state.visits`:
 
 ```sh
-curl http://support-<host>.<tailnet>.ts.net/agents/support-agent/alice
-curl http://support-<host>.<tailnet>.ts.net/agents/support-agent/alice   # same object: its visit count goes up
+curl http://twd-support-<id>.<tailnet>.ts.net/agents/support-agent/alice
+curl http://twd-support-<id>.<tailnet>.ts.net/agents/support-agent/alice   # same object: its visit count goes up
 twd ls                                         # deployments and objects (each with its own node)
 twd audit <object-id>                          # who created, called, spawned or killed it
 twd kill <object-id> --cascade                 # cut it (and its sub-agents) off the tailnet
@@ -211,8 +217,14 @@ prove every ✅ and ⚠️.
 
 ## More
 
+- **Docs map** (every doc by role and by task): [docs/README.md](docs/README.md).
+- **CLI reference:** `twd help` lists every command and its flags;
+  `twd <command> --help` shows one.
 - **Install details, other modes and troubleshooting:**
   [docs/INSTALL.md](docs/INSTALL.md).
+  - [Upgrade](docs/upgrading.md),
+    [back up and restore](docs/INSTALL.md#back-up-and-restore) and
+    [uninstall](docs/INSTALL.md#uninstall).
   - Other ways to mint keys: workload identity federation (`twd up --wif`)
     or an API key.
   - A separate developer laptop: `twd link`.
@@ -227,7 +239,8 @@ prove every ✅ and ⚠️.
 - **`twd.jsonc`, every key:** [docs/twd-jsonc.md](docs/twd-jsonc.md)
   (with a JSON Schema for editor completion).
 - **An existing Workers project** (`wrangler.toml`, environments, bundling
-  with wrangler): [docs/wrangler.md](docs/wrangler.md).
+  with wrangler), and what's different from Cloudflare in short:
+  [docs/wrangler.md](docs/wrangler.md).
 - **What runs and what doesn't:** [docs/COMPAT.md](docs/COMPAT.md)
   (every Workers surface, with the tests behind it) and
   [docs/node-tier.md](docs/node-tier.md) (Node.js apps).

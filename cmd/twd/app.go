@@ -75,8 +75,9 @@ func cmdInit(args []string) error {
 	if _, err := os.Stat(filepath.Join(dir, "gitignore")); err == nil {
 		os.Rename(filepath.Join(dir, "gitignore"), filepath.Join(dir, ".gitignore"))
 	}
-	// Name the workload after the directory (twd.jsonc and wrangler.jsonc).
-	for _, fn := range []string{"twd.jsonc", "wrangler.jsonc"} {
+	// Name the workload after the directory (twd.jsonc and wrangler.jsonc),
+	// and the npm package too (its first "name" is the top-level one).
+	for _, fn := range []string{"package.json", "twd.jsonc", "wrangler.jsonc"} {
 		p := filepath.Join(dir, fn)
 		b, err := os.ReadFile(p)
 		if err != nil {
@@ -91,6 +92,10 @@ func cmdInit(args []string) error {
 			done = true
 			return re.ReplaceAll(m, []byte(`${1}"`+wl+`"`))
 		})
+		if fn == "wrangler.jsonc" {
+			// A template var that names the app (refund-approval's approve hint).
+			b = regexp.MustCompile(`("APP_NAME"\s*:\s*)"[^"]*"`).ReplaceAll(b, []byte(`${1}"`+wl+`"`))
+		}
 		if fn == "twd.jsonc" && !*keepTags {
 			if nb, _, err := appTags(b, wl); err == nil {
 				b = nb
@@ -238,7 +243,7 @@ func (a *app) build(vars map[string]string) ([]byte, int, error) {
 		node, err := exec.LookPath("node")
 		if err != nil {
 			return nil, 0, fail("node_required", `runtime "node" apps need Node.js on this machine to build`).
-				withFix("install Node.js 22+ (e.g. https://nodejs.org) and re-run twd deploy")
+				withFix("install Node.js 24+ (e.g. https://nodejs.org) and re-run twd deploy")
 		}
 		return a.buildNode(node, ct, out, vars)
 	}

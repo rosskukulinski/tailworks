@@ -2,7 +2,7 @@
   "name": "twd-mcp",
   "private": true,
   "type": "module",
-  "scripts": { "build": "create-twd build .", "deploy": "twd deploy" },
+  "scripts": { "dev": "twd dev", "deploy": "twd deploy" },
   "dependencies": {
     "@twd/tailnet": "^0.2.0",
     "@twd/mcp": "^0.2.0",

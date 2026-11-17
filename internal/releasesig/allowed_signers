@@ -11,3 +11,4 @@
 # `sh scripts/release-keygen.sh --sync` rewrites them, and `make test`
 # (internal/releasesig) fails if they differ. docs/RELEASING.md, "Signing",
 # has the key ceremony and rotation steps.
+tw-release namespaces="tw-release" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC8VB/53QVWaiyARbdrg6MP6F6LVuQPebi4lhMN4h0Yk tw-release 2026-11-17

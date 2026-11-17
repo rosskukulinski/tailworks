@@ -20,6 +20,7 @@ TAG=${1:-latest}
 # overrides, for tests and mirrors of private builds).
 # BEGIN tw release signers (copied from internal/releasesig/allowed_signers by scripts/release-keygen.sh --sync)
 SIGNERS='
+tw-release namespaces="tw-release" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC8VB/53QVWaiyARbdrg6MP6F6LVuQPebi4lhMN4h0Yk tw-release 2026-11-17
 '
 # END tw release signers
 

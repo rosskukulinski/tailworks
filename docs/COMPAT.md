@@ -110,7 +110,7 @@ table, in logical position, not at the end. `make lint` runs
 |---|---|---|---|---|---|---|
 | <a id="agents-sdk"></a>Cloudflare Agents SDK (`agents`) | ⚠️ | — | runs unmodified: routing, state, SQL, schedules, WebSockets and hibernation, MCP client and server, in both object modes. `getCaller` in `onRequest` and `onConnect`. `AgentWorkflow` and `waitForApproval`, with the approver's verified identity. [Details](#cloudflare-agents-sdk-agents-0330) | an agent can't call an MCP server on the same host over the tailnet (`forbidden_destination`); `approveWorkflow()`/`rejectWorkflow()` from app code are refused by design ([approvals](#approvals)) | `subAgent()`, `env.AI`, email, browser, codemode; `McpAgent`, `@callable` and `AIChatAgent` not tested | `e2e/sdk:TestCloudflareAgents/RouteAgentRequest`, `e2e/sdk:TestCloudflareAgents/Schedule`, `e2e/sdk:TestCloudflareAgents/AgentAsMCPClient`, `e2e/sdk:TestAgentTemplate`, `e2e/sdk:TestWorkflowApprovals` |
 | <a id="mcp"></a>MCP servers (`createMcpHandler`, `mcp-handler`) | ✅ | — | `@tailworks/mcp` `withTailnet`: a per-request caller, and tools allowed or denied by tailnet grants (`cap_missing`) | — | stdio transport | `e2e/sdk:TestCloudflareAgents/CreateMcpHandlerWithTailnet`, `e2e/sdk:TestVercelAI/McpHandlerWithTailnet` |
-| <a id="vercel-ai"></a>Vercel AI SDK (`ai`) | ⚠️ | — | `ToolLoopAgent` and UI message streams run in the Worker and in objects (one agent, one node). [Details](#vercel-ai-sdk-ai-70165-and-mcp-handler-231) | `@ai-sdk/mcp` with the default `fetch` throws in workerd; use `@tailworks/mcp` `mcpFetch` | `WorkflowAgent` in the Worker (it runs on [Node apps](#node-runtime)), on-behalf-of assertions | `e2e/sdk:TestVercelAI/ToolLoopAgent`, `e2e/sdk:TestVercelAI/EgressRefusalIsTyped`, `e2e/node:TestNodeWorkflow` |
+| <a id="vercel-ai"></a>Vercel AI SDK (`ai`) | ⚠️ | — | `ToolLoopAgent` and UI message streams run in the Worker and in objects (one agent, one node). [Details](#vercel-ai-sdk-ai-70173-and-mcp-handler-240) | `@ai-sdk/mcp` with the default `fetch` throws in workerd; use `@tailworks/mcp` `mcpFetch` | `WorkflowAgent` in the Worker (it runs on [Node apps](#node-runtime)), on-behalf-of assertions | `e2e/sdk:TestVercelAI/ToolLoopAgent`, `e2e/sdk:TestVercelAI/EgressRefusalIsTyped`, `e2e/node:TestNodeWorkflow` |
 
 ## Tooling
 
@@ -144,10 +144,10 @@ Pinned versions (root `package.json`, exact):
 | `agents` (Cloudflare Agents SDK) | 0.33.0 | npm `latest` on 2026-11-08; runs on the pinned workerd unmodified |
 | `@modelcontextprotocol/server` / `client` | 2.4.0 | MCP SDK v2 (agents' peers; `createMcpHandler`, `addMcpServer`) |
 | `@modelcontextprotocol/sdk` | 1.32.2 | v1, only for agents' deprecated `McpAgent` (not used) |
-| `ai` (Vercel AI SDK) | 7.0.165 | `ToolLoopAgent`, `ai/test` `MockLanguageModelV4` |
-| `@ai-sdk/provider` / `provider-utils` | 4.0.37 / 5.0.76 | |
-| `@ai-sdk/mcp` | 2.0.93 | HTTP transport only |
-| `mcp-handler` (Vercel) | 2.3.1 | MCP SDK v2, 2026-07-28 spec |
+| `ai` (Vercel AI SDK) | 7.0.173 | `ToolLoopAgent`, `ai/test` `MockLanguageModelV4` |
+| `@ai-sdk/provider` / `provider-utils` | 4.0.38 / 5.0.81 | |
+| `@ai-sdk/mcp` | 2.0.99 | HTTP transport only |
+| `mcp-handler` (Vercel) | 2.4.0 | MCP SDK v2, 2026-07-28 spec |
 | `zod` | 4.6.7 | |
 | `@cloudflare/workers-oauth-provider` | 1.2.4 | `OAUTH_KV` on tailworks' KV binding (`TestOAuthProviderKV`) |
 
@@ -291,7 +291,7 @@ separate processes).
 | CPU time (`cpuTime` in tail events, the CPU time metric) | ❌ | `TestTelemetry` | workerd reports `cpuTime: 0` and `wallTime: 0`; tailworks reports wall time from its ingress |
 | Workers Analytics Engine binding | ❌ | — | not a binding on tailworks |
 
-## Vercel AI SDK (`ai` 7.0.165) and `mcp-handler` 2.3.1
+## Vercel AI SDK (`ai` 7.0.173) and `mcp-handler` 2.4.0
 
 | Feature | Status | Test | Notes |
 |---|---|---|---|
@@ -432,9 +432,9 @@ The microVM tier is the strongest boundary.
 | Thing | Version | Status on the Node tier |
 |---|---|---|
 | Node.js | 25.1 (macOS), 24.x (Lima) | ✅ (needs ≥ 24 for `NODE_USE_ENV_PROXY`) |
-| `workflow` (Vercel Workflow SDK) | 5.4.0 | ✅ `"use workflow"`, steps, `sleep`, `createHook`/`resumeHook`, kill/resume |
-| `@workflow/world-local` | 5.2.1 | ✅ (single process per data dir) |
+| `workflow` (Vercel Workflow SDK) | 5.5.0 | ✅ `"use workflow"`, steps, `sleep`, `createHook`/`resumeHook`, kill/resume |
+| `@workflow/world-local` | 5.3.0 | ✅ (single process per data dir) |
 | `@workflow/world-postgres` | 5.1.1 | not tested (follow-up) |
-| `@ai-sdk/workflow` `WorkflowAgent` | 2.0.97 (`ai` 7.0.165) | ✅ `generate()` with tools as steps, mock `LanguageModelV4` |
+| `@ai-sdk/workflow` `WorkflowAgent` | 2.0.105 (`ai` 7.0.173) | ✅ `generate()` with tools as steps, mock `LanguageModelV4` |
 | `undici` | 8.12.4 | ✅ via `dispatcher(undici)` / `installGlobalDispatcher(undici)`; ⚠ importing it disables env proxies |
 | Node built-in `fetch` / `http` with env proxies | Node 25 | ✅ (CONNECT / absolute form) |

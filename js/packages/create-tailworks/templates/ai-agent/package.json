@@ -10,9 +10,9 @@
   "dependencies": {
     "@tailworks/tailnet": "^0.2.0",
     "@tailworks/mcp": "^0.2.0",
-    "ai": "7.0.165",
-    "@ai-sdk/mcp": "2.0.93",
-    "@ai-sdk/provider": "4.0.37",
+    "ai": "7.0.173",
+    "@ai-sdk/mcp": "2.0.99",
+    "@ai-sdk/provider": "4.0.38",
     "zod": "^4.6.7"
   },
   "devDependencies": {

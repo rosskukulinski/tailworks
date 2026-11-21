@@ -227,9 +227,9 @@ The `node-workflow` template is a plain `node:http` server with a durable
 | Thing | Version | Status on the Node tier |
 |---|---|---|
 | Node.js | 25.1 (macOS), 24.x (Lima) | ✅ (needs ≥ 24 for `NODE_USE_ENV_PROXY`) |
-| `workflow` (Vercel Workflow SDK) | 5.4.0 | ✅ `"use workflow"`, steps, `sleep`, `createHook`/`resumeHook`, kill/resume |
-| `@workflow/world-local` | 5.2.1 | ✅ (single process per data dir) |
+| `workflow` (Vercel Workflow SDK) | 5.5.0 | ✅ `"use workflow"`, steps, `sleep`, `createHook`/`resumeHook`, kill/resume |
+| `@workflow/world-local` | 5.3.0 | ✅ (single process per data dir) |
 | `@workflow/world-postgres` | 5.1.1 | not tested (follow-up) |
-| `@ai-sdk/workflow` `WorkflowAgent` | 2.0.97 (`ai` 7.0.165) | ✅ `generate()` with tools as steps, mock `LanguageModelV4` |
+| `@ai-sdk/workflow` `WorkflowAgent` | 2.0.105 (`ai` 7.0.173) | ✅ `generate()` with tools as steps, mock `LanguageModelV4` |
 | `undici` | 8.12.4 | ✅ via `dispatcher(undici)` / `installGlobalDispatcher(undici)`; ⚠ importing it disables env proxies |
 | Node built-in `fetch` / `http` with env proxies | Node 25 | ✅ (CONNECT / absolute form) |

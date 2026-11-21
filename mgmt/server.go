@@ -164,6 +164,7 @@ func writeErr(w http.ResponseWriter, r *http.Request, err error) {
 		e.Status = 500
 	}
 	if e.Code == "identity_pending" {
+		// limits.md#identity-pending-retry-after
 		w.Header().Set("Retry-After", "1")
 	}
 	if e.RetryAfter > 0 {
@@ -174,6 +175,7 @@ func writeErr(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 func readJSON(r *http.Request, v any) error {
+	// limits.md#mgmt-body
 	dec := json.NewDecoder(io.LimitReader(r.Body, 64<<20))
 	if err := dec.Decode(v); err != nil && !errors.Is(err, io.EOF) {
 		var mbe *http.MaxBytesError

@@ -502,6 +502,7 @@ const (
 	ErrorCodeSharedOwnerTag          ErrorCode = "shared_owner_tag"
 	ErrorCodeSpawnBudgetExceeded     ErrorCode = "spawn_budget_exceeded"
 	ErrorCodeStoreConflict           ErrorCode = "store_conflict"
+	ErrorCodeStoreDegraded           ErrorCode = "store_degraded"
 	ErrorCodeStoreLimit              ErrorCode = "store_limit"
 	ErrorCodeStoreUnavailable        ErrorCode = "store_unavailable"
 	ErrorCodeSuperseded              ErrorCode = "superseded"
@@ -655,6 +656,8 @@ func (e ErrorCode) Valid() bool {
 	case ErrorCodeSpawnBudgetExceeded:
 		return true
 	case ErrorCodeStoreConflict:
+		return true
+	case ErrorCodeStoreDegraded:
 		return true
 	case ErrorCodeStoreLimit:
 		return true
@@ -2289,6 +2292,7 @@ type Error struct {
 	// | `lease_lost` | 409 | epoch/holder fence failed |
 	// | `lease_held` | 409 | another host holds the lease |
 	// | `store_conflict` | 409 | a store journal append's `after` (or `incarnation`) is not the journal's head: catch up and retry |
+	// | `store_degraded` | 409 | the store object on the workload's host could not apply a journal entry: it stopped its replay there, serves reads from what it applied and refuses writes (`tw d1 export`, then recreate the database) |
 	// | `store_limit` | 400 | a store append exceeds an entry, append or store size limit |
 	// | `queue_limit` | 400 | a send exceeds a message, batch, delay or queue size limit |
 	// | `store_unavailable` | 503 | the store is unreachable, restarting or contended (a row-lock or idle-transaction timeout); retry after `Retry-After` |
@@ -2384,6 +2388,7 @@ type Error struct {
 // | `lease_lost` | 409 | epoch/holder fence failed |
 // | `lease_held` | 409 | another host holds the lease |
 // | `store_conflict` | 409 | a store journal append's `after` (or `incarnation`) is not the journal's head: catch up and retry |
+// | `store_degraded` | 409 | the store object on the workload's host could not apply a journal entry: it stopped its replay there, serves reads from what it applied and refuses writes (`tw d1 export`, then recreate the database) |
 // | `store_limit` | 400 | a store append exceeds an entry, append or store size limit |
 // | `queue_limit` | 400 | a send exceeds a message, batch, delay or queue size limit |
 // | `store_unavailable` | 503 | the store is unreachable, restarting or contended (a row-lock or idle-transaction timeout); retry after `Retry-After` |
@@ -2598,6 +2603,7 @@ type HostDrainResult struct {
 		// | `lease_lost` | 409 | epoch/holder fence failed |
 		// | `lease_held` | 409 | another host holds the lease |
 		// | `store_conflict` | 409 | a store journal append's `after` (or `incarnation`) is not the journal's head: catch up and retry |
+		// | `store_degraded` | 409 | the store object on the workload's host could not apply a journal entry: it stopped its replay there, serves reads from what it applied and refuses writes (`tw d1 export`, then recreate the database) |
 		// | `store_limit` | 400 | a store append exceeds an entry, append or store size limit |
 		// | `queue_limit` | 400 | a send exceeds a message, batch, delay or queue size limit |
 		// | `store_unavailable` | 503 | the store is unreachable, restarting or contended (a row-lock or idle-transaction timeout); retry after `Retry-After` |
@@ -4282,6 +4288,7 @@ type TombstoneError struct {
 	// | `lease_lost` | 409 | epoch/holder fence failed |
 	// | `lease_held` | 409 | another host holds the lease |
 	// | `store_conflict` | 409 | a store journal append's `after` (or `incarnation`) is not the journal's head: catch up and retry |
+	// | `store_degraded` | 409 | the store object on the workload's host could not apply a journal entry: it stopped its replay there, serves reads from what it applied and refuses writes (`tw d1 export`, then recreate the database) |
 	// | `store_limit` | 400 | a store append exceeds an entry, append or store size limit |
 	// | `queue_limit` | 400 | a send exceeds a message, batch, delay or queue size limit |
 	// | `store_unavailable` | 503 | the store is unreachable, restarting or contended (a row-lock or idle-transaction timeout); retry after `Retry-After` |
@@ -6788,8 +6795,10 @@ type ClientInterface interface {
 	// table and its `INSERT`s, then indexes, triggers and views), read
 	// from the store object of the running workload after it has caught
 	// up with the journal. At most 16 MiB (`400 store_limit` beyond).
-	// Rows of virtual tables are not exported. A read: logged, not
-	// audited.
+	// Rows of virtual tables are not exported. A database that could
+	// not apply a journal entry (degraded) exports what it applied,
+	// headed by a `-- tailworks: degraded export` comment naming the
+	// entry. A read: logged, not audited.
 	//
 	// Corresponds with GET /v1/tenants/{id}/workloads/{workload}/d1/{name}/export (the `ExportD1` operationId).
 	ExportD1(ctx context.Context, id TenantID, workload WorkloadName, name StoreName, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -6811,7 +6820,9 @@ type ClientInterface interface {
 	// d1_error`, with SQLite's message; nothing is applied). `404
 	// unknown_workload` when the workload isn't running (the database is
 	// only reachable through a running deployment that binds it); `404
-	// unknown_store` when its deployment binds no such database. A batch
+	// unknown_store` when its deployment binds no such database. `409
+	// store_degraded` when the store object could not apply a journal
+	// entry (ADR-038): it refuses writes until then. A batch
 	// that changed the database is audited (`kind: d1_write`, with the
 	// statement count, never the SQL); a read is logged.
 	//
@@ -6837,7 +6848,9 @@ type ClientInterface interface {
 	// d1_error`, with SQLite's message; nothing is applied). `404
 	// unknown_workload` when the workload isn't running (the database is
 	// only reachable through a running deployment that binds it); `404
-	// unknown_store` when its deployment binds no such database. A batch
+	// unknown_store` when its deployment binds no such database. `409
+	// store_degraded` when the store object could not apply a journal
+	// entry (ADR-038): it refuses writes until then. A batch
 	// that changed the database is audited (`kind: d1_write`, with the
 	// statement count, never the SQL); a read is logged.
 	//
@@ -9681,8 +9694,10 @@ func (c *Client) DecideApproval(ctx context.Context, id TenantID, workload Workl
 // table and its `INSERT`s, then indexes, triggers and views), read
 // from the store object of the running workload after it has caught
 // up with the journal. At most 16 MiB (`400 store_limit` beyond).
-// Rows of virtual tables are not exported. A read: logged, not
-// audited.
+// Rows of virtual tables are not exported. A database that could
+// not apply a journal entry (degraded) exports what it applied,
+// headed by a `-- tailworks: degraded export` comment naming the
+// entry. A read: logged, not audited.
 //
 // Corresponds with GET /v1/tenants/{id}/workloads/{workload}/d1/{name}/export (the `ExportD1` operationId).
 func (c *Client) ExportD1(ctx context.Context, id TenantID, workload WorkloadName, name StoreName, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -9714,7 +9729,9 @@ func (c *Client) ExportD1(ctx context.Context, id TenantID, workload WorkloadNam
 // d1_error`, with SQLite's message; nothing is applied). `404
 // unknown_workload` when the workload isn't running (the database is
 // only reachable through a running deployment that binds it); `404
-// unknown_store` when its deployment binds no such database. A batch
+// unknown_store` when its deployment binds no such database. `409
+// store_degraded` when the store object could not apply a journal
+// entry (ADR-038): it refuses writes until then. A batch
 // that changed the database is audited (`kind: d1_write`, with the
 // statement count, never the SQL); a read is logged.
 //
@@ -9750,7 +9767,9 @@ func (c *Client) QueryD1WithBody(ctx context.Context, id TenantID, workload Work
 // d1_error`, with SQLite's message; nothing is applied). `404
 // unknown_workload` when the workload isn't running (the database is
 // only reachable through a running deployment that binds it); `404
-// unknown_store` when its deployment binds no such database. A batch
+// unknown_store` when its deployment binds no such database. `409
+// store_degraded` when the store object could not apply a journal
+// entry (ADR-038): it refuses writes until then. A batch
 // that changed the database is audited (`kind: d1_write`, with the
 // statement count, never the SQL); a read is logged.
 //
@@ -18047,8 +18066,10 @@ type ClientWithResponsesInterface interface {
 	// table and its `INSERT`s, then indexes, triggers and views), read
 	// from the store object of the running workload after it has caught
 	// up with the journal. At most 16 MiB (`400 store_limit` beyond).
-	// Rows of virtual tables are not exported. A read: logged, not
-	// audited.
+	// Rows of virtual tables are not exported. A database that could
+	// not apply a journal entry (degraded) exports what it applied,
+	// headed by a `-- tailworks: degraded export` comment naming the
+	// entry. A read: logged, not audited.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -18072,7 +18093,9 @@ type ClientWithResponsesInterface interface {
 	// d1_error`, with SQLite's message; nothing is applied). `404
 	// unknown_workload` when the workload isn't running (the database is
 	// only reachable through a running deployment that binds it); `404
-	// unknown_store` when its deployment binds no such database. A batch
+	// unknown_store` when its deployment binds no such database. `409
+	// store_degraded` when the store object could not apply a journal
+	// entry (ADR-038): it refuses writes until then. A batch
 	// that changed the database is audited (`kind: d1_write`, with the
 	// statement count, never the SQL); a read is logged.
 	//
@@ -18098,7 +18121,9 @@ type ClientWithResponsesInterface interface {
 	// d1_error`, with SQLite's message; nothing is applied). `404
 	// unknown_workload` when the workload isn't running (the database is
 	// only reachable through a running deployment that binds it); `404
-	// unknown_store` when its deployment binds no such database. A batch
+	// unknown_store` when its deployment binds no such database. `409
+	// store_degraded` when the store object could not apply a journal
+	// entry (ADR-038): it refuses writes until then. A batch
 	// that changed the database is audited (`kind: d1_write`, with the
 	// statement count, never the SQL); a read is logged.
 	//
@@ -30154,8 +30179,10 @@ func (c *ClientWithResponses) DecideApprovalWithResponse(ctx context.Context, id
 // table and its `INSERT`s, then indexes, triggers and views), read
 // from the store object of the running workload after it has caught
 // up with the journal. At most 16 MiB (`400 store_limit` beyond).
-// Rows of virtual tables are not exported. A read: logged, not
-// audited.
+// Rows of virtual tables are not exported. A database that could
+// not apply a journal entry (degraded) exports what it applied,
+// headed by a `-- tailworks: degraded export` comment naming the
+// entry. A read: logged, not audited.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -30185,7 +30212,9 @@ func (c *ClientWithResponses) ExportD1WithResponse(ctx context.Context, id Tenan
 // d1_error`, with SQLite's message; nothing is applied). `404
 // unknown_workload` when the workload isn't running (the database is
 // only reachable through a running deployment that binds it); `404
-// unknown_store` when its deployment binds no such database. A batch
+// unknown_store` when its deployment binds no such database. `409
+// store_degraded` when the store object could not apply a journal
+// entry (ADR-038): it refuses writes until then. A batch
 // that changed the database is audited (`kind: d1_write`, with the
 // statement count, never the SQL); a read is logged.
 //
@@ -30217,7 +30246,9 @@ func (c *ClientWithResponses) QueryD1WithBodyWithResponse(ctx context.Context, i
 // d1_error`, with SQLite's message; nothing is applied). `404
 // unknown_workload` when the workload isn't running (the database is
 // only reachable through a running deployment that binds it); `404
-// unknown_store` when its deployment binds no such database. A batch
+// unknown_store` when its deployment binds no such database. `409
+// store_degraded` when the store object could not apply a journal
+// entry (ADR-038): it refuses writes until then. A batch
 // that changed the database is audited (`kind: d1_write`, with the
 // statement count, never the SQL); a read is logged.
 //

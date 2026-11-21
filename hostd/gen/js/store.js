@@ -18,6 +18,14 @@
 // local state is always a replay of a prefix of the journal, and an
 // acknowledged write survives the host.
 //
+// An entry the kind can't apply (apply throws: an entry written by a
+// newer tailworks, a corrupt entry, a D1 statement that fails on replay)
+// stops the replay there: seq stays at the entry before it, the store is
+// marked degraded (the failing seq and error, kept on disk), and it never
+// reports itself synced past it. A degraded store keeps serving reads
+// from what it has applied, refuses writes (store_degraded), and tries
+// the entry again on later syncs; it heals if the entry applies.
+//
 // A kind is a module that calls registerStoreKind(kind, def):
 //   init(store)              create its tables (idempotent; every boot)
 //   apply(store, data, seq)  apply one entry (Uint8Array) inside a transaction;
@@ -90,6 +98,7 @@ export class Store extends DurableObject {
     this.kv = ctx.storage.kv;
     if (this.kind) this.kind.init(this);
     this.syncedAt = 0; // last successful catch-up of this boot (ms)
+    this.triedAt = 0; // last catch-up that stopped at a failing entry (ms)
     this.chain = Promise.resolve();
   }
 
@@ -110,6 +119,13 @@ export class Store extends DurableObject {
   // fail rather than answer from an empty or stale copy.
   get everSynced() {
     return this.#meta("synced", 0) === 1;
+  }
+
+  // degraded: the journal entry this object could not apply, {seq, error,
+  // at}, or null. Replay stopped before it.
+  get degraded() {
+    const d = this.#meta("degraded", "");
+    return d ? JSON.parse(d) : null;
   }
 
   #check() {
@@ -149,7 +165,38 @@ export class Store extends DurableObject {
       this.kind.reset(this);
       this.#setMeta("seq", 0);
       this.#setMeta("inc", inc);
+      this.kv.delete("__tw_store_degraded");
     });
+  }
+
+  // #applyEntries applies [{seq, data}] in order, inside the caller's
+  // transaction, each in its own nested one, and moves seq past each
+  // entry it applied. At the first entry the kind can't apply it stops,
+  // marks the store degraded and returns {seq, error}; else null.
+  #applyEntries(entries) {
+    for (const e of entries) {
+      try {
+        this.ctx.storage.transactionSync(() => this.kind.apply(this, e.data, e.seq));
+      } catch (err) {
+        const bad = { seq: e.seq, error: String(err?.message ?? err), at: Date.now() };
+        this.#setMeta("degraded", JSON.stringify(bad));
+        return bad;
+      }
+      this.#setMeta("seq", e.seq);
+    }
+    const d = this.degraded;
+    if (d && this.seq >= d.seq) this.kv.delete("__tw_store_degraded"); // the entry applied this time
+    return null;
+  }
+
+  #degradedError(bad, journaled = false) {
+    this.triedAt = Date.now();
+    const msg =
+      `${this.kindName} store ${this.name}: journal entry ${bad.seq} failed to apply (${bad.error}); ` +
+      (journaled ? "the write is in the journal but this host could not apply it; " : "") +
+      `the local copy stops before it: reads serve it, writes are refused until the entry applies or the store is recreated`;
+    console.error("tw store " + msg);
+    return new StoreError("store_degraded", msg);
   }
 
   async #catchUp() {
@@ -170,14 +217,15 @@ export class Store extends DurableObject {
           this.#setMeta("inc", inc);
         }
       }
-      const entries = p.entries ?? [];
+      const entries = (p.entries ?? []).map((e) => ({ seq: e.seq, data: b64dec(e.data) }));
+      let bad = null;
       this.ctx.storage.transactionSync(() => {
-        for (const e of entries) this.kind.apply(this, b64dec(e.data), e.seq);
-        let seq = entries.length ? entries[entries.length - 1].seq : this.seq;
-        if (!p.more && p.head > seq) seq = p.head;
-        this.#setMeta("seq", seq);
+        bad = this.#applyEntries(entries);
+        if (bad) return; // keep what applied; never synced past the failing entry
+        if (!p.more && p.head > this.seq) this.#setMeta("seq", p.head);
         if (!p.more) this.#setMeta("synced", 1);
       });
+      if (bad) throw this.#degradedError(bad);
       if (!p.more) break;
       after = this.seq;
     }
@@ -197,9 +245,13 @@ export class Store extends DurableObject {
   async fresh(maxAgeMs = DEFAULT_FRESH_MS) {
     this.#check();
     if (this.syncedAt && Date.now() - this.syncedAt < maxAgeMs) return;
+    // A degraded store tries its failing entry again at the same pace.
+    if (this.degraded && Date.now() - this.triedAt < maxAgeMs) return;
     try {
       await this.sync();
     } catch (e) {
+      // Degraded: what it has applied is an exact prefix of the journal.
+      if (e?.code === "store_degraded") return;
       if (!this.everSynced || e?.code === "lease_lost") throw e;
       console.warn("tw store " + this.kindName + "/" + this.name + ": serving local data; journal unreachable: " + e.message);
     }
@@ -212,7 +264,9 @@ export class Store extends DurableObject {
   commit(entries) {
     this.#check();
     return this.#locked(async () => {
-      if (!this.syncedAt) await this.#catchUp();
+      // A degraded store tries its failing entry again first, and refuses
+      // the write (store_degraded) if it still doesn't apply.
+      if (!this.syncedAt || this.degraded) await this.#catchUp();
       for (let attempt = 0; attempt < 8; attempt++) {
         const es = (typeof entries === "function" ? entries() : entries).map((e) => ({ ckey: e.ckey || undefined, data: toBytes(e.data) }));
         if (!es.length) return this.seq;
@@ -230,13 +284,14 @@ export class Store extends DurableObject {
           }
           throw e;
         }
+        let bad = null;
         this.ctx.storage.transactionSync(() => {
           let seq = r.head - es.length;
-          for (const e of es) this.kind.apply(this, e.data, ++seq);
-          this.#setMeta("seq", r.head);
           this.#setMeta("inc", r.incarnation);
-          this.#setMeta("synced", 1);
+          bad = this.#applyEntries(es.map((e) => ({ seq: ++seq, data: e.data })));
+          if (!bad) this.#setMeta("synced", 1);
         });
+        if (bad) throw this.#degradedError(bad, true);
         return r.head;
       }
       throw new StoreError("store_conflict", "the store kept moving under this write; retry");

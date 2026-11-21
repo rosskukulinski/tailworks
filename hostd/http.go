@@ -85,6 +85,7 @@ func (h *Host) ingressHandler(t *tenant) http.Handler {
 		trace := newTraceID()
 		blob["tw"] = route
 		blob["traceId"] = trace
+		// limits.md#redeploy-wait
 		ctx, cancel := context.WithTimeout(r.Context(), h.cfg.DrainTimeout+5*time.Second)
 		inst, release := wl.acquire(ctx)
 		cancel()
@@ -420,6 +421,7 @@ func (h *Host) hostAPI(inst *instance) http.Handler {
 				return
 			}
 			to := time.Duration(req.TimeoutMS) * time.Millisecond
+			// limits.md#ready-wait-max
 			if to <= 0 || to > 5*time.Minute {
 				to = h.cfg.ReadyTimeout
 			}
@@ -510,7 +512,12 @@ func (h *Host) pushHandlers(m *http.ServeMux) {
 			writeAPIError(w, &apiError{Code: "bad_request", Detail: "objectID required"})
 			return
 		}
-		h.killLocal(k.ObjectID, k.Reason)
+		if err := h.killLocal(k.ObjectID, k.Reason); err != nil {
+			// The node is cut off, but workerd did not confirm the in-process
+			// kill: not a pushed kill (mgmt reports it; the next heartbeat retries).
+			writeAPIError(w, &apiError{Code: "hostd_unavailable", Detail: err.Error()})
+			return
+		}
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
 	m.HandleFunc("POST /v1/push/assignments", func(w http.ResponseWriter, r *http.Request) {

@@ -869,3 +869,46 @@ Design note for F4: `docs/create-admission.md`.
 `hostd/public_test.go` §3b (F4), `js/packages/tailnet/test/public.test.js`.
 The remaining items are turned into tests by the loop in
 `security/LOOP.md`.
+
+---
+
+# Note 2026-11-17: macOS Seatbelt profile tightened (#121, PR #171)
+
+This note updates the macOS parts of RT-08 (Pass 2 verdict "cooperative
+elsewhere", and "Residual risk by tier: macOS process") and the Pass 1 fix
+status row. The earlier passes are left as written.
+
+The default macOS process-tier profile is now `seatbeltProfile` in
+`hostd/seatbelt_strict.go`. It keeps `(allow default)` for system services
+(Mach, sysctls), then:
+
+- `(deny file-write*)`; writes allowed back only in the workload's own
+  dirs and `/dev/null`, `/dev/zero`, `/dev/dtracehelper`;
+- `(deny network*)`; allowed back: unix sockets in its own dirs, TCP
+  connect to `localhost:<port>` for the ports hostd passes (a Node app:
+  its egress proxy and its own port; workerd: none), TCP bind and accept
+  on its own port. No UDP, so no DNS of its own;
+- `(deny signal)` with `(allow signal (target same-sandbox))`: itself and
+  its children, not tw-hostd, tw-mgmt or another workload;
+- `(deny process-exec*)`; exec allowed of the runtime, the Node prefix, its
+  own dirs and `/System`, `/bin`, `/opt`, `/sbin`, `/usr`;
+- reads: the deny list as before (home dir, tailworks' state and run dirs,
+  hostd's data and run dirs, tenants' credential files).
+
+| ID | Verdict on macOS (default `-sandbox seatbelt`) | Evidence |
+|----|------|------|
+| RT-08 | **HOLDS on macOS**, with two residual gaps (H26, [#175](https://github.com/rosskukulinski/tailworks/issues/175)) | `hostd.TestSeatbeltStrictProbes` runs each probe unsandboxed first (it must succeed), then under the profile with `sandbox-exec`: TCP connect to a loopback port it wasn't given, TCP to `1.1.1.1:443`, TCP bind of another port, `kill -0` of another process and of the test process (hostd), a write outside its dirs and to `/tmp`, a read of a denied dir, exec of a script outside the allowed dirs and a unix connect outside its dirs all fail; its given TCP port, its own port bind, signalling itself and a child, its own dir, `/dev/null`, its own unix socket, `workerd --version` and node listening and connecting to the "proxy" work. `hostd.TestSeatbeltStrictProfileShape` pins rule order (Seatbelt applies the last match) and that no other TCP allow appears. `hostd.TestMultiTenant` repeats loopback TCP, `kill -0` hostd and a `/tmp` write under tenant A's live workerd profile. `TestNodeTier/Sandbox` (`make test-node`, not in CI) probes from inside the sandboxed Node app: internet TCP, host loopback, hostd's push socket, a signal to hostd and a `/tmp` write are `EPERM`, and status reports `Egress: enforced`. `hostd.TestEgressEnforcementByABI` pins `seatbelt` → `enforced`, `seatbelt-legacy` → `unenforced`. |
+
+Still open on macOS (H26, #175):
+
+- **Reads are a deny list.** Outside the denied dirs a workload reads what
+  the user can (`/etc`, `/tmp`, …). Landlock allows only OS dirs, the
+  runtime and its own dirs.
+- **TCP is matched as `localhost:<port>`**, not one address: a workload
+  reaches its allowed port numbers on any loopback address.
+
+`tw-hostd -sandbox seatbelt-legacy` keeps the previous files-only profile
+for one release; under it the Pass 2 macOS verdict (TCP anywhere, writes to
+`/tmp`, signals to any same-user process, unix sockets outside the deny
+list including the system tailscaled socket, egress `unenforced`) applies
+again.

@@ -493,7 +493,7 @@ func findWorkerd(flagVal string) (string, error) {
 			return p, nil
 		}
 	}
-	return "", fail("not_installed", "workerd not found").withFix("pass --workerd <path> or set $TW_WORKERD (tw pins workerd 1.20261114.1)")
+	return "", fail("not_installed", "workerd not found").withFix("pass --workerd <path> or set $TW_WORKERD (tw pins workerd 1.20261115.1)")
 }
 
 // createTailworksDir finds the create-tailworks package (bundler + templates).

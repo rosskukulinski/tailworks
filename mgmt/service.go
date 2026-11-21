@@ -876,6 +876,7 @@ func (m *Mgmt) Deploy(ctx context.Context, r DeployRequest) (DeployResponse, err
 			} else if len(cfg.Tailnet.Tags) > 0 && !slices.ContainsFunc(classes, func(c ClassConfig) bool { return c.Class == WorkloadNamespace }) {
 				classes = append(classes, ClassConfig{Class: WorkloadNamespace, Tags: cfg.Tailnet.Tags})
 			}
+			// limits.md#spawn-lower
 			if cfg.Tailnet.Spawn.MaxLive > 0 {
 				maxLive = min(cfg.Tailnet.Spawn.MaxLive, DefaultMaxLive)
 			}

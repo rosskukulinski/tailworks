@@ -450,8 +450,43 @@ func TestD1(t *testing.T) {
 		}
 	})
 
+	// A journal entry that fails on replay (#106) is not skipped: replay
+	// stops before it, the bookmark (the local seq) stays at the entry
+	// before, reads serve what applied, writes fail with store_degraded,
+	// and an export says what's missing.
+	t.Run("ReplayFailureStops", func(t *testing.T) {
+		w := W.with(t)
+		bad := degradeStore(t, e, "/v1/tenants/"+e.TenantID+"/workloads/d1app/stores/d1/app-db/journal",
+			[]byte(`{"v":1,"id":"bad","q":[{"s":"INSERT INTO no_such_table VALUES (1)"}]}`),
+			[]byte(`{"v":1,"id":"good","q":[{"s":"INSERT INTO kv (k, v) VALUES ('after-bad', 1)"}]}`))
+		e1 := w.qErr(map[string]any{"sql": "INSERT INTO kv (k, v) VALUES ('w-degraded', 1)", "method": "run"})
+		if !strings.Contains(e1, "[store_degraded]") || !strings.Contains(e1, "no such table: no_such_table") || !strings.Contains(e1, fmt.Sprintf("entry %d failed", bad)) {
+			t.Fatalf("write to a degraded database: %s", e1)
+		}
+		if got := js(w.col("SELECT v FROM kv WHERE k = 'op'", "v")); got != `"from the operator"` {
+			t.Fatalf("read from a degraded database: %s", got)
+		}
+		if got := js(w.col("SELECT count(*) AS n FROM kv WHERE k IN ('after-bad', 'w-degraded')", "n")); got != "0" {
+			t.Fatalf("applied past the failing entry: %s rows", got)
+		}
+		r := w.post("/session", map[string]any{"steps": []any{map[string]any{"sql": "SELECT 1 AS one", "method": "first", "col": "one"}}})
+		bm, _ := r["steps"].([]any)[0].(map[string]any)["bookmark"].(string)
+		if want := fmt.Sprintf("%016d.", bad-1); !strings.HasPrefix(bm, want) {
+			t.Fatalf("bookmark %q of a degraded database: want %s… (synced only up to the entry before the failing one)", bm, want)
+		}
+		if _, err := e.Host.StoreAdmin(ctx, e.TenantID, "d1app", "d1", "app-db", "query", []byte(`{"queries":[{"sql":"INSERT INTO kv (k, v) VALUES ('op2', 1)"}]}`)); err == nil || !strings.Contains(err.Error(), "store_degraded") {
+			t.Fatalf("operator write to a degraded database: %v", err)
+		}
+		var ex struct{ SQL string }
+		json.Unmarshal(admin("export", map[string]any{}), &ex)
+		if !strings.HasPrefix(ex.SQL, fmt.Sprintf("-- tailworks: degraded export: journal entry %d failed to apply", bad)) || !strings.Contains(ex.SQL, `'from the operator'`) || strings.Contains(ex.SQL, "after-bad") {
+			t.Fatalf("export of a degraded database:\n%s", ex.SQL)
+		}
+	})
+
 	// An admin deletes the database: the object empties itself on its next
-	// sync; the binding then works on a new, empty database.
+	// sync; the binding then works on a new, empty database (which also
+	// recovers it from ReplayFailureStops' degraded state).
 	t.Run("Delete", func(t *testing.T) {
 		w := W.with(t)
 		if err := e.Mgmt.Do(ctx, "DELETE", "/v1/tenants/"+e.TenantID+"/workloads/d1app/stores/d1/app-db", nil, nil); err != nil {

@@ -131,7 +131,7 @@ Thrown in the Worker · platform. **When:** app code sent an event of type `appr
 500 · cli. **When:** `tw host setup --microvm` installed `tw-vmhelper.service` but it did not come up. **Fix:** `journalctl -u tw-vmhelper`.
 
 ### host_failed
-1 · cli. **When:** `tw up` (single process): the host agent embedded in tw-mgmt failed to start or to register with mgmt. **Fix:** the detail has the cause; `tw logs --component hostd` and `tw doctor`, then `tw up` again.
+1 · cli. **When:** `tw up` (single process): the host agent embedded in tw-mgmt failed to start or to register with mgmt. Also the supervisor's exit error (in `supervisor.log`) when tw-hostd (two processes) kept exiting and the supervisor gave up; it exits 1 so the service manager restarts it. **Fix:** the detail has the cause; `tw logs --component hostd` and `tw doctor`, then `tw up` again (under `tw up --service` it restarts on its own).
 
 ### host_holds_leases
 409 · mgmt, cli. **When:** `tw host rm <id>` while the host still holds namespace leases. **Fix:** `tw host rm <id> --drain`.
@@ -191,7 +191,7 @@ Thrown in the Worker · platform. **When:** app code sent an event of type `appr
 408 · cli. **When:** a tailnet node tailworks joins interactively (`tw link --tsnet`) printed a login URL and nobody completed the browser login within 5 minutes. **Fix:** run the command again and finish the login, or pass an auth key file for an unattended join.
 
 ### mgmt_failed
-1 · cli. **When:** `tw up` (single process): the embedded tw-mgmt failed to start. **Fix:** the detail has the cause; `tw logs --component mgmt` and `tw doctor`, then `tw up` again.
+1 · cli. **When:** `tw up` (single process): the embedded tw-mgmt failed to start. Also the supervisor's exit error (in `supervisor.log`) when mgmt stopped after start: its listener failed (single process) or tw-mgmt kept exiting (two processes); it exits 1 so the service manager restarts it. **Fix:** the detail has the cause; `tw logs --component mgmt` and `tw doctor`, then `tw up` again (under `tw up --service` it restarts on its own).
 
 ### mgmt_not_found
 404 · cli. **When:** `tw link` with no endpoint found no `tw-mgmt` through MagicDNS. **Fix:** `tw link tw-mgmt.<tailnet>.ts.net`.
@@ -378,6 +378,9 @@ Thrown in the Worker · platform. **When:** app code sent an event of type `appr
 
 ### store_conflict
 409 · mgmt. **When:** a platform store journal append named a head (`after`) or incarnation that is no longer current: another writer (a replica, an admin) appended first, or the store was deleted. **Fix:** nothing for app code: the store object catches up and retries on its own. A client of the REST API reads the journal from its `after` and retries.
+
+### store_degraded
+409 · hostd, mgmt. **When:** a platform store's object couldn't apply a journal entry while catching up (a D1 statement that fails on replay, which only non-deterministic SQL can do; an entry written by a newer tailworks; a corrupt entry). It stopped there instead of skipping the entry: it serves reads from what it applied before it, refuses writes, and tries the entry again on later syncs. A Worker's D1 call fails with `D1_ERROR: [store_degraded] …` naming the entry and SQLite's error. **Fix:** an entry from a newer tailworks: upgrade tw-hostd. Otherwise, for D1, `tw d1 export <db> --output backup.sql` (it exports what applied, headed by a comment naming the failing entry), check it, then `tw d1 delete <db>`, `tw d1 create <db>` and `tw d1 execute <db> --file backup.sql` ([d1.md](d1.md), "Recovery").
 
 ### store_limit
 400 · mgmt, hostd. **When:** a platform store write is too big: an entry over 2 MiB, an append over 4 MiB or 128 entries, a compaction key over 1 KiB, or a store over 1 GiB. **Fix:** write less at once, or delete data you no longer need.

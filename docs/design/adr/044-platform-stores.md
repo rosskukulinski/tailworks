@@ -79,6 +79,11 @@ Drafted as `ADR-platform-stores`.
      used after a start, after a conflict, and when a read wants data
      fresher than its last sync. Catch-up runs the same `apply` as a local
      commit, so local state is always a replay of a prefix of the journal.
+   - An entry a kind can't apply stops the replay before it: the object
+     keeps what applied, marks itself degraded (the failing seq and
+     error), serves reads, refuses writes with `store_degraded`, and
+     retries the entry on later syncs. It never skips an entry or reports
+     itself synced past one.
    - An acknowledged write is in mgmt's database before the caller sees it:
      RPO 0 for a host loss or a move. The new host's object starts empty
      and replays the journal.

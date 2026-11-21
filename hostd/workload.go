@@ -178,6 +178,7 @@ func (w *workload) stopAll() {
 func (h *Host) deploy(w *workload, a mgmtapi.Assignment) {
 	w.deployMu.Lock()
 	defer w.deployMu.Unlock()
+	// limits.md#deploy-bringup
 	ctx, cancel := context.WithTimeout(h.ctx, 2*time.Minute)
 	defer cancel()
 	st := time.Now()
@@ -856,6 +857,7 @@ func (inst *instance) currentVM() sandbox.VM {
 // bootVM starts (or restarts) the instance's microVM. Firecracker exiting
 // for any reason other than stop() is handled like a workerd crash.
 func (inst *instance) bootVM() error {
+	// limits.md#vm-boot
 	ctx, cancel := context.WithTimeout(inst.h.ctx, 60*time.Second)
 	defer cancel()
 	vm, err := inst.h.cfg.VM.Boot(ctx, inst.spec)

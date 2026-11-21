@@ -1451,7 +1451,9 @@ paths:
         d1_error`, with SQLite's message; nothing is applied). `404
         unknown_workload` when the workload isn't running (the database is
         only reachable through a running deployment that binds it); `404
-        unknown_store` when its deployment binds no such database. A batch
+        unknown_store` when its deployment binds no such database. `409
+        store_degraded` when the store object could not apply a journal
+        entry (ADR-038): it refuses writes until then. A batch
         that changed the database is audited (`kind: d1_write`, with the
         statement count, never the SQL); a read is logged.
       x-tw-role: admin|tenant:data
@@ -1489,8 +1491,10 @@ paths:
         table and its `INSERT`s, then indexes, triggers and views), read
         from the store object of the running workload after it has caught
         up with the journal. At most 16 MiB (`400 store_limit` beyond).
-        Rows of virtual tables are not exported. A read: logged, not
-        audited.
+        Rows of virtual tables are not exported. A database that could
+        not apply a journal entry (degraded) exports what it applied,
+        headed by a `-- tailworks: degraded export` comment naming the
+        entry. A read: logged, not audited.
       x-tw-role: admin|tenant:data
       responses:
         "200":
@@ -4243,6 +4247,7 @@ components:
         | `lease_lost` | 409 | epoch/holder fence failed |
         | `lease_held` | 409 | another host holds the lease |
         | `store_conflict` | 409 | a store journal append's `after` (or `incarnation`) is not the journal's head: catch up and retry |
+        | `store_degraded` | 409 | the store object on the workload's host could not apply a journal entry: it stopped its replay there, serves reads from what it applied and refuses writes (`tw d1 export`, then recreate the database) |
         | `store_limit` | 400 | a store append exceeds an entry, append or store size limit |
         | `queue_limit` | 400 | a send exceeds a message, batch, delay or queue size limit |
         | `store_unavailable` | 503 | the store is unreachable, restarting or contended (a row-lock or idle-transaction timeout); retry after `Retry-After` |
@@ -4324,6 +4329,7 @@ components:
         - lease_held
         - approval_not_pending
         - store_conflict
+        - store_degraded
         - store_limit
         - queue_limit
         - takeover_unconfirmed

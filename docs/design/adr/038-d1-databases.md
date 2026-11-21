@@ -75,8 +75,13 @@
      database (after a move or a lost disk). Locally the dry run and the
      apply run back to back under the store's write lock, so the caller's
      results are what was applied. An entry that fails on replay (only
-     possible through non-deterministic SQL) is skipped, logged, and does
-     not wedge the journal. Bind such values from JS where they matter.
+     possible through non-deterministic SQL) is never skipped: replay
+     stops before it and the database is degraded (`store_degraded`):
+     it serves reads from what it applied, refuses writes, retries the
+     entry on later syncs, and never reports itself synced past it. A
+     skipped entry would silently diverge from the acknowledged writes
+     (#106). Recovery: export what applied, recreate, re-import. Bind
+     such values from JS where they matter.
    - There's no compaction: an entry has no `ckey`, because no later
      statement supersedes an earlier one. The journal keeps every write, up
      to the substrate's 1 GiB per store. Snapshot compaction is open

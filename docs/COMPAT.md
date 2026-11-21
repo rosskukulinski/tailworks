@@ -140,7 +140,7 @@ Pinned versions (root `package.json`, exact):
 
 | Package | Version | Note |
 |---|---|---|
-| workerd | 1.20261114.1 | platform runtime; first release with the built-in Workflows engine (`/workerd/workflows.js`, workerd#8331) |
+| workerd | 1.20261115.1 | platform runtime; the built-in Workflows engine (`/workerd/workflows.js`, workerd#8331) is in 1.20261114.1 and later |
 | `agents` (Cloudflare Agents SDK) | 0.33.0 | npm `latest` on 2026-11-08; runs on the pinned workerd unmodified |
 | `@modelcontextprotocol/server` / `client` | 2.4.0 | MCP SDK v2 (agents' peers; `createMcpHandler`, `addMcpServer`) |
 | `@modelcontextprotocol/sdk` | 1.32.2 | v1, only for agents' deprecated `McpAgent` (not used) |

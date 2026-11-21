@@ -64,6 +64,7 @@ export function installApprovalWaits(step: any, tw: TailnetApiStub | undefined, 
   step.waitForEvent = async (name: string, opts?: { type?: string; timeout?: unknown }) => {
     const type = opts?.type;
     if (!isApprovalType(type) || !instance) return wait(name, opts);
+    // limits.md#approval-timeout
     const base = { workflow, instance, step: name, type, timeout: opts?.timeout ?? "24 hours", facts };
     await doStep(`__tw_approval_requested:${name}`, REPORT_STEP, () => report(tw, { ...base, op: "requested" }));
     try {

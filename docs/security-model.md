@@ -92,7 +92,9 @@ other):
   docker/podman/lxd/incus groups): refused.
 - **Your user can reach the system tailscaled socket**: refused on Linux
   when a Node app uses `listen: "unix"`. (On macOS the Seatbelt profile
-  refuses every unix socket outside the workload's own dirs.)
+  refuses every unix socket outside the workload's own dirs; under
+  `-sandbox seatbelt-legacy` it refuses only those under the deny list,
+  and hostd doesn't check for the tailscaled socket.)
 
 A host whose sandbox works but doesn't confine TCP (Landlock ABI 1–3, or
 macOS with `-sandbox seatbelt-legacy`) **is admitted** as a shared host.

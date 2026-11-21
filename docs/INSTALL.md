@@ -43,7 +43,7 @@ connection, which is exactly the identity mgmt wants to see.
 
 The tarball is self-contained (~87 MB compressed, ~300 MB installed): the Go binaries `tw`, `tw-mgmt`,
 `tw-hostd`, `tw-netd` (static, `CGO_ENABLED=0`; esbuild is built into
-`tw`, so deploys need no Node.js), the pinned `workerd` (1.20261114.1, from
+`tw`, so deploys need no Node.js), the pinned `workerd` (1.20261115.1, from
 npm `@cloudflare/workerd-darwin-arm64`), the app templates and the
 `node_modules` they need (vendored, so `tw init` and `tw deploy` work
 offline).
@@ -465,6 +465,15 @@ Installed with `get.sh`? It doesn't keep the release directory; see
 - A Node app on Linux gets `EACCES` from `net.connect` or its own
   dispatcher: that's the sandbox; send egress through `HTTP(S)_PROXY` /
   `@tailworks/node`'s `fetch`.
+- The supervisor (`tw __supervise`, which runs mgmt and the host) exits 0
+  only on a clean stop (`tw down`, `systemctl --user stop tw`, `launchctl
+  bootout`). When mgmt or the host stops on its own (mgmt's listener
+  failed, or a component kept exiting), it logs why to
+  `~/.tailworks/logs/supervisor.log` (`tw logs --component supervisor`)
+  and exits 1 with `mgmt_failed` or `host_failed`. Under `tw up --service`
+  that non-zero exit makes systemd (`Restart=on-failure`) or launchd
+  (`KeepAlive` on an unsuccessful exit) start it again within a few
+  seconds; without a service, run `tw up` again.
 - Logs: `tw logs <workload>` (on the host or a linked machine; `-f` to
   follow), `tw logs --component mgmt|hostd|supervisor` (on the host only).
   From a linked machine, `host_unavailable` means mgmt could not reach the

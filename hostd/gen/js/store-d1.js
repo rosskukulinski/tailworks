@@ -236,8 +236,9 @@ function encodeEntry(id, stmts) {
 // (ADR-041 §4); every D1 entry has carried v since the
 // first release, and a missing v reads as v1.
 const D1_ENTRY_V = 1;
-// D1FormatError: an entry written by a newer tailworks. apply rethrows it (a
-// skipped write would silently lose data on replay).
+// D1FormatError: an entry written by a newer tailworks. Like any entry
+// that fails to apply, it stops the replay (a skipped write would
+// silently lose data).
 class D1FormatError extends Error {}
 export function decodeEntry(data) {
   // Not norm(): an entry was checked when it was written, and a later
@@ -360,26 +361,26 @@ registerStoreKind("d1", {
     s.d1Want = new Map(); // request id -> results format, for writes in flight on this object
     s.d1Out = new Map(); // request id -> applied results
   },
+  // apply throws when an entry can't be applied (not a D1 write, written
+  // by a newer tailworks, or a statement that fails on replay, which only
+  // non-deterministic SQL can do): the store stops its replay there and
+  // is degraded (tw-store.js). Skipping it would leave a database that
+  // differs from the one whose writes were acknowledged.
   apply(s, data, seq) {
     let e;
     try {
       e = decodeEntry(data);
     } catch (err) {
       if (err instanceof D1FormatError) throw err;
-      console.warn(`tw d1 ${s.name}: journal entry ${seq} is not a D1 write; skipped (${err.message})`);
-      return;
+      throw new Error(`journal entry ${seq} is not a D1 write: ${err.message}`);
     }
     const format = s.d1Want.get(e.id);
     let r;
     try {
-      // Nested: a statement that fails on replay rolls back this entry
-      // only (it can't, unless the SQL is not deterministic, e.g. random()).
-      s.ctx.storage.transactionSync(() => {
-        r = execAll(s, e.stmts, format ?? "ROWS_AND_COLUMNS", format !== undefined);
-      });
+      r = execAll(s, e.stmts, format ?? "ROWS_AND_COLUMNS", format !== undefined);
     } catch (err) {
-      r = { error: String(err?.message ?? err), index: err?.index ?? 0 };
-      console.warn(`tw d1 ${s.name}: journal entry ${seq} failed to apply and was skipped: ${r.error}`);
+      const at = e.stmts.length > 1 ? ` (statement ${(err?.index ?? 0) + 1} of ${e.stmts.length})` : "";
+      throw new Error(`D1 statement failed to apply${at}: ${String(err?.message ?? err)}`);
     }
     if (format !== undefined) s.d1Out.set(e.id, r);
   },
@@ -402,11 +403,20 @@ registerStoreKind("d1", {
       const r = await query(s, { body: req?.queries ?? [], format: "ROWS_AND_COLUMNS", perLine: false, session: "first-primary" });
       return r.body;
     },
-    // export: the database as SQL text.
+    // export: the database as SQL text. A degraded database exports what
+    // it has applied, headed by a comment naming the entry that failed:
+    // the way to recover it (export, delete, create, execute --file).
     async export(s, req) {
-      await s.sync();
+      let head = "";
       try {
-        return { sql: exportSQL(s, Math.min(req?.limit ?? D1_LIMITS.resultBytes, D1_LIMITS.resultBytes)) };
+        await s.sync();
+      } catch (e) {
+        if (e?.code !== "store_degraded") throw e;
+        const d = s.degraded;
+        head = `-- tailworks: degraded export: journal entry ${d?.seq} failed to apply and is not included, nor anything after it: ${String(d?.error ?? "").replaceAll("\n", " ")}\n`;
+      }
+      try {
+        return { sql: head + exportSQL(s, Math.min(req?.limit ?? D1_LIMITS.resultBytes, D1_LIMITS.resultBytes)) };
       } catch (e) {
         if (e instanceof D1Fail) return { error: e.message };
         throw e;

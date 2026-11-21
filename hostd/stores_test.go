@@ -119,8 +119,21 @@ func TestPlatformStore(t *testing.T) {
 		t.Fatalf("after losing DO storage, all: %v, want %v", r, want)
 	}
 
+	// An entry the kind can't apply (here: not JSON) stops the replay
+	// there (#106): the store is degraded, never synced past it. Reads
+	// serve what applied before it (not the good entry after it), writes
+	// are refused with store_degraded.
+	degradeStore(t, e, journal, []byte(`not json`), []byte(`{"k":"after","v":"x"}`))
+	if r := call("/all"); fmt.Sprint(r) != fmt.Sprint(want) {
+		t.Fatalf("degraded store, all: %v, want %v (nothing from the failing entry on)", r, want)
+	}
+	if code, _, body := s.do("GET", "http://"+wl.IP+"/put?k=y&v=1", nil); code != 500 || !strings.Contains(string(body), "[store_degraded]") || !strings.Contains(string(body), "failed to apply") {
+		t.Fatalf("write to a degraded store: %d %s", code, body)
+	}
+
 	// An admin deletes the store: the object empties itself on its next
-	// sync, and the next write starts a new incarnation from seq 1.
+	// sync, and the next write starts a new incarnation from seq 1 (which
+	// also clears the degraded state).
 	if err := e.Mgmt.Do(context.Background(), "DELETE", "/v1/tenants/"+e.TenantID+"/workloads/storeprobe/stores/probe/main", nil, nil); err != nil {
 		t.Fatal(err)
 	}

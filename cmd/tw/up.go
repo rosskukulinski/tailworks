@@ -912,10 +912,11 @@ func cmdSupervise(args []string) error {
 
 	sig := make(chan os.Signal, 2)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
-	stopping := make(chan struct{})
+	st := newSupStop() // supervise_exit.go: a signal exits 0, a child giving up exits 1
+	stopping := st.done
 	go func() {
 		<-sig
-		close(stopping)
+		st.stop(nil)
 	}()
 	waitMgmt := func() bool {
 		for i := 0; i < 600; i++ {
@@ -959,6 +960,7 @@ func cmdSupervise(args []string) error {
 			}
 			if len(c.restarts) > 10 {
 				logf("%s keeps exiting; giving up (see %s)", c.name, c.logPath)
+				st.stop(gaveUpErr(c))
 				return
 			}
 			select {
@@ -979,7 +981,7 @@ func cmdSupervise(args []string) error {
 	mg.stop(90 * time.Second)
 	wg.Wait()
 	logf("stopped")
-	return nil
+	return st.err
 }
 
 // superviseSingle is the single-process layout: mgmt (internal/mgmtd) and
@@ -1053,16 +1055,11 @@ func superviseSingle(s *state, logf func(string, ...any)) error {
 		return fail("host_failed", "the embedded host agent could not register with mgmt", netd.Redact(err.Error()))
 	}
 	logf("running: mgmt node %s, host %s embedded (transport %s)", mrt.Self.DNSName, s.Cfg.HostID, hrt.Transport)
-	select {
-	case <-ctx.Done():
-		logf("stopping: host first (nodes close in parallel), then mgmt (flushes pending device deletes)")
-	case err := <-mrt.Errs():
-		logf("mgmt listener failed: %v; stopping", err)
-	}
+	werr := waitSingle(ctx, mrt.Errs(), logf) // supervise_exit.go: exit 1 on a listener failure (#110)
 	hrt.Close()
 	mrt.Close()
 	logf("stopped")
-	return nil
+	return werr
 }
 
 // ---- down ----

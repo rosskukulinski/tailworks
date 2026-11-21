@@ -156,6 +156,7 @@ func (o *Object) serveIngress(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, newErr(CodeKilled, "object "+o.id+" is "+string(state)))
 		return
 	}
+	// limits.md#whois-timeout
 	ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
 	who, err := lc.WhoIs(ctx, req.RemoteAddr)
 	cancel()
@@ -183,6 +184,7 @@ func (o *Object) serveIngress(w http.ResponseWriter, req *http.Request) {
 // server on a unix socket (the workerd ingress socket, configured with
 // cfBlobHeader = HeaderCF). The original Host header is preserved.
 func UnixUpstream(path string) http.Handler {
+	// limits.md#tailnet-no-deadline
 	tr := &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			return (&net.Dialer{}).DialContext(ctx, "unix", path)

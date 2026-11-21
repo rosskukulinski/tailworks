@@ -5,6 +5,8 @@ Revised: 2026-11-17 (#118): tiers and sandboxes match the code at master
 e62f70a; boundaries B7–B10 added for `/mcp`, public ingress, upgrades and
 hosts' push API; attacker goals restated with what is fixed and what is
 open.
+Revised: 2026-11-17 (follow-up to #121): the macOS process tier matches the
+strict Seatbelt profile at master adae38b (#171).
 
 Companions: [`docs/security-model.md`](../docs/security-model.md) (the
 user-facing model; where this file and that one disagree, fix both),
@@ -125,9 +127,9 @@ which has the full per-platform rows.
 
 | Tier | Native code? | Isolation | Residual attacker power |
 |------|-------------|-----------|-------------------------|
-| **process, macOS** (Seatbelt) | Node app: yes. workerd: only after a V8 escape | V8 isolate (workerd); Seatbelt `(allow default)` plus a deny list (`hostd/seatbelt.go`) | Can't read or write the home dir, tailworks' state and run dirs or other tenants' credential files, or connect to tailworks' sockets there. **Can** open TCP to any address (loopback, including other tenants' ports; the LAN; the internet), bypassing netd's egress guard; write elsewhere (`/tmp`); signal any process of the same user, including tw-hostd and tw-mgmt; reach the system tailscaled socket. Node-tier egress is `unenforced`. Tightening is #121. |
+| **process, macOS** (Seatbelt) | Node app: yes. workerd: only after a V8 escape | V8 isolate (workerd); Seatbelt `(allow default)` for system services (Mach, sysctls), with writes, network, signals and exec denied and allowed back for what the workload needs (`seatbeltProfile`, `hostd/seatbelt_strict.go`) | Can't read or write the home dir, tailworks' state and run dirs or other tenants' credential files. Writes only its own dirs and `/dev/null`, `/dev/zero`, `/dev/dtracehelper`. Network: unix sockets only in its own dirs (not tailworks' sockets or the system tailscaled socket); TCP connect only to `localhost:<port>` for the ports hostd passes (a Node app: its egress proxy and its own port; workerd: none), bind and accept only its own port; no UDP, so no DNS of its own. Signals only itself and its children (`same-sandbox`): not tw-hostd, tw-mgmt or another workload. Exec only of the runtime, the Node prefix, its own dirs and `/System`, `/bin`, `/opt`, `/sbin`, `/usr`. Node-tier egress is `enforced`. **Residual** ([#175](https://github.com/rosskukulinski/tailworks/issues/175), H26): reads outside the deny list (`/etc`, `/tmp`, …) stay open, and TCP is matched as `localhost:<port>` rather than one address. `-sandbox seatbelt-legacy` (kept for one release) brings back the old files-only profile: TCP anywhere, writes to `/tmp`, signals to any same-user process, unix sockets outside the deny list (including the system tailscaled socket), egress `unenforced`. |
 | **process, Linux, Landlock ABI ≥ 4** (kernel 6.7+) | as above | Landlock allow list + seccomp (`internal/procsb`) | Reads only OS dirs, its runtime and its own dirs; writes only its own dirs; TCP connect only to the ports hostd gives it; no AF_UNIX (seccomp), no UDP/raw; signals only its own process group; no ptrace, mount, bpf, namespaces, io_uring. Residual: the kernel's attack surface, and the same uid as tailworks (an escape from the sandbox is the host operator). |
-| **process, Linux, Landlock ABI 1–3** | as above | as above, but Landlock has no TCP rules | As ABI ≥ 4 for files, unix sockets, signals and syscalls. TCP is **unrestricted**: same as macOS for TCP; Node-tier egress `unenforced`. |
+| **process, Linux, Landlock ABI 1–3** | as above | as above, but Landlock has no TCP rules | As ABI ≥ 4 for files, unix sockets, signals and syscalls. TCP is **unrestricted** (loopback, including other tenants' ports; the LAN; the internet); Node-tier egress `unenforced`. |
 | **process, Linux without Landlock** (or `-sandbox none`) | as above | none | Full same-uid access: every tenant's node keys and state, the mgmt token file, every control socket. hostd therefore runs one tenant's process-tier workloads only (`sandbox_unavailable` for a second), unless started with `--insecure-shared-host`. |
 | **microVM, Linux** (Firecracker) | yes, inside the guest | a VM per workload; Firecracker under its jailer (chroot, uid, netns, cgroup); per-VM gateway; node keys never in the guest; DO storage on a dm-crypt volume whose key mgmt releases only to the lease holder | Confined to its own workload. Holds its workload's MAC root, so it can forge egress attribution **among its own workload's objects**. After a VMM escape: the jail uid, and the root vmhelper's message surface (H11 #149, H16 #151). Snapshot-restored guests share kernel state from before the reseed (H24 #157). |
 | **microVM, macOS** (Virtualization.framework, Apple silicon) | yes, inside the guest | a VM per workload; node keys stay on the host | Confined to its own workload; forges attribution only among its own workload's objects, as above. |
@@ -137,23 +139,29 @@ the process tier sets no CPU or memory limit (#115). The Node runtime is
 process tier only.
 
 So: the microVM tier is the boundary that doesn't depend on the host
-kernel's same-uid sandbox. On Linux with Landlock ABI ≥ 4 the process tier
-confines files, sockets and TCP; on macOS and on Landlock ABI 1–3 it
-confines files and unix sockets but not TCP; without Landlock it confines
-nothing and the host is single-tenant. hostd's shared-host checks refuse
-the unconfined cases (§4.1); a host that confines files but not TCP is
-admitted as shared, and `tw status`/`tw doctor` say so.
+kernel's same-uid sandbox. On Linux with Landlock ABI ≥ 4 and on macOS the
+process tier confines files, sockets and TCP (on macOS, reads only under
+a deny list); on Landlock ABI 1–3 (and macOS under
+`-sandbox seatbelt-legacy`) it confines files and unix sockets but not TCP;
+without Landlock it confines nothing and the host is single-tenant. hostd's
+shared-host checks refuse the unconfined cases (§4.1); a host that confines
+files but not TCP is admitted as shared, and `tw status`/`tw doctor` say
+so.
 
 ## 4. Attacker goals, and where each stands
 
 1. **Tenant → tenant** (B2): read A1/A2/A3, forge A5 to another object,
    reach another tenant's objects. → netd's netmap isolation holds (one
    registry per tailnet). Files and unix sockets are confined on macOS and
-   on any Linux with Landlock. A second tenant is refused on a host with no
-   sandbox, whose user can reach a container engine, or (macOS, or a Node
-   app in `listen: "unix"` mode) can reach the system tailscaled socket.
-   **Open:** on macOS and Landlock ABI 1–3, TCP to another tenant's
-   loopback ports; on macOS, signals to tailworks' own processes (#121).
+   on any Linux with Landlock; TCP to another tenant's loopback ports and
+   signals to other processes are refused on macOS (#121, fixed by #171)
+   and on Landlock ABI ≥ 4. A second tenant is refused on a host with no
+   sandbox, or whose user can reach a container engine, or (on Linux,
+   with a Node app in `listen: "unix"` mode) can reach the system
+   tailscaled socket.
+   **Open:** on Landlock ABI 1–3 (and macOS under
+   `-sandbox seatbelt-legacy`), TCP to another tenant's loopback ports; on
+   macOS, reads outside the deny list (#175).
 2. **Tenant → platform** (B1): reach A7, forge A4/props, abuse spawn to
    escalate A6 or exhaust A9, SSRF via egress. → props and the caller are
    unforgeable across nodes; every Worker and facet `fetch()`, redirect,
@@ -164,7 +172,7 @@ admitted as shared, and `tw status`/`tw doctor` say so.
    audit is a `tenant_note` only (C09); the mgmt socket needs the host
    token (C10). **Open:** in-process `request.cf` forgery within one
    workload (H08, #148); Node-tier egress is enforced only on Landlock
-   ABI ≥ 4.
+   ABI ≥ 4 and macOS (not under `-sandbox seatbelt-legacy`).
 3. **Identity / crypto** (A4/A6/A3). → the egress MAC is per object with
    a replay cache (C11); the Node tier's `x-tw-caller` carries a nonce;
    custody and issuer keys are 0600 and mode-checked. On-behalf-of
@@ -190,10 +198,14 @@ admitted as shared, and `tw status`/`tw doctor` say so.
    and upgrade path (B9). **Open:** placement inputs from a host are not
    cross-checked (H23, #156); warm keys in custody (H25, #158).
 7. **Sandboxes.** → as in §3. The Linux escape battery
-   (`attacks.TestRT08_LinuxSandboxEscapeBattery`) and the Seatbelt
-   profile tests (`hostd.TestSeatbeltProfile*`) pin them. **Open:** the
-   macOS profile's TCP, write and signal gaps (#121); vmhelper input
-   validation (H11, H16).
+   (`attacks.TestRT08_LinuxSandboxEscapeBattery`) and the Seatbelt tests
+   pin them: `hostd.TestSeatbeltStrictProbes` (real probes under
+   `sandbox-exec`), `hostd.TestSeatbeltStrictProfileShape`,
+   `hostd.TestMultiTenant` (probes under a running workload's live
+   profile), `hostd.TestSeatbeltProfile*` and, in `make test-node`,
+   `TestNodeTier/Sandbox` (from inside the Node app). **Open:** the macOS
+   profile's read deny list and `localhost:<port>` TCP matching (H26,
+   #175); vmhelper input validation (H11, H16).
 8. **Internet → workload** (B8): reach an unlisted path, `/_tw` or a DO;
    mint nodes; exhaust a limit from one address; squat a name. → routes,
    `/_tw` and path tricks are refused (C13); `getCaller()` throws on a

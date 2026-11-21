@@ -118,6 +118,9 @@ type Server struct {
 	// storesDown: the store journal answers 503 (storesdown.go).
 	storesDown bool
 
+	// readyCalls: object ID -> ready PATCHes (readycalls.go).
+	readyCalls map[string]int
+
 	// Queues (queues.go): tenant|queue -> queue.
 	queues map[string]*fakeQueue
 	// OTLP export (telemetry.go): tenantID -> config.
@@ -1258,6 +1261,7 @@ func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 		s.writeGone(w, o)
 		return
 	}
+	s.countReadyLocked(o.ObjectID)
 	o.Status, o.NodeID, o.StableNodeID, o.MagicDNS, o.UpdatedAt = "ready", req.StableNodeID, req.StableNodeID, req.MagicDNS, ms(time.Now())
 	if req.StableNodeID != "" {
 		s.nodeIDs[req.StableNodeID] = o.ObjectID

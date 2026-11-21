@@ -45,6 +45,11 @@ const OriginPublic = "public"
 type publicState struct {
 	spec *mgmtapi.PublicAssignment // nil: not public (close any listener)
 	opts *netd.PublicOptions       // what the live node was started with
+
+	// applyMu serializes applyPublic for the workload. deploy and
+	// syncAssignments both run it; two at once would each restart the
+	// public node and start two awaitNodes for it (issue #133).
+	applyMu sync.Mutex
 }
 
 // publicCreates is the persisted record of names admitted by public
@@ -172,6 +177,10 @@ func (h *Host) applyPublic(w *workload, spec *mgmtapi.PublicAssignment) {
 		ps = &publicState{}
 		h.public[key] = ps
 	}
+	h.mu.Unlock()
+	ps.applyMu.Lock()
+	defer ps.applyMu.Unlock()
+	h.mu.Lock()
 	ps.spec = spec
 	po := h.byKey[objKey(w.tenantID, w.name, mgmtapi.PublicNamespace, w.name)]
 	t := h.tenants[w.tenantID]
@@ -247,6 +256,7 @@ func (h *Host) applyPublic(w *workload, spec *mgmtapi.PublicAssignment) {
 	h.mu.Lock()
 	wasLive := po.live
 	po.live = false
+	po.bumpNodeGenLocked() // the old node's awaitNode must not report the kill below
 	if po.Status == statusReady || po.Status == statusPending {
 		po.Status = statusPending
 		po.readyCh = make(chan struct{})

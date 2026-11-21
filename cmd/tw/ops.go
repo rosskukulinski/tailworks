@@ -578,6 +578,7 @@ func cmdAudit(args []string) error {
 func cmdLogs(args []string) error {
 	f := newFlags("logs")
 	comp := f.String("component", "", "mgmt | hostd | supervisor (default: hostd, or workerd for a workload)")
+	// limits.md#logs-n
 	n := f.Int("n", 50, "lines")
 	follow := f.Bool("f", false, "follow")
 	tenantF := tenantFlag(f)

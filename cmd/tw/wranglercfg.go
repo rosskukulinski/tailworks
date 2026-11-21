@@ -249,6 +249,7 @@ func wranglerKeyNote(k string, v any, builder string) string {
 			return bindingHint + "env." + strings.Join(names, ", env.") + " will be undefined"
 		}
 		return bindingHint + "ignored"
+	// limits.md#wrangler-limits-ignored
 	case "observability", "logpush", "limits", "usage_model", "send_metrics", "keep_vars", "dev",
 		"compliance_region", "first_party_worker", "legacy_env", "python_modules":
 		return "ignored by tailworks"

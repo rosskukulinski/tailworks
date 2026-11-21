@@ -38,6 +38,7 @@ var storeErrStatus = map[string]int{
 	"store_limit":             400,
 	mgmtapi.CodeStoreConflict: 409,
 	mgmtapi.CodeLeaseLost:     409,
+	"store_degraded":          409,
 	"store_unavailable":       503,
 	"identity_pending":        503,
 	"hostd_unavailable":       503,

@@ -11,7 +11,7 @@
     "@tailworks/tailnet": "^0.2.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "5.20261114.1",
+    "@cloudflare/workers-types": "5.20261115.1",
     "typescript": "7.0.2"
   }
 }

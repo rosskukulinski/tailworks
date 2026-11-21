@@ -504,6 +504,7 @@ const (
 	ErrorCodeSharedOwnerTag          ErrorCode = "shared_owner_tag"
 	ErrorCodeSpawnBudgetExceeded     ErrorCode = "spawn_budget_exceeded"
 	ErrorCodeStoreConflict           ErrorCode = "store_conflict"
+	ErrorCodeStoreDegraded           ErrorCode = "store_degraded"
 	ErrorCodeStoreLimit              ErrorCode = "store_limit"
 	ErrorCodeStoreUnavailable        ErrorCode = "store_unavailable"
 	ErrorCodeSuperseded              ErrorCode = "superseded"
@@ -657,6 +658,8 @@ func (e ErrorCode) Valid() bool {
 	case ErrorCodeSpawnBudgetExceeded:
 		return true
 	case ErrorCodeStoreConflict:
+		return true
+	case ErrorCodeStoreDegraded:
 		return true
 	case ErrorCodeStoreLimit:
 		return true
@@ -2291,6 +2294,7 @@ type Error struct {
 	// | `lease_lost` | 409 | epoch/holder fence failed |
 	// | `lease_held` | 409 | another host holds the lease |
 	// | `store_conflict` | 409 | a store journal append's `after` (or `incarnation`) is not the journal's head: catch up and retry |
+	// | `store_degraded` | 409 | the store object on the workload's host could not apply a journal entry: it stopped its replay there, serves reads from what it applied and refuses writes (`tw d1 export`, then recreate the database) |
 	// | `store_limit` | 400 | a store append exceeds an entry, append or store size limit |
 	// | `queue_limit` | 400 | a send exceeds a message, batch, delay or queue size limit |
 	// | `store_unavailable` | 503 | the store is unreachable, restarting or contended (a row-lock or idle-transaction timeout); retry after `Retry-After` |
@@ -2386,6 +2390,7 @@ type Error struct {
 // | `lease_lost` | 409 | epoch/holder fence failed |
 // | `lease_held` | 409 | another host holds the lease |
 // | `store_conflict` | 409 | a store journal append's `after` (or `incarnation`) is not the journal's head: catch up and retry |
+// | `store_degraded` | 409 | the store object on the workload's host could not apply a journal entry: it stopped its replay there, serves reads from what it applied and refuses writes (`tw d1 export`, then recreate the database) |
 // | `store_limit` | 400 | a store append exceeds an entry, append or store size limit |
 // | `queue_limit` | 400 | a send exceeds a message, batch, delay or queue size limit |
 // | `store_unavailable` | 503 | the store is unreachable, restarting or contended (a row-lock or idle-transaction timeout); retry after `Retry-After` |
@@ -2600,6 +2605,7 @@ type HostDrainResult struct {
 		// | `lease_lost` | 409 | epoch/holder fence failed |
 		// | `lease_held` | 409 | another host holds the lease |
 		// | `store_conflict` | 409 | a store journal append's `after` (or `incarnation`) is not the journal's head: catch up and retry |
+		// | `store_degraded` | 409 | the store object on the workload's host could not apply a journal entry: it stopped its replay there, serves reads from what it applied and refuses writes (`tw d1 export`, then recreate the database) |
 		// | `store_limit` | 400 | a store append exceeds an entry, append or store size limit |
 		// | `queue_limit` | 400 | a send exceeds a message, batch, delay or queue size limit |
 		// | `store_unavailable` | 503 | the store is unreachable, restarting or contended (a row-lock or idle-transaction timeout); retry after `Retry-After` |
@@ -4284,6 +4290,7 @@ type TombstoneError struct {
 	// | `lease_lost` | 409 | epoch/holder fence failed |
 	// | `lease_held` | 409 | another host holds the lease |
 	// | `store_conflict` | 409 | a store journal append's `after` (or `incarnation`) is not the journal's head: catch up and retry |
+	// | `store_degraded` | 409 | the store object on the workload's host could not apply a journal entry: it stopped its replay there, serves reads from what it applied and refuses writes (`tw d1 export`, then recreate the database) |
 	// | `store_limit` | 400 | a store append exceeds an entry, append or store size limit |
 	// | `queue_limit` | 400 | a send exceeds a message, batch, delay or queue size limit |
 	// | `store_unavailable` | 503 | the store is unreachable, restarting or contended (a row-lock or idle-transaction timeout); retry after `Retry-After` |

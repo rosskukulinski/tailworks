@@ -300,6 +300,7 @@ func (inst *instance) onNodeExit() {
 	n := np.restarts
 	why := np.lastExit
 	np.mu.Unlock()
+	// limits.md#node-restart-backoff
 	d := 250 * time.Millisecond << min(n-1, 6)
 	if d > 10*time.Second {
 		d = 10 * time.Second
@@ -537,6 +538,7 @@ func (inst *instance) stopNode() {
 		syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
 		select {
 		case <-ex:
+		// limits.md#node-stop-grace
 		case <-time.After(3 * time.Second):
 			syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 			<-ex

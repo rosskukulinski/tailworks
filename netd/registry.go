@@ -529,9 +529,10 @@ func (o *Object) start(ctx context.Context) error {
 		IdleConnTimeout:     30 * time.Second,
 		ForceAttemptHTTP2:   false,
 	}
+	// limits.md#object-ingress-server
 	hs := &http.Server{
 		Handler:           http.HandlerFunc(o.serveIngress),
-		ReadHeaderTimeout: 30 * time.Second,
+		ReadHeaderTimeout: 30 * time.Second, // limits.md#object-ingress-header-timeout
 		ErrorLog:          slog.NewLogLogger(r.log.Handler(), slog.LevelDebug),
 	}
 
@@ -640,15 +641,19 @@ func (o *Object) up(ctx context.Context, key string, rejoin bool) (*local.Client
 		return nil, nil, fmt.Errorf("start %s: %w", o.hostname, err)
 	}
 	o.spans.at(func(s *JoinSpans) *float64 { return &s.Start })
-	lc0, err := srv.LocalClient()
+	lc, err := srv.LocalClient()
 	if err != nil {
 		return nil, nil, err
 	}
-	lc0.OmitAuth = true
-	go o.spans.watch(upCtx, lc0)
+	// ADR-019 rule 4: without this every LocalClient call on macOS execs lsof
+	// and sends the *system* Tailscale.app's token (~25 ms/call). tsnet
+	// returns the same *local.Client on every call, so set it once, here,
+	// before the watchers below start reading it (issue #134).
+	lc.OmitAuth = true
+	go o.spans.watch(upCtx, lc)
 	if rejoin && key == "" {
 		var once sync.Once
-		go watchNeedsLogin(upCtx, lc0, func() { once.Do(func() { close(rejected); upCancel() }) })
+		go watchNeedsLogin(upCtx, lc, func() { once.Do(func() { close(rejected); upCancel() }) })
 	}
 	if _, err := srv.Up(upCtx); err != nil {
 		select {
@@ -659,13 +664,6 @@ func (o *Object) up(ctx context.Context, key string, rejoin bool) (*local.Client
 		return nil, nil, fmt.Errorf("up %s: %w", o.hostname, err)
 	}
 	o.spans.at(func(s *JoinSpans) *float64 { return &s.Running })
-	lc, err := srv.LocalClient()
-	if err != nil {
-		return nil, nil, err
-	}
-	// ADR-019 rule 4: without this every LocalClient call on macOS execs lsof
-	// and sends the *system* Tailscale.app's token (~25 ms/call).
-	lc.OmitAuth = true
 	sst, err := lc.StatusWithoutPeers(ctx)
 	if err != nil {
 		return nil, nil, err

@@ -5,7 +5,7 @@ package version
 // (TestWorkerdPinMatchesLockfile fails otherwise): bump workerd with
 // `npm install workerd@<v>` and update this line in the same PR
 // (ADR-041 §6).
-const WorkerdPin = "1.20261114.1"
+const WorkerdPin = "1.20261115.1"
 
 // WorkerdPinDate is the date `workerd --version` prints for WorkerdPin
 // (1.YYYYMMDD.N → YYYY-MM-DD).

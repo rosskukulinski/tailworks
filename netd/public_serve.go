@@ -664,6 +664,7 @@ func (o *Object) servePublic(w http.ResponseWriter, req *http.Request) {
 		req.Body = body
 	}
 	ctx := req.Context()
+	// limits.md#public-timeout
 	if !upgrade && lim.TimeoutSeconds > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, lim.Timeout())

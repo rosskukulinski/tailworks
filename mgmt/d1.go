@@ -132,6 +132,8 @@ func (m *Mgmt) d1Admin(ctx context.Context, tenantID, workload, name, action str
 			return nil, host, errf(400, he.Code, "%s", he.Message)
 		case "lease_lost":
 			return nil, host, errf(409, "lease_lost", "%s", he.Message)
+		case "store_degraded":
+			return nil, host, errf(409, "store_degraded", "%s", he.Message)
 		}
 		return nil, host, errf(503, "store_unavailable", "host %s: %s %s", host, he.Code, he.Message)
 	}

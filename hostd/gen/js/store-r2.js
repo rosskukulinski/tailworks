@@ -397,6 +397,7 @@ registerStoreKind("r2", {
         if (i === 0 || i === "httpMetadata") include.http = true;
         if (i === 1 || i === "customMetadata") include.custom = true;
       }
+      // limits.md#r2-list-include
       if (include.http || include.custom) limit = Math.min(limit, 100);
       let startAfter = o.startAfter;
       if (o.cursor) {

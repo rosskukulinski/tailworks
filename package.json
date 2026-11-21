@@ -22,7 +22,7 @@
     "esbuild": "0.28.2",
     "mcp-handler": "2.4.0",
     "typescript": "7.0.2",
-    "workerd": "1.20261114.1",
+    "workerd": "1.20261115.1",
     "zod": "4.6.7"
   },
   "engines": {

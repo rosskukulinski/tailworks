@@ -88,6 +88,16 @@ Code references are to master at 22301b4.
   rebuild). An entry that fails on replay stops the replay and degrades the
   store (#106, #147); `tw d1 repair --skip <seq>` deletes it from the
   journal.
+- **T.9a Replicas diverge today, not only on a rebuild.** Every replica
+  of a workload (`<w>--r<n>`) keeps its own copy of a D1 database (ADR-038
+  §"read replicas": "each of which has its own copy") and fills it by
+  catch-up, which is statement replay. So the same non-deterministic
+  statements give each replica different values (`random()`,
+  `datetime('now')`, `DEFAULT CURRENT_TIMESTAMP`) the moment they are
+  applied. A later deterministic statement can then do different things
+  on different replicas, or fail on one and degrade it. The *journal* is
+  linearizable (T.5), but the materialized copies are not identical.
+  ADR-038 records re-evaluation only "when a host rebuilds a database".
 - **T.10 mgmt is on the read path too** (issue #38 comment). A read whose
   freshness lapsed waits on a sync that is chained behind every earlier
   commit or sync on the object (`#locked`), with no coalescing and no
@@ -160,6 +170,11 @@ Code references are to master at 22301b4.
 - **G.3** Keep what ADR-044 got right: an acknowledged write survives a
   host loss (RPO 0) where we promise it; two hosts never diverge a store;
   data is sealed at rest outside the host; delete crypto-shreds.
+- **G.3a Clarification (round 3).** "Two hosts never diverge a store"
+  holds for the journal (the order and content of entries). It doesn't
+  hold for D1's materialized copies on replicas (T.9a), today or under
+  A–D. Only exact replay (F, or E for one host) or a single copy per
+  store gives it.
 - **G.4** No reads of workerd's private files unless the option says so
   and pays for it (ADR-012, RFC §14 P3 "No reads of private workerd
   files").
@@ -485,7 +500,9 @@ layout, migration, failure modes, verdict.
   on it: with a gap at `head+1`, a writer would think itself current and
   its create at `head+1` would *succeed*, ordering its write before
   entries it never saw. This rules out copying mgmt's sparse journal
-  (T.19) object by object (B.25a).
+  (T.19) object by object (B.25a). Precisely: gap-free *after the newest
+  snapshot*. GC creates a leading gap by design, and B.12d covers how
+  readers detect it.
 - **B.3** Tenant and workload names appear in object names, as they do for
   R2 blobs today (ADR-036 §4). KV keys and SQL never do. HMAC'd path
   elements are possible but make operator debugging harder (Q.8).
@@ -574,6 +591,20 @@ layout, migration, failure modes, verdict.
   outright: no tombstones, no `T_gc`, no clock. Readers already start
   after the snapshot. Tombstones are needed only in the variant that
   skips B.12b for recently caught-up writers.
+- **B.12d Correction to B.12c (round 3): tombstones are still needed for
+  reads.** B.12b protects *appends* only. The freshness check is a GET of
+  `log/<head+1>`. For a holder whose head is behind a snapshot whose
+  covered log GC deleted outright, that GET answers 404, and the holder
+  concludes it is up to date. It then serves an arbitrarily old copy, with
+  no partition and no error, until its next write. Either keep tombstones
+  (B.12) so the GET finds one and the holder loads the snapshot, or make
+  the freshness check also look for a newer snapshot, which costs two
+  requests per check. In both cases a catch-up whose LIST starts after
+  `head` and returns a first object that doesn't begin at `head+1` has
+  found a GC gap, and loads the snapshot. Keeping tombstones is the
+  cheaper choice. Without B.12b, though, tombstones bring back `T_gc` and
+  the clock, so the full fix is tombstones *and* B.12b, with tombstones
+  deleted by age only as a storage optimization.
 - **B.13** mgmt still controls who may hold the lease, hence who gets the
   key (X.3) and who may write the barrier. A host that never held the
   lease has no key and cannot produce entries that open. A host that holds
@@ -1124,6 +1155,15 @@ recommended for now; it could layer on B later for latency.
   when a statement is non-deterministic) needs the SQL parser D1 avoids.
 - **F.4** What F would buy, exact replay of the tail, B's snapshots
   already give for everything before the tail (B.20).
+- **F.4a Correction (round 3): F buys more than F.4 says.** Snapshots
+  bound drift on a *rebuild*, but replicas apply every entry by replay as
+  it arrives (T.9a). Between snapshots, each replica diverges from the
+  writer on every non-deterministic statement. Restoring the writer's
+  snapshot would re-converge them, but a replica normally catches up from
+  the log, not the snapshot. Only row images (F) or a writer-side rewrite
+  that pins values make replicas identical. A cheaper interim measure is
+  to refuse D1 bindings in replicated workloads (or warn on them) until F
+  exists (Q.15).
 
 **Verdict.**
 
@@ -1293,6 +1333,12 @@ XL.
   (X.10b). The supported backends are those that pass V.2, named in the
   docs (expected: AWS S3, Cloudflare R2, MinIO, `fs` single-host), and
   "any S3-compatible store" is not the claim: Garage is expected to fail.
+- **REC.1b Wording (round 3).** REC.1's "linearizability" means
+  linearizable *writes* (the log order). Reads are served from the
+  holder's copy, are stale by up to the kind's freshness while it is
+  connected, and are unbounded under a partition (X.11a). D1 replicas
+  don't hold identical copies (T.9a). B neither improves nor worsens
+  either point.
 - **REC.3a Order of work, amended.** Step 3 includes B.12b, X.9a and the
   hash chain from the first object written; B.13b's mark and B.23a's
   reconciliation land before step 5 (migration), because migration is when
@@ -1351,6 +1397,9 @@ XL.
   style credentials.
 - **Q.14** Garage: tell Garage users B needs a different store (or
   B.33), or wait for Garage to ship a conditional create?
+- **Q.15** D1 in replicated workloads: replicas hold different values for
+  non-deterministic SQL today (T.9a). Refuse or warn on the combination
+  until row capture (F) exists, or document it?
 
 ## 10. To verify before accepting
 

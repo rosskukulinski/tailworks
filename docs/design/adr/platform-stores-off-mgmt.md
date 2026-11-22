@@ -21,6 +21,10 @@ renumbering the rest: add `B.14a` rather than shifting numbers. Each option
 has the same subsections in the same order, so options can be compared
 section by section.
 
+Claims with a letter suffix (`B.12a`) and claims numbered past an
+option's original last claim were added by the critique rounds recorded
+as comments on PR #226 ("Critique round N").
+
 ---
 
 ## 1. Today (as built at 22301b4)
@@ -113,6 +117,24 @@ Code references are to master at 22301b4.
   (`tw host drain --allow-local-state-loss`). Workflows (ADR-040) keep
   instance state in DO storage too. The RFC's async encrypted backup
   (§4.9, §10) is not built.
+- **T.16 R2 blob bytes are not sealed by tailworks.** The R2 blob backend
+  stores object bytes as the Worker wrote them; with `s3`, encryption at
+  rest is the object store's (ADR-036, "encrypted by tailworks" only for
+  the journaled index). So the object store operator already holds R2
+  plaintext today.
+- **T.17 A mgmt restore already fences epochs.** `tw-mgmt restore-fence`
+  raises every lease epoch by `RestoreEpochJump` (2^20) after a restore
+  (`mgmt/sqlstore_upgrades.go` `RestoreFence`), so no epoch handed out
+  before a restore is reused after it. Lease rows are kept on release
+  (`ReleaseLease`) and deleted only with their tenant, so a lease's epoch
+  is monotonic for the life of the tenant.
+- **T.18 Hosts measure time with Go's monotonic clock.** The ADR-028 fence
+  is `time.Since(h.lastHB) > FenceAfter` (`hostd/host.go`). Go documents
+  that "on some systems the monotonic clock will stop if the computer goes
+  to sleep"; in practice it excludes suspend on Linux (`CLOCK_MONOTONIC`)
+  and macOS. A host that sleeps (a laptop on the process tier, a paused VM)
+  wakes believing almost no time passed. Every duration-based guard in
+  this doc (X.7, A.6, B.12) inherits that.
 
 ## 2. Goals, non-goals and constraints
 
@@ -180,6 +202,18 @@ The options reuse a few mechanisms. They are described once here.
   re-seal under the newest key, after which older keys can be destroyed.
   Cost: a key list per store in custody and more release logic. Open
   question Q.6.
+- **X.16 Optional: backend credentials released at the lease too.**
+  Today every host holds the operator's object-store credentials for the
+  whole bucket (T.12). Under B that lets any host, including one whose
+  process-tier sandbox a tenant escaped, list every tenant's store names,
+  sizes and write timing, and delete any tenant's log. Where the backend
+  supports it, mgmt can mint short-lived credentials scoped to the
+  store's prefix at each lease grant (AWS STS with a session policy; R2
+  and MinIO both have temporary, prefix-scoped credentials), so a host
+  can touch only the stores it currently leases. Same cadence as X.3 (per
+  lease change), so it doesn't put mgmt on the write path, but mgmt then
+  holds a credential that can mint credentials for the bucket. Garage and
+  `fs` have nothing like it.
 
 ### X3. Fencing without mgmt per write
 
@@ -211,6 +245,14 @@ Three mechanisms, used differently by the options.
     needed per write. This is how replicated logs use leader epochs.
   - Writer identity is the lease name (`<w>` or `<w>--r<n>`), so replicas
     keep writing one journal concurrently as they do today (T.5).
+- **X.9a The barrier must be authenticated.** A barrier is sealed under
+  the store key like any entry (AAD naming it a barrier, the writer and
+  the epoch). An unsealed barrier lets anyone with backend write access
+  append `{writer, epoch: 2^62}` and fence the real holder out for good.
+  A holder that reads a barrier for its own writer at an epoch *higher*
+  than its own fences itself; one that reads a barrier at a *lower* epoch
+  ignores it. Epochs never go backwards, including across a mgmt restore
+  (T.17).
 - **X.10** X.9 requires the backend to offer an atomic "create if absent"
   for a log slot and read-after-write consistency for it. A plain
   conditional PUT (`If-None-Match: *`) on an S3-compatible store, or
@@ -219,10 +261,56 @@ Three mechanisms, used differently by the options.
   document conditional PUT; MinIO, Garage and SeaweedFS must be checked per
   version (V.2). hostd should run a probe at start (create a slot twice;
   the second must fail) and refuse a backend that passes both.
+- **X.10a What we know per backend** (to be confirmed by V.2):
+  - *AWS S3*: `If-None-Match: *` on PutObject since August 2024; S3 is
+    strongly consistent for reads and LIST. Concurrent conditional writes
+    can answer `409 ConditionalRequestConflict` as well as `412`, and a
+    retry after a lost response can answer `412` for the caller's own
+    write. hostd treats both as "conflict, then check the append ID"
+    (B.28).
+  - *Cloudflare R2*: documents `If-None-Match: *` on PutObject as checked
+    atomically against committed state; one racer wins, the rest get 412.
+  - *MinIO*: documents `If-None-Match` on PutObject. The community edition
+    has been source-only and in maintenance mode since late 2025, so
+    "MinIO" as a recommended homelab backend is itself a risk.
+  - *Garage*: its documented design reads and writes by quorum with no
+    primary and reconciles with CRDT rules; it documents no conditional
+    PUT. A create-if-absent that is atomic between two concurrent writers
+    needs a single serialization point, which that design doesn't have.
+    Treat Garage as **unable to back B** unless V.2 proves otherwise.
+    ADR-036 lists Garage for R2 blobs, which need no conditional writes;
+    an operator who chose it for R2 can't reuse it for B.
+  - *Any multi-site or asynchronously replicated deployment* (MinIO site
+    replication, Ceph multisite, a bucket replicated across regions with
+    writers in both): a conditional create is atomic per site at most.
+    Every host must write to the same site.
+  - *`fs`*: atomic `link(2)` (or `O_EXCL`) plus fsync of the file and its
+    directory on a local filesystem. Today's `fs` R2 backend uses
+    `CreateTemp` + `rename`, which *replaces* (`hostd/r2/fs.go`), so the
+    journal needs a new primitive. NFS is out: `O_EXCL` isn't reliable on
+    older NFS, and `fs` is single-host by definition.
+- **X.10b The probe can't prove atomicity.** A gateway that emulates
+  `If-None-Match` with a HEAD then a PUT passes a sequential probe and
+  loses races. The probe should race N concurrent creates of one slot and
+  require exactly one success, and still counts only as a smoke test; the
+  supported list (V.2) is what we stand behind.
 - **X.11 Stale reads.** A fenced-off holder can keep serving reads from its
   local copy until its next catch-up sees the barrier. That window is the
   kind's freshness (D1 1 s, KV `cacheTtl`, R2 every read), the same bound
   as today, now enforced against the backend rather than mgmt.
+- **X.11a Correction: under a partition the stale-read window is
+  unbounded, today and under every option.** `fresh()` serves the local
+  copy on any catch-up error except `lease_lost` (`store.js` `fresh`). A
+  holder cut off from mgmt (today) or from the backend (B) never sees the
+  barrier or the `lease_lost`, so after a takeover it keeps answering reads
+  from its old copy for as long as clients can reach it. KV/D1/R2-only
+  Workers have no ADR-028 fence to stop them (T.11). P.1 (serve stale on
+  a failed sync) makes this the common path rather than a corner. The
+  freshness bound in X.11 holds only while the holder can reach its
+  journal. A cap is possible: refuse reads (`store_unavailable`) once the
+  last successful catch-up is older than `maxStale`, measured on a clock
+  that counts suspend (T.18). It trades availability for a staleness bound
+  (Q.11).
 
 ### X4. Snapshots by the Store object
 
@@ -434,6 +522,27 @@ layout, migration, failure modes, verdict.
     a tombstone loads the snapshot instead.
   `T_gc` can be hours, so this is a clock assumption with a wide margin,
   not ADR-028's tight one.
+- **B.12a Correction: the `T_stale` guard fails across a suspend.** A
+  monotonic `T_stale` doesn't advance while the host sleeps (T.18). A
+  laptop host closed overnight wakes with its last catch-up "a minute
+  ago", the tombstones it would have hit are gone, its create-if-absent
+  on a deleted slot succeeds, and the write is acknowledged and then
+  invisible to every reader: silent loss of an acknowledged write. A wider
+  margin doesn't fix it; the clock is wrong, not tight.
+- **B.12b A clock-free fix.** After a successful PUT of `log/<k>` and
+  before acknowledging, hostd checks that no complete snapshot covers `k`
+  (one LIST of `snap/` with `start-after` its head, or a GET of the next
+  expected manifest). This is sound on a strongly consistent backend: GC
+  deletes `log/<k>` only after a snapshot covering `k` is complete, and
+  that deletion happened before the stale PUT succeeded, so a read after
+  the PUT sees the snapshot. If one exists, hostd answers `store_conflict`
+  instead of success; the orphan object is ignored by readers and removed
+  by the next GC. Cost: one extra request per write, roughly doubling
+  write latency, so the practical choice is between B.12b on every append
+  and B.12 with a clock that counts suspend (`CLOCK_BOOTTIME` on Linux;
+  wall-clock checked alongside the monotonic one elsewhere) plus B.12b
+  only when the writer's last catch-up is older than a few seconds.
+  Either way, no lease timing is involved.
 - **B.13** mgmt still controls who may hold the lease, hence who gets the
   key (X.3) and who may write the barrier. A host that never held the
   lease has no key and cannot produce entries that open. A host that holds
@@ -442,6 +551,28 @@ layout, migration, failure modes, verdict.
   service that stops replay at `k` (degraded, as today with a corrupt
   entry). The object-store credentials are operator credentials on every
   host, as for R2 today.
+- **B.13a The log has no authenticated head, so a lost tail is
+  invisible.** Today mgmt's `head` is the authority: a host that gets
+  fewer entries than `head` knows. Under B (B.2, "nothing mutable"), if the
+  newest log objects disappear (a delete by a host with bucket
+  credentials, an operator lifecycle rule on the shared bucket, a bucket
+  restored from an asynchronous replica or an older backup), the next
+  holder replays a shorter log and serves it as complete. Acknowledged
+  writes are lost with no error and no degraded record. That undercuts
+  B.8's RPO 0, which in fact rests on the backend never losing a
+  committed object.
+- **B.13b Detection without the write path.** mgmt records a high-water
+  mark per store: `(head, hash of the last log object)` at every lease
+  change (the outgoing holder's last known head, reported with its
+  release or the new holder's barrier) and asynchronously from heartbeats
+  (bounded staleness, off the write path; G.8 allows per lease change).
+  Each log object also carries the hash of its predecessor, so a
+  substituted or reordered object breaks the chain. A holder whose
+  recovered log ends before mgmt's mark, or whose chain breaks, degrades
+  the store and refuses writes instead of serving it. This detects a lost
+  tail older than the last report; it doesn't prevent loss, and a tail
+  lost within one report interval is still silent. Object lock or
+  versioning on the journal prefix (B.31) is the prevention.
 
 **Custody and encryption.**
 
@@ -449,6 +580,16 @@ layout, migration, failure modes, verdict.
   the lease holder at its epoch (X.3). hostd seals and opens; mgmt never
   sees an entry (G.2). The object store operator sees ciphertext, object
   names (B.3), sizes and timing.
+- **B.14a** The object store operator sees ciphertext for the journal
+  and snapshots only; R2 blob bytes in the same bucket are plaintext today
+  (T.16). If G.3's "sealed at rest outside the host" is meant for R2 too,
+  hostd can seal blobs with the same lease-released key (X.3), as a
+  separate change.
+- **B.14b** Every host, not only the holder, can see every tenant's store
+  names, sizes and write timing in the bucket unless X.16 scopes
+  credentials. Today a host sees only its own workloads' stores. This is a
+  cross-tenant metadata leak to hosts that B introduces for stores (R2
+  blobs already have it).
 - **B.15** Who can read tenant data: the current lease holder (it already
   can), a former holder until it restarts (X.5; X.6 narrows it), mgmt (it
   can release itself the key; custody is mgmt's, as for secrets), and
@@ -475,6 +616,15 @@ layout, migration, failure modes, verdict.
   complete snapshots. KV's `ckey` compaction (T.8) becomes snapshot
   compaction; tombstones of deleted KV keys disappear at the next snapshot,
   closing ADR-044's open tombstone item.
+- **B.18a Replicas need one snapshotter and a lag allowance.** With
+  replicas (`<w>--r<n>`), only the primary lease holder (`<w>`) snapshots
+  and GCs; two writers snapshotting the same store race on GC. A replica
+  whose head falls behind a snapshot whose covered log was already
+  tombstoned must reload the whole snapshot (B.12). For a large D1 behind
+  a 60 s KV-style freshness, that is a full download per lag event. GC
+  should keep the log after a snapshot for at least the longest replica
+  freshness window plus a margin, so ordinary lag catches up from the
+  log.
 - **B.19** Growth is in the object store, bounded by live data times two
   plus the log tail. mgmt's database holds no tenant data, so the 1 GiB
   per-store limit becomes a product choice rather than a protection for
@@ -488,6 +638,9 @@ layout, migration, failure modes, verdict.
   Degraded-entry handling (#106) is unchanged. `tw d1 repair --skip` can no
   longer delete a log entry (that reopens B.12); it appends a substrate
   `skip <seq>` marker instead, and replay looks ahead for markers.
+  (Looking ahead means replay reads the whole tail before applying
+  anything after a failing entry, and markers must be sealed like
+  barriers, X.9a, or any host with bucket access can skip entries.)
 
 **Operator burden and new components.**
 
@@ -505,6 +658,23 @@ layout, migration, failure modes, verdict.
 - **B.23** Operators back up the object store instead of (for this data)
   mgmt's database. Restoring mgmt from backup no longer rolls tenant data
   back with it, which is a behaviour change worth documenting.
+- **B.23a A mgmt restore and the object log diverge.** Epochs are safe
+  (T.17), but store metadata isn't. A store created after the backup has
+  a log in the bucket that the restored mgmt doesn't know; the workload's
+  next first append creates a *new* incarnation (`AppendStore` with
+  `after 0` creates the store) and the old data is stranded under the old
+  prefix, silently. A store deleted after the backup comes back as a row
+  whose key was already shredded. `restore-fence` must reconcile: list
+  incarnation prefixes in the backend, compare with mgmt, and hold any
+  `(tenant, workload, kind, name)` with an unknown incarnation (refuse to
+  create a new one) until an operator adopts or discards it. Adopting
+  needs the key, so a restore must also restore custody to the same
+  point or later.
+- **B.23b Operators must not put lifecycle rules on the journal prefix.**
+  A common bucket setting ("expire objects after N days", "delete
+  noncurrent versions") deletes live log objects and snapshots: silent
+  loss (B.13a) or the B.12 hazard. hostd's start-up probe should read the
+  bucket's lifecycle configuration where the API allows and warn.
 
 **workerd file layout.**
 
@@ -537,7 +707,9 @@ layout, migration, failure modes, verdict.
 - **B.27** Object store without real create-if-absent or with stale LIST:
   split brain. Mitigated by the start-up probe (X.10), not eliminated; a
   backend that regresses on upgrade could pass the probe and still lose a
-  race. Conformance tests per supported backend (V.2).
+  race. Conformance tests per supported backend (V.2). See X.10a: Garage
+  and multi-site deployments are expected to fail, and the probe has to
+  race (X.10b).
 - **B.28** Lost PUT response: hostd doesn't know whether `log/<k>` is its
   own. It GETs `log/<k>` and compares an append ID it put in the object
   (D1 entries already carry an `id`); same ID means success.
@@ -551,6 +723,8 @@ layout, migration, failure modes, verdict.
   on the host (wrapped by the host's node key, or in the microVM volume)
   would close this, at the cost of a key at rest on the host (Q.3).
 - **B.30** Clock assumption only in B.12 (`T_stale < T_gc`, hours apart).
+  **Corrected by B.12a:** that assumption fails across a host suspend;
+  B.12b removes it.
 - **B.31** A host with object-store credentials can delete a tenant's log
   (B.13). Today a host can't delete mgmt rows. Object-store versioning or
   object lock limits the damage; that is operator configuration.
@@ -563,6 +737,36 @@ layout, migration, failure modes, verdict.
   write latency becomes the object store's, a new class of backend
   correctness risk (B.27), and the largest implementation of the RPO-0
   options except D.
+- **B.32a Amended verdict.** B stands as the direction, but as first
+  written it had a silent-loss hole (B.12a), no way to notice a lost tail
+  (B.13a), unauthenticated substrate entries (X.9a) and a narrower set of
+  backends than "any S3-compatible store" (X.10a). With B.12b, B.13b, X.9a
+  and B.23a it is sound on a strongly consistent backend with atomic
+  create-if-absent. Its RPO 0 means "as durable as the backend never
+  losing a committed object", which is the same trust today's design puts
+  in mgmt's database, minus the head check.
+
+**Alternative log backend.**
+
+- **B.33 The log needs only three operations, and a SQL database has
+  them.** B's backend contract is: create `(store, seq)` if absent,
+  read a range in order, and strongly consistent reads of both. A table
+  `(incarnation, seq) PRIMARY KEY` with `INSERT … ON CONFLICT DO NOTHING`
+  is exactly that, so hostd can write the log straight to a Postgres
+  that is *not* mgmt's (or a separate database on the same server), with
+  host sealing, barriers and snapshots unchanged. No journald service (C),
+  no conditional-PUT question (X.10a), latency like today's append. Costs:
+  database credentials on every host (the same exposure as bucket
+  credentials, B.13; per-host roles with row-level security can't follow
+  leases without mgmt managing grants per lease change), large values in
+  SQL (snapshots can still go to an object store or `fs`), and the
+  operator runs a Postgres. It is the fallback for operators whose object
+  store fails V.2 (Garage) and a better fit than C for REC.4 (Q.12).
+- **B.34 Snapshots and the log can use different backends.** Nothing in
+  B ties them: log in Postgres (B.33) or `fs`, snapshots in an object
+  store, is a valid combination. The reverse (mgmt's database for
+  snapshots only) still puts tenant data in mgmt's database and fails
+  G.2.
 
 ### Option C: a separate journal service with lease-fenced appends
 
@@ -812,6 +1016,14 @@ recommended for now; it could layer on B later for latency.
   stream for DO SQLite, in the spirit of WD-1 to WD-4); Cloudflare's own
   DO storage ships WAL batches to followers and object storage
   internally, so the shape exists, but not as a self-hosting API.
+- **E.11a Litestream and LiteFS are E, not new options.** Litestream
+  ships WAL frames by holding a read transaction on the database file to
+  control checkpoints, so it needs exactly the file access and locking
+  E.11 describes. LiteFS intercepts SQLite's files through a FUSE mount,
+  so it would sit under workerd's private layout (G.4) and needs FUSE on
+  every host, including macOS process-tier hosts. Both give RPO = ship
+  lag, not 0. They are useful prior art for E's shipper, not a way around
+  its problem.
 
 **Migration.**
 
@@ -883,6 +1095,47 @@ recommended for now; it could layer on B later for latency.
 - **HY.4** Verdict: worth it only if a real app is write-bound on the
   `journal` class after B lands and is measured (V.1). Don't build it
   speculatively (Q.5).
+- **HY.5 A better opt-in than `snapshot`: `async`.** The same log as B,
+  but hostd acknowledges after the local apply and uploads the log object
+  in the background (group-committed). RPO is the upload lag (seconds),
+  not A's snapshot interval, and there are no per-interval snapshot
+  stalls (A.18). Fencing still needs B's barrier plus a time bound on the
+  old holder's *unshipped* writes, which a takeover discards. If a
+  durability class is ever built, this is the one to build, not A.
+
+### Option H: a consensus log embedded in the hosts (added in critique round 1)
+
+Short form: the subsections that match D are not repeated.
+
+- **H.1 Summary.** Instead of D's primary-backup with mgmt as
+  configuration master, three (or five) hosts run a Raft group, using an
+  existing library (etcd's `raft`, hashicorp/raft) rather than the custom
+  log the RFC rejected (D.11). Store appends are proposals; an append is
+  acknowledged when a majority has it. One group per fleet (a replicated
+  journal for every store) or one per store (multi-Raft).
+- **H.2 What it fixes in D.** Losing a follower doesn't need mgmt
+  (D.4): a majority keeps committing, and membership changes are Raft's
+  own. Fencing is Raft's term, not mgmt's epoch, inside the group; the
+  store's lease epoch still decides which workload host may propose.
+- **H.3 Write path.** The lease holder's hostd forwards to the group
+  leader (which may be another host), the leader replicates to a majority
+  with fsync, then answers: two host-to-host round trips in the worst
+  case. On a LAN, comparable to today; no object store needed.
+- **H.4 What it costs.** A fleet-wide group is a replicated database in
+  the hosts: another control-plane-shaped component, with quorum loss
+  stopping every store's writes, snapshots and log compaction to run,
+  disk on every member, and upgrades that must keep the group's wire
+  format compatible (ADR-041). A per-store group multiplies all of that.
+  It needs ≥ 3 hosts, so single-host `tw up` and two-host homelabs get
+  nothing (G.5), and it needs host-to-host grants (D.10). It doesn't remove
+  the need for an off-site backup (snapshots to an object store, B.34).
+- **H.5 Custody.** As D.6: the holder seals, the group stores
+  ciphertext.
+- **H.6 Verdict.** The strongest option for RPO 0 without an external
+  store, and the right comparison point if Q.1 is "no object store". It
+  is more machinery than B or B.33 for the install sizes tailworks
+  targets. Not recommended now; worth revisiting only for operators that
+  run ≥ 3 hosts and refuse both an object store and a Postgres.
 
 ---
 
@@ -938,6 +1191,16 @@ Latency columns are expectations, not measurements (V.1).
 | Single-host `tw up` | works | works (`fs`) | works (`fs`) | works (same box) | no benefit | works |
 | Covers tenant DOs, Workflows | no | no | no | no | no | **yes** |
 | Size of change | — | M | L | M | XL | XL + upstream |
+| Correctness rests on | mgmt's DB transaction | object-store lease + clocks | atomic create-if-absent + strong reads (X.10a) | journald's DB transaction | epoch checks + reconfiguration | object-store lease + clocks + workerd layout |
+| Lost committed tail noticed | yes (mgmt `head`) | no | only with B.13b | yes (journald head) | partly (followers) | no |
+| Hosts can see other tenants' store metadata | no | yes (bucket) | yes, unless X.16 | no | followers only | yes (bucket) |
+
+Added in critique round 1, not in the table: **B.33** (B with a Postgres
+log instead of an object store) behaves like B in every row except
+"Per-write dependency" (that Postgres), "Write latency" (like today) and
+"Correctness rests on" (a SQL primary key). **H** (Raft in hosts) is
+like D but survives a follower loss without mgmt, needs ≥ 3 hosts and is
+XL.
 
 ## 8. Recommendation
 
@@ -967,6 +1230,22 @@ Latency columns are expectations, not measurements (V.1).
   choose C, shipped as a role of the mgmt binary with host-side sealing,
   epoch tokens and snapshot compaction. It meets G.2 and G.3 but keeps a
   stateful service and a second database on the path.
+- **REC.1a Amended (critique round 1): B, with its corrections as part
+  of the design, not follow-ups.** Sealed barriers and markers (X.9a), the
+  clock-free stale-append check (B.12b), the head high-water mark and
+  hash chain (B.13b), restore reconciliation (B.23a) and a racing probe
+  (X.10b). The supported backends are those that pass V.2, named in the
+  docs (expected: AWS S3, Cloudflare R2, MinIO, `fs` single-host), and
+  "any S3-compatible store" is not the claim: Garage is expected to fail.
+- **REC.3a Order of work, amended.** Step 3 includes B.12b, X.9a and the
+  hash chain from the first object written; B.13b's mark and B.23a's
+  reconciliation land before step 5 (migration), because migration is when
+  a lost tail would first matter for existing data.
+- **REC.4a The fallback, amended.** If an object store is unacceptable
+  (Q.1) or the operator's fails V.2, prefer B with a Postgres log (B.33)
+  over C: same protocol, no new service, no mgmt role. C is better only
+  if per-host access control to the journal (C.17's WhoIs check) matters
+  more than running one service fewer (Q.12).
 - **REC.5 Don't build A or G now.** Revisit a `snapshot` class only with a
   measured write-bound app (HY.4).
 - **REC.6 Pursue E separately**, for tenant DOs and Workflows, starting
@@ -1000,6 +1279,19 @@ Latency columns are expectations, not measurements (V.1).
   limit (D1's own) or make it an operator setting?
 - **Q.10** Should a mgmt backup restore still roll tenant data back (B.23)?
   Under B it doesn't; that is a change in what "restore mgmt" means.
+- **Q.11** Stale reads under a partition are unbounded today and under
+  every option (X.11a). Accept that as "fail static", or add a `maxStale`
+  cap after which a cut-off holder refuses reads?
+- **Q.12** Fallback when there is no usable object store: B with a
+  Postgres log written by hosts directly (B.33, every host holds the
+  database credential) or C's journald (one more service, but it can check
+  each caller's identity)?
+- **Q.13** Should hosts get lease-scoped backend credentials (X.16) so a
+  compromised host can't list or delete other tenants' logs? It puts a
+  credential-minting secret in mgmt and works only on backends with STS-
+  style credentials.
+- **Q.14** Garage: tell Garage users B needs a different store (or
+  B.33), or wait for Garage to ship a conditional create?
 
 ## 10. To verify before accepting
 
@@ -1015,3 +1307,10 @@ Latency columns are expectations, not measurements (V.1).
 - **V.4** Snapshot time and write stall for a 1 GiB D1 database (X.14).
 - **V.5** workerd's on-disk layout, journal mode and locking on the pinned
   version, if E is pursued.
+- **V.6** Suspend: put a host to sleep longer than `T_gc` and the lease
+  TTL during a forced takeover, wake it, and check that no acknowledged
+  write is lost (B.12a/B.12b) and that the ADR-028 fence (T.18) behaves.
+- **V.7** Lost tail: delete the newest log objects behind hostd's back
+  and check the next holder degrades rather than serves (B.13b).
+- **V.8** Restore drill: restore mgmt from a backup older than a store's
+  creation and check reconciliation holds the orphan (B.23a).

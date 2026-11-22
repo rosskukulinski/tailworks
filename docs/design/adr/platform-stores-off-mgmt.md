@@ -1346,13 +1346,24 @@ XL.
   snapshot-based (B.25a) and refuses reads as well as appends (B.25b).
   The prefix-delete task (B.15a) ships with step 3, since new stores
   already leave objects behind when deleted.
+- **REC.3b Correction (round 4): step 2 needs step 5's admin paths.**
+  Once hosts seal (step 2), mgmt can no longer open entries, so every
+  admin path that folds the journal *inside mgmt* stops working: `tw kv
+  key get/list` (`mgmt/kv.go` `kvFold`) and `tw r2 object list` (ADR-036
+  §8, which reads the bucket's journal in mgmt). The only alternative is
+  mgmt releasing the key to itself, which defeats step 2. So moving those
+  admin paths to the lease holder (B.26, and the Q.4 decision) belongs in
+  step 2, not step 5. The `ckey` HMAC (`storeCKey`) has to move to the
+  host with sealing too: today's mgmt-side compaction keeps working
+  because it compares opaque HMACs.
 - **REC.4a The fallback, amended.** If an object store is unacceptable
   (Q.1) or the operator's fails V.2, prefer B with a Postgres log (B.33)
   over C: same protocol, no new service, no mgmt role. C is better only
   if per-host access control to the journal (C.17's WhoIs check) matters
   more than running one service fewer (Q.12).
 - **REC.5 Don't build A or G now.** Revisit a `snapshot` class only with a
-  measured write-bound app (HY.4).
+  measured write-bound app (HY.4). (Round 4: if a class is ever built,
+  build `async` (HY.5) rather than `snapshot`.)
 - **REC.6 Pursue E separately**, for tenant DOs and Workflows, starting
   with an upstream ask for a public DO-storage backup/commit hook, and ask
   for F's change hook in the same conversation. Neither blocks REC.1.

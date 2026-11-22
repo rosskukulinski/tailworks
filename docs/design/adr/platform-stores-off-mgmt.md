@@ -134,7 +134,20 @@ Code references are to master at 22301b4.
   to sleep"; in practice it excludes suspend on Linux (`CLOCK_MONOTONIC`)
   and macOS. A host that sleeps (a laptop on the process tier, a paused VM)
   wakes believing almost no time passed. Every duration-based guard in
-  this doc (X.7, A.6, B.12) inherits that.
+  this doc (X.7, A.6, B.12) inherits that. (Go's runtime reads
+  `CLOCK_MONOTONIC` on Linux and `mach_absolute_time` on macOS
+  (`runtime/sys_darwin_*.s`); neither advances during sleep.)
+- **T.19 mgmt's journal has gaps.** `ckey` compaction deletes superseded
+  rows in the append transaction (`mgmt/sqlstore_stores.go`
+  `AppendStore`), so a KV or R2-index journal's seqs are sparse and its
+  `head` can be past its last row; the store object then jumps its `seq`
+  to `head` (`store.js` `#catchUp`). D1 journals have no gaps.
+- **T.20 An in-transaction fence exists but stores don't use it.**
+  `checkFence` (`mgmt/sqlstore.go`) checks the lease inside a write
+  transaction for other fenced writes; `AppendStore` checks the lease in
+  `fenceStore` before its transaction (T.5). Moving the check inside
+  would make today's store fence atomic, which matters only if mgmt stays
+  on the path.
 
 ## 2. Goals, non-goals and constraints
 
@@ -327,6 +340,12 @@ Three mechanisms, used differently by the options.
   pages; reads interleave, writes queue. For a 1 GiB D1 database that is
   on the order of seconds (to measure, V.4). Today's export is capped at
   16 MiB (T.14) and must become streaming and chunked first.
+- **X.14a** "Seconds" assumes the dump is read into memory under the lock
+  and uploaded after it. A dump streamed straight to the backend while
+  holding the lock stalls writes for the upload too, which on a remote
+  object store is tens of seconds for 1 GiB. The choice is memory (a full
+  copy in the isolate) or a longer stall; a third way is to dump to a
+  scratch table or local file first, which doubles local disk use.
 - **X.15** Snapshots are sealed in chunks (same seal, AAD naming the
   snapshot and chunk) and written as one manifest plus chunks; the
   manifest is written last, so a partial snapshot is never used.
@@ -420,7 +439,7 @@ layout, migration, failure modes, verdict.
 
 - **A.15** Per store, the lease holder takes a first snapshot, then mgmt
   flips the store to `backend=snapshot` and refuses further appends. Same
-  shape as B.21.
+  shape as B.25 (cross-reference corrected in round 2; it read B.21).
 
 **Failure modes.**
 
@@ -460,6 +479,13 @@ layout, migration, failure modes, verdict.
   - nothing mutable. There is no head pointer: a reader lists `log/` after
     the newest snapshot (`start-after`), and a freshness check is one GET
     of `log/<seq+1>` (404 means up to date).
+- **B.2a Invariant: the log is gap-free.** Each log object starts at the
+  seq after the previous object's last. The freshness check (404 on
+  `log/<head+1>` means "up to date") and the conditional append both rely
+  on it: with a gap at `head+1`, a writer would think itself current and
+  its create at `head+1` would *succeed*, ordering its write before
+  entries it never saw. This rules out copying mgmt's sparse journal
+  (T.19) object by object (B.25a).
 - **B.3** Tenant and workload names appear in object names, as they do for
   R2 blobs today (ADR-036 §4). KV keys and SQL never do. HMAC'd path
   elements are possible but make operator debugging harder (Q.8).
@@ -543,6 +569,11 @@ layout, migration, failure modes, verdict.
   wall-clock checked alongside the monotonic one elsewhere) plus B.12b
   only when the writer's last catch-up is older than a few seconds.
   Either way, no lease timing is involved.
+- **B.12c Simplification.** If B.12b runs on every append, a reborn slot
+  is always caught by its writer, so GC can delete covered log objects
+  outright: no tombstones, no `T_gc`, no clock. Readers already start
+  after the snapshot. Tombstones are needed only in the variant that
+  skips B.12b for recently caught-up writers.
 - **B.13** mgmt still controls who may hold the lease, hence who gets the
   key (X.3) and who may write the barrier. A host that never held the
   lease has no key and cannot produce entries that open. A host that holds
@@ -596,6 +627,18 @@ layout, migration, failure modes, verdict.
   nobody with only the object store or only mgmt's database. Delete still
   crypto-shreds: deleting the custody key makes every log object and
   snapshot unreadable, before GC removes them.
+- **B.15a Who deletes a deleted store's objects?** Nothing in B does.
+  GC runs in the lease holder of a *live* store; mgmt has no backend
+  credentials (Q.4); ADR-036 already leaves R2 blobs of a deleted workload
+  or tenant behind ("Open: … deleting a workload's blobs when it is
+  deleted"). Under B every deleted store, workload and tenant leaves its
+  ciphertext, names and sizes in the bucket forever. Because B's prefixes
+  include the incarnation, a whole-prefix delete is safe (no new
+  incarnation writes there). So mgmt should queue a "delete prefix" task
+  on store, workload and tenant delete and hand it to any host with
+  backend access through the existing assignment channel, retried until
+  done: control-plane work, off the write path. Until it runs, a host
+  that still has the old key in memory (X.5) can read the old log.
 
 **Move, takeover, host loss.**
 
@@ -697,6 +740,19 @@ layout, migration, failure modes, verdict.
   4. mgmt keeps the old rows for a retention period (rollback: copy the
      object log back and flip again), then deletes them. The key is the
      same, so crypto-shred is unchanged.
+- **B.25a Correction to step 1 and X.4.** KV and R2-index journals are
+  sparse (T.19), so copying their sealed rows verbatim as log objects
+  breaks B.2a. Migration writes a **snapshot at `head`** (the lease
+  holder's local copy, which is the journal folded, taken after a
+  catch-up to mgmt's `head` and refused while the store is degraded), and
+  the log starts empty at `head+1`. Only a D1 journal (gap-free) could be copied row by
+  row, and it should be snapshotted anyway to drop the replay drift.
+  Verbatim copy (X.4) remains useful only for C (C.15), which keeps
+  today's journal semantics.
+- **B.25b Reads must be refused too.** After the flip, mgmt must answer
+  journal *reads* with `store_migrated` as well, not only appends.
+  Otherwise a lagging host still on the mgmt path catches up from a
+  frozen journal, finds nothing new and serves a stale copy as fresh.
 - **B.26** Admin paths that fold the journal inside mgmt (`tw kv key
   get/put/list`, `tw r2 object list`, T.6) move to the lease holder, the
   way `tw d1 execute` already works (`/v1/store-admin`). Consequence: those
@@ -1240,7 +1296,10 @@ XL.
 - **REC.3a Order of work, amended.** Step 3 includes B.12b, X.9a and the
   hash chain from the first object written; B.13b's mark and B.23a's
   reconciliation land before step 5 (migration), because migration is when
-  a lost tail would first matter for existing data.
+  a lost tail would first matter for existing data. Migration is
+  snapshot-based (B.25a) and refuses reads as well as appends (B.25b).
+  The prefix-delete task (B.15a) ships with step 3, since new stores
+  already leave objects behind when deleted.
 - **REC.4a The fallback, amended.** If an object store is unacceptable
   (Q.1) or the operator's fails V.2, prefer B with a Postgres log (B.33)
   over C: same protocol, no new service, no mgmt role. C is better only

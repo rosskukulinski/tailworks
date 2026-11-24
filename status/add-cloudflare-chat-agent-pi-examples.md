@@ -61,3 +61,8 @@ After the chat page and Aperture changes:
 - Both model paths against a fake OpenAI-compatible server: ok.
 - `make lint`, `make changes-check`, `make test-js`: ok.
 - Vendored tree: 267 packages, 163.1 MB; `check-pure-js` ok.
+
+Final, after merging origin/master (4ffbb469; #277, merged since, only changes ci.yml):
+
+- `make lint`, `make test`, `make templates-typecheck` (9 templates), `make test-sdk`: all ok.
+- Static assets support split out to issue #278.

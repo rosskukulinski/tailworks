@@ -124,7 +124,7 @@ Cloudflare Agents SDK `Agent`. Each instance is a Durable Object with its own
 SQLite storage, **and** its own tailnet node.
 
 ```sh
-tw init support --template agent              # also: hello, mcp, ai-agent, lock, refund-approval, node-workflow
+tw init support --template agent              # also: hello, mcp, ai-agent, chat-agent, pi-agent, lock, refund-approval, node-workflow
 cd support
 npm install                                   # optional (needs Node.js): editor types for the Agents SDK and ctx.tailnet
 tw policy                                     # what this app needs in your tailnet policy, as one snippet

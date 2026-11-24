@@ -1,0 +1,23 @@
+{
+  "name": "tw-chat-agent",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tw dev",
+    "deploy": "tw deploy",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@ai-sdk/openai-compatible": "3.0.94",
+    "@ai-sdk/provider": "4.0.39",
+    "@cloudflare/ai-chat": "0.12.3",
+    "@tailworks/tailnet": "^0.4.0",
+    "agents": "0.34.0",
+    "ai": "7.0.177",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261118.1",
+    "typescript": "7.0.2"
+  }
+}

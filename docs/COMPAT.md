@@ -111,7 +111,7 @@ other `e2e/` suites), its Tests cell must say "nightly". `make lint` runs
 
 | Surface | Status | workerd provides | tailworks adds | Different from Cloudflare | Missing | Tests |
 |---|---|---|---|---|---|---|
-| <a id="agents-sdk"></a>Cloudflare Agents SDK (`agents`) | ⚠️ | — | runs unmodified: routing, state, SQL, schedules, WebSockets and hibernation, MCP client and server, in both object modes. `getCaller` in `onRequest` and `onConnect`. `AgentWorkflow` and `waitForApproval`, with the approver's verified identity. [Details](#cloudflare-agents-sdk-agents-0330) | an agent can't call an MCP server on the same host over the tailnet (`forbidden_destination`); `approveWorkflow()`/`rejectWorkflow()` from app code are refused by design ([approvals](#approvals)) | `subAgent()`, `env.AI`, email, browser, codemode; `McpAgent`, `@callable` and `AIChatAgent` not tested | `e2e/sdk:TestCloudflareAgents/RouteAgentRequest`, `e2e/sdk:TestCloudflareAgents/Schedule`, `e2e/sdk:TestCloudflareAgents/AgentAsMCPClient`, `e2e/sdk:TestAgentTemplate`, `e2e/sdk:TestWorkflowApprovals` (nightly: `make test-sdk`) |
+| <a id="agents-sdk"></a>Cloudflare Agents SDK (`agents`) | ⚠️ | — | runs unmodified: routing, state, SQL, schedules, WebSockets and hibernation, MCP client and server, in both object modes. `getCaller` in `onRequest` and `onConnect`. `AgentWorkflow` and `waitForApproval`, with the approver's verified identity. `AIChatAgent` turns with server and approval tools, and `PiHarness` (Pi Durable) with a tool. [Details](#cloudflare-agents-sdk-agents-0340) | an agent can't call an MCP server on the same host over the tailnet (`forbidden_destination`); `approveWorkflow()`/`rejectWorkflow()` from app code are refused by design ([approvals](#approvals)) | `subAgent()`, `env.AI`, email, browser, codemode; `McpAgent` and `@callable` not tested | `e2e/sdk:TestCloudflareAgents/RouteAgentRequest`, `e2e/sdk:TestCloudflareAgents/Schedule`, `e2e/sdk:TestCloudflareAgents/AgentAsMCPClient`, `e2e/sdk:TestAgentTemplate`, `e2e/sdk:TestWorkflowApprovals` (nightly: `make test-sdk`), `cmd/tw:TestTemplateTests/chat-agent`, `cmd/tw:TestTemplateTests/pi-agent` |
 | <a id="mcp"></a>MCP servers (`createMcpHandler`, `mcp-handler`) | ✅ | — | `@tailworks/mcp` `withTailnet`: a per-request caller, and tools allowed or denied by tailnet grants (`cap_missing`) | — | stdio transport | `e2e/sdk:TestCloudflareAgents/CreateMcpHandlerWithTailnet`, `e2e/sdk:TestVercelAI/McpHandlerWithTailnet` (nightly: `make test-sdk`) |
 | <a id="vercel-ai"></a>Vercel AI SDK (`ai`) | ⚠️ | — | `ToolLoopAgent` and UI message streams run in the Worker and in objects (one agent, one node). [Details](#vercel-ai-sdk-ai-70177-and-mcp-handler-240) | `@ai-sdk/mcp` with the default `fetch` throws in workerd; use `@tailworks/mcp` `mcpFetch` | `WorkflowAgent` in the Worker (it runs on [Node apps](#node-runtime)), on-behalf-of assertions | `e2e/sdk:TestVercelAI/ToolLoopAgent`, `e2e/sdk:TestVercelAI/EgressRefusalIsTyped`, `e2e/node:TestNodeWorkflow` (nightly: `make test-sdk`, `make test-node`) |
 
@@ -144,7 +144,9 @@ Pinned versions (root `package.json`, exact):
 | Package | Version | Note |
 |---|---|---|
 | workerd | 1.20261118.1 | platform runtime; the built-in Workflows engine (`/workerd/workflows.js`, workerd#8331) is in 1.20261114.1 and later |
-| `agents` (Cloudflare Agents SDK) | 0.33.0 | npm `latest` on 2026-11-08; runs on the pinned workerd unmodified |
+| `agents` (Cloudflare Agents SDK) | 0.34.0 | npm `latest` on 2026-11-23; runs on the pinned workerd unmodified. `agents/harness/pi` needs 0.34.0 or later |
+| `@cloudflare/ai-chat` | 0.12.3 | `AIChatAgent` (`chat-agent` template) |
+| `@earendil-works/pi-durable` / `pi-ai` / `pi-schema` / `chord` | 1.6.0 | Pi, for `PiHarness` (`pi-agent` template); agents 0.34 wants `~1.6.0` |
 | `@modelcontextprotocol/server` / `client` | 2.4.0 | MCP SDK v2 (agents' peers; `createMcpHandler`, `addMcpServer`) |
 | `@modelcontextprotocol/sdk` | 1.32.2 | v1, only for agents' deprecated `McpAgent` (not used) |
 | `ai` (Vercel AI SDK) | 7.0.177 | `ToolLoopAgent`, `ai/test` `MockLanguageModelV4` |
@@ -159,7 +161,7 @@ object's `fetch()` leaves from its own node) and **plain-DO**
 (`"egress": "workload"`; egress leaves as the workload node). Every Agent
 check below runs in both.
 
-## Cloudflare Agents SDK (`agents` 0.33.0)
+## Cloudflare Agents SDK (`agents` 0.34.0)
 
 | Feature | Facet | Plain-DO | Test (`e2e/sdk`) | Notes |
 |---|---|---|---|---|
@@ -187,7 +189,9 @@ check below runs in both.
 | Codemode / dynamic agents (`env.LOADER` for tenants) | ❌ | ❌ | `UnsupportedBindings` | Worker Loader is platform-only |
 | `harness/container/*` | not tested | not tested | — | was ❌ (needed a container). Tailworks now implements `ctx.container` (ADR-032, below), the primitive it builds on, but no `harness/container` code has been run on tailworks |
 | `McpAgent` | not tested | | — | deprecated upstream; use `createMcpHandler` (ADR-022) |
-| `@callable` RPC, `useAgent`, `AIChatAgent` | not tested | | — | same DO/WebSocket primitives as above (assumption) |
+| `AIChatAgent` (`@cloudflare/ai-chat`): `onChatMessage`, `saveMessages`, `get-messages`, server tools, `needsApproval` | ✅ | not tested | `cmd/tw:TestTemplateTests/chat-agent` | the `chat-agent` template under `tw dev`: over HTTP, a server tool runs and a large `calculate` stops at `approval-requested`; over the WebSocket (`useAgentChat`'s protocol, the template's page), an approval runs the tool and a client tool's answer continues the turn; one chat per caller. `routeAgentRequest` takes the instance name from the path without decoding it, so the template URL-encodes the caller's key everywhere. Not tested: the React `useAgentChat` client itself, stream resume |
+| `PiHarness` (`agents/harness/pi`) + `Lifecycle` | ✅ | not tested | `cmd/tw:TestTemplateTests/pi-agent` | the `pi-agent` template under `tw dev`: Pi Durable on a plain `DurableObject` in facet mode, a prompt, a `word_count` tool round, the transcript in the object's SQLite, one assistant per caller. Not tested: the Lifecycle alarm resuming a run after eviction, sessions, signals |
+| `@callable` RPC, `useAgent`, `useAgentChat` | not tested | | — | same DO/WebSocket primitives as above (assumption) |
 
 ## Secrets: details
 

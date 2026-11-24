@@ -33,7 +33,7 @@ func workloadLabel(s string) string {
 
 func cmdInit(args []string) error {
 	f := newFlags("init")
-	tmpl := f.String("template", "hello", "hello | agent | mcp | ai-agent | lock | refund-approval | node-workflow")
+	tmpl := f.String("template", "hello", "hello | agent | mcp | ai-agent | chat-agent | pi-agent | lock | refund-approval | node-workflow")
 	name := f.String("name", "", "workload name (default: the directory name)")
 	keepTags := f.Bool("keep-tags", false, "keep the template's tags instead of naming them after the app (tag:tw-wl-<workload>, tag:tw-<workload>-<class>)")
 	pos, err := f.parse(args)
@@ -174,7 +174,7 @@ func loadAppWith(dir, name string, o appOpts) (*app, error) {
 				return nil, err
 			}
 			if twErr != nil {
-				return nil, fail("bad_request", "no tailworks.jsonc or wrangler config in "+dir).withFix("tw init <dir> --template hello|agent|mcp|ai-agent|lock|refund-approval|node-workflow")
+				return nil, fail("bad_request", "no tailworks.jsonc or wrangler config in "+dir).withFix("tw init <dir> --template hello|agent|mcp|ai-agent|chat-agent|pi-agent|lock|refund-approval|node-workflow")
 			}
 			return nil, fail("bad_request", "no wrangler.jsonc, wrangler.json or wrangler.toml in "+dir)
 		}

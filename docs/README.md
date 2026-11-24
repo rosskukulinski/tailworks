@@ -42,7 +42,9 @@ in the CLI: `tw docs ls`, `tw docs search <words>`,
 - [Try it without a tailnet](INSTALL.md#try-it-without-a-tailnet): `tw dev`.
 - Templates: `tw init <dir> --template <name>`. `hello`, `agent`, `mcp`,
   `ai-agent` (a mock model; `src/model.ts` shows how to point it at an LLM
-  gateway on your tailnet), `lock`,
+  gateway on your tailnet), `chat-agent` (Cloudflare's `AIChatAgent` chat
+  example, with a chat page), `pi-agent` (Cloudflare's Pi harness example;
+  both use Aperture when you point them at it), `lock`,
   `refund-approval` (a Workflow that waits for a person), `node-workflow`.
   Each has a README.md: what it shows, how to run it, what to change.
 - [Recipes](recipes.md): short, runnable how-tos (internet APIs and LLMs through a tailnet gateway, a Durable Object per user, a signed webhook, cron into KV).

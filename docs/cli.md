@@ -388,7 +388,7 @@ create an app from a template
 ```text
 tw init: create an app from a template (node-workflow needs Node.js on the deploying machine)
 
-usage: tw init <dir> [--template hello|agent|mcp|ai-agent|lock|refund-approval|node-workflow] [--name <workload>]
+usage: tw init <dir> [--template hello|agent|mcp|ai-agent|chat-agent|pi-agent|lock|refund-approval|node-workflow] [--name <workload>]
 
 flags:
   -json
@@ -400,7 +400,7 @@ flags:
   -state-dir string
     	state directory (default $TW_STATE_DIR or ~/.tailworks)
   -template string
-    	hello | agent | mcp | ai-agent | lock | refund-approval | node-workflow (default "hello")
+    	hello | agent | mcp | ai-agent | chat-agent | pi-agent | lock | refund-approval | node-workflow (default "hello")
 ```
 
 ### tw dev

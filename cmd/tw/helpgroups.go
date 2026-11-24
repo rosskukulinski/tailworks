@@ -94,7 +94,8 @@ func usageGrouped(w io.Writer) {
 			fmt.Fprintf(w, "  %-11s %s\n", c.name, helpLine(c))
 		}
 	}
-	fmt.Fprintln(w, "\ntemplates (tw init --template): hello | agent | mcp | ai-agent | lock | refund-approval | node-workflow (needs Node.js)")
+	fmt.Fprintln(w, "\ntemplates (tw init --template): hello | agent | mcp | ai-agent | chat-agent | pi-agent | lock |")
+	fmt.Fprintln(w, "  refund-approval | node-workflow (needs Node.js)")
 	fmt.Fprintln(w, "\ntw <command> --help     a command's usage and flags")
 	fmt.Fprintln(w, "tw help --all           every command's usage")
 	fmt.Fprintln(w, "tw completion --help    tab completion for bash, zsh and fish")

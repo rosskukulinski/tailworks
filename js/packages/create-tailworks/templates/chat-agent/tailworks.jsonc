@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/rosskukulinski/tailworks/master/schema/tailworks.schema.json",
+  "name": "chat-agent",
+  "tailnet": {
+    "tags": ["tag:tw-wl-chat"],
+    "objects": {
+      // one chat per caller; each is its own node, so the model calls and
+      // tool calls it makes leave as that chat, not as the whole app
+      "ChatAgent": { "tags": ["tag:tw-chat-agent"], "agent": true }
+    }
+    // With LLM_URL pointing at Aperture, name Aperture's tag here so
+    // `tw policy` and `tw deploy` check the grant, e.g.
+    //   "connects": ["tag:aperture"]
+  }
+}

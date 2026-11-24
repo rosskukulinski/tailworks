@@ -1,0 +1,15 @@
+{
+  "name": "pi-agent",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": { "bindings": [{ "name": "Assistant", "class_name": "Assistant" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Assistant"] }],
+  "vars": {
+    // An OpenAI-compatible gateway on your tailnet, e.g. Aperture:
+    // "http://<aperture-hostname>/v1". Empty: a scripted mock model.
+    "LLM_URL": "",
+    // A model the gateway serves (Aperture: one its config lists).
+    "LLM_MODEL": ""
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/rosskukulinski/tailworks/master/schema/tailworks.schema.json",
+  "name": "pi-agent",
+  "tailnet": {
+    "tags": ["tag:tw-wl-pi"],
+    "objects": {
+      // one assistant per caller; each is its own node, so its model and
+      // tool calls leave as that assistant, not as the whole app
+      "Assistant": { "tags": ["tag:tw-pi-agent"], "agent": true }
+    }
+    // With LLM_URL pointing at Aperture, name Aperture's tag here so
+    // `tw policy` and `tw deploy` check the grant, e.g.
+    //   "connects": ["tag:aperture"]
+  }
+}

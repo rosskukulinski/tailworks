@@ -12,6 +12,16 @@
 #          so adding or renaming a job here never needs a settings change
 #          (add it to ci-ok's needs, though).
 #
+# Go caches: setup-go's cache is off here. Its one key per go.sum was shared
+# by every job, saved once by whichever job finished first, and then never
+# updated, so lint (vet per build tag, staticcheck) and test (-race) rebuilt
+# nearly everything on every run. Instead each job restores its own cache
+# (module cache, build cache and, for lint, staticcheck's) from the newest
+# master run. Only master pushes (and workflow_dispatch) save. PR and queue
+# runs restore only, because a PR-scoped cache is invisible to every other
+# ref. go-cache-prune then deletes the older entries, so each job keeps one
+# rolling cache within the repo's 10 GB Actions cache budget.
+#
 # merge_group runs the same gates on master + the queued PRs combined, which
 # is what catches two PRs that pass alone and break master together. The
 # suites that need Docker, VMs, credentials or a real tailnet stay out of
@@ -29,6 +39,14 @@ on:
 permissions:
   contents: read
 
+env:
+  GO_CACHE_PATHS: |
+    ~/go/pkg/mod
+    ~/.cache/go-build
+    ~/.cache/staticcheck
+  # Saved by master pushes and workflow_dispatch only (see the header).
+  GO_CACHE_SAVE: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -44,12 +62,28 @@ jobs:
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
+          cache: false # the per-job go-ci-* caches below replace it
+      - name: restore Go caches
+        id: go-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.GO_CACHE_PATHS }}
+          key: go-ci-lint-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum', 'tools/go.mod', 'tools/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            go-ci-lint-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum', 'tools/go.mod', 'tools/go.sum') }}-
+            go-ci-lint-${{ runner.os }}-
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
           cache: npm
       - name: make lint
         run: make lint
+      - name: save Go caches
+        if: ${{ !cancelled() && steps.go-cache.outcome == 'success' && env.GO_CACHE_SAVE == 'true' && steps.go-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.GO_CACHE_PATHS }}
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
 
   test:
     runs-on: ubuntu-24.04
@@ -59,6 +93,16 @@ jobs:
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
+          cache: false # the per-job go-ci-* caches below replace it
+      - name: restore Go caches
+        id: go-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.GO_CACHE_PATHS }}
+          key: go-ci-test-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum', 'tools/go.mod', 'tools/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            go-ci-test-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum', 'tools/go.mod', 'tools/go.sum') }}-
+            go-ci-test-${{ runner.os }}-
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
@@ -69,6 +113,12 @@ jobs:
       # on this step. It still runs in a local `make test` and in release.yml.
       - name: make test
         run: make test
+      - name: save Go caches
+        if: ${{ !cancelled() && steps.go-cache.outcome == 'success' && env.GO_CACHE_SAVE == 'true' && steps.go-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.GO_CACHE_PATHS }}
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
 
   suite:
     name: ${{ matrix.target }}
@@ -86,6 +136,16 @@ jobs:
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
+          cache: false # the per-job go-ci-* caches below replace it
+      - name: restore Go caches
+        id: go-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.GO_CACHE_PATHS }}
+          key: go-ci-suite-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum', 'tools/go.mod', 'tools/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            go-ci-suite-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum', 'tools/go.mod', 'tools/go.sum') }}-
+            go-ci-suite-${{ runner.os }}-
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
@@ -94,6 +154,13 @@ jobs:
         run: make deps
       - name: make ${{ matrix.target }}
         run: make ${{ matrix.target }}
+      - name: save Go caches
+        # The three suites share one cache; e2e-local builds the most Go, so it saves.
+        if: ${{ !cancelled() && steps.go-cache.outcome == 'success' && env.GO_CACHE_SAVE == 'true' && steps.go-cache.outputs.cache-hit != 'true' && matrix.target == 'e2e-local' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.GO_CACHE_PATHS }}
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
 
   ci-ok:
     if: always()
@@ -110,3 +177,28 @@ jobs:
         run: |
           echo "results: $RESULTS"
           for r in $RESULTS; do [ "$r" = success ] || exit 1; done
+
+  # Keep one go-ci-<job> cache per job on this ref: the newest. Its own job
+  # so that the actions: write token never reaches the jobs that run the
+  # branch's code.
+  go-cache-prune:
+    if: always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    needs:
+      - lint
+      - suite
+      - test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      REF: ${{ github.ref }}
+    steps:
+      - name: delete older go-ci caches
+        run: |
+          for job in lint suite test; do
+            gh cache list --ref "$REF" --key "go-ci-$job-" --sort created_at --order desc --limit 100 --json id --jq '.[1:][].id' |
+              while read -r id; do echo "delete go-ci-$job cache $id"; gh cache delete "$id"; done
+          done

@@ -1,0 +1,12 @@
+{
+  "name": "vmalarm",
+  "tailnet": {
+    "tags": ["tag:ttest"],
+    "objects": {
+      // facet mode (the default): the alarm is delegated to its Host DO
+      "Clock": { "tags": ["tag:ttest"] },
+      // plain-DO mode: workerd's own alarm
+      "PlainClock": { "tags": ["tag:ttest"], "egress": "workload" },
+    },
+  },
+}

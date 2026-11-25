@@ -33,6 +33,12 @@ import (
 // multipart upload, and that blobs are named by tenant, workload and
 // bucket.
 func TestR2Binding(t *testing.T) {
+	t.Parallel()
+	testR2Binding(t, hostdtest.BackendFake)
+}
+
+// testR2Binding is TestR2Binding against backend (realmgmt_test.go).
+func testR2Binding(t *testing.T, backend string) {
 	fake := r2test.StartFakeS3(t.TempDir())
 	defer fake.Close()
 	for _, tc := range []struct {
@@ -44,9 +50,9 @@ func TestR2Binding(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			blobDir := t.TempDir()
-			s := startSuiteCapsOpts(t, fakemgmt.Config{}, tailcfg.PeerCapMap{nettest.TestCap: []tailcfg.RawMessage{nettest.TestCapValue}}, func(o *hostdtest.Options) {
+			s := startSuiteCapsOpts(t, fakemgmt.Config{}, tailcfg.PeerCapMap{nettest.TestCap: []tailcfg.RawMessage{nettest.TestCapValue}}, onBackend(backend, func(o *hostdtest.Options) {
 				o.R2 = tc.be(blobDir)
-			})
+			}))
 			e := s.e
 			dep := e.Deploy(hostdtest.Fixture("r2probe"), "r2probe", nil)
 			wl := e.WaitActive("r2probe", dep, 60*time.Second)
@@ -379,6 +385,9 @@ func filesUnder(t *testing.T, dir string) []string {
 // from a JS generator, which is not measured: its chunks are V8 garbage,
 // about 150 MiB of RSS per 512 MiB even without R2.) Request bodies of known length also stream from the
 // tailnet into a bucket and back, from the worker and from a facet.
+//
+// Not parallel: the heap it samples is the whole test process's, which
+// the parallel tests would inflate.
 func TestR2Streaming(t *testing.T) {
 	if testing.Short() {
 		t.Skip("moves 1 GiB")
@@ -490,11 +499,14 @@ func r2Mem(pid int) (heap, rss uint64) {
 // Deleting the bucket (its store, as `tw r2 bucket delete` does) empties
 // it and deletes the blobs the index pointed to.
 func TestR2IndexSurvivesMove(t *testing.T) {
+	t.Parallel()
 	fake := r2test.StartFakeS3(t.TempDir())
 	defer fake.Close()
 	s := startSuiteCapsOpts(t, fakemgmt.Config{}, tailcfg.PeerCapMap{nettest.TestCap: []tailcfg.RawMessage{nettest.TestCapValue}}, func(o *hostdtest.Options) {
 		o.R2 = fake.Backend("")
-		o.FenceAfter, o.HeartbeatEvery = time.Second, 100*time.Millisecond
+		// 5 s, not 1 s: ordinary calls must not trip the stall fence on a loaded
+		// runner (#556 gates stateful ingress on heartbeat freshness; #591).
+		o.FenceAfter, o.HeartbeatEvery = 5*time.Second, 100*time.Millisecond
 	})
 	e := s.e
 	dep := e.Deploy(hostdtest.Fixture("r2probe"), "r2probe", nil)
@@ -515,7 +527,7 @@ func TestR2IndexSurvivesMove(t *testing.T) {
 
 	ws := workloadStatus(t, e, "r2probe")
 	e.FM.SetHeartbeatsDown(true)
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for workloadStatus(t, e, "r2probe").PID != 0 {
 		if time.Now().After(deadline) {
 			t.Fatal("workload not fenced")

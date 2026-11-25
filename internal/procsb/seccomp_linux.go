@@ -92,10 +92,12 @@ func (p *prog) retIfEq(k, v uint32) {
 }
 
 // filterOpts parameterise the program: self is the sandboxed process's pid
-// (exec keeps it), noUnix denies socket(AF_UNIX).
+// (exec keeps it), noUnix denies socket(AF_UNIX), noListen makes listen()
+// a no-op returning 0.
 type filterOpts struct {
-	self   int
-	noUnix bool
+	self     int
+	noUnix   bool
+	noListen bool
 }
 
 // buildFilter returns the seccomp program (see the package comment).
@@ -112,6 +114,12 @@ func buildFilter(o filterOpts) []unix.SockFilter {
 	}
 	for _, nr := range enosysSyscalls {
 		p.retIfEq(uint32(nr), retErrno(unix.ENOSYS))
+	}
+	if o.noListen {
+		// RET_ERRNO with errno 0: the syscall is skipped and returns 0, so
+		// node's listen() on its inherited, already-listening fd succeeds
+		// and any other socket stays a non-listener.
+		p.retIfEq(uint32(unix.SYS_LISTEN), unix.SECCOMP_RET_ERRNO)
 	}
 	jClone := p.jeq(uint32(unix.SYS_CLONE))
 	jSocket := p.jeq(uint32(unix.SYS_SOCKET))

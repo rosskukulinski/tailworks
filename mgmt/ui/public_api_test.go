@@ -9,9 +9,9 @@ import (
 	v1 "github.com/rosskukulinski/tailworks/mgmt/api/v1"
 )
 
-// transportHeaders are what Go's HTTP client adds on its own; they are part
-// of HTTP, not of the tailworks API.
-var transportHeaders = map[string]bool{"Accept-Encoding": true, "User-Agent": true}
+// transportHeaders are what Go's HTTP client adds on its own (Content-Length:
+// 0 on a PUT with no body); they are part of HTTP, not of the tailworks API.
+var transportHeaders = map[string]bool{"Accept-Encoding": true, "Content-Length": true, "User-Agent": true}
 
 // documentedHeaders are request headers api/openapi.yaml documents for every
 // operation rather than per operation: Accept (content negotiation) and
@@ -57,13 +57,15 @@ func TestUsesOnlyPublicAPI(t *testing.T) {
 			t.Errorf("%s points the browser at the API directly", p)
 		}
 	}
-	for path, form := range map[string]string{
-		"/ui/objects/obj_root/kill":      "cascade=true&reason=r",
-		"/ui/deployments/dep_1/undeploy": "reason=r",
-		"/ui/hosts/h1/remove":            "drain=true",
-		"/ui/tenants/tn_1/delete":        "force=true",
+	for _, f := range [][2]string{
+		{"/ui/objects/obj_root/kill", "cascade=true&reason=r"},
+		{"/ui/deployments/dep_1/undeploy", "reason=r"},
+		{"/ui/hosts/h1/cordon", ""},
+		{"/ui/hosts/h1/cordon", "uncordon=true"},
+		{"/ui/hosts/h1/remove", "drain=true"},
+		{"/ui/tenants/tn_1/delete", "force=true"},
 	} {
-		r := httptest.NewRequest("POST", "http://tw-mgmt.t.ts.net"+path, strings.NewReader(form))
+		r := httptest.NewRequest("POST", "http://tw-mgmt.t.ts.net"+f[0], strings.NewReader(f[1]))
 		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		h.ServeHTTP(httptest.NewRecorder(), r)
 	}

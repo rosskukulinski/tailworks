@@ -1,0 +1,8 @@
+{
+  // e2e/dataplane containers loop (issue #423): a microVM-tier workload,
+  // deployed under many names in a burst, so its VMs come from the warm pool
+  // and the base snapshot concurrently (ADR-030).
+  "name": "vmw",
+  "tier": "microvm",
+  "tailnet": { "tags": ["tag:ttest"] },
+}

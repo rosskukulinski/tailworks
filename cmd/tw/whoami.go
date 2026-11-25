@@ -30,6 +30,10 @@ type whoamiResult struct {
 	Tenants   []string       `json:"tenants"`
 	Caps      []string       `json:"caps"` // github.com/rosskukulinski/tailworks/cap/* held toward mgmt
 	Can       whoamiCanFlags `json:"can"`
+
+	// Console is the admin console URL when this identity may open it
+	// (console.go): linked, not --tsnet.
+	Console string `json:"console,omitempty"`
 }
 
 type whoamiMgmt struct {
@@ -108,6 +112,9 @@ func whoamiFrom(s *state, w whoamiWire) whoamiResult {
 	if res.Can.TenantAdmin == nil {
 		res.Can.TenantAdmin = []mgmt.TenantGrant{}
 	}
+	if s.remote() {
+		res.Console = consoleURL(s.Link, w.Admin, len(w.TenantGrants) > 0, w.Approver != nil && *w.Approver)
+	}
 	if w.Admin || !s.remote() || len(w.TenantGrants) > 0 {
 		for _, t := range s.tenants() {
 			res.Tenants = append(res.Tenants, t.Tailnet)
@@ -181,6 +188,13 @@ func printWhoami(r whoamiResult) {
 	}
 	if len(r.Caps) > 0 {
 		fmt.Printf("caps      %s\n", strings.Join(r.Caps, ", "))
+	}
+	if r.Console != "" {
+		only := ""
+		if strings.HasSuffix(r.Console, "/ui/approvals") {
+			only = " (the approvals page: the rest needs admin)"
+		}
+		fmt.Printf("console   %s%s\n", r.Console, only)
 	}
 	for _, h := range whoamiHints(r) {
 		fmt.Printf("› %s\n", h)

@@ -27,6 +27,7 @@ func rawVals(vals ...string) []json.RawMessage {
 }
 
 func TestTenantGrantParsing(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		val   string
 		valid bool
@@ -51,6 +52,7 @@ func TestTenantGrantParsing(t *testing.T) {
 
 // TestTenantGrantPerValue: values are matched one at a time, never merged.
 func TestTenantGrantPerValue(t *testing.T) {
+	t.Parallel()
 	p := Principal{Kind: "user", CapValues: map[string][]json.RawMessage{TenantAdminCap: rawVals(
 		`{"tenants": ["a"], "actions": ["read"]}`,
 		`{"tenants": ["b"], "actions": ["deploy"]}`,
@@ -76,11 +78,13 @@ func TestTenantGrantPerValue(t *testing.T) {
 // tenantOperatorRoutes are the operations under /v1/tenants/{id} that stay
 // admin-only (no "tenant:" part), by decision, not by omission.
 var tenantOperatorRoutes = map[string]bool{
-	"DELETE /v1/tenants/{id}":         true, // removing a tenant
-	"DELETE /v1/tenants/{id}/objects": true, // purging every object
-	"GET /v1/tenants/{id}/approvals":  true, // approvers (github.com/rosskukulinski/tailworks/cap/approve)
-	"PATCH /v1/tenants/{id}":          true, // limits, pool, tier, credentials
+	"DELETE /v1/tenants/{id}":                                                    true, // removing a tenant
+	"DELETE /v1/tenants/{id}/objects":                                            true, // purging every object
+	"GET /v1/tenants/{id}/approvals":                                             true, // approvers (github.com/rosskukulinski/tailworks/cap/approve)
+	"GET /v1/tenants/{id}/workloads/{workload}/service-bindings/{binding}":       true, // hosts
+	"PATCH /v1/tenants/{id}":                                                     true, // limits, pool, tier, credentials
 	"POST /v1/tenants/{id}/workloads/{workload}/approvals/{workflow}/{instance}": true, // approvers
+	"POST /v1/tenants/{id}/workloads/{workload}/policy":                          true, // writes the tailnet policy (issue #116)
 	"POST /v1/tenants/{id}/workloads/{workload}/secret-grants":                   true, // hosts
 	"POST /v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name}/status":     true, // hosts (a store object's degraded report)
 	"POST /v1/tenants/{id}/workloads/{workload}/telemetry-grants":                true, // hosts
@@ -90,6 +94,7 @@ var tenantOperatorRoutes = map[string]bool{
 // sits where something checks the tenant; every tenant-path operation is
 // either open to tenant admins or deliberately admin-only.
 func TestTenantRolesConsistent(t *testing.T) {
+	t.Parallel()
 	roles, err := v1.OperationRoles()
 	if err != nil {
 		t.Fatal(err)
@@ -223,6 +228,7 @@ func newTenantEnv(t *testing.T) *tenantEnv {
 }
 
 func TestTenantAdminScope(t *testing.T) {
+	t.Parallel()
 	e := newTenantEnv(t)
 	tn, tn2 := e.tn, e.tn2
 
@@ -331,6 +337,7 @@ func TestTenantAdminScope(t *testing.T) {
 }
 
 func TestTenantAdminValuesNotMerged(t *testing.T) {
+	t.Parallel()
 	e := newTenantEnv(t)
 	// read in tn, deploy in tn2: no deploy in tn, no read in tn2.
 	if st, eb := e.call(nodeTeamRO, "GET", "/v1/tenants/"+e.tn, nil, nil); st != 200 {
@@ -348,6 +355,7 @@ func TestTenantAdminValuesNotMerged(t *testing.T) {
 }
 
 func TestTenantAdminInvalidAndOperator(t *testing.T) {
+	t.Parallel()
 	e := newTenantEnv(t)
 	// A caller whose only value is invalid gets nothing but whoami, which
 	// says why.
@@ -370,6 +378,7 @@ func TestTenantAdminInvalidAndOperator(t *testing.T) {
 }
 
 func TestTenantAdminRegistry(t *testing.T) {
+	t.Parallel()
 	e := newTenantEnv(t)
 	// Approvers were admitted as plain users and reached the registry as if
 	// they were admins; now they don't reach it.
@@ -406,6 +415,7 @@ func TestTenantAdminRegistry(t *testing.T) {
 }
 
 func TestTenantAdminSubValues(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		val   string
 		valid bool
@@ -454,6 +464,7 @@ func (e *tenantEnv) mcpCall(from, tool string, args map[string]any) (map[string]
 }
 
 func TestTenantAdminMCP(t *testing.T) {
+	t.Parallel()
 	e := newTenantEnv(t)
 	// Read tools from the "mcp" value, plus kill (named, and "kill" in the
 	// same value). No status (operator), no deploy or undeploy.
@@ -487,6 +498,7 @@ func TestTenantAdminMCP(t *testing.T) {
 }
 
 func TestTenantAdminApprovals(t *testing.T) {
+	t.Parallel()
 	e := newTenantEnv(t)
 	// An approve-only value admits the approvals routes for its tenant...
 	if st, eb := e.call(nodeTeamApp, "GET", "/v1/tenants/"+e.tn+"/approvals", nil, nil); st != 200 {
@@ -513,6 +525,7 @@ func TestTenantAdminApprovals(t *testing.T) {
 }
 
 func TestTenantAdminSeveralTenants(t *testing.T) {
+	t.Parallel()
 	e := newTenantEnv(t)
 	// read in both tenants, no ?tenant=: both tenants' rows, nobody else's.
 	var ds struct{ Items []map[string]any }
@@ -543,6 +556,7 @@ func TestTenantAdminSeveralTenants(t *testing.T) {
 }
 
 func TestTenantAccessWarnings(t *testing.T) {
+	t.Parallel()
 	e := newTenantEnv(t) // tn and tn2 share t.ts.net
 	ctx := context.Background()
 	tn, err := e.m.store.GetTenant(ctx, e.tn)

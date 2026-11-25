@@ -20,6 +20,7 @@ import (
 // object's sandbox must not outlive the lease); a workload whose classes
 // are all "fence": "never" keeps its containers, and they keep working.
 func TestContainerFenceInheritance(t *testing.T) {
+	t.Parallel()
 	const fenceAfter = time.Second
 	procs := &sandboxtest.Procs{}
 	st, err := sandboxtest.ImageStore(t.TempDir(), []string{"sleep", "3600"}, "tw.test/box:1")

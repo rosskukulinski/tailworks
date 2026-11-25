@@ -47,6 +47,12 @@ func newRundir(t *testing.T) string {
 
 func startEnv(t *testing.T, objects ...string) *env {
 	t.Helper()
+	return startEnvWith(t, nil, objects...)
+}
+
+// startEnvWith is startEnv with a hook that adjusts the registry's Config.
+func startEnvWith(t *testing.T, tweak func(*netd.Config), objects ...string) *env {
+	t.Helper()
 	wdBin, err := nettest.WorkerdBinary()
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +76,7 @@ func startEnv(t *testing.T, objects ...string) *env {
 	t.Cleanup(wd.Stop)
 	t.Logf("workerd cold start %v", wd.ColdStart)
 
-	e.reg, err = netd.New(netd.Config{
+	cfg := netd.Config{
 		ControlURL: ctl.URL,
 		StateRoot:  filepath.Join(e.rundir, "state"),
 		Keys:       netd.StaticKey(nettest.DummyKey),
@@ -79,7 +85,11 @@ func startEnv(t *testing.T, objects ...string) *env {
 			e.deleted <- info
 			return nil
 		},
-	})
+	}
+	if tweak != nil {
+		tweak(&cfg)
+	}
+	e.reg, err = netd.New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,9 +257,6 @@ func TestChain(t *testing.T) {
 			{"own-ip", "http://" + e.objIP["a"] + "/", netd.CodeForbiddenDestination},
 			{"own-ip-other-port", "http://" + e.objIP["a"] + ":8080/", netd.CodeForbiddenDestination},
 			{"own-name", "http://tw-a/", netd.CodePeerNotVisible}, // self is not a peer in its own netmap
-			{"sibling-ip", "http://" + e.objIP["b"] + "/", netd.CodeForbiddenDestination},
-			{"sibling-name", "http://tw-b/", netd.CodeForbiddenDestination},
-			{"sibling-fqdn", "http://tw-c." + nettest.MagicDNSDomain + "/", netd.CodeForbiddenDestination},
 			{"host-ip", "http://" + hostIP + "/", netd.CodeForbiddenDestination},
 			{"loopback-v4", "http://127.0.0.1/", netd.CodeForbiddenDestination},
 			{"loopback-v4-alt", "http://127.1.2.3:18080/", netd.CodeForbiddenDestination},
@@ -282,6 +289,8 @@ func TestChain(t *testing.T) {
 			})
 		}
 	})
+
+	t.Run("SameHostHop", func(t *testing.T) { testSameHostHop(t, e) }) // samehost_test.go
 
 	t.Run("InternetEgressUnavailable", func(t *testing.T) {
 		// A name that is not tailnet-shaped is internet egress, which Workers

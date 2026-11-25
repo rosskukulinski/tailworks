@@ -42,6 +42,7 @@ func auditKinds(h *Host) map[string]int {
 // Reports are idempotent per wait, persist across a hostd restart, and a
 // timeout settles the wait (rejected by default).
 func TestApprovalRegistry(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	h, inst := approvalsHost(t, dir)
 	report(t, h, inst, "requested", "wf1", 50)
@@ -75,6 +76,7 @@ func TestApprovalRegistry(t *testing.T) {
 }
 
 func TestAuthorizeApproval(t *testing.T) {
+	t.Parallel()
 	a := &Approval{Workload: "refunds", Workflow: "refund", Step: "wait-for-approval", Facts: map[string]float64{"amount": 700}}
 	g := func(s ...string) []json.RawMessage {
 		var out []json.RawMessage
@@ -114,6 +116,7 @@ func TestAuthorizeApproval(t *testing.T) {
 // The endpoint on the workload's node: tailnet identities only, JSON posts
 // only, grants checked (and refusals audited) before anything is delivered.
 func TestServeApprovalsRefusals(t *testing.T) {
+	t.Parallel()
 	h, inst := approvalsHost(t, t.TempDir())
 	report(t, h, inst, "requested", "wf1", 50)
 	wl := inst.w

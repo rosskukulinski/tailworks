@@ -39,6 +39,10 @@ type auditLog struct {
 	flushMu sync.Mutex // one flush at a time
 	now     func() time.Time
 	memMax  int // maxPendingAudit; lowered by tests
+
+	// resumeFrom: the head a clean shutdown saved, until the first
+	// registration (auditresume.go).
+	resumeFrom string
 }
 
 // maxPendingAudit is how many records wait in memory before host records

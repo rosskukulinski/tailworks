@@ -8,7 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rosskukulinski/tailworks/internal/mgmtd"
 	"github.com/rosskukulinski/tailworks/internal/tsapi"
+	"github.com/rosskukulinski/tailworks/internal/tsnetlc"
 	"tailscale.com/ipn"
 	"tailscale.com/tailcfg/nodecap"
 	"tailscale.com/tsnet"
@@ -35,17 +37,19 @@ type joinOpts struct {
 	Out                       io.Writer // where the login URL and progress go
 }
 
-// joinMgmtNode joins (or re-opens) mgmt's tsnet node from the CLI, so the
+// joinMgmtNode joins (or re-opens) a tsnet node from the CLI, so an
 // interactive login happens in the operator's terminal: it prints the
 // login URL, waits for the login, reads the netmap (tailnet name, DNS
-// name, HTTPS, funnel) and closes the node again. tw-mgmt then re-opens
-// the same state dir without any login. The system tailscaled is never
-// used: this is a separate tsnet node whose state lives under Dir.
+// name, HTTPS, funnel) and closes the node again. `tw link --tsnet` uses
+// it for the CLI's own node. `tw up` no longer does: mgmt joins its own
+// node with the single-use key tw up hands it in a 0600 file
+// (up_mgmtjoin.go). The system tailscaled is never used: this is a
+// separate tsnet node whose state lives under Dir.
 func joinMgmtNode(ctx context.Context, o joinOpts) (*mgmtNode, error) {
 	ts := &tsnet.Server{Hostname: o.Hostname, Dir: o.Dir, ControlURL: o.ControlURL, AdvertiseTags: o.Tags, AuthKey: o.AuthKey,
 		Logf: func(string, ...any) {}, UserLogf: func(string, ...any) {}}
-	defer ts.Close()
-	lc, err := ts.LocalClient()
+	defer tsnetlc.Close(ts)
+	lc, err := tsnetlc.Client(ts)
 	if err != nil {
 		return nil, fail("bootstrap_failed", "could not start mgmt's tailnet node", err.Error())
 	}
@@ -66,15 +70,15 @@ func joinMgmtNode(ctx context.Context, o joinOpts) (*mgmtNode, error) {
 		if err != nil {
 			if wctx.Err() != nil {
 				return nil, fail("login_timeout", fmt.Sprintf("no login after %v", o.Timeout),
-					"the login URL was printed above; tw up waits for the browser login to complete").
-					withFix("run tw up again and finish the login, or pass --mgmt-authkey-file for an unattended join")
+					"the login URL was printed above; tw link --tsnet waits for the browser login to complete").
+					withFix("run tw link --tsnet again and finish the login, or pass --tsnet-authkey-file to tw link --tsnet for an unattended join")
 			}
 			return nil, fail("bootstrap_failed", "tailnet join failed", err.Error())
 		}
 		if n.ErrMessage != nil {
 			msg := *n.ErrMessage
 			if tsapi.IsTagsNotPermitted(errors.New(msg)) {
-				return nil, policyMissingTagOwners("the control server refused the join of "+o.Hostname+" with tags "+strings.Join(o.Tags, ", "), errors.New(msg))
+				return nil, policyMissingTagOwners("the control server refused the join of "+o.Hostname+" with tags "+strings.Join(o.Tags, ", "), errors.New(msg), nil)
 			}
 			e := fail("bootstrap_failed", "the control server refused the join", msg)
 			if strings.Contains(strings.ToLower(msg), "tag") {
@@ -89,6 +93,13 @@ func joinMgmtNode(ctx context.Context, o joinOpts) (*mgmtNode, error) {
 		}
 		if n.State != nil && *n.State == ipn.Running {
 			break
+		}
+		// Logged in with a netmap is all tw up needs (name, tailnet, tags,
+		// IP); Running would also wait for netcheck and DERP (#245).
+		if n.State != nil || n.SelfChange != nil {
+			if _, ok := mgmtd.LoggedIn(wctx, lc); ok {
+				break
+			}
 		}
 	}
 	st, err := lc.Status(ctx)

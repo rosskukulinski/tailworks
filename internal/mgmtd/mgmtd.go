@@ -13,6 +13,7 @@ package mgmtd
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,11 +28,15 @@ import (
 
 	"github.com/rosskukulinski/tailworks/internal/approvecap"
 	"github.com/rosskukulinski/tailworks/internal/obs"
+	"github.com/rosskukulinski/tailworks/internal/registry"
 	"github.com/rosskukulinski/tailworks/internal/tsapi"
+	"github.com/rosskukulinski/tailworks/internal/tsnetlc"
 	"github.com/rosskukulinski/tailworks/internal/tssvc"
 	"github.com/rosskukulinski/tailworks/mgmt"
+	"tailscale.com/client/local"
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/ipnstate"
+	"tailscale.com/tailcfg/nodecap"
 	"tailscale.com/tsnet"
 )
 
@@ -63,7 +68,7 @@ type Options struct {
 	// TSNetHostname names mgmt's own tailnet node (required unless
 	// LocalDev); TSNetControlURL is required with it. TSNetAuthKeyFile
 	// holds TS_AUTHKEY=… for the first join (else the node state must be
-	// logged in already: tw up joins it first). TSNetTags are
+	// logged in already; tw up hands the key over: TSNetAuthKeyOnce). TSNetTags are
 	// the tags the node advertises (nil = mgmt.MgmtTag; empty = none).
 	// TSNetService also hosts a Tailscale Service (svc:…) on :80,
 	// advertised only while this replica's store answers. TSNetTLS also
@@ -74,6 +79,13 @@ type Options struct {
 	TSNetTags        []string
 	TSNetService     string
 	TSNetTLS         bool
+
+	// TSNetAuthKeyOnce makes TSNetAuthKeyFile a single-use handoff (`tw
+	// up`, joinkey.go): the key is read and the file deleted before the
+	// join, a missing file is no key, and a failed Start deletes the file
+	// and records why in StartErrFile.
+	TSNetAuthKeyOnce bool
+
 	// NoLoopback skips publishing <StateDir>/loopback.json for the local CLI.
 	NoLoopback bool
 	// Version is reported by GET /v1/status.
@@ -92,10 +104,17 @@ type Options struct {
 	// mgmt.DefaultWarmKeyTTL).
 	WarmKeys   int
 	WarmKeyTTL time.Duration
+	// RevokeWarmKeysOnClose: Close revokes the unused pooled keys
+	// (mgmt.Config; tw-mgmt -revoke-warm-keys-on-exit).
+	RevokeWarmKeysOnClose bool
+
+	// APILimits rate-limit tailnet callers of the API (zero: the defaults).
+	APILimits mgmt.APILimits
+
 	// RegistryDir is the OCI registry blob store ("" = <StateDir>/registry,
 	// "off" = no registry); RegistryInsecure lists upstream registry hosts
 	// mirrored over plain HTTP; NoMirror refuses external image refs at
-	// deploy; ImageAliasesFile is a JSON file [{from, to, arch}] replacing
+	// deploy; ImageAliasesFile is a JSON file [{from, to, arch, source}] replacing
 	// the default image alias map.
 	RegistryDir      string
 	RegistryInsecure []string
@@ -111,6 +130,11 @@ type Options struct {
 	// BundleRetention is how many bundles per workload mgmt keeps for
 	// rollback (mgmt.Config; 0 = mgmt.DefaultBundleRetention, < 0 = all).
 	BundleRetention int
+
+	// Audit retention (mgmt.Config, mgmt/retention.go): 0 = keep every
+	// record (the default).
+	AuditMaxAge     time.Duration
+	AuditMaxRecords int64
 }
 
 // Runtime is a running mgmt.
@@ -129,6 +153,12 @@ type Runtime struct {
 	servers  []*http.Server
 	gate     *mgmt.ServiceGate
 	cleanups []func()
+
+	// bg is cancelled first by Close: background LocalAPI calls (the
+	// certificate prefetch) must not hold tsnet.Server.Close's LocalAPI
+	// shutdown for its 5 s grace (#245).
+	bg       context.Context
+	bgCancel context.CancelFunc
 
 	// metrics.go: registries served with mgmt's on /metrics.
 	metricsMu    sync.Mutex
@@ -159,11 +189,24 @@ func Start(ctx context.Context, o Options) (rt *Runtime, err error) {
 	}
 	os.Chmod(o.StateDir, 0o700)
 	rt = &Runtime{log: log, errc: make(chan error, 4)}
+	rt.bg, rt.bgCancel = context.WithCancel(context.Background())
 	defer func() {
 		if err != nil {
 			rt.Close()
 		}
 	}()
+	if o.TSNetAuthKeyOnce {
+		defer func() { // joinkey.go
+			if err == nil {
+				os.Remove(StartErrFile(o.StateDir))
+				return
+			}
+			if o.TSNetAuthKeyFile != "" {
+				os.Remove(o.TSNetAuthKeyFile) // single use, also when Start fails before reading it
+			}
+			recordStartErr(o.StateDir, err)
+		}()
+	}
 
 	dsn := o.DB
 	if o.DBFile != "" {
@@ -214,6 +257,8 @@ func Start(ctx context.Context, o Options) (rt *Runtime, err error) {
 	// Operator-tailnet node (optional).
 	var ts *tsnet.Server
 	self := mgmt.SelfInfo{}
+	var selfTags []string // for the loopback descriptor: tw up checks them
+	var selfFunnel bool
 	if o.TSNetService != "" {
 		if o.TSNetHostname == "" {
 			return nil, errors.New("-tsnet-service needs -tsnet-hostname")
@@ -235,15 +280,29 @@ func Start(ctx context.Context, o Options) (rt *Runtime, err error) {
 			ts.AdvertiseTags = o.TSNetTags
 		}
 		if o.TSNetAuthKeyFile != "" {
-			k, err := tsapi.LoadEnvFile(o.TSNetAuthKeyFile, "TS_AUTHKEY")
+			load := tsapi.LoadEnvFile
+			if o.TSNetAuthKeyOnce {
+				load = func(path, _ string) (string, error) { return readJoinKeyOnce(path) } // joinkey.go
+			}
+			k, err := load(o.TSNetAuthKeyFile, "TS_AUTHKEY")
 			if err != nil {
 				return nil, err
 			}
 			ts.AuthKey = k
 		}
 		rt.TS = ts
+		// Before anything uses the node's LocalAPI client: Close drains it
+		// (internal/tsnetlc). ADR-019 rule 4: OmitAuth skips the LocalAPI's
+		// per-call peer-credential check (~25 ms per WhoIs on macOS); it is
+		// set here because writing it later races the client's users.
+		lc, err := tsnetlc.Client(ts)
+		if err != nil {
+			return nil, fmt.Errorf("tsnet start: %w", err)
+		}
+		lc.OmitAuth = true
 		upCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-		st, err := tsnetUp(upCtx, ts, ts.AuthKey == "")
+		upStart := time.Now()
+		st, err := tsnetUp(upCtx, rt.bg, ts, ts.AuthKey == "", o.TSNetService == "")
 		cancel()
 		if err != nil {
 			return nil, fmt.Errorf("tsnet up: %w", err)
@@ -261,13 +320,16 @@ func Start(ctx context.Context, o Options) (rt *Runtime, err error) {
 		if st.Self.Tags != nil {
 			tags = st.Self.Tags.AsSlice()
 		}
-		log.Info("tailnet node", "name", self.DNSName, "tailnet", self.Tailnet, "tags", tags, "https", self.HTTPS, "ips", st.TailscaleIPs)
+		selfTags = tags
+		_, selfFunnel = st.Self.CapMap[nodecap.Funnel]
+		log.Info("tailnet node", "name", self.DNSName, "tailnet", self.Tailnet, "tags", tags, "https", self.HTTPS, "ips", st.TailscaleIPs,
+			"state", st.BackendState, "ms", time.Since(upStart).Milliseconds())
 	}
 
 	mcfg := mgmt.Config{Store: store, Custody: custody, Broker: &mgmt.Broker{BaseURL: o.TSAPIURL},
 		IDSecret: secret, ReplicaID: replicaID, ReapInterval: o.ReapInterval, DeviceDeleteDelay: o.DeviceDeleteDelay, Log: log,
 		OperatorTailnet: self.Tailnet, OperatorControlURL: o.TSNetControlURL, NoMirror: o.NoMirror, WarmKeys: o.WarmKeys, WarmKeyTTL: o.WarmKeyTTL,
-		Version: o.Version, ReleaseDir: filepath.Join(o.StateDir, "releases")}
+		RevokeWarmKeysOnClose: o.RevokeWarmKeysOnClose, Version: o.Version, ReleaseDir: filepath.Join(o.StateDir, "releases")}
 	switch o.RegistryDir {
 	case "off":
 	case "":
@@ -276,6 +338,8 @@ func Start(ctx context.Context, o Options) (rt *Runtime, err error) {
 		mcfg.RegistryDir = o.RegistryDir
 	}
 	mcfg.BundleRetention = o.BundleRetention // ADR-046
+	// Audit retention: mgmt/retention.go.
+	mcfg.AuditMaxAge, mcfg.AuditMaxRecords = o.AuditMaxAge, o.AuditMaxRecords
 	if len(o.RegistryInsecure) > 0 {
 		mcfg.RegistryInsecure = o.RegistryInsecure
 	}
@@ -285,6 +349,9 @@ func Start(ctx context.Context, o Options) (rt *Runtime, err error) {
 			return nil, err
 		}
 		if err := json.Unmarshal(b, &mcfg.ImageAliases); err != nil {
+			return nil, fmt.Errorf("-image-aliases %s: %w", o.ImageAliasesFile, err)
+		}
+		if err := registry.ValidateAliases(mcfg.ImageAliases); err != nil {
 			return nil, fmt.Errorf("-image-aliases %s: %w", o.ImageAliasesFile, err)
 		}
 	}
@@ -349,7 +416,7 @@ func Start(ctx context.Context, o Options) (rt *Runtime, err error) {
 			return nil, err
 		}
 		whois := func(ctx context.Context, addr string) (mgmt.WhoIsInfo, error) {
-			wi, err := lc.WhoIs(ctx, addr)
+			wi, err := tssvc.WhoIs(ctx, lc, addr) // svc:tw-mgmt flows get svc: grants (H22)
 			if err != nil {
 				return mgmt.WhoIsInfo{}, err
 			}
@@ -382,7 +449,7 @@ func Start(ctx context.Context, o Options) (rt *Runtime, err error) {
 		if err != nil {
 			return nil, err
 		}
-		th := api.TailnetHandler(whois, rt.handler)
+		th := api.TailnetHandler(whois, mgmt.NewAPILimiter(o.APILimits).Wrap(rt.handler))
 		api.Listeners = append(api.Listeners, "tsnet:80")
 		serve("tsnet", ln, th)
 		if o.TSNetService != "" {
@@ -411,6 +478,7 @@ func Start(ctx context.Context, o Options) (rt *Runtime, err error) {
 				return nil, fmt.Errorf("tsnet loopback: %w", err)
 			}
 			lb := mgmt.Loopback{Addr: addr, ProxyCred: cred, MgmtIP: self.IP, DNSName: self.DNSName, HTTPS: self.HTTPS, PID: os.Getpid()}
+			lb.NodeID, lb.Tailnet, lb.Tags, lb.Funnel = self.NodeID, self.Tailnet, selfTags, selfFunnel
 			b, _ := json.Marshal(lb)
 			if err := os.WriteFile(loopbackPath+".tmp", b, 0o600); err != nil {
 				return nil, err
@@ -424,19 +492,22 @@ func Start(ctx context.Context, o Options) (rt *Runtime, err error) {
 		}
 		if self.HTTPS {
 			// The API over the node's own HTTPS certificate: what `tw
-			// link` uses from a developer machine. tailnet-only (ListenTLS
-			// never serves Funnel traffic).
-			tln, err := ts.ListenTLS("tcp", ":443")
+			// link` uses from a developer machine. tailnet-only (Listen
+			// never serves Funnel traffic). Not ts.ListenTLS: it waits for
+			// Running (a DERP connection), which tsnetUp no longer does
+			// (#245); self.HTTPS already checked the cert domains.
+			ln, err := ts.Listen("tcp", ":443")
 			if err != nil {
 				return nil, fmt.Errorf("tsnet tls: %w", err)
 			}
+			tln := tls.NewListener(ln, &tls.Config{GetCertificate: lc.GetCertificate})
 			api.Listeners = append(api.Listeners, "tsnet:443")
 			serve("tsnet-tls", tln, th)
 			// Fetch the node's certificate now, in the background: a new
 			// node name's first certificate takes 30–100 s, and nothing
 			// else would request it before the first `tw link`, whose TLS
 			// handshake would time out.
-			go prefetchCert(ts, self.DNSName, log)
+			go prefetchCert(rt.bg, ts, self.DNSName, log)
 		} else if o.TSNetTLS {
 			log.Warn("HTTPS is not enabled on this tailnet: the API is served on :80 only; `tw link` uses plain HTTP (WireGuard-encrypted, WhoIs-authenticated)")
 		}
@@ -464,8 +535,22 @@ func (rt *Runtime) Close() error {
 	if rt == nil {
 		return nil
 	}
+	if rt.bgCancel != nil {
+		rt.bgCancel()
+	}
 	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	// Each phase's time goes to the log: a `tw down` that takes seconds
+	// shows where (#245).
+	var phases []any
+	t0 := time.Now()
+	lap := func(phase string) {
+		phases = append(phases, phase+"_ms", time.Since(t0).Milliseconds())
+		t0 = time.Now()
+	}
+	if rt.servers != nil || rt.M != nil || rt.TS != nil {
+		defer func() { rt.log.Info("stopped", phases...) }()
+	}
 	if rt.gate != nil {
 		// Withdraw before closing listeners: control stops routing callers
 		// to this replica while its in-flight requests finish.
@@ -478,6 +563,7 @@ func (rt *Runtime) Close() error {
 		s.Shutdown(sctx)
 	}
 	rt.servers = nil
+	lap("listeners")
 	for i := len(rt.cleanups) - 1; i >= 0; i-- {
 		rt.cleanups[i]()
 	}
@@ -486,14 +572,17 @@ func (rt *Runtime) Close() error {
 		rt.M.Close()
 		rt.M = nil
 	}
+	lap("mgmt")
 	if rt.TS != nil {
-		rt.TS.Close()
+		tsnetlc.Close(rt.TS)
 		rt.TS = nil
 	}
+	lap("tsnet")
 	if rt.store != nil {
 		rt.store.Close()
 		rt.store = nil
 	}
+	lap("store")
 	return nil
 }
 
@@ -501,19 +590,22 @@ func (rt *Runtime) Close() error {
 // node name's first certificate takes 30–100 s, and nothing else would
 // request it before the first `tw link`, whose TLS handshake would time
 // out.
-func prefetchCert(ts *tsnet.Server, dnsName string, log *slog.Logger) {
+func prefetchCert(ctx context.Context, ts *tsnet.Server, dnsName string, log *slog.Logger) {
 	lc, err := ts.LocalClient()
 	if err != nil || dnsName == "" {
 		return
 	}
 	st := time.Now()
 	for attempt := 1; ; attempt++ {
-		cctx, ccancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		cctx, ccancel := context.WithTimeout(ctx, 3*time.Minute)
 		_, _, err := lc.CertPair(cctx, dnsName)
 		ccancel()
 		if err == nil {
 			log.Info("HTTPS certificate ready", "name", dnsName, "ms", time.Since(st).Milliseconds(), "attempts", attempt)
 			return
+		}
+		if ctx.Err() != nil {
+			return // Close
 		}
 		// ACME orders fail transiently (seen: CreateOrder 404); a TLS
 		// handshake retries on its own later, this only warms.
@@ -521,15 +613,29 @@ func prefetchCert(ts *tsnet.Server, dnsName string, log *slog.Logger) {
 		if attempt == 4 {
 			return
 		}
-		time.Sleep(time.Duration(attempt) * 20 * time.Second)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Duration(attempt) * 20 * time.Second):
+		}
 	}
 }
 
 // tsnetUp brings the node up. If it needs an interactive login and no auth
 // key was given, it fails fast with the login URL instead of waiting for
 // someone to click it: `tw up` owns the interactive flow.
-func tsnetUp(ctx context.Context, ts *tsnet.Server, failOnLogin bool) (*ipnstate.Status, error) {
-	if !failOnLogin {
+//
+// earlyOK returns as soon as the node is logged in with a netmap (state
+// Starting): mgmt can serve the local CLI, the embedded host and its own
+// listeners then. Waiting for Running would also wait for the first
+// netcheck and a live DERP connection, ~3 s on a fresh node and longer
+// while the network comes up after a boot (#245); peers reach the node
+// once that is done either way. tsnet.Server.Up then runs in the
+// background (bg) for its one-time reset of stale serve config. Without
+// earlyOK (a Tailscale Service replica, whose advertisement that reset
+// would clear) it waits for Running through Up as before.
+func tsnetUp(ctx, bg context.Context, ts *tsnet.Server, failOnLogin, earlyOK bool) (*ipnstate.Status, error) {
+	if !failOnLogin && !earlyOK {
 		return ts.Up(ctx)
 	}
 	lc, err := ts.LocalClient()
@@ -549,11 +655,29 @@ func tsnetUp(ctx context.Context, ts *tsnet.Server, failOnLogin bool) (*ipnstate
 		if n.ErrMessage != nil {
 			return nil, errors.New(*n.ErrMessage)
 		}
-		if n.BrowseToURL != nil {
+		if n.BrowseToURL != nil && failOnLogin {
 			return nil, fmt.Errorf("the mgmt node needs an interactive login (run `tw up` on this host to log in): %s", *n.BrowseToURL)
 		}
 		if n.State != nil && *n.State == ipn.Running {
 			return ts.Up(ctx)
 		}
+		// The netmap (SelfChange) or a state change: logged in yet?
+		if earlyOK && (n.State != nil || n.SelfChange != nil) {
+			if st, ok := LoggedIn(ctx, lc); ok {
+				go ts.Up(bg)
+				return st, nil
+			}
+		}
 	}
+}
+
+// LoggedIn is the node's status once it is logged in with a netmap and an
+// address (state Starting or Running): enough to read its name, tailnet,
+// tags and IPs, and to serve, without waiting for a DERP connection.
+func LoggedIn(ctx context.Context, lc *local.Client) (*ipnstate.Status, bool) {
+	st, err := lc.Status(ctx)
+	if err != nil || st.Self == nil || len(st.TailscaleIPs) == 0 {
+		return nil, false
+	}
+	return st, st.BackendState == ipn.Starting.String() || st.BackendState == ipn.Running.String()
 }

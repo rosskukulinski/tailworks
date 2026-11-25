@@ -52,6 +52,7 @@ func testReleaseKey(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {
 // unsigned tarball, one signed by another key (say, by a compromised mgmt),
 // or one with a file changed after signing never reaches install.sh.
 func TestSelfUpgradeRefusesUnsignedReleases(t *testing.T) {
+	t.Parallel()
 	pub, priv := testReleaseKey(t)
 	_, other := testReleaseKey(t)
 	top := "tailworks-0.3.0-linux-amd64"

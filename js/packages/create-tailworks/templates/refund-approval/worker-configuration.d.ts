@@ -2,8 +2,6 @@
 // Don't edit it: run `tw types` again after changing them
 // (`tw types --check` fails when this file is stale).
 interface Env {
-  // vars
-  APP_NAME: string;
   // Durable Objects
   RefundAgent: DurableObjectNamespace<import("./src/index").RefundAgent>;
   // Workflows

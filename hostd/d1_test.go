@@ -82,10 +82,19 @@ func (c d1Client) qErr(body map[string]any) string {
 // and recovery of the whole database from mgmt's journal after the host
 // was fenced and lost its DO storage.
 func TestD1(t *testing.T) {
-	const fenceAfter = time.Second
-	s := startSuiteCapsOpts(t, fakemgmt.Config{}, tailcfg.PeerCapMap{nettest.TestCap: []tailcfg.RawMessage{nettest.TestCapValue}}, func(o *hostdtest.Options) {
+	t.Parallel()
+	testD1(t, hostdtest.BackendFake)
+}
+
+// testD1 is TestD1 against backend (realmgmt_test.go).
+func testD1(t *testing.T, backend string) {
+	// Long enough that ordinary queries never trip the stall fence on a
+	// loaded runner (#556 gates stateful ingress on heartbeat freshness:
+	// #591, #595); RecoveredFromJournal only waits a little longer for it.
+	const fenceAfter = 5 * time.Second
+	s := startSuiteCapsOpts(t, fakemgmt.Config{}, tailcfg.PeerCapMap{nettest.TestCap: []tailcfg.RawMessage{nettest.TestCapValue}}, onBackend(backend, func(o *hostdtest.Options) {
 		o.FenceAfter, o.HeartbeatEvery = fenceAfter, 100*time.Millisecond
-	})
+	}))
 	e := s.e
 	fixture := hostdtest.Fixture("d1app")
 	dep := e.Deploy(fixture, "d1app", nil)
@@ -291,22 +300,22 @@ func TestD1(t *testing.T) {
 
 	t.Run("JournalFirst", func(t *testing.T) {
 		w, f := W.with(t), F.with(t)
-		n0 := e.FM.StoreAppends()
+		n0 := e.Hooks.StoreAppends()
 		w.q("SELECT * FROM kv ORDER BY v DESC", "all")                      // a read with a sort
 		w.q("WITH x AS (SELECT k FROM kv) SELECT count(*) FROM x", "all")   // a CTE read
 		w.q("UPDATE kv SET v = 0 WHERE k = 'no such key'", "run")           // a write that writes nothing
 		w.q("CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v)", "run") // DDL that changes nothing
-		if n := e.FM.StoreAppends(); n != n0 {
+		if n := e.Hooks.StoreAppends(); n != n0 {
 			t.Fatalf("reads and no-op writes appended %d journal entries", n-n0)
 		}
 		w.q("UPDATE kv SET v = v WHERE k = 'a'", "run")
 		f.post("/batch", []map[string]any{{"sql": "DELETE FROM kv WHERE k = 'e1'"}, {"sql": "DELETE FROM kv WHERE k = 'e2'"}})
-		if n := e.FM.StoreAppends(); n != n0+2 {
+		if n := e.Hooks.StoreAppends(); n != n0+2 {
 			t.Fatalf("2 writes appended %d entries, want 2 (one per request)", n-n0)
 		}
 		// A CTE that writes is caught by the read path and journaled.
 		w.q("WITH n AS (SELECT 7 AS v) INSERT INTO kv (k, v) SELECT 'cte', v FROM n", "run")
-		if n := e.FM.StoreAppends(); n != n0+3 {
+		if n := e.Hooks.StoreAppends(); n != n0+3 {
 			t.Fatalf("a writing CTE appended %d entries, want 1", n-n0-2)
 		}
 	})
@@ -331,11 +340,11 @@ func TestD1(t *testing.T) {
 		if e := w.qErr(map[string]any{"sql": big}); !strings.Contains(e, "result too large") {
 			t.Fatalf("big result: %s", e)
 		}
-		n0 := e.FM.StoreAppends()
+		n0 := e.Hooks.StoreAppends()
 		if e := w.qErr(map[string]any{"sql": "INSERT INTO kv (k, v) VALUES ('big', ?)", "method": "run", "params": []any{map[string]any{"$u8": make([]int, 1_900_000)}}}); !strings.Contains(e, "write too large") {
 			t.Fatalf("write over the journal's entry size: %s", e)
 		}
-		if e.FM.StoreAppends() != n0 {
+		if e.Hooks.StoreAppends() != n0 {
 			t.Fatal("a refused write reached the journal")
 		}
 	})
@@ -416,8 +425,8 @@ func TestD1(t *testing.T) {
 		if ws.DOStorage == "" {
 			t.Fatal("no DO storage dir in status")
 		}
-		e.FM.SetHeartbeatsDown(true)
-		deadline := time.Now().Add(10 * time.Second)
+		e.Hooks.SetHeartbeatsDown(true)
+		deadline := time.Now().Add(fenceAfter + 15*time.Second)
 		for workloadStatus(t, e, "d1app").PID != 0 {
 			if time.Now().After(deadline) {
 				t.Fatalf("workload not fenced: %+v", workloadStatus(t, e, "d1app"))
@@ -427,7 +436,7 @@ func TestD1(t *testing.T) {
 		if err := os.RemoveAll(ws.DOStorage); err != nil {
 			t.Fatal(err)
 		}
-		e.FM.SetHeartbeatsDown(false)
+		e.Hooks.SetHeartbeatsDown(false)
 		wl = e.WaitActive("d1app", dep, 60*time.Second)
 		s.waitPeer(wl.IP)
 		W.base, F.base = "http://"+wl.IP, "http://"+wl.IP+"/do"

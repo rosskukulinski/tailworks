@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rosskukulinski/tailworks/internal/procsb"
+	"github.com/rosskukulinski/tailworks/internal/wallclock"
 )
 
 // Process-tier sandboxes (Config.Sandbox).
@@ -160,14 +161,21 @@ func (inst *instance) workerdCommand() (*exec.Cmd, error) {
 		args = append(args, "--socket-fd", "ingress=3")
 	}
 	args, bind := inst.inspectorArgs(args) // inspector.go: tw dev --inspector-port
+	args = append(args, inst.pyodideArgs()...)
+	var trees []string
+	if inst.pyodide != "" {
+		trees = []string{inst.pyodide} // pyodide.go: read-only
+	}
+	_, clockFiles := wallclock.Workerd() // a test build's skewed clock; nil otherwise
 	cmd, err := inst.sandboxed(inst.h.cfg.WorkerdBin, args,
-		[]string{inst.dir, inst.doStorage}, []string{inst.h.cfg.WorkerdBin}, nil, bind, inst.loopPorts)
+		[]string{inst.dir, inst.doStorage}, append([]string{inst.h.cfg.WorkerdBin}, clockFiles...), trees, bind, inst.loopPorts)
 	if err != nil {
 		if f != nil {
 			f.Close()
 		}
 		return nil, err
 	}
+	cmd.Env = WorkerdEnv() // workerdenv.go (#336): not hostd's environment, on any branch
 	if f != nil {
 		cmd.ExtraFiles = []*os.File{f}
 	}
@@ -188,6 +196,9 @@ func (inst *instance) nodeCommand(args []string) (*exec.Cmd, error) {
 	var bind, connect []uint16
 	if np.port != 0 {
 		bind, connect = []uint16{uint16(np.port)}, []uint16{uint16(np.port)}
+	}
+	if np.confined() { // nodelisten.go: hostd owns the listener
+		bind = nil
 	}
 	if a, ok := np.proxy.Addr().(*net.TCPAddr); ok {
 		connect = append(connect, uint16(a.Port))
@@ -223,6 +234,7 @@ func (inst *instance) sandboxed(bin string, args, own, readOnly, readOnlyTrees [
 		noUnix := inst.ingressLn != nil || inst.node != nil && inst.node.listen != "unix"
 		prof := &procsb.Profile{Launcher: launcher, Exec: readOnly, ReadOnly: readOnlyTrees, Own: own,
 			BindTCP: bindTCP, ConnectTCP: connectTCP, NoUnixSockets: noUnix, Deny: inst.h.sandboxDeny()}
+		prof.NoListen = inst.node != nil && inst.node.confined() // nodelisten.go
 		p := filepath.Join(inst.dir, "sandbox.json")
 		if err := prof.Write(p); err != nil {
 			return nil, err

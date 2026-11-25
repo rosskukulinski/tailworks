@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -30,7 +29,6 @@ import (
 	"github.com/rosskukulinski/tailworks/internal/tsapi"
 	"github.com/rosskukulinski/tailworks/mgmt"
 	"github.com/rosskukulinski/tailworks/netd"
-	"golang.org/x/term"
 )
 
 const prodControl = "https://controlplane.tailscale.com"
@@ -96,6 +94,9 @@ type upResult struct {
 	LingerHint string             `json:"lingerHint,omitempty"`
 	SleepHint  string             `json:"sleepHint,omitempty"`
 	Timings    map[string]float64 `json:"timingsMs"`
+
+	// UnsafeFlags: the saved unsafe tw up flags (up_unsafe.go).
+	UnsafeFlags []string `json:"unsafeFlags"`
 }
 
 func ms(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }
@@ -104,31 +105,34 @@ const defaultMgmtHostname = "tw-mgmt"
 
 func cmdUp(args []string) error {
 	f := newFlags("up")
+	upFlagGroups(f) // up_help.go: --help's groups
 	tailnet := f.String("tailnet", "", "the tailnet to serve (oauth: read from the client's devices or mgmt's node; headscale: required, the dns.base_domain). Overrides discovery")
-	oauthFile := f.String("oauth-client-file", "", "mint mode \"oauth\" (Tailscale): 0600 file with TS_OAUTH_CLIENT_ID=… and TS_OAUTH_CLIENT_SECRET=tskey-client-… (an OAuth client with Auth Keys write, tag tag:tw). No browser, no Funnel")
-	keyFile := f.String("api-key-file", "", "--control=headscale only: 0600 file with HEADSCALE_API_KEY=… (read at use, never copied). Tailscale API keys are not a mint mode: use --oauth-client-file")
-	yes := f.Bool("yes", false, "non-interactive: don't ask for confirmation")
-	apply := f.Bool("policy-apply", false, "headscale: apply the policy snippet (validated first, written with If-Match); default: print it")
+	oauthFile := f.String("oauth-client-file", "", "mint mode \"oauth\" (Tailscale): file with TS_OAUTH_CLIENT_SECRET=tskey-client-… (an OAuth client with Auth Keys write, tag tag:tw; tightened to 0600). Default on the default state dir: ~/.config/tailworks/oauth.env, asked for and saved on the first tw up")
+	keyFile := f.String("api-key-file", "", "Headscale only: 0600 file with HEADSCALE_API_KEY=… (read at use, never copied); with a non-default --control-url it selects the Headscale profile. Default on the default state dir with a Headscale --control-url: ~/.config/tailworks/headscale.env when it exists. Tailscale API keys are not a mint mode: use --oauth-client-file")
+	yes := yesFlagBefore(f, "--apply-policy writes the policy")
+	apply := f.Bool("apply-policy", false, "write the tagOwners and grants tailworks needs to the tailnet policy instead of printing them (additive, validated first, written with If-Match); tw up shows the lines and asks first (--yes to skip). Without the flag tw up asks only on a terminal (not with --json or --yes); --apply-policy=false never asks or writes. Tailscale: the OAuth client needs Policy File write. Headscale: needs policy.mode database")
 	control := f.String("control-url", prodControl, "coordination server for the tailnet's nodes")
-	profileF := f.String("control", controlTailscale, "control-plane profile: tailscale, or headscale (ADR-015: a Headscale server at --control-url; --api-key-file holds HEADSCALE_API_KEY=…, --tailnet is its dns.base_domain)")
+	profileF := f.String("control", controlTailscale, "control-plane profile: tailscale, or headscale (ADR-015: a Headscale server; implied by --api-key-file with a non-default --control-url: tw up --control-url <url> --tailnet <base_domain> [--api-key-file <file>]; the file holds HEADSCALE_API_KEY=…, --tailnet is its dns.base_domain; docs/headscale.md)")
 	tsapiURL := f.String("tsapi-url", "", "Tailscale API base URL (testing)")
 	hostID := f.String("host-id", defaultHostID(), "this host's ID")
 	prefix := f.String("hostname-prefix", "tw-", "prefix for every object node hostname")
 	ephemeral := f.Bool("ephemeral", false, "join object nodes as ephemeral; `tw down` then deletes every device (tests, demos)")
 	insecureSH := f.Bool("insecure-shared-host", false, "on a host without a process sandbox (Linux without Landlock), still serve process-tier workloads of more than one tenant; tenants are then NOT isolated from each other")
-	workerdFlag := f.String("workerd", "", "workerd binary")
-	hb := f.Duration("heartbeat", time.Second, "host heartbeat period")
-	tomb := f.Duration("kill-tombstone", 12*time.Second, "keep a killed node answering object_killed this long")
-	delDelay := f.Duration("device-delete-delay", 8*time.Second, "delete a killed object's device this long after the kill (< --kill-tombstone)")
-	siblings := f.Bool("allow-sibling-egress", false, "let objects reach other objects on this host over the tailnet (hairpin; single-host tests and demos)")
-	warmKeys := f.Int("warm-keys", 5, "pre-minted single-use keys kept per (tenant, tag set), so a new object skips the key-API call; sized from the recent create rate, capped here (0 = off)")
-	poolNodes := f.Int("pool-nodes", 1, "pre-joined nodes kept per hot class (a create here in the last hour), so a new object is renamed onto one (~0.2 s) instead of joining a new node; each is a device (0 = off)")
+	allowExp := f.Bool("allow-experimental-flags", false, "let deployments on this host set compatibility flags workerd marks experimental (unsafe_module, rtti_api, precise_timers, …); refused by default (docs/COMPAT.md#experimental-flags)")
+	workerdFlag := f.String("workerd", "", "workerd binary (default: $TW_WORKERD, the install's, or PATH)")
+	// up_tuning.go: --heartbeat, --kill-tombstone, --device-delete-delay, --push-port
+	addRemovedUpFlags(f)
+	retention := addRetentionFlags(f) // up_retention.go
+	workerInet := addWorkerInternetFlag(f)
+	siblings := f.Bool("allow-sibling-egress", false, "dial other objects on this host over WireGuard (a hairpin) instead of netd's in-process hop (tests)")
+	warmKeys := f.Int("warm-keys", mgmtd.DefaultWarmKeys, "pre-minted single-use keys kept per (tenant, tag set), so a new object skips the key-API call; sized from the recent create rate, capped here (0 = off)")
+	poolNodes := f.Int("pool-nodes", hostdrun.DefaultPoolNodes, "pre-joined nodes kept per hot class (a create here in the last hour), so a new object is renamed onto one (~0.2 s) instead of joining a new node; each is a device (0 = off)")
 	portMapping := f.Bool("port-mapping", false, "use UPnP/NAT-PMP/PCP for this host's nodes (off by default: it adds ~250 ms to every new node's join and has every node ask the router for a mapping; turn on behind hard NATs that need router-assisted direct paths)")
-	service := f.Bool("service", false, "run the supervisor as a service that starts at login: Linux systemd user unit (~/.config/systemd/user/tw.service), macOS LaunchAgent (~/Library/LaunchAgents/dev.tailworks.up.plist)")
+	service := f.Bool("service", false, "run the supervisor as a service that starts at login: Linux systemd user unit (~/.config/systemd/user/tw.service), macOS LaunchAgent (~/Library/LaunchAgents/dev.tailworks.up.plist). Default: on for a new default state dir where available; an existing state dir keeps how it runs (--service=false runs it in the background without a service)")
 	mgmtHost := f.String("mgmt-hostname", "", "mgmt's own tailnet node name (default "+defaultMgmtHostname+")")
 	mgmtKey := f.String("mgmt-authkey-file", "", "TS_AUTHKEY=… file for mgmt's node (unattended join: tests, automation); default: the tenant's credential mints it")
 	localDev := f.Bool("local-dev", false, "DEVELOPMENT ONLY: hostd and the CLI use mgmt's unix socket with the per-host token instead of the tailnet (hermetic tests). Normal operation is tsnet only")
-	pushPort := f.Int("push-port", defaultPushPort, "port on this host's own tailnet node where mgmt pushes kills (--separate-host)")
+	storeF := addStoreFlags(f) // up_store.go: --db, --db-file, --custody, --setec-url
 	separate := f.Bool("separate-host", false, "run tw-hostd as its own process on its own tag:tw-host tailnet node (the scale-out layout; default: ONE process, the host agent embedded in tw-mgmt, mgmt's node the only infrastructure device). --local-dev implies it")
 	pos, err := f.parse(args)
 	if err != nil {
@@ -137,12 +141,13 @@ func cmdUp(args []string) error {
 	if len(pos) > 0 {
 		return fail("bad_request", "tw up takes no arguments", "usage: tw "+usageOf("up"))
 	}
+	warnRemovedUpFlags(f.FlagSet, os.Stderr)
+	pmode := policyModeOf(f, *apply, *yes) // policy_ask.go: ask on a terminal (#481)
+	if _, err := storeF.validate(); err != nil {
+		return err
+	}
 	t0 := time.Now()
 	timings := map[string]float64{}
-	if *delDelay >= *tomb {
-		return fail("bad_request", "--device-delete-delay must be shorter than --kill-tombstone",
-			"the tombstone answers object_killed only while the device still exists in peers' netmaps")
-	}
 	s, err := openState(*f.stateDir)
 	if err != nil {
 		return err
@@ -150,15 +155,18 @@ func cmdUp(args []string) error {
 	// The mint mode: the flag, else the state dir's, else the choice is
 	// printed. Tailscale tailnets mint with an OAuth client; the Headscale
 	// profile with a Headscale API key (ADR-042).
+	if headscaleInferred(f.FlagSet, *keyFile, *control) { // up_headscale.go
+		*profileF = controlHeadscale
+	}
 	if *profileF == controlHeadscale && *oauthFile != "" {
 		return fail("profile_unsupported", "the Headscale profile mints with a Headscale API key: OAuth clients are a Tailscale feature").
-			withFix("tw up --control=headscale --control-url <server_url> --tailnet <base_domain> --api-key-file <file with HEADSCALE_API_KEY=…>")
+			withFix("tw up --control-url <server_url> --tailnet <base_domain> --api-key-file <file with HEADSCALE_API_KEY=…>")
 	}
 	if *profileF != controlHeadscale && *keyFile != "" {
 		return fail("mint_mode_removed", "tw no longer mints with a Tailscale API key (--api-key-file is for --control=headscale only)",
 			"an OAuth client is scoped to auth keys and tag:tw, and its secret never expires; an API key could do anything its owner can").
-			withFix("create an OAuth client (admin console › Settings › OAuth clients: Auth Keys write, tag tag:tw; see docs/INSTALL.md), save it 0600, then:",
-				"tw up --oauth-client-file <file>")
+			withFix("create an OAuth client (admin console › Settings › Trust credentials: Auth Keys write, tag tag:tw; see docs/INSTALL.md), save it 0600, then:",
+				"tw up --oauth-client-file <file>", headscaleOnHint)
 	}
 	mode := ""
 	switch {
@@ -209,6 +217,29 @@ func cmdUp(args []string) error {
 				withFix("tw down --purge, then remove "+s.Dir, "or use another --state-dir")
 		}
 	}
+	defaultDir := isDefaultStateDir(s.Dir, *f.stateDir) // up_defaults.go
+	if mode == "" && defaultDir && *oauthFile == "" {
+		if p := headscaleDefaultKey(f.FlagSet, *profileF, *control); p != "" { // up_headscale.go
+			*keyFile, *profileF, mode = p, controlHeadscale, mgmt.MintHeadscale
+		}
+	}
+	if mode == "" && defaultDir && *profileF != controlHeadscale {
+		if p := defaultOAuthFile(); p != "" {
+			asked := false
+			if !fileExists(p) && !*f.json {
+				if asked, err = promptOAuthSecret(p, os.Stdout, "tw up", ""); err != nil {
+					return err
+				}
+			}
+			if asked || fileExists(p) {
+				*oauthFile, mode = p, "oauth"
+			}
+		}
+	}
+	if mode == "" && *profileF == controlHeadscale {
+		_, err := headscaleKeyFile("")
+		return err
+	}
 	if mode == "" {
 		return mintModeRequired()
 	}
@@ -221,9 +252,9 @@ func cmdUp(args []string) error {
 		}
 	}
 	if hsMode && *tailnet == "" {
-		return fail("tailnet_required", "tw up --control=headscale needs --tailnet (the Headscale server's dns.base_domain)",
+		return fail("tailnet_required", "tw up on Headscale needs --tailnet (the Headscale server's dns.base_domain)",
 			"an API key does not name its tailnet, and tailworks never uses this machine's tailscaled or its identity.").
-			withFix("tw up --control=headscale --control-url <server_url> --tailnet <base_domain> --api-key-file <file with HEADSCALE_API_KEY=…>")
+			withFix("tw up --control-url <server_url> --tailnet <base_domain> --api-key-file <file with HEADSCALE_API_KEY=…>")
 	}
 	// oauth: the credential file must be the owner's only (checked before
 	// anything else happens; tw-mgmt refuses it too).
@@ -231,6 +262,7 @@ func cmdUp(args []string) error {
 	var oauthCreds tsapi.OAuthCredentials
 	if oauthMode {
 		absOAuth, _ = filepath.Abs(*oauthFile)
+		tightenSecretFile(absOAuth) // your own file: fix its mode instead of refusing it
 		c, err := tsapi.LoadOAuthFile(absOAuth)
 		if err != nil {
 			if tsapi.IsInsecureFile(err) {
@@ -241,26 +273,22 @@ func cmdUp(args []string) error {
 		}
 		oauthCreds = c
 	}
+	if err := checkUpLayout(s, absOAuth, *keyFile); err != nil { // sandbox_layout.go (#342)
+		return err
+	}
+	// --service defaults on for the default state dir (where the platform
+	// has a user service manager); a state dir already set up keeps how it
+	// runs, so tw upgrade's restart doesn't change it.
+	if !flagGiven(f.FlagSet, "service") && !*localDev {
+		if s.configured() {
+			*service, _ = serviceOf(s)
+		} else {
+			*service = defaultDir && serviceAvailable() == nil && npmServiceErr() == nil // npm_install.go
+		}
+	}
 	if *service {
 		if err := serviceAvailable(); err != nil {
 			return err
-		}
-	}
-	if !*yes {
-		if *f.json || !term.IsTerminal(int(os.Stdin.Fd())) { // --json never prompts (docs/cli-json.md)
-			return fail("bad_request", "not a terminal (or --json): pass --yes to run non-interactively")
-		}
-		what := "for tailnet " + *tailnet
-		if oauthMode {
-			what = "with OAuth client " + oauthCreds.ClientID
-		}
-		if oauthMode && s.Cfg.Tailnet != "" {
-			what += " for tailnet " + s.Cfg.Tailnet
-		}
-		fmt.Printf("Start tailworks on this machine %s (state in %s)? [y/N] ", what, s.Dir)
-		ln, _ := bufio.NewReader(os.Stdin).ReadString('\n')
-		if a := strings.ToLower(strings.TrimSpace(ln)); a != "y" && a != "yes" {
-			return fail("cancelled", "not started")
 		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
@@ -273,10 +301,11 @@ func cmdUp(args []string) error {
 	}
 
 	// The credential must work for this tailnet; read the policy (written
-	// only by --policy-apply on Headscale).
+	// only with --apply-policy).
 	var api *tsapi.Client
 	var capi controlAPI // mints mgmt's node key; reads/applies the policy
 	hsApplied := false  // headscale: the policy snippet was applied up front
+	upApplied := false  // tailscale: --apply-policy wrote the snippet (up_policyapply.go)
 	var pol []byte
 	policyReadable := false
 	absKey := ""
@@ -291,7 +320,7 @@ func cmdUp(args []string) error {
 		timings["api_check"] = ms(time.Since(ps))
 		// Headscale refuses to register a node whose tags its policy
 		// doesn't define, so the snippet goes in before mgmt's key is used.
-		if pol, hsApplied, err = headscaleUpPolicy(ctx, hc, pol, *apply); err != nil {
+		if pol, hsApplied, err = headscaleUpPolicy(ctx, hc, f, pol, pmode, *yes, out); err != nil {
 			return err
 		}
 	}
@@ -314,11 +343,20 @@ func cmdUp(args []string) error {
 		if singleLayout {
 			needed = policy.Snippet{TagOwners: map[string][]string{mgmt.MgmtTag: {"tag:tw"}}}
 		}
-		found, p, readable, err := oauthPreflight(ctx, api, src, oauthCreds.ClientID, absOAuth, out, needed)
+		pre := needed
+		if pmode != policyPrintOnly {
+			pre = policy.Snippet{} // upApplyPolicy writes what is missing, then checks needed
+		}
+		found, p, readable, err := oauthPreflight(ctx, api, src, oauthCreds.ClientID, absOAuth, out, pre)
 		if err != nil {
 			return err
 		}
 		pol, policyReadable = p, readable
+		if pmode != policyPrintOnly {
+			if pol, upApplied, err = upApplyPolicy(ctx, api, f, pol, readable, needed, pmode, *yes, out); err != nil {
+				return err
+			}
+		}
 		if *tailnet == "" && found != "" {
 			*tailnet = found
 		}
@@ -327,6 +365,9 @@ func cmdUp(args []string) error {
 
 	wd, err := findWorkerd(*workerdFlag)
 	if err != nil {
+		return err
+	}
+	if err := upPreflight(wd, out); err != nil { // up_preflight.go (#480)
 		return err
 	}
 	res := upResult{StateDir: s.Dir, HostID: *hostID, Timings: timings}
@@ -371,64 +412,52 @@ func cmdUp(args []string) error {
 	if s.configured() && s.Cfg.MgmtHostname != "" && mgmtHostname != "" && mgmtHostname != s.Cfg.MgmtHostname {
 		return fail("state_conflict", "mgmt's node in "+s.Dir+" is named "+s.Cfg.MgmtHostname).withFix("drop --mgmt-hostname, or use another --state-dir")
 	}
-	if mgmtHostname != "" && !s.supervisorAlive() {
-		// The join runs in this process with a key the credential mints,
-		// then the node is handed to tw-mgmt. While
-		// the supervisor runs, mgmt holds the node and its state is
-		// authoritative.
-		authKey := ""
-		if *mgmtKey != "" {
-			if authKey, err = tsapi.LoadEnvFile(*mgmtKey, "TS_AUTHKEY"); err != nil {
-				return fail("bad_request", "can't read TS_AUTHKEY from "+*mgmtKey, err.Error())
-			}
-		}
-		firstJoin := !isFile(filepath.Join(s.mgmtTsnetDir(), "tailscaled.state"))
-		if firstJoin && authKey == "" {
-			// The credential mints mgmt's node key (tag:tw-mgmt): no
-			// browser login. The key is used in-process and never stored.
-			if authKey, err = mintNodeKey(ctx, capi, mgmt.MgmtTag, "tw mgmt node "+mgmtHostname); err != nil {
-				return err
-			}
-		}
-		js := time.Now()
-		if err := os.MkdirAll(s.mgmtTsnetDir(), 0o700); err != nil {
-			return err
-		}
-		node, err := joinMgmtNode(ctx, joinOpts{Dir: s.mgmtTsnetDir(), Hostname: mgmtHostname, ControlURL: *control, Tags: advertisedTags(hsMode, mgmt.MgmtTag),
-			AuthKey: authKey, Out: out})
+	// mgmt joins its own node (up_mgmtjoin.go): on the first start tw up
+	// mints the single-use key and hands it over in a 0600 file that mgmt
+	// deletes once it has read it. While the supervisor runs, mgmt holds
+	// the node and its state is authoritative.
+	freshStart := mgmtHostname != "" && !s.supervisorAlive()
+	firstUp := !s.configured()
+	handedKey := false
+	mintMgmtKey := func() error {
+		key, err := mintNodeKey(ctx, capi, mgmt.MgmtTag, "tw mgmt node "+mgmtHostname)
 		if err != nil {
 			return err
 		}
-		timings["mgmt_join"] = ms(time.Since(js))
-		res.MgmtNode, res.MgmtNodeID, res.MgmtIP, res.HTTPS = node.DNSName, node.NodeID, node.IP, node.HTTPS
-		if !slices.Contains(node.Tags, mgmt.MgmtTag) && *control == prodControl {
-			return fail("bootstrap_failed", "mgmt's node joined without the "+mgmt.MgmtTag+" tag (tags: "+strings.Join(node.Tags, ",")+")",
-				"the account that logged in is not a tagOwner of "+mgmt.MgmtTag+", so control dropped the tag").
-				withFix("add to tagOwners: \"" + mgmt.MgmtTag + "\": [\"autogroup:admin\", \"tag:tw\"], then remove the node " + node.DNSName + " in the admin console and run tw up again")
+		handedKey = true
+		return s.writeMgmtJoinKey(key)
+	}
+	if freshStart {
+		defer os.Remove(s.mgmtJoinFile()) // a key mgmt never read doesn't outlive tw up
+		os.Remove(s.mgmtStartErr())
+		switch {
+		case *mgmtKey != "":
+			k, err := tsapi.LoadEnvFile(*mgmtKey, "TS_AUTHKEY")
+			if err != nil {
+				return fail("bad_request", "can't read TS_AUTHKEY from "+*mgmtKey, err.Error())
+			}
+			if err := s.writeMgmtJoinKey(k); err != nil {
+				return err
+			}
+			handedKey = true
+		case s.mgmtNeedsKey():
+			// The credential mints mgmt's node key (tag:tw-mgmt): no
+			// browser login.
+			if err := mintMgmtKey(); err != nil {
+				return err
+			}
 		}
-		if *tailnet == "" {
-			*tailnet = node.Tailnet
-		} else if *control == prodControl && node.Tailnet != "" && node.Tailnet != *tailnet {
-			return fail("state_conflict", "mgmt's node joined tailnet "+node.Tailnet+", not --tailnet "+*tailnet).
-				withFix("drop --tailnet (it is discovered), or use the right credential")
-		}
-		if node.Funnel {
-			// mgmt never serves Funnel; a funnel attribute on its tag (from
-			// an older tailworks' keyless snippet) is only exposure to remove.
-			fmt.Fprintf(os.Stderr, "! policy   %s has the funnel attribute; tailworks doesn't use it: remove {\"target\": [\"%s\"], \"attr\": [\"funnel\"]} from nodeAttrs\n",
-				mgmt.MgmtTag, mgmt.MgmtTag)
-		}
-		s.Cfg.MgmtHostname, s.Cfg.MgmtDNSName, s.Cfg.MgmtNodeID, s.Cfg.MgmtIP, s.Cfg.HTTPS = mgmtHostname, node.DNSName, node.NodeID, node.IP, node.HTTPS
+		timings["mgmt_key"] = ms(time.Since(t0))
+		s.Cfg.MgmtHostname = mgmtHostname
 	} else if mgmtHostname != "" {
 		res.MgmtNode, res.MgmtNodeID, res.MgmtIP, res.HTTPS = s.Cfg.MgmtDNSName, s.Cfg.MgmtNodeID, s.Cfg.MgmtIP, s.Cfg.HTTPS
 		if *tailnet == "" {
 			*tailnet = s.Cfg.Tailnet
 		}
 	}
-	if *tailnet == "" {
+	if *tailnet == "" && !freshStart {
 		return fail("tailnet_required", "could not determine the tailnet").withFix("tw up --tailnet <tailnet>")
 	}
-	res.Tailnet = *tailnet
 	if !s.configured() {
 		s.Cfg = Config{Tailnet: *tailnet, CreatedAt: time.Now().UTC().Format(time.RFC3339), MgmtHostname: s.Cfg.MgmtHostname, MgmtDNSName: s.Cfg.MgmtDNSName,
 			MgmtNodeID: s.Cfg.MgmtNodeID, MgmtIP: s.Cfg.MgmtIP, HTTPS: s.Cfg.HTTPS}
@@ -442,43 +471,103 @@ func cmdUp(args []string) error {
 	s.Cfg.ControlURL, s.Cfg.TSAPIURL, s.Cfg.HostID = *control, *tsapiURL, *hostID
 	s.Cfg.HostnamePrefix, s.Cfg.Ephemeral, s.Cfg.Workerd = *prefix, *ephemeral, wd
 	s.Cfg.InsecureSharedHost = *insecureSH
-	s.Cfg.Heartbeat, s.Cfg.KillTombstone, s.Cfg.DeviceDeleteDelay = hb.String(), tomb.String(), delDelay.String()
+	s.Cfg.AllowExperimentalFlags = *allowExp
+	s.Cfg.defaultTuning() // up_tuning.go
 	s.Cfg.AllowSiblingEgress = *siblings
 	if *warmKeys < 0 || *poolNodes < 0 {
 		return fail("bad_request", "--warm-keys and --pool-nodes must be ≥ 0")
 	}
 	s.Cfg.WarmKeys, s.Cfg.PoolNodes, s.Cfg.PortMapping = warmKeys, poolNodes, *portMapping
-	s.Cfg.LocalDev, s.Cfg.PushPort, s.Cfg.Mode = *localDev, *pushPort, layout
+	if err := retention.save(&s.Cfg); err != nil {
+		return err
+	}
+	if err := saveWorkerInternet(&s.Cfg, *workerInet); err != nil {
+		return err
+	}
+	s.Cfg.LocalDev, s.Cfg.Mode = *localDev, layout
+	s.Cfg.InstallPrefix = upInstallPrefix() // upgrade_prefix.go
+	if err := storeF.apply(s); err != nil {
+		return err
+	}
 	if err := s.save(); err != nil {
 		return err
 	}
-	if *service {
-		was := s.supervisorAlive()
-		changed, err := installService(s)
-		if err != nil {
-			return err
+	launch := func() error {
+		if *service {
+			was := s.supervisorAlive()
+			changed, err := installService(s)
+			if err != nil {
+				return err
+			}
+			res.Started = !was || changed
+			res.Service = serviceUnitPath()
+			res.LingerHint = lingerHint()
+			res.SleepHint = sleepHint()
+		} else if inst, act := serviceOf(s); inst && act {
+			return fail("service_running", "tw runs as the "+serviceKind()+" "+serviceUnit+" (installed by tw up --service)").
+				withFix("tw up --service … to change its settings", serviceRestartHint(), "tw down --service to remove it")
+		} else if !s.supervisorAlive() {
+			if err := startSupervisor(s); err != nil {
+				return err
+			}
+			res.Started = true
 		}
-		res.Started = !was || changed
-		res.Service = serviceUnitPath()
-		res.LingerHint = lingerHint()
-		res.SleepHint = sleepHint()
-	} else if inst, act := serviceOf(s); inst && act {
-		return fail("service_running", "tw runs as the "+serviceKind()+" "+serviceUnit+" (installed by tw up --service)").
-			withFix("tw up --service … to change its settings", serviceRestartHint(), "tw down --service to remove it")
-	} else if !s.supervisorAlive() {
-		if err := startSupervisor(s); err != nil {
-			return err
-		}
-		res.Started = true
+		return nil
+	}
+	if err := launch(); err != nil {
+		return err
 	}
 	ms0 := time.Now()
 	for !s.mgmtHealthy(ctx) {
+		if msg, failed := s.mgmtStartFailure(); failed && freshStart {
+			stopFailedStart(s, firstUp) // up_mgmtjoin.go
+			if !needsLogin(msg) || handedKey {
+				return joinFailure(mgmtHostname, advertisedTags(hsMode, mgmt.MgmtTag), msg)
+			}
+			// mgmt's node was logged out (removed in the admin console, say):
+			// mint a key and start again, once.
+			os.Remove(s.mgmtStartErr())
+			if err := mintMgmtKey(); err != nil {
+				return err
+			}
+			if err := launch(); err != nil {
+				return err
+			}
+			continue
+		}
 		if time.Since(ms0) > 90*time.Second || !s.supervisorAlive() {
+			if msg, failed := s.mgmtStartFailure(); failed && freshStart {
+				stopFailedStart(s, firstUp)
+				return joinFailure(mgmtHostname, advertisedTags(hsMode, mgmt.MgmtTag), msg)
+			}
 			return fail("mgmt_unavailable", "tw-mgmt did not become healthy", "log: "+s.log("mgmt")).withFix("tw logs --component mgmt")
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 	}
 	timings["mgmt_ready"] = ms(time.Since(t0))
+	if freshStart {
+		// mgmt's node as it joined (its loopback descriptor), checked as tw
+		// up's own join used to be, then saved.
+		lb := s.loopback()
+		if lb == nil {
+			return fail("mgmt_unavailable", "tw-mgmt is healthy but published no node", "log: "+s.log("mgmt"))
+		}
+		tn, err := checkMgmtNode(lb, *control, *tailnet)
+		if err == nil && tn == "" {
+			err = fail("tailnet_required", "could not determine the tailnet").withFix("tw up --tailnet <tailnet>")
+		}
+		if err != nil {
+			stopFailedStart(s, firstUp)
+			return err
+		}
+		*tailnet = tn
+		res.MgmtNode, res.MgmtNodeID, res.MgmtIP, res.HTTPS = lb.DNSName, lb.NodeID, lb.MgmtIP, lb.HTTPS
+		s.Cfg.Tailnet, s.Cfg.MgmtDNSName, s.Cfg.MgmtNodeID, s.Cfg.MgmtIP, s.Cfg.HTTPS = *tailnet, lb.DNSName, lb.NodeID, lb.MgmtIP, lb.HTTPS
+		if err := s.save(); err != nil {
+			return err
+		}
+	}
+	res.Tailnet = *tailnet
 
 	// Tenant (operator = tenant = you). In normal operation the host's own
 	// node needs a join key minted through the tenant's credential, so the
@@ -579,7 +668,11 @@ func cmdUp(args []string) error {
 		res.PolicyOK = miss.Empty()
 		if !res.PolicyOK {
 			res.PolicyDiff = miss.HuJSON()
-			if *apply {
+			write, err := bootstrapPolicyGate(ctx, capi, f, pmode, *yes, "tw up", profile, pol, snip, popts, miss, out) // policy_ask.go
+			if err != nil {
+				return err
+			}
+			if write {
 				ar, err := policy.ApplyWith(ctx, capi, snip, popts)
 				if err != nil {
 					return fail("policy_apply_failed", "could not apply the policy snippet", err.Error()).withFix("add it in "+policyHome(profile)+":", res.PolicyDiff)
@@ -589,6 +682,7 @@ func cmdUp(args []string) error {
 		}
 		res.Applied = res.Applied || hsApplied
 	} else {
+		res.Applied = upApplied
 		// Tag ownership is proven (mgmt's and the host's keys minted); the
 		// grants are checked when the client can read the policy.
 		res.PolicyOK = true
@@ -598,7 +692,7 @@ func cmdUp(args []string) error {
 			// the host key was not minted, so tag:tw-host ownership is
 			// checked here too, and everything about tag:tw-host is
 			// advisory (needed only for tw host add).
-			want := policy.Snippet{Grants: operatorSnippet().Grants}
+			want := policy.Snippet{Grants: operatorSnippetFor(pol).Grants}
 			if single {
 				want.TagOwners = map[string][]string{mgmt.HostTag: {"tag:tw"}}
 			}
@@ -612,6 +706,7 @@ func cmdUp(args []string) error {
 		}
 	}
 	timings["total"] = ms(time.Since(t0))
+	res.UnsafeFlags = unsafeFlags(s.Cfg) // up_unsafe.go
 	emit(f, res, func() {
 		if hsMode {
 			fmt.Printf("tw up · all-in-one on this machine (%s) · Headscale %s, base domain %s (API key, mint mode headscale)\n", layoutLabel(single), *control, *tailnet)
@@ -626,7 +721,7 @@ func cmdUp(args []string) error {
 		if single {
 			mgmtName = "tw-mgmt (in the tailworks supervisor process)"
 		}
-		fmt.Printf("✓ mgmt     %s %s · leases in SQLite (%s) · custody: file (homelab mode)\n", mgmtName, started, filepath.Join(s.Dir, "mgmt", "mgmt.db"))
+		fmt.Printf("✓ mgmt     %s %s · %s\n", mgmtName, started, s.Cfg.storeLabel(s.Dir))
 		if res.MgmtNode != "" {
 			sch := "http"
 			if res.HTTPS {
@@ -640,8 +735,11 @@ func cmdUp(args []string) error {
 		} else {
 			fmt.Printf("✓ host     this machine (%s) · own node %s (%s) · %s\n", *hostID, mgmt.HostNodeName(*hostID), mgmt.HostTag, tierLine(s))
 		}
+		printSavedFlags(s.Cfg, s.Dir, 9, nil) // up_unsafe.go
 		fmt.Printf("✓ tenant   %s connected (tenant %s, mint mode %s) · control %s\n", *tailnet, tid, s.Cfg.mintMode(), *control)
 		switch {
+		case res.Applied && oauthMode:
+			fmt.Printf("✓ policy   applied tailworks' tagOwners and grants (--apply-policy; validated, If-Match)\n")
 		case res.Applied:
 			fmt.Printf("✓ policy   applied tag:tw tagOwners (validated, If-Match)\n")
 		case res.PolicyOK && hsMode:
@@ -660,9 +758,9 @@ func cmdUp(args []string) error {
 			fmt.Printf("✓ policy   tag:tw owns %s and %s (both keys minted); grants not checked (the OAuth client can't read the policy)\n", mgmt.MgmtTag, mgmt.HostTag)
 		default:
 			if oauthMode {
-				fmt.Printf("› policy   missing (add in the admin console › Access controls):\n")
+				fmt.Printf("› policy   missing (re-run with --apply-policy if the OAuth client has Policy File › Write, or add in the admin console › Access controls):\n")
 			} else {
-				fmt.Printf("› policy   not applied (re-run with --policy-apply, or add in %s):\n", policyHome(profile))
+				fmt.Printf("› policy   not applied (re-run with --apply-policy, or add in %s):\n", policyHome(profile))
 			}
 			for _, l := range strings.Split(strings.TrimSpace(res.PolicyDiff), "\n") {
 				fmt.Printf("    %s\n", l)
@@ -769,7 +867,7 @@ type child struct {
 }
 
 func (c *child) start(slog func(string, ...any)) error {
-	lf, err := os.OpenFile(c.logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	lf, err := openDaemonLog(c.logPath) // up_logs.go: rotated
 	if err != nil {
 		return err
 	}
@@ -818,7 +916,7 @@ func cmdSupervise(args []string) error {
 	if err != nil {
 		return err
 	}
-	if !s.configured() {
+	if !s.configured() && !s.firstStartPending() { // up_mgmtjoin.go
 		return fail("not_up", "no config in "+s.Dir)
 	}
 	logf := func(format string, a ...any) {
@@ -850,6 +948,9 @@ func cmdSupervise(args []string) error {
 	}
 	margs := []string{mgmtBin, "-state-dir", filepath.Join(s.Dir, "mgmt"), "-device-delete-delay", s.Cfg.DeviceDeleteDelay, "-version", version}
 	margs = append(margs, s.Cfg.identityMgmtArgs()...)
+	margs = append(margs, s.Cfg.storeMgmtArgs()...)
+	margs = append(margs, s.Cfg.retentionMgmtArgs()...) // up_retention.go
+	margs = append(margs, "-revoke-warm-keys-on-exit")  // tw down leaves no preauthorized key in custody (#158)
 	if s.Cfg.LocalDev {
 		// RT-03: a fresh per-host token on every mgmt start (tw up, a
 		// supervisor/systemd restart). hostd re-reads the file when it
@@ -861,23 +962,20 @@ func cmdSupervise(args []string) error {
 		margs = append(margs, "-tsapi-url", s.Cfg.TSAPIURL)
 	}
 	if s.Cfg.MgmtHostname != "" {
-		// mgmt's own tailnet node (joined by tw up): the API over WhoIs
+		// mgmt's own tailnet node (it joins with tw up's key): the API over WhoIs
 		// (never Funnel).
 		margs = append(margs, "-tsnet-hostname", s.Cfg.MgmtHostname, "-tsnet-control-url", s.Cfg.ControlURL)
-		if !s.Cfg.headscale() {
-			margs = append(margs, "-tsnet-tags", mgmt.MgmtTag)
-		}
+		margs = append(margs, "-tsnet-tags="+strings.Join(advertisedTags(s.Cfg.headscale(), mgmt.MgmtTag), ","))
+		// tw up's single-use join key (up_mgmtjoin.go), when there is one.
+		margs = append(margs, "-tsnet-authkey-file", s.mgmtJoinFile(), "-tsnet-authkey-once")
 	}
+	mgmtURLArg := 0 // hargs index of -mgmt's value (normal operation)
 	hargs := []string{hostdBin, "-host-id", s.Cfg.HostID,
 		"-data-dir", filepath.Join(s.Dir, "hostd"), "-run-dir", s.hostdRunDir(), "-workerd", s.Cfg.Workerd,
 		"-heartbeat", s.Cfg.Heartbeat, "-kill-tombstone", s.Cfg.KillTombstone, "-hostname-prefix", s.Cfg.HostnamePrefix,
 		// No tenant's workerd may touch tailworks' state (mgmt custody, every
 		// tenant's node keys and DO storage) or its sockets, except its own.
-		"-sandbox", "auto", "-sandbox-deny", strings.Join([]string{filepath.Join(s.Dir, "mgmt"), filepath.Join(s.Dir, "hostd"),
-			s.logDir(), s.configPath(), filepath.Join(s.Dir, "tenants"), s.runDir()}, ",")}
-	if s.Cfg.OAuthClientFile != "" {
-		hargs[len(hargs)-1] += "," + s.Cfg.OAuthClientFile // the OAuth client secret (also denied via the tenant list)
-	}
+		"-sandbox", "auto", "-sandbox-deny", strings.Join(s.sandboxDenyList(), ",")} // sandbox_layout.go
 	if s.Cfg.LocalDev {
 		hargs = append(hargs, "-local-dev", "-mgmt", "unix://"+s.mgmtSock(), "-mgmt-token-file", s.hostTokenFile())
 	} else {
@@ -888,6 +986,7 @@ func cmdSupervise(args []string) error {
 		if s.Cfg.MgmtIP == "" {
 			mgmtURL = "http://" + s.Cfg.MgmtDNSName
 		}
+		mgmtURLArg = len(hargs) + 1
 		port := s.Cfg.PushPort
 		if port == 0 {
 			port = defaultPushPort
@@ -904,10 +1003,15 @@ func cmdSupervise(args []string) error {
 	if s.Cfg.InsecureSharedHost {
 		hargs = append(hargs, "-insecure-shared-host")
 	}
+	if s.Cfg.AllowExperimentalFlags {
+		hargs = append(hargs, "-allow-experimental-flags")
+	}
 	if s.Cfg.AllowSiblingEgress {
 		hargs = append(hargs, "-allow-sibling-egress")
 	}
 	hargs = append(hargs, s.Cfg.identityHostdArgs()...)
+	hargs = append(hargs, s.Cfg.retentionHostdArgs()...) // up_retention.go
+	hargs = append(hargs, s.Cfg.workerInternetHostdArgs()...)
 	mg := &child{name: "tw-mgmt", args: margs, logPath: s.log("mgmt")}
 	hd := &child{name: "tw-hostd", args: hargs, logPath: s.log("hostd")}
 
@@ -975,7 +1079,17 @@ func cmdSupervise(args []string) error {
 	logf("supervising in %s (tailnet %s)", s.Dir, s.Cfg.Tailnet)
 	wg.Add(2)
 	go supervise(mg, nil)
-	go supervise(hd, waitMgmt)
+	go supervise(hd, func() bool {
+		if !waitMgmt() {
+			return false
+		}
+		// mgmt's tailnet IP from its loopback descriptor: on tw up's first
+		// start, mgmt joins its node after this supervisor started.
+		if lb := s.loopback(); lb != nil && mgmtURLArg > 0 {
+			hd.args[mgmtURLArg] = "http://" + lb.MgmtIP
+		}
+		return true
+	})
 	<-stopping
 	logf("stopping: hostd first (nodes close in parallel), then mgmt (flushes pending device deletes)")
 	hd.stop(45 * time.Second)
@@ -994,8 +1108,8 @@ func cmdSupervise(args []string) error {
 // unchanged. SIGTERM stops hostd first (nodes close in parallel), then
 // mgmt (flushes pending device deletes).
 func superviseSingle(s *state, logf func(string, ...any)) error {
-	openLog := func(name string) (*os.File, *slog.Logger, error) {
-		lf, err := os.OpenFile(s.log(name), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	openLog := func(name string) (io.WriteCloser, *slog.Logger, error) {
+		lf, err := openDaemonLog(s.log(name)) // up_logs.go: rotated
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1016,10 +1130,17 @@ func superviseSingle(s *state, logf func(string, ...any)) error {
 	delDelay, _ := time.ParseDuration(s.Cfg.DeviceDeleteDelay)
 	mo := mgmtd.Options{StateDir: filepath.Join(s.Dir, "mgmt"), DeviceDeleteDelay: delDelay, Version: version, TSAPIURL: s.Cfg.TSAPIURL,
 		TSNetHostname: s.Cfg.MgmtHostname, TSNetControlURL: s.Cfg.ControlURL, TSNetTags: advertisedTags(s.Cfg.headscale(), mgmt.MgmtTag), TSNetTLS: true,
-		WarmKeys: mgmtd.DefaultWarmKeys, Log: mlog,
+		TSNetAuthKeyFile: s.mgmtJoinFile(), TSNetAuthKeyOnce: true, // tw up's single-use join key, when there is one (up_mgmtjoin.go)
+		Log: mlog, RevokeWarmKeysOnClose: true, // tw down leaves no preauthorized key in custody (#158)
 		MetricsPort: obs.DefaultMetricsPort}
 	if mo.TSAPIURL == "" {
 		mo.TSAPIURL = tsapi.DefaultBaseURL
+	}
+	s.Cfg.storeOptions(&mo)         // up_store.go
+	s.Cfg.retentionSingle(&mo, nil) // up_retention.go
+	s.Cfg.identitySingle(&mo, nil)  // up_identity.go
+	if !s.Cfg.PortMapping {
+		netd.DisablePortMapping() // process-wide: before mgmt's node exists
 	}
 	logf("supervising in %s (tailnet %s): single process, mgmt + embedded host %s", s.Dir, s.Cfg.Tailnet, s.Cfg.HostID)
 	mrt, err := mgmtd.Start(ctx, mo)
@@ -1032,14 +1153,18 @@ func superviseSingle(s *state, logf func(string, ...any)) error {
 	tomb, _ := time.ParseDuration(s.Cfg.KillTombstone)
 	// No tenant's workerd may touch tailworks' state (mgmt custody, every
 	// tenant's node keys and DO storage) or its sockets, except its own.
-	deny := []string{filepath.Join(s.Dir, "mgmt"), filepath.Join(s.Dir, "hostd"), s.logDir(), s.configPath(), filepath.Join(s.Dir, "tenants"), s.runDir()}
-	if s.Cfg.OAuthClientFile != "" {
-		deny = append(deny, s.Cfg.OAuthClientFile) // the OAuth client secret (also denied via the tenant list)
-	}
+	deny := s.sandboxDenyList() // sandbox_layout.go
 	ho := hostdrun.Options{Client: inproc.NewClient(mrt.Handler(), s.Cfg.HostID), HostID: s.Cfg.HostID,
 		DataDir: filepath.Join(s.Dir, "hostd"), RunDir: s.hostdRunDir(), Workerd: s.Cfg.Workerd,
-		Heartbeat: hb, KillTombstone: tomb, HostnamePrefix: s.Cfg.HostnamePrefix, Sandbox: "auto", SandboxDeny: deny, PoolNodes: hostdrun.DefaultPoolNodes,
+		Heartbeat: hb, KillTombstone: tomb, HostnamePrefix: s.Cfg.HostnamePrefix, Sandbox: "auto", SandboxDeny: deny,
 		Ephemeral: s.Cfg.Ephemeral, InsecureSharedHost: s.Cfg.InsecureSharedHost, AllowSiblingEgress: s.Cfg.AllowSiblingEgress, Log: hlog}
+	// Experimental compatibility flags (hostd/gen/compatflags.go, #337).
+	ho.AllowExperimentalFlags = s.Cfg.AllowExperimentalFlags
+	// The converted container image cache cap, tw-hostd's default (#476).
+	ho.ContainerImageCacheMaxMiB = hostdrun.DefaultImageCacheMiB
+	s.Cfg.retentionSingle(nil, &ho) // up_retention.go
+	s.Cfg.identitySingle(nil, &ho)  // up_identity.go
+	s.Cfg.workerInternetSingle(&ho) // up_workerinternet.go
 	hrt, err := hostdrun.New(ctx, ho)
 	if err != nil {
 		logf("host agent failed to start: %v", err)
@@ -1106,59 +1231,91 @@ func cmdDown(args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	if (*purge || s.Cfg.Ephemeral) && s.Cfg.TenantID != "" && s.mgmtHealthy(ctx) {
-		// No new objects from here on (no pool refill, no create from a
-		// request arriving meanwhile) and none in flight, so the list below
-		// is complete (hostd/teardown.go). An older hostd without the route
-		// answers 404: carry on as before.
-		s.hostd().Do(ctx, "POST", "/v1/teardown", nil, nil)
-		// Every tenant this host serves (each kill goes to its own tailnet).
-		var objs []mgmt.Object
-		for _, tn := range s.tenants() {
-			o, err := s.objectsOf(ctx, tn.TenantID)
-			if err == nil {
-				objs = append(objs, o...)
-			}
-		}
-		{
-			live := map[string]bool{}
-			for _, o := range objs {
-				if o.Status != "killed" && o.Status != "failed" && o.Status != "transferred" {
-					live[o.ID] = true
-				}
-			}
-			for _, o := range objs {
-				if !live[o.ID] || live[o.ParentID] {
-					continue // dead, or killed with its root (cascade)
-				}
-				var kr struct {
-					Killed []string `json:"killed"`
-				}
-				if err := s.mgmt().DoHeaders(ctx, "DELETE", "/v1/objects/"+o.ID+"?cascade=true&reason="+url.QueryEscape("tw down --purge"), nil,
-					&kr, map[string]string{"Tw-Actor": actor()}); err == nil {
-					res.Killed = append(res.Killed, kr.Killed...)
-				}
-			}
-		}
-		var fr struct {
-			Deleted []string `json:"deleted"`
-		}
-		s.mgmt().Do(ctx, "POST", "/v1/device-delete-runs", nil, &fr)
-		res.Flushed = len(fr.Deleted)
-		// Forget the killed objects (mgmt rows, hostd tombstones) so the
-		// same workload deploys again on this state dir.
-		for _, tn := range s.tenants() {
-			var pr mgmt.PurgeResult
-			if err := s.mgmt().Do(ctx, "DELETE", "/v1/tenants/"+tn.TenantID+"/objects", nil, &pr); err == nil {
-				res.Purged += len(pr.Purged)
-			}
-		}
-		s.hostd().Do(ctx, "POST", "/v1/purge", nil, nil)
+		downPurge(ctx, s, &res)
 		res.Timings["purge"] = ms(time.Since(t0))
 	}
+	if err := downStop(s, *service, &res, t0); err != nil {
+		return err
+	}
+	res.Timings["total"] = ms(time.Since(t0))
+	emit(f, res, func() {
+		if len(res.Killed) > 0 || res.Purged > 0 {
+			fmt.Printf("✓ purged   %d objects killed · %d devices deleted · %d killed objects forgotten\n", len(res.Killed), res.Flushed, res.Purged)
+		}
+		what := "tw-hostd, tw-mgmt"
+		if s.Cfg.single() {
+			what = "tw-mgmt with the embedded host"
+		}
+		fmt.Printf("✓ stopped  %s (%.1fs) · state kept in %s\n", what, res.Timings["total"]/1000, s.Dir)
+		if res.ServiceRemoved {
+			fmt.Println("✓ removed  " + serviceUnitPath() + " (disabled)")
+		} else if res.ServiceStopped {
+			fmt.Println("› service  " + serviceUnit + " stopped but still installed (starts at next login/boot); `tw down --service` removes it")
+		}
+	})
+	return nil
+}
+
+// downPurge is tw down --purge's first half (also tw uninstall's): kill
+// every live object of every tenant this host serves, delete their devices
+// and forget them. mgmt must be healthy.
+func downPurge(ctx context.Context, s *state, res *downResult) {
+	// No new objects from here on (no pool refill, no create from a
+	// request arriving meanwhile) and none in flight, so the list below
+	// is complete (hostd/teardown.go). An older hostd without the route
+	// answers 404: carry on as before.
+	s.hostd().Do(ctx, "POST", "/v1/teardown", nil, nil)
+	// Every tenant this host serves (each kill goes to its own tailnet).
+	var objs []mgmt.Object
+	for _, tn := range s.tenants() {
+		o, err := s.objectsOf(ctx, tn.TenantID)
+		if err == nil {
+			objs = append(objs, o...)
+		}
+	}
+	{
+		live := map[string]bool{}
+		for _, o := range objs {
+			if o.Status != "killed" && o.Status != "failed" && o.Status != "transferred" {
+				live[o.ID] = true
+			}
+		}
+		for _, o := range objs {
+			if !live[o.ID] || live[o.ParentID] {
+				continue // dead, or killed with its root (cascade)
+			}
+			var kr struct {
+				Killed []string `json:"killed"`
+			}
+			if err := s.mgmt().DoHeaders(ctx, "DELETE", "/v1/objects/"+o.ID+"?cascade=true&reason="+url.QueryEscape("tw down --purge"), nil,
+				&kr, map[string]string{"Tw-Actor": actor()}); err == nil {
+				res.Killed = append(res.Killed, kr.Killed...)
+			}
+		}
+	}
+	var fr struct {
+		Deleted []string `json:"deleted"`
+	}
+	s.mgmt().Do(ctx, "POST", "/v1/device-delete-runs", nil, &fr)
+	res.Flushed = len(fr.Deleted)
+	// Forget the killed objects (mgmt rows, hostd tombstones) so the
+	// same workload deploys again on this state dir.
+	for _, tn := range s.tenants() {
+		var pr mgmt.PurgeResult
+		if err := s.mgmt().Do(ctx, "DELETE", "/v1/tenants/"+tn.TenantID+"/objects", nil, &pr); err == nil {
+			res.Purged += len(pr.Purged)
+		}
+	}
+	s.hostd().Do(ctx, "POST", "/v1/purge", nil, nil)
+}
+
+// downStop stops the supervisor (through the service manager when one runs
+// it; service: also remove the service) and waits for it to exit.
+func downStop(s *state, service bool, res *downResult, t0 time.Time) error {
 	pid := s.supervisorPID()
 	inst, act := serviceOf(s) // never another state dir's service (e.g. the real ~/.tailworks while tests run)
 	switch {
-	case *service && inst:
+	case service && inst:
 		// disable --now stops it (the supervisor's own SIGTERM path) and
 		// keeps it from starting again at login/boot.
 		removed, err := removeService()
@@ -1184,22 +1341,6 @@ func cmdDown(args []string) error {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	res.Timings["total"] = ms(time.Since(t0))
-	emit(f, res, func() {
-		if len(res.Killed) > 0 || res.Purged > 0 {
-			fmt.Printf("✓ purged   %d objects killed · %d devices deleted · %d killed objects forgotten\n", len(res.Killed), res.Flushed, res.Purged)
-		}
-		what := "tw-hostd, tw-mgmt"
-		if s.Cfg.single() {
-			what = "tw-mgmt with the embedded host"
-		}
-		fmt.Printf("✓ stopped  %s (%.1fs) · state kept in %s\n", what, res.Timings["total"]/1000, s.Dir)
-		if res.ServiceRemoved {
-			fmt.Println("✓ removed  " + serviceUnitPath() + " (disabled)")
-		} else if res.ServiceStopped {
-			fmt.Println("› service  " + serviceUnit + " stopped but still installed (starts at next login/boot); `tw down --service` removes it")
-		}
-	})
 	return nil
 }
 
@@ -1221,6 +1362,9 @@ type tenantStatus struct {
 	MintQueue int            `json:"mintQueue"`
 	Rate      float64        `json:"registrationsPerMinute"`
 	Objects   map[string]int `json:"objectsByStatus"`
+
+	// WarmKeys: pooled preauthorized join keys in mgmt custody (#158).
+	WarmKeys int `json:"warmKeys"`
 }
 
 type statusResult struct {
@@ -1253,6 +1397,18 @@ type statusResult struct {
 	// DegradedStores (#147, storedegraded.go): stores whose object stopped
 	// its replay at a journal entry it can't apply.
 	DegradedStores []mgmt.StoreInfo `json:"degradedStores,omitempty"`
+
+	// WarmKeys: the operator tenant's pooled preauthorized join keys in
+	// mgmt custody (#158; per tenant in Tenants).
+	WarmKeys int `json:"warmKeys"`
+
+	// WorkerInternet: this host's Worker internet egress, "direct" or
+	// "off" (up_workerinternet.go): what the running host reports, else
+	// tw.json's.
+	WorkerInternet string `json:"workerInternet"`
+
+	// UnsafeFlags: the saved unsafe tw up flags (up_unsafe.go).
+	UnsafeFlags []string `json:"unsafeFlags"`
 }
 
 func cmdStatus(args []string) error {
@@ -1285,9 +1441,10 @@ func cmdStatus(args []string) error {
 		var tn struct {
 			Q    int     `json:"mintQueue"`
 			Rate float64 `json:"effectiveRegistrationsPerMinute"`
+			Warm int     `json:"warmKeys"`
 		}
 		s.mgmt().Do(ctx, "GET", "/v1/tenants/"+s.Cfg.TenantID, nil, &tn)
-		r.MintQueue, r.Rate = tn.Q, tn.Rate
+		r.MintQueue, r.Rate, r.WarmKeys = tn.Q, tn.Rate, tn.Warm
 		var h struct {
 			ID       string `json:"hostID"`
 			LastSeen int64  `json:"lastSeen"`
@@ -1318,9 +1475,10 @@ func cmdStatus(args []string) error {
 			var tn struct {
 				Q    int     `json:"mintQueue"`
 				Rate float64 `json:"effectiveRegistrationsPerMinute"`
+				Warm int     `json:"warmKeys"`
 			}
 			s.mgmt().Do(ctx, "GET", "/v1/tenants/"+t.TenantID, nil, &tn)
-			ts.MintQueue, ts.Rate = tn.Q, tn.Rate
+			ts.MintQueue, ts.Rate, ts.WarmKeys = tn.Q, tn.Rate, tn.Warm
 		}
 		for _, o := range hv.Objects {
 			if o.TenantID == t.TenantID {
@@ -1330,61 +1488,17 @@ func cmdStatus(args []string) error {
 		r.Tenants = append(r.Tenants, ts)
 	}
 	r.Containers = hv.Containers
+	r.WorkerInternet = cmpOr(hv.WorkerInternet, s.Cfg.workerInternet())
 	if r.Mgmt {
 		r.Capacity, r.Reservations = containerState(ctx, s.mgmt(), "")
 		r.DegradedStores = degradedStores(ctx, s.mgmt(), "")
 	}
 	r.Healthy = r.Supervisor && r.Mgmt && r.Host
-	emit(f, r, func() {
-		mark := func(ok bool) string {
-			if ok {
-				return "✓"
-			}
-			return "✗"
-		}
-		fmt.Printf("tw status · %s · tailnet %s · mint mode %s · transport %s\n", s.Dir, s.Cfg.Tailnet, r.MintMode, r.Transport)
-		fmt.Printf("%s supervisor  pid %d\n", mark(r.Supervisor), s.supervisorPID())
-		if r.MgmtNode != "" {
-			sch := "http"
-			if s.Cfg.HTTPS {
-				sch = "https"
-			}
-			fmt.Printf("%s node        %s (%s; API over the tailnet, WhoIs auth) · console %s://%s/ui/\n", mark(r.Mgmt), r.MgmtNode, mgmt.MgmtTag, sch, r.MgmtNode)
-		}
-		fmt.Printf("%s mgmt        tenant %s · mint queue %d · %.0f registrations/min · %d pending device deletes\n", mark(r.Mgmt), r.TenantID, r.MintQueue, r.Rate, r.Pending)
-		where := "own node " + mgmt.HostNodeName(s.Cfg.HostID)
-		switch {
-		case s.Cfg.single():
-			where = "embedded in the mgmt process"
-		case s.Cfg.LocalDev:
-			where = "local-dev"
-		}
-		fmt.Printf("%s host        %s (%s) · heartbeat %.1fs ago · objects %v\n", mark(r.Host), s.Cfg.HostID, where, float64(r.HostAgeMS)/1000, r.Objects)
-		if len(r.Tenants) > 1 {
-			for _, t := range r.Tenants {
-				fmt.Printf("  tenant      %s (%s) · mint queue %d · %.0f registrations/min · objects %v\n", t.Tailnet, t.TenantID, t.MintQueue, t.Rate, t.Objects)
-			}
-		}
-		for _, w := range r.Workloads {
-			e := ""
-			if w.Error != "" {
-				e = " · " + tsafe(w.Error)
-			}
-			sb := ""
-			if w.Sandbox != "" {
-				sb = ", sandbox " + w.Sandbox
-			}
-			if w.Egress != "" {
-				sb += ", egress " + w.Egress
-				if w.Egress == hostd.EgressUnenforced {
-					sb += " (Node tier: the egress proxy is cooperative here, not a boundary)"
-				}
-			}
-			fmt.Printf("%s workload    %s %s (tenant %s, %s, epoch %d, %d requests%s)%s\n", mark(w.Status == "active"), w.Workload, w.Status, w.TenantID, w.DeploymentID, w.Epoch, w.Requests, sb, e)
-		}
-		printDegradedStores(r.DegradedStores)
-		printContainers(r.Capacity, r.Reservations, r.Containers, hv.ImageCacheBytes)
-	})
+	r.UnsafeFlags = unsafeFlags(s.Cfg)
+	if r.Workloads == nil {
+		r.Workloads = []hostd.WorkloadStatus{} // [], never null (docs/cli-json.md)
+	}
+	emit(f, r, func() { printHostStatus(s, r, hv, hostOK) }) // status_view.go
 	if !r.Healthy {
 		return fail("unhealthy", "tw is not healthy in "+s.Dir).withFix("tw logs --component supervisor", "tw up")
 	}
@@ -1401,13 +1515,9 @@ func remoteStatus(f *flags, s *state) error {
 		return err
 	}
 	hosts, _ := listAll[mgmt.Host](ctx, s.mgmt(), "/v1/hosts", 0)
-	type tenantView struct {
-		TenantRef
-		Deployments []mgmt.DeploymentView `json:"deployments"`
-	}
-	var tenants []tenantView
+	tenants := []remoteTenant{}
 	for _, t := range s.tenants() {
-		tv := tenantView{TenantRef: t}
+		tv := remoteTenant{TenantRef: t}
 		tv.Deployments, _ = listAll[mgmt.DeploymentView](ctx, s.mgmt(), "/v1/deployments?latest=true&tenant="+url.QueryEscape(t.TenantID), 0)
 		tenants = append(tenants, tv)
 	}
@@ -1419,41 +1529,12 @@ func remoteStatus(f *flags, s *state) error {
 	}
 	capv, resv := containerState(ctx, s.mgmt(), "")
 	degraded := degradedStores(ctx, s.mgmt(), "")
-	res := map[string]any{"linked": s.Link, "whoami": w, "hosts": hosts, "tenants": tenants, "healthy": live > 0,
+	res := map[string]any{"linked": s.Link, "stateDir": s.Dir, "whoami": w, "hosts": hosts, "tenants": tenants, "healthy": live > 0,
 		"hostCapacity": capv, "containerReservations": resv}
 	if len(degraded) > 0 {
 		res["degradedStores"] = degraded
 	}
-	emit(f, res, func() {
-		fmt.Printf("tw status · linked to %s · tailnet %s · you are %s (admin by WhoIs)\n", s.Link.Endpoint, w.Mgmt.Tailnet, w.Actor)
-		for _, h := range hosts {
-			mark := "✗"
-			if h.Live(time.Now()) {
-				mark = "✓"
-			}
-			fmt.Printf("%s host        %s · heartbeat %.1fs ago · %d live nodes · tiers %s\n", mark, h.ID, time.Since(time.UnixMilli(h.LastSeen)).Seconds(), h.LiveNodes, strings.Join(h.Tiers, ","))
-		}
-		for _, t := range tenants {
-			fmt.Printf("✓ tenant      %s (%s, mint mode %s)\n", t.Tailnet, t.TenantID, mintModeName(t.MintMode))
-			for _, d := range t.Deployments {
-				by := ""
-				if d.DeployedBy != "" {
-					by = " · by " + d.DeployedBy
-				}
-				if d.Error != "" {
-					by += " · " + tsafe(d.Error)
-				}
-				fmt.Printf("  workload    %s %s · http://%s/%s\n", tsafe(d.Workload), tsafe(d.Status), tsafe(d.Endpoint.MagicDNS), by)
-				for _, c := range d.Containers {
-					for _, p := range c.Pins {
-						fmt.Printf("    image     %s %s linux/%s → %s@%s\n", c.Class, p.Ref, p.Arch, p.Repository, p.Digest)
-					}
-				}
-			}
-		}
-		printDegradedStores(degraded)
-		printContainers(capv, resv, nil, 0)
-	})
+	emit(f, res, func() { printRemoteStatus(s, w, hosts, tenants, live, degraded, capv, resv) }) // status_view.go
 	if live == 0 {
 		return fail("unhealthy", "no live host at "+s.Link.Endpoint).withFix("tw status on the host")
 	}
@@ -1465,11 +1546,12 @@ func remoteStatus(f *flags, s *state) error {
 // tenants: the process tier by the OS sandbox (Seatbelt on macOS,
 // Landlock+seccomp on Linux; "none" is loud), the microVM tier by the
 // Firecracker jailer + VM.
-func tierLine(s *state) string {
+func tierLine(s *state) (line string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	var hv hostd.StatusView
 	_ = s.hostd().Do(ctx, "GET", "/v1/status", nil, &hv)
+	defer func() { line += containersUpNote(hv) }() // doctor_containers.go
 	sb := hv.Sandbox
 	switch {
 	case sb == "":

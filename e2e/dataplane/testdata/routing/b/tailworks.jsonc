@@ -1,0 +1,10 @@
+{
+  // e2e/dataplane routing loop (#422), Worker B: the target of rt-a's
+  // service binding (fetch and RPC). Stateful (a Durable Object), so it
+  // fences.
+  "name": "rt-b",
+  "tailnet": {
+    "tags": ["tag:ttest"],
+    "objects": { "Pin": { "tags": ["tag:ttest"], "egress": "workload" } },
+  },
+}

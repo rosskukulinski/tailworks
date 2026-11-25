@@ -129,14 +129,16 @@ func mcpToolList() []mcpTool {
 		{Name: "logs", Kind: "read", Description: "A workload's request records (one per request: method, path, status, outcome, caller, its console output and exceptions), or with console=true its raw output, like `tw logs`.",
 			Input: obj([]string{"workload"}, map[string]any{"tenant": tenantArg, "workload": strProp("the workload"), "n": intProp("how many records (or lines with console) from the end; default 50", 1000),
 				"console": boolProp("the app's raw output instead of request records"), "errors": boolProp("only failed requests (status >= 400, exceptions)"),
-				"status": strProp("only this status (404) or class (5xx)"), "object": strProp("only this object (ID, Class/name, Class or name)"), "trace": strProp("only this trace ID")}), run: mcpLogs},
-		{Name: "audit", Kind: "read", Description: "The hash-chained audit trail: who created, called, spawned or killed what, like `tw audit`.",
-			Input: obj(nil, map[string]any{"tenant": tenantArg, "object": strProp("records about this object ID"), "trace": strProp("records of this trace ID"), "limit": intProp("at most this many records; default 100", 500)}), run: mcpAudit},
+				"status": strProp("only this status (404) or class (5xx)"), "object": strProp("only this object (ID, Class/name, Class or name)"),
+				"outcome": strProp("only this outcome (ok, exception, canceled, …)"), "caller": strProp("only callers whose login or node name contains this (public: Funnel requests)"),
+				"trace": strProp("only this trace ID")}), run: mcpLogs},
+		{Name: "audit", Kind: "read", Description: "The audit trail, like `tw audit`: who created, called, spawned or killed what, when and why.",
+			Input: obj(nil, map[string]any{"tenant": tenantArg, "object": strProp("records about this object ID"), "human": strProp("records acting for this principal (login or caller node)"), "trace": strProp("records of this trace ID"), "limit": intProp("at most this many records; default 100", 500)}), run: mcpAudit},
 		{Name: "deploy", Kind: "write", Description: "Deploy a workload. With bundle (base64 of the tar `tw deploy` uploads) it deploys that; without, it redeploys the workload's current bundle (with replace=true, re-placed on the best host). Returns at once; poll ls for status.",
 			Input: obj([]string{"workload"}, map[string]any{"tenant": tenantArg, "workload": strProp("the workload"), "bundle": strProp("base64 bundle tar (optional)"),
 				"replace": boolProp("re-place the workload on a better host"), "dryRun": boolProp("only preflight the bundle against the tailnet policy")}), run: mcpDeploy},
 		{Name: "kill", Kind: "destructive", Description: "Kill an object: cut it off the tailnet in under a second and delete its node. No undo. Only after the user agreed to kill this object.",
-			Input: obj([]string{"object", "reason"}, map[string]any{"object": strProp("the object ID (from ls)"), "cascade": boolProp("also kill everything it spawned"), "reason": strProp("why (recorded in the audit trail)")}), run: mcpKill},
+			Input: obj([]string{"object", "reason"}, map[string]any{"object": strProp("the object ID (from ls)"), "cascade": boolProp("also kill everything it spawned; default true, like tw kill (with false the reaper kills them within seconds)"), "reason": strProp("why (recorded in the audit trail)")}), run: mcpKill},
 		{Name: "undeploy", Kind: "destructive", Description: "Stop a workload: kill all its objects and release its host. No undo. Only after the user agreed to undeploy this workload.",
 			Input: obj([]string{"workload", "reason"}, map[string]any{"tenant": tenantArg, "workload": strProp("the workload"), "reason": strProp("why (recorded in the audit trail)")}), run: mcpUndeploy},
 	}
@@ -399,7 +401,7 @@ func toolError(err error) map[string]any {
 	if !ok {
 		e = errf(500, "internal", "%v", err)
 	}
-	body := map[string]any{"code": e.Code, "message": e.Message, "doc_url": "https://github.com/rosskukulinski/tailworks/blob/master/docs/errors.md#" + e.Code}
+	body := map[string]any{"code": e.Code, "message": e.Message, "doc_url": DocBase + e.Code}
 	hint := "see the doc_url"
 	if e.Snippet != "" {
 		body["snippet"] = e.Snippet
@@ -580,10 +582,14 @@ func mcpLs(c *mcpCtx, a map[string]any) (any, error) {
 	if err := c.call("GET", "/v1/deployments?latest=true&limit=500&"+q, nil, &deps); err != nil {
 		return nil, err
 	}
-	if err := c.call("GET", "/v1/objects?limit=500&"+q, nil, &objs); err != nil {
+	all := argBool(a, "all")
+	oq := q
+	if !all { // killed objects never eat the page (tw ls does the same)
+		oq += "&" + url.Values{"state": LiveStatuses}.Encode()
+	}
+	if err := c.call("GET", "/v1/objects?limit=500&"+oq, nil, &objs); err != nil {
 		return nil, err
 	}
-	all := argBool(a, "all")
 	shown := []map[string]any{}
 	for _, o := range objs.Items {
 		if all || !slices.Contains([]string{StatusKilled, StatusFailed, StatusTransferred}, fmt.Sprint(o["status"])) {
@@ -619,7 +625,7 @@ func mcpLogs(c *mcpCtx, a map[string]any) (any, error) {
 		q.Set("source", "console")
 	} else {
 		q.Set("source", "requests")
-		for _, k := range []string{"status", "object", "trace"} {
+		for _, k := range []string{"status", "object", "outcome", "caller", "trace"} { // every obs.Filter key (TestMCPLogsFilterParity)
 			if v := argStr(a, k); v != "" {
 				q.Set(k, v)
 			}
@@ -683,6 +689,9 @@ func mcpAudit(c *mcpCtx, a map[string]any) (any, error) {
 	if v := argStr(a, "object"); v != "" {
 		q.Set("object", v)
 	}
+	if v := argStr(a, "human"); v != "" {
+		q.Set("human", v)
+	}
 	if v := argStr(a, "trace"); v != "" {
 		q.Set("trace", v)
 	}
@@ -735,7 +744,7 @@ func mcpKill(c *mcpCtx, a map[string]any) (any, error) {
 		return nil, err
 	}
 	q := url.Values{"reason": {reason}}
-	if argBool(a, "cascade") {
+	if casc, ok := a["cascade"].(bool); !ok || casc { // cascade unless told not to, like tw kill
 		q.Set("cascade", "true")
 	}
 	var v map[string]any

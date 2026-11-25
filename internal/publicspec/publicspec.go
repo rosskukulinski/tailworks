@@ -9,6 +9,7 @@ package publicspec
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"path"
 	"sort"
@@ -85,7 +86,10 @@ var Ceilings = Limits{RPS: 1000, Burst: 2000, IPRPS: 200, IPBurst: 400, MaxBodyB
 	UpgradeLifetimeSeconds: 86400,
 }
 
-// Effective fills unset fields from Defaults.
+// Effective fills unset fields from Defaults. An unset burst (ipBurst) is
+// derived from the rate it goes with: two seconds' worth of rps (ipRps),
+// never below the default and never above the ceiling, so raising rps alone
+// doesn't leave a spike size meant for the default rate.
 func (l *Limits) Effective() Limits {
 	e := Defaults
 	if l == nil {
@@ -96,12 +100,16 @@ func (l *Limits) Effective() Limits {
 	}
 	if l.Burst > 0 {
 		e.Burst = l.Burst
+	} else {
+		e.Burst = derivedBurst(e.RPS, Defaults.Burst, Ceilings.Burst)
 	}
 	if l.IPRPS > 0 {
 		e.IPRPS = l.IPRPS
 	}
 	if l.IPBurst > 0 {
 		e.IPBurst = l.IPBurst
+	} else {
+		e.IPBurst = derivedBurst(e.IPRPS, Defaults.IPBurst, Ceilings.IPBurst)
 	}
 	if l.MaxBodyBytes > 0 {
 		e.MaxBodyBytes = l.MaxBodyBytes
@@ -122,6 +130,12 @@ func (l *Limits) Effective() Limits {
 		e.UpgradeLifetimeSeconds = l.UpgradeLifetimeSeconds
 	}
 	return e
+}
+
+// derivedBurst is min(ceiling, max(def, ceil(2*rps))): upward-only, so a
+// config that relied on the default burst never gets a smaller one.
+func derivedBurst(rps float64, def, ceiling int) int {
+	return min(ceiling, max(def, int(math.Ceil(2*rps))))
 }
 
 // Timeout is TimeoutSeconds as a duration.

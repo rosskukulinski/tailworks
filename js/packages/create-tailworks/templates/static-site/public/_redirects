@@ -1,0 +1,3 @@
+# <from> <to> [status]: checked before any file (docs/wrangler.md#assets)
+/home  /      301
+/docs  https://github.com/rosskukulinski/tailworks/blob/master/docs/wrangler.md#assets

@@ -160,6 +160,9 @@ func (s *Server) deleteStore(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) readJournal(w http.ResponseWriter, r *http.Request) {
+	if !s.holdStoreRead(w, r) {
+		return
+	}
 	if s.journalDown(w) {
 		return
 	}
@@ -255,5 +258,8 @@ func (s *Server) appendJournal(w http.ResponseWriter, r *http.Request) {
 	}
 	st.update = time.Now()
 	s.storeAppends++
+	if s.loseAppendAnswerLocked(w) {
+		return
+	}
 	writeJSON(w, 201, mgmtapi.StoreAppendResult{Incarnation: st.inc, Head: st.head})
 }

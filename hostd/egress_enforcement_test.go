@@ -5,6 +5,7 @@ import "testing"
 // Node-tier egress is an enforcement boundary only under Landlock with TCP
 // rules (ABI ≥ 4). Below that, status must not say "enforced" (issue #100).
 func TestEgressEnforcementByABI(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		sandbox string
 		abi     int

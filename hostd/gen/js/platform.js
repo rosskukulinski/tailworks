@@ -6,6 +6,7 @@
 //   EGRESS_WL    hostd's workload egress socket (the tenant service's identity)
 //   HOSTD        hostd's local host API socket (ensure/spawn/ready/kill/audit)
 //   MAC_KEY      per-process root key; per-object egress MAC keys are derived from it (RT-04)
+//   LOCAL_TOKEN  hostd's loopback token (Landlock sandbox only), sent in connect() tunnels
 //   TENANT       the tenant service (the app's default export)
 //   NS_<Class>   plain-DO namespaces (classes with "egress": "workload")
 //
@@ -15,13 +16,13 @@ import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import CFG from "tw-config.json";
 import MODULES from "tw-modules.js";
 import { deliverQueue } from "tw-queue.js";
+import { DOC, bindingCallee, setObjectEgress } from "tw-svc.js";
 
 const FACET_MODULES = MODULES;
 
 const json = (status, body, extra = {}) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": "no-store", ...extra } });
 
-const DOC = "https://github.com/rosskukulinski/tailworks/blob/main/docs/errors.md#";
 const STATUS = {
   killed: 410, no_identity: 401, bad_request: 400, unknown_object: 404, identity_pending: 503, hostd_unavailable: 503,
   public_create_denied: 403, public_request: 403, not_public: 404, create_not_admitted: 403,
@@ -33,6 +34,15 @@ const STATUS = {
 function isPublic(req) {
   return req?.cf?.tailscale?.requester?.kind === "public";
 }
+// httpsRequest is req with an https:// URL (tailnet.https). A port that is
+// http's default drops out with the scheme change (443 is https's).
+function httpsRequest(req) {
+  const u = new URL(req.url);
+  if (u.protocol !== "http:") return req;
+  u.protocol = "https:";
+  if (u.port === "80") u.port = "";
+  return new Request(u, req);
+}
 function errBody(code, message, extra = {}) {
   return { code, message, doc_url: DOC + code, ...extra };
 }
@@ -41,7 +51,9 @@ function errResponse(code, message, extra = {}) {
 }
 
 // principalOf names who a request acts for (audit "actingFor"): the human
-// login for an untagged caller, else the calling node's name.
+// login for an untagged caller, else the calling node's name. Pass it a
+// request sealedRequest() returned: cf.tailscale.caller is then the caller
+// hostd sealed, or absent.
 function principalOf(req) {
   if (isPublic(req)) return "public"; // never a caller name, whatever else cf holds
   const c = req?.cf?.tailscale?.caller;
@@ -97,6 +109,11 @@ async function routeObject(env, ctx, cls, name, req) {
 // scheduled() with a controller and answers {outcome, noRetry, error}.
 // (workerd's native Fetcher.scheduled() builds its own controller, so the
 // ticket could not ride on that.)
+function traceparentOnly(req) {
+  const tp = req.headers.get("traceparent");
+  return tp ? { traceparent: tp } : {};
+}
+
 async function scheduled(env, t, req) {
   const cron = t.cron;
   if (typeof cron !== "string" || !CFG.crons.includes(cron)) return errResponse("bad_request", "no such cron trigger in this deployment");
@@ -107,6 +124,8 @@ async function scheduled(env, t, req) {
       new Request("http://tenant/_tw/scheduled", {
         method: "POST",
         signal: req.signal,
+        // The run's root span (hostd crontrace.go): its record and egress join that trace.
+        headers: traceparentOnly(req),
         cf: { tw: { kind: "scheduled", cron, scheduledTime: st, ticket: t.ticket }, traceId: req.cf?.traceId },
       }),
     );
@@ -158,7 +177,8 @@ export default {
       if (t.kind !== "workload") return errResponse("public_request", "a public request may only reach its workload's entry point");
       const p = new URL(req.url).pathname;
       if (p === "/_tw" || p.startsWith("/_tw/")) return errResponse("not_public", "/_tw is never public");
-      return env.TENANT.fetch(req);
+      // Funnel terminated TLS: the Worker sees the https:// URL (#360).
+      return env.TENANT.fetch(t.https === true ? httpsRequest(req) : req);
     }
     switch (t.kind) {
       case "admin":
@@ -182,6 +202,13 @@ export default {
         return objectStub(env, ctx, t.class, t.name).__tw_intercept(t.key, r, await hostCap(env));
       }
       case "workload": {
+        // A service binding call to a named entrypoint or an RPC method
+        // (hostd admitted it: cf.tw.binding; tw-svc.js).
+        if (t.binding) return bindingCallee(req, env, t);
+        // tailnet.https: the request reached the workload node on :443
+        // (hostd sets cf.tw.https only then), so the Worker sees the
+        // https:// URL it was called at, as on Cloudflare.
+        if (t.https === true) req = httpsRequest(req);
         // /_tw/o/<Class>/<name>/... on the workload node reaches an object
         // before (or instead of) its own node.
         const u = new URL(req.url);
@@ -247,17 +274,18 @@ function hostEnsure(h, cls) {
 function hostFacet(h, cls) {
   // Every path to tenant code ends here: a killed object runs none (#211).
   if (h.__killed) throw new Error("[killed] object " + cls + "/" + h.ctx.id.name + " was killed: " + h.__killed);
-  if (!h.__f) {
+  if (!h.__w) {
     const name = h.ctx.id.name;
     if (!name) throw new Error("[bad_request] tw objects must be addressed by name (getByName/idFromName); newUniqueId() is not supported yet");
     const exp = h.ctx.exports;
-    const w = h.env.LOADER.get(CFG.deploymentID + ":" + cls + ":" + name, () => {
+    h.__w = h.env.LOADER.get(CFG.deploymentID + ":" + cls + ":" + name, () => {
       const env = { ...CFG.vars };
       for (const b of CFG.bindings) env[b.name] = exp.NsProxy({ props: { class: b.class } });
       for (const w of CFG.workflows ?? []) env[w.binding] = exp.WorkflowGate({ props: { workflow: w.name } });
       env.__TW = exp.TailnetApi({ props: { kind: "object", class: cls, name } });
       for (const s of CFG.stores ?? []) env[s.binding] = exp[s.facet]({ props: s.props });
       for (const q of CFG.queues?.producers ?? []) env[q.binding] = exp.QueueFacetProxy({ props: { binding: q.binding } });
+      for (const sb of CFG.services ?? []) env[sb.binding] = exp.ServiceBinding({ props: { binding: sb.binding, class: cls, name } });
       const wrap = Object.fromEntries((CFG.stores ?? []).filter((s) => s.wrap).map((s) => [s.binding, s.wrap]));
       if (Object.keys(wrap).length) env.__TW_WRAP = wrap; // tw-rt.js puts the API around these stubs (D1)
       return {
@@ -272,9 +300,13 @@ function hostFacet(h, cls) {
         env,
       };
     });
-    h.__f = h.ctx.facets.get("app", () => ({ class: w.getDurableObjectClass(cls) }));
   }
-  return h.__f;
+  // The facet stub is not kept between calls: once the facet calls
+  // ctx.abort() its stub fails with the abort reason for good, and only a
+  // fresh get() starts a new instance, as Cloudflare resets an aborted
+  // object for its next request (#395). get() of a running facet returns it.
+  const w = h.__w;
+  return h.ctx.facets.get("app", () => ({ class: w.getDurableObjectClass(cls) }));
 }
 
 // hostCap is the capability the platform passes to a Host's internal entry
@@ -295,7 +327,7 @@ function makeHost(cls) {
   const H = class extends DurableObject {
     constructor(ctx, env) {
       super(ctx, env);
-      this.__f = null;
+      this.__w = null; // the facet's Dynamic Worker (hostFacet)
       this.__ensured = null;
       this.__actingFor = ""; // own property: the Proxy would answer unknown names with an RPC forwarder
       this.__killed = ctx.storage.kv.get("__tw_killed") ?? null;
@@ -309,7 +341,9 @@ function makeHost(cls) {
             // No tenant code runs for an object nobody admitted (RT3-06).
             const d = await hostAdmitted(self, cls);
             if (d) throw new Error("[" + d.code + "] " + d.message);
-            return hostFacet(self, cls)[p](...args);
+            // A Request argument carries only a sealed caller, as a fetch does.
+            const a = await Promise.all(args.map((x) => sealedRequest(self.env, x)));
+            return hostFacet(self, cls)[p](...a);
           };
         },
       });
@@ -317,6 +351,9 @@ function makeHost(cls) {
     async fetch(req) {
       if (this.__killed) return errResponse("killed", "object " + cls + "/" + this.ctx.id.name + " was killed: " + this.__killed);
       if (!this.ctx.id.name) return errResponse("bad_request", "tw objects must be addressed by name (getByName/idFromName); newUniqueId() is not supported yet");
+      // Only a caller hostd sealed reaches the facet or names a principal
+      // (RT3-08): the sender may be tenant code forwarding in-process.
+      req = await sealedRequest(this.env, req);
       // Internal fetches (e.g. partyserver's set-name) carry no caller.
       const who = principalOf(req);
       if (who && !this.__actingFor) {
@@ -380,7 +417,6 @@ function makeHost(cls) {
       } catch {
         /* not running */
       }
-      this.__f = null;
       return true;
     }
   };
@@ -433,36 +469,230 @@ async function mac(env, cls, name, s) {
   return hex(sig);
 }
 
+// ---- caller seals (RT3-08 / H08, #148) ----
+//
+// request.cf is whatever the sender says once tenant code forwards a
+// request in-process, so cf.tailscale.caller alone proves nothing. hostd
+// seals the caller netd got from WhoIs (cf.tailscale.seal, gen.SealCaller):
+// hex(HMAC-SHA256(MAC_KEY, "tw-caller-seal-v1\n" + exp + "\n" + caller)),
+// where caller is the caller's exact JSON. A caller counts only if its seal
+// verifies, and then the sealed copy is used, never cf.tailscale.caller:
+// tenant code can drop a seal or replay one it was given (the same real
+// caller), but cannot make one for anybody else. MAC_KEY never leaves this
+// isolate; the runtime asks here ("unseal").
+const SEAL_DOMAIN = "tw-caller-seal-v1\n";
+const SEAL_MAX_AHEAD_MS = 6 * 60_000; // gen.CallerSealTTL plus a minute of skew
+let sealKey = null;
+
+// verifiedCaller returns the caller a seal vouches for, or null.
+async function verifiedCaller(env, s) {
+  if (!s || typeof s !== "object" || s.v !== 1 || typeof s.caller !== "string" || typeof s.mac !== "string") return null;
+  if (!Number.isSafeInteger(s.exp) || !/^[0-9a-f]{64}$/.test(s.mac)) return null;
+  const now = Date.now();
+  if (now > s.exp || s.exp - now > SEAL_MAX_AHEAD_MS) return null;
+  sealKey ??= await crypto.subtle.importKey("raw", enc.encode(env.MAC_KEY), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+  const sig = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) sig[i] = parseInt(s.mac.slice(2 * i, 2 * i + 2), 16);
+  if (!(await crypto.subtle.verify("HMAC", sealKey, sig, enc.encode(SEAL_DOMAIN + s.exp + "\n" + s.caller)))) return null;
+  try {
+    const c = JSON.parse(s.caller);
+    return c && typeof c === "object" && !Array.isArray(c) ? c : null;
+  } catch {
+    return null;
+  }
+}
+
+// sealedCf returns cf with only a verified caller (the sealed copy, seal
+// kept so a further forward still verifies), or with no caller and no
+// seal; null when cf has neither (nothing to change).
+async function sealedCf(env, cf) {
+  const ts = cf?.tailscale;
+  if (!ts || typeof ts !== "object" || (!("caller" in ts) && !("seal" in ts))) return null;
+  const caller = await verifiedCaller(env, ts.seal);
+  const { caller: _c, seal, ...rest } = ts;
+  return { ...cf, tailscale: caller ? { ...rest, caller, seal } : rest };
+}
+
+// sealedRequest is req as tenant code may see it (see sealedCf).
+async function sealedRequest(env, req) {
+  if (!(req instanceof Request)) return req;
+  const cf = await sealedCf(env, req.cf);
+  return cf ? new Request(req, { cf }) : req;
+}
+
+// objectEgress sends a request as facet object cls/name: hostd verifies the
+// MAC, maps class+name to the object and its node, and netd dials from that
+// node. extra are platform headers set after tenant x-tw-* are stripped
+// (a service binding's, tw-svc.js). tailworks-binding is the header a
+// binding call carries between hosts: hostd's to set, never the tenant's
+// (#347; hostd strips it again).
+async function objectEgress(env, cls, name, url, init, extra = {}) {
+  const h = new Headers(init.headers);
+  for (const k of [...h.keys()]) if (k.startsWith("x-tw-") || k.startsWith("tw-") || k === "proxy-authorization" || k === "tailworks-binding") h.delete(k);
+  for (const [k, v] of Object.entries(extra)) h.set(k, v);
+  const ts = String(Date.now());
+  const nonce = crypto.randomUUID();
+  h.set("x-tw-class", cls);
+  h.set("x-tw-name", encodeURIComponent(name));
+  h.set("x-tw-ts", ts);
+  h.set("x-tw-nonce", nonce);
+  h.set("x-tw-mac", await mac(env, cls, name, [cls, name, init.method, url, ts, nonce].join("\n")));
+  // workerd's proxy-style external sends absolute-form without Host; Go's net/http rejects that.
+  h.set("host", new URL(url).host);
+  return env.NETD_EGRESS.fetch(new Request(url, { ...init, headers: h, redirect: "manual" }));
+}
+setObjectEgress(objectEgress);
+
 // Egress for a facet's fetch(). props were minted by Host_<Class>; tenant code
-// cannot change them. hostd verifies the MAC, maps class+name to the object
-// and its node, and netd dials from that node.
+// cannot change them.
 export class Egress extends WorkerEntrypoint {
   async fetch(request) {
     const { class: cls, name } = this.ctx.props;
-    const h = new Headers(request.headers);
-    for (const k of [...h.keys()]) if (k.startsWith("x-tw-") || k.startsWith("tw-") || k === "proxy-authorization") h.delete(k);
-    const ts = String(Date.now());
-    const nonce = crypto.randomUUID();
-    h.set("x-tw-class", cls);
-    h.set("x-tw-name", encodeURIComponent(name));
-    h.set("x-tw-ts", ts);
-    h.set("x-tw-nonce", nonce);
-    h.set("x-tw-mac", await mac(this.env, cls, name, [cls, name, request.method, request.url, ts, nonce].join("\n")));
-    // workerd's proxy-style external sends absolute-form without Host; Go's net/http rejects that.
-    h.set("host", new URL(request.url).host);
-    return this.env.NETD_EGRESS.fetch(new Request(request.url, { method: request.method, headers: h, body: request.body, redirect: "manual" }));
+    return objectEgress(this.env, cls, name, request.url, { method: request.method, headers: request.headers, body: request.body });
+  }
+  // Stock connect() from a facet: as the object's own node.
+  async connect(socket) {
+    const { class: cls, name } = this.ctx.props;
+    await tcpServe(socket, (dst) => tcpDial(this.env, this.env.NETD_EGRESS, dst, { class: cls, name }, false));
   }
 }
+
+// Service bindings (tw-svc.js, ADR-053).
+export { ServiceBinding } from "tw-svc.js";
 
 // WorkloadEgress is the tenant service's globalOutbound: the Worker and
 // plain-DO objects egress as the workload node.
 export class WorkloadEgress extends WorkerEntrypoint {
   async fetch(request) {
     const h = new Headers(request.headers);
-    for (const k of [...h.keys()]) if (k.startsWith("x-tw-") || k.startsWith("tw-") || k === "proxy-authorization") h.delete(k);
+    for (const k of [...h.keys()]) if (k.startsWith("x-tw-") || k.startsWith("tw-") || k === "proxy-authorization" || k === "tailworks-binding") h.delete(k);
     h.set("host", new URL(request.url).host);
     return this.env.EGRESS_WL.fetch(new Request(request.url, { method: request.method, headers: h, body: request.body, redirect: "manual" }));
   }
+  // Stock connect() from the Worker or a plain-DO object (RFC §4.8: as
+  // the workload node).
+  async connect(socket) {
+    await tcpServe(socket, (dst) => tcpDial(this.env, this.env.EGRESS_WL, dst, null, false));
+  }
+}
+
+// ---- raw TCP egress (ADR-052) ----
+//
+// A tenant's connect() reaches its globalOutbound's connect() handler.
+// The handler opens a CONNECT tunnel to hostd (workerd sends it with no
+// headers), writes one preamble line (gen.ConnectPreamble: the loopback
+// token, a facet's MAC'd identity), and reads hostd's status line
+// (gen.ConnectStatus) before any of the flow's bytes. Refusals reach stock
+// connect() only as a lost connection (workerd has no way to fail a
+// handler's socket with a reason); ctx.tailnet.connect() gets them typed
+// (TailnetApi.tcpConnect).
+
+const MAX_DST = 512;
+const NL = 10;
+
+class TcpRefused extends Error {
+  constructor(code, message) {
+    super("[" + code + "] " + message);
+    this.code = code;
+    this.detail = message;
+  }
+}
+
+function checkDst(dst) {
+  if (typeof dst !== "string" || !dst || dst.length > MAX_DST || /[\s\/@]/.test(dst) || !/:\d{1,5}$/.test(dst)) {
+    throw new TcpRefused("bad_request", "connect() needs host:port");
+  }
+  return dst;
+}
+
+// tcpDial opens an authenticated tunnel for dst through binding and returns
+// { readable, writable, close } once hostd has dialled, or throws TcpRefused.
+// ident is a facet's { class, name } (MAC'd), null for the workload.
+async function tcpDial(env, binding, dst, ident, tls) {
+  checkDst(dst);
+  const up = binding.connect(dst);
+  const pre = { v: 1 };
+  if (env.LOCAL_TOKEN) pre.token = env.LOCAL_TOKEN;
+  if (ident) {
+    const ts = String(Date.now());
+    const nonce = crypto.randomUUID();
+    Object.assign(pre, {
+      class: ident.class,
+      name: encodeURIComponent(ident.name),
+      ts,
+      nonce,
+      mac: await mac(env, ident.class, ident.name, [ident.class, ident.name, "CONNECT", dst, ts, nonce].join("\n")),
+    });
+  }
+  if (tls) pre.tls = true;
+  const r = up.readable.getReader();
+  let buf = new Uint8Array(0);
+  let st;
+  try {
+    const w = up.writable.getWriter();
+    await w.write(enc.encode(JSON.stringify(pre) + "\n"));
+    w.releaseLock();
+    for (;;) {
+      const i = buf.indexOf(NL);
+      if (i >= 0) {
+        st = JSON.parse(new TextDecoder().decode(buf.subarray(0, i)));
+        buf = buf.subarray(i + 1);
+        break;
+      }
+      if (buf.length > 4096) throw new Error("status line too long");
+      const { value, done } = await r.read();
+      if (done) throw new Error("hostd closed the tunnel");
+      const b = new Uint8Array(buf.length + value.length);
+      b.set(buf);
+      b.set(value, buf.length);
+      buf = b;
+    }
+  } catch (e) {
+    up.close().catch(() => {});
+    throw new TcpRefused("hostd_unavailable", "egress tunnel: " + String(e?.message ?? e));
+  }
+  if (!st || st.ok !== true) {
+    up.close().catch(() => {});
+    throw new TcpRefused(String(st?.code || "dial_failed"), String(st?.message || "refused"));
+  }
+  // The destination may speak first (MySQL, Redis greetings): bytes read
+  // past the status line come first.
+  let rest = buf.length ? buf : null;
+  const readable = new ReadableStream({
+    async pull(c) {
+      if (rest) {
+        c.enqueue(rest);
+        rest = null;
+        return;
+      }
+      const { value, done } = await r.read();
+      if (done) c.close();
+      else c.enqueue(value);
+    },
+    cancel(reason) {
+      return r.cancel(reason);
+    },
+  });
+  return { readable, writable: up.writable, close: () => up.close() };
+}
+
+// tcpServe answers a connect() handler's socket with dial(dst)'s tunnel.
+async function tcpServe(socket, dial) {
+  let dst, up;
+  try {
+    const info = await socket.opened;
+    dst = info?.localAddress ?? info?.remoteAddress;
+    up = await dial(dst);
+  } catch (e) {
+    console.warn("tw: connect(" + String(dst) + ") refused: " + String(e?.message ?? e));
+    await socket.close().catch(() => {});
+    return;
+  }
+  await Promise.allSettled([
+    socket.readable.pipeTo(up.writable),
+    up.readable.pipeTo(socket.writable),
+  ]);
+  await Promise.allSettled([socket.close(), up.close()]);
 }
 
 // attestedAs is who a TailnetApi call acts for: the facet object named by
@@ -490,6 +720,24 @@ function containerAs(props, args) {
 // tenant service, which may act as a plain-DO object it hosts (args.as) but
 // never as a facet object.
 export class TailnetApi extends WorkerEntrypoint {
+  // ctx.tailnet.connect(): the socket's streams, or a typed refusal. A
+  // facet connects as its own node; the Worker as the workload node. A
+  // plain-DO object has no node of its own to connect from (WD-3), so it
+  // is refused rather than silently given the workload's identity.
+  async tcpConnect(args = {}) {
+    const p = this.ctx.props ?? {};
+    const tls = args.tls === "netd";
+    try {
+      let s;
+      if (p.kind === "object") s = await tcpDial(this.env, this.env.NETD_EGRESS, args.address, { class: p.class, name: p.name }, tls);
+      else if (args.as) throw new TcpRefused("not_supported", "ctx.tailnet.connect() in a plain-DO object (\"egress\": \"workload\") has no per-object identity; use connect() from cloudflare:sockets (egresses as the workload node) or facet mode");
+      else s = await tcpDial(this.env, this.env.EGRESS_WL, args.address, null, tls);
+      return { ok: true, value: { readable: s.readable, writable: s.writable } };
+    } catch (e) {
+      if (e instanceof TcpRefused) return { ok: false, error: errBody(e.code, e.detail) };
+      return { ok: false, error: errBody("dial_failed", String(e?.message ?? e)) };
+    }
+  }
   // ctx.container ops (JSON): status, start, destroy, signal, monitor,
   // setInactivityTimeout, inspect, intercept, exec-signal, exec-resize.
   async ctr(op, args = {}) {
@@ -562,16 +810,31 @@ export class TailnetApi extends WorkerEntrypoint {
       }
     }
     if (op === "approval") return approvalReport(this.env, p, args);
+    if (op === "unseal") {
+      // The runtime's check of a request's caller seal (RT3-08). A verify
+      // oracle only: nothing here makes a seal.
+      return { ok: true, value: { caller: await verifiedCaller(this.env, args.seal) } };
+    }
     if (op === "admit") {
       // Create admission: may the caller reach, and so create, class/name?
       // hostd decides from who asks: an attested object (as), a tailnet
-      // request (its ticket), or a public request (public.create, ADR-029
+      // request (its ticket), a Workflow (workflow: classes with no node,
+      // and existing objects), or a public request (public.create, ADR-029
       // D5). Nothing is created here.
       if (typeof args.class !== "string" || !CFG.classes[args.class] || typeof args.name !== "string" || !args.name) {
         return { ok: false, error: errBody("create_not_admitted", "admit: unknown class or empty name") };
       }
       try {
-        return { ok: true, value: await hostd(this.env, "admit", { class: args.class, name: args.name, ticket: typeof args.ticket === "string" ? args.ticket : undefined, as }) };
+        return {
+          ok: true,
+          value: await hostd(this.env, "admit", {
+            class: args.class,
+            name: args.name,
+            ticket: typeof args.ticket === "string" ? args.ticket : undefined,
+            workflow: args.workflow === true,
+            as,
+          }),
+        };
       } catch (e) {
         return { ok: false, error: e.body ?? errBody("hostd_unavailable", String(e)) };
       }

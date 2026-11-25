@@ -56,7 +56,11 @@ func Handler(api *http.Client, baseURL string) http.Handler {
 	mux.HandleFunc("POST /ui/deployments/{id}/undeploy", u.undeployForm)
 	mux.HandleFunc("GET /ui/hosts/{id}", u.host)
 	mux.HandleFunc("POST /ui/hosts/{id}/remove", u.removeHostForm)
+	mux.HandleFunc("POST /ui/hosts/{id}/cordon", u.cordonHostForm) // cordon.go
 	mux.HandleFunc("GET /ui/tenants/{id}", u.tenant)
+	// logs.go
+	mux.HandleFunc("GET /ui/tenants/{id}/workloads/{workload}/logs", u.workloadLogs)
+	mux.HandleFunc("GET /ui/objects/{id}/logs", u.objectLogs)
 	mux.HandleFunc("POST /ui/tenants/{id}/delete", u.deleteTenantForm)
 	mux.HandleFunc("GET /ui/audit", u.audit)
 	// approvals.go
@@ -140,30 +144,9 @@ func (e *apiError) Error() string { return fmt.Sprintf("%s: %s", e.Code, e.Messa
 // call sends method path to the API with the browser request's context and
 // decodes a 2xx body into out. Non-2xx answers are *apiError.
 func (u *ui) call(r *http.Request, method, p string, out any) error {
-	req, err := http.NewRequestWithContext(r.Context(), method, u.apiURL+p, nil)
+	body, err := u.fetch(r, method, p, "application/json")
 	if err != nil {
-		return &apiError{Status: 500, Code: "internal", Message: err.Error()}
-	}
-	req.Header.Set("Accept", "application/json")
-	// Tw-Actor names the actor on the local-dev socket, as the CLI does;
-	// over the tailnet the caller's WhoIs login wins.
-	req.Header.Set("Tw-Actor", "operator (admin ui)")
-	res, err := u.api.Do(req)
-	if err != nil {
-		return &apiError{Status: 502, Code: "internal", Message: fmt.Sprintf("%s %s: %v", method, p, err)}
-	}
-	defer res.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(res.Body, maxBody))
-	if err != nil {
-		return &apiError{Status: 502, Code: "internal", Message: fmt.Sprintf("%s %s: reading the answer: %v", method, p, err)}
-	}
-	if res.StatusCode/100 != 2 {
-		e := &apiError{Status: res.StatusCode, Raw: body}
-		if json.Unmarshal(body, e) != nil || e.Code == "" {
-			e.Code = "internal"
-			e.Message = fmt.Sprintf("%s %s answered %d", method, p, res.StatusCode)
-		}
-		return e
+		return err
 	}
 	if out != nil && len(body) > 0 {
 		if err := json.Unmarshal(body, out); err != nil {
@@ -171,6 +154,38 @@ func (u *ui) call(r *http.Request, method, p string, out any) error {
 		}
 	}
 	return nil
+}
+
+// fetch sends method path to the API, asking for accept, and returns a 2xx
+// body as is (logs.go reads text and JSON Lines). Non-2xx answers are
+// *apiError.
+func (u *ui) fetch(r *http.Request, method, p, accept string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(r.Context(), method, u.apiURL+p, nil)
+	if err != nil {
+		return nil, &apiError{Status: 500, Code: "internal", Message: err.Error()}
+	}
+	req.Header.Set("Accept", accept)
+	// Tw-Actor names the actor on the local-dev socket, as the CLI does;
+	// over the tailnet the caller's WhoIs login wins.
+	req.Header.Set("Tw-Actor", "operator (admin ui)")
+	res, err := u.api.Do(req)
+	if err != nil {
+		return nil, &apiError{Status: 502, Code: "internal", Message: fmt.Sprintf("%s %s: %v", method, p, err)}
+	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(res.Body, maxBody))
+	if err != nil {
+		return nil, &apiError{Status: 502, Code: "internal", Message: fmt.Sprintf("%s %s: reading the answer: %v", method, p, err)}
+	}
+	if res.StatusCode/100 != 2 {
+		e := &apiError{Status: res.StatusCode, Raw: body}
+		if json.Unmarshal(body, e) != nil || e.Code == "" {
+			e.Code = "internal"
+			e.Message = fmt.Sprintf("%s %s answered %d", method, p, res.StatusCode)
+		}
+		return nil, e
+	}
+	return body, nil
 }
 
 // listAll follows nextCursor up to maxItems (0 = one page).
@@ -236,7 +251,7 @@ func parsePages() map[string]*template.Template {
 	}
 	layout := template.Must(template.New("layout").Funcs(funcs).ParseFS(templateFS, "templates/layout.html"))
 	pages := map[string]*template.Template{}
-	for _, name := range []string{"overview", "object", "objects", "deployment", "host", "tenant", "audit", "approvals", "error"} {
+	for _, name := range []string{"overview", "object", "objects", "deployment", "host", "tenant", "audit", "approvals", "logs", "error"} {
 		t := template.Must(layout.Clone())
 		pages[name] = template.Must(t.ParseFS(templateFS, "templates/"+name+".html"))
 	}
@@ -261,7 +276,10 @@ func (u *ui) base(r *http.Request, title string) base {
 	} else {
 		u.call(r, "GET", "/v1/whoami", &b.Who)
 	}
-	if b.Who.Admin || b.Who.Kind == "local" || b.Who.Kind == "" {
+	// whoami reports admin for mgmt's own node too. A zero Who (whoami
+	// failed; only the error page gets here) skips /v1/status and renders
+	// the approvals-only nav.
+	if b.Who.Admin {
 		u.call(r, "GET", "/v1/status", &b.Status) // a tenant admin may not read it
 	}
 	b.Flash = r.URL.Query().Get("ok")
@@ -328,7 +346,7 @@ func (u *ui) overview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var err error
-	operator := d.Who.Admin || d.Who.Kind == "local"
+	operator := d.Who.Admin
 	if operator { // a tenant admin sees its own tenants, not hosts
 		d.Hosts, err = listAll[host](u, r, "/v1/hosts?limit=500", 2000)
 		note("hosts", err)
@@ -451,7 +469,7 @@ func (u *ui) object(w http.ResponseWriter, r *http.Request) {
 	d.Children = len(d.Down) - 1
 	if d.Obj.Live() && d.Obj.StableNodeID != "" {
 		var nc nodeCert
-		if err := u.call(r, "GET", "/v1/objects/"+url.PathEscape(id)+"/certificate", &nc); err == nil {
+		if err := u.call(r, "GET", "/v1/certificates/"+url.PathEscape(d.Obj.StableNodeID)+"?tenant="+url.QueryEscape(d.Obj.TenantID), &nc); err == nil {
 			d.Cert = &nc
 		} else {
 			d.CertErr = err.Error()

@@ -20,6 +20,7 @@ import (
 // deployment status, or write audit records about its objects. h1's own
 // calls keep working, with and without the epoch.
 func TestRT3_HostWritesAreLeaseBound(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	c, h1, h2 := e.c, e.asHost("h1"), e.asHost("h2")
 	ctx := context.Background()

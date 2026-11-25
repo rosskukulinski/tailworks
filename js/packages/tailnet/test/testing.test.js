@@ -74,11 +74,23 @@ test("fake ctx.tailnet: spawn, kill, audit, self, fetch", async () => {
   assert.equal(t.killed[0].reason, "done");
   await ctx.tailnet.audit([{ event: "x" }]);
   assert.deepEqual(t.audits, [{ event: "x" }]);
-  assert.equal((await ctx.tailnet.self()).epoch, 7);
+  const me = await ctx.tailnet.self();
+  assert.equal(me.epoch, 7);
+  assert.equal(me.workload, "test-workload");
+  assert.equal(me.deploymentId, "test-deployment");
+  assert.equal(ctx.tailnet.forward, undefined);
   assert.deepEqual(await (await ctx.tailnet.fetch("http://db/items")).json(), { ok: true });
   await assert.rejects(ctx.tailnet.fetch("http://elsewhere/"), (e) => e.code === "peer_not_visible");
   assert.equal(t.fetches.length, 2);
-  assert.throws(() => ctx.tailnet.connect(), (e) => e.code === "plan_feature_missing");
+  assert.throws(() => ctx.tailnet.connect("db:5432"), (e) => e.code === "not_supported");
+});
+
+test("fake ctx.tailnet.connect: the test's socket", () => {
+  const sock = { readable: new ReadableStream(), writable: new WritableStream(), opened: Promise.resolve({ remoteAddress: "db:5432" }), closed: Promise.resolve(), close: async () => {} };
+  const seen = [];
+  const t = createTestTailnet({ connect: (a, o) => (seen.push([a, o]), sock) });
+  assert.equal(t.tailnet.connect({ hostname: "db", port: 5432 }, { tls: "netd" }), sock);
+  assert.deepEqual(seen, [[{ hostname: "db", port: 5432 }, { tls: "netd" }]]);
 });
 
 test("fake ctx.tailnet: refuses egress by default, onSpawn can fail a spawn", async () => {

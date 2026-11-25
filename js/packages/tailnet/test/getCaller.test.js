@@ -14,6 +14,8 @@ test("getCaller reads netd's cf blob", () => {
   assert.deepEqual(c.tags, ["tag:ttest"]);
   assert.equal(c.user, undefined);
   assert.equal(c.objectId, "room-1");
+  assert.equal("chain" in c, false); // on-behalf-of is not built (RFC §4.6)
+  assert.equal("actingFor" in c, false);
   assert.deepEqual(c.caps("example.com/cap/ttest"), [{ role: "tester" }]);
   assert.deepEqual(c.caps("missing"), []);
 });

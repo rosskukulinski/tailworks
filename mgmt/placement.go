@@ -421,6 +421,8 @@ func scoreTargets(s *HostScore, targets []string, get func(string) (PathMeasurem
 			switch {
 			case age > maxAge:
 				ts.Detail = fmt.Sprintf("stale (%v old)", age.Round(time.Second))
+			case unusableMeasurement(m, now) != "": // placement_bounds.go
+				ts.Detail, ts.AgeSeconds = unusableMeasurement(m, now), 0
 			case pathRank(m.Path) == 0:
 				ts.Detail = m.Path
 			default:
@@ -649,7 +651,7 @@ func resolvePlacement(cfg *TwConfig) PlacementConfig {
 		}
 		ts = []string{h}
 	default:
-		ts = cfg.Tailnet.Connects
+		ts = ConnectTargets(cfg.Tailnet.Connects) // connects.go: ports dropped
 	}
 	seen := map[string]bool{}
 	for _, t := range ts {

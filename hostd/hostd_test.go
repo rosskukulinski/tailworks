@@ -138,6 +138,7 @@ func js(v any) string { b, _ := json.Marshal(v); return string(b) }
 // TestHostd is the hermetic M3 suite: testcontrol + local DERP + fakemgmt +
 // tw-hostd (stock workerd) + tsnet client/echo nodes.
 func TestHostd(t *testing.T) {
+	t.Parallel()
 	s := startSuite(t, fakemgmt.Config{})
 	e := s.e
 	echoURL := "http://ttest-echo/"
@@ -230,10 +231,17 @@ func TestHostd(t *testing.T) {
 		if code != 200 || r["name"] != "a" || get(r, "caller", "nodeId") != s.clientID {
 			t.Fatalf("%d %v", code, r)
 		}
-		for k := range r["sawHeaders"].(map[string]any) {
-			if k != "x-tw-object" {
-				t.Fatalf("tenant saw identity header %q: %v", k, r["sawHeaders"])
-			}
+		// No x-tw-* at all, not even netd's own x-tw-object routing header
+		// (#303): neither in the object (a DO) nor in the Worker's fetch.
+		if seen := r["sawHeaders"].(map[string]any); len(seen) != 0 {
+			t.Fatalf("object saw platform/identity headers: %v", seen)
+		}
+		code, r = s.getJSON("http://"+probe.IP+"/", "x-tw-object", "b", "x-tw-cf", `{"objectId":"b"}`)
+		if code != 200 || r["kind"] != "worker" {
+			t.Fatalf("worker: %d %v", code, r)
+		}
+		if seen := r["sawHeaders"].(map[string]any); len(seen) != 0 {
+			t.Fatalf("worker fetch saw platform/identity headers: %v", seen)
 		}
 		// Forged egress attribution from tenant code.
 		ob, _ := e.Host.Object(e.TenantID, "probe", "Probe", "b")
@@ -244,7 +252,9 @@ func TestHostd(t *testing.T) {
 			t.Fatalf("forged egress: %d %v", code, r)
 		}
 		for k := range r["headers"].(map[string]any) {
-			if lk := strings.ToLower(k); strings.HasPrefix(lk, "x-tw-") || lk == "proxy-authorization" {
+			// tailworks-binding: a service binding's wire header, which only
+			// hostd may put on an egress request (#347).
+			if lk := strings.ToLower(k); strings.HasPrefix(lk, "x-tw-") || lk == "proxy-authorization" || lk == "tailworks-binding" {
 				t.Fatalf("header %s reached echo", k)
 			}
 		}
@@ -573,6 +583,7 @@ func TestHostd(t *testing.T) {
 // TestKillViaHeartbeat: with no push (what M2's tw-mgmt does), kills
 // arrive in the heartbeat's revokeObjects.
 func TestKillViaHeartbeat(t *testing.T) {
+	t.Parallel()
 	s := startSuite(t, fakemgmt.Config{NoPush: true})
 	e := s.e
 	d := e.Deploy(hostdtest.Fixture("probe"), "probe", nil)
@@ -604,6 +615,7 @@ func TestKillViaHeartbeat(t *testing.T) {
 // a refreshed epoch instead of leaving the workload active with a dead
 // entry node.
 func TestNodeRetriesAfterLeaseLost(t *testing.T) {
+	t.Parallel()
 	s := startSuite(t, fakemgmt.Config{NoPush: true})
 	e := s.e
 	e.FM.SetLeaseLostCredentials(1)

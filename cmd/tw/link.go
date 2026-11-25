@@ -226,6 +226,9 @@ type linkResult struct {
 	Tenants  []TenantRef `json:"tenants"`
 	Path     string      `json:"path"`
 	Unlinked bool        `json:"unlinked,omitempty"`
+
+	// Console is the admin console URL (console.go); omitted under --tsnet.
+	Console string `json:"console,omitempty"`
 }
 
 // cmdLink binds this machine to a remote mgmt: `tw link
@@ -240,9 +243,15 @@ func cmdLink(args []string) error {
 	tsDir := f.String("tsnet-dir", "", "--tsnet: node state dir (default <state>/cli); tests pass one explicitly")
 	tsHost := f.String("tsnet-hostname", "", "--tsnet: the CLI node's hostname (default tw-cli-<user>)")
 	tsCtl := f.String("control-url", prodControl, "--tsnet: control URL for the CLI node")
-	tsKey := f.String("tsnet-authkey-file", "", "--tsnet: TS_AUTHKEY=… file for an unattended first join (tests); default: interactive login")
-	tsTags := f.String("tsnet-tags", "", "--tsnet: comma-separated tags the CLI node advertises (tests)")
+	tsKey := f.String("tsnet-authkey-file", "", "--tsnet: TS_AUTHKEY=… file for an unattended first join (automation, CI); default: interactive login")
+	tsTags := f.String("tsnet-tags", "", "--tsnet: comma-separated tags the CLI node advertises (an unattended join with a tagged key)")
 	loginTO := f.Duration("login-timeout", 5*time.Minute, "--tsnet: how long to wait for the browser login")
+	// --help lists these under Advanced (helpflags.go).
+	f.group(advancedFlags,
+		"tsnet-authkey-file",
+		"tsnet-tags",
+	)
+	f.hidden("for the test harness", "tsnet-dir")
 	pos, err := f.parse(args)
 	if err != nil {
 		return err
@@ -311,7 +320,7 @@ func cmdLink(args []string) error {
 		// Auto-discover: the plain-HTTP listener on `tw-mgmt` (MagicDNS
 		// search domain) tells us its full name and whether it has HTTPS.
 		name := "tw-mgmt"
-		if n := os.Getenv("TW_LINK_DISCOVER_NAME"); n != "" {
+		if n := os.Getenv("TW_TEST_LINK_NAME"); n != "" {
 			name = n // hermetic tests: never resolve the real tw-mgmt on this machine's own tailnet
 		}
 		l.Endpoint = "http://" + name
@@ -365,6 +374,7 @@ func cmdLink(args []string) error {
 		return err
 	}
 	res := linkResult{Endpoint: ep, Scheme: l.Scheme, Tailnet: l.Tailnet, MgmtNode: l.MgmtNode, Login: w.Login, Actor: w.Actor, NodeID: w.NodeID, Admin: w.Admin, Tenants: s.tenants(), Path: s.linkPath()}
+	res.Console = consoleURL(l, w.Admin, len(w.TenantGrants) > 0, false)
 	emit(f, res, func() {
 		role := "admin"
 		if !w.Admin {
@@ -381,6 +391,9 @@ func cmdLink(args []string) error {
 		}
 		for _, t := range res.Tenants {
 			fmt.Printf("✓ tenant    %s (%s, mint mode %s)\n", t.Tailnet, t.TenantID, mintModeName(t.MintMode))
+		}
+		if res.Console != "" {
+			fmt.Printf("✓ console   %s (admin UI in your browser)\n", res.Console)
 		}
 		fmt.Printf("  saved %s · `tw init hello --template agent && cd hello && tw deploy` · `tw ls` · `tw audit` · `tw link --unlink`\n", s.linkPath())
 	})

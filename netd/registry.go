@@ -20,6 +20,7 @@ import (
 	"tailscale.com/envknob"
 	"time"
 
+	"github.com/rosskukulinski/tailworks/internal/tsnetlc"
 	"github.com/rosskukulinski/tailworks/internal/tssvc"
 	"tailscale.com/client/local"
 	"tailscale.com/ipn"
@@ -84,17 +85,29 @@ type Config struct {
 	// ReadyTimeout bounds how long egress waits for a pending object before
 	// failing with identity_pending. Default 30 s.
 	ReadyTimeout time.Duration
+
+	// EgressGate, if set, is asked before each egress once the node is up
+	// (egressgate.go, issue #331); an error refuses it.
+	EgressGate func(ctx context.Context, objectID, stableNodeID string) error
 	// Ephemeral and Tags are defaults for objects that don't override them.
 	Ephemeral bool
 	Tags      []string
 	// Hostname maps an object ID to its node hostname. Default "tw-"+id.
 	Hostname func(objectID string) string
-	// AllowSiblings lets an object's egress reach other objects hosted by this
-	// registry. Default false: same-host object calls must go through the
-	// platform's policy-checked path (RFC §4.5), not a hairpin over WireGuard.
+	// AllowSiblings dials other objects hosted by this registry over
+	// WireGuard (a hairpin). Default false: a flow to a sibling is delivered
+	// in process to its attributed ingress, after the same netmap and packet
+	// filter checks (samehost.go, RFC §4.8).
 	AllowSiblings bool
 	// ExtraForbidden prefixes are always refused on egress (platform endpoints).
 	ExtraForbidden []netip.Prefix
+
+	// Internet is the internet egress path for destinations that are not
+	// on the tailnet (internet.go, ADR-049). Nil: there
+	// is none; internet names are refused with internet_egress_unavailable
+	// and non-tailnet IPs with forbidden_destination.
+	Internet *InternetConfig
+
 	// OnDelete, if set, is called after a killed object's node is closed
 	// (kill tier 2: delete the device at the coordination server).
 	OnDelete func(ctx context.Context, info ObjectInfo) error
@@ -111,11 +124,23 @@ type Config struct {
 	// ListenFunnel(":443", FunnelOnly()). Tests inject a listener whose
 	// conns are *ipn.FunnelConn (testcontrol issues no certificates).
 	PublicListen func(srv *tsnet.Server) (net.Listener, error)
+
+	// HTTPSCert supplies the certificate of a node's tailnet HTTPS
+	// listener (tailnethttps.go). Nil: the node's own ts.net certificate
+	// from its LocalAPI, refused when the tailnet issues none. Tests
+	// inject a self-signed one (testcontrol issues no certificates).
+	HTTPSCert HTTPSCertFunc
 	// OnPublicRequest is called after each public request (audit, D7).
 	OnPublicRequest func(PublicRequestRecord)
 	// OnPublicRejected is called at most once per PublicRejectWindow per
 	// public node with the requests the limits refused.
 	OnPublicRejected func(PublicRejectSummary)
+
+	// OnRejected is called after control rejected a READY node (issue
+	// #200, rejected.go): the object is failed and its node state dropped.
+	// The owner restarts it with Create, which re-mints under the same
+	// hostname. Nil: the object stays failed.
+	OnRejected func(objectID string)
 }
 
 // ObjectOptions override registry defaults for one object.
@@ -125,6 +150,10 @@ type ObjectOptions struct {
 	Ephemeral *bool
 	// Public makes this a public (Funnel) node: see public.go.
 	Public *PublicOptions
+
+	// HTTPS also serves the node's ingress on :443 with its ts.net
+	// certificate once it is ready (tailnethttps.go, SetTailnetHTTPS).
+	HTTPS bool
 }
 
 // Registry holds every object node for one tenant on this host.
@@ -256,9 +285,23 @@ type Object struct {
 	svcLn    *tssvc.ConnListener
 	svcHTTP  *http.Server
 	services []string // Services this node advertises
+
+	// hopLn feeds same-host flows from sibling objects to hopHTTP (the
+	// same handler as httpSrv; samehost.go).
+	hopLn   *tssvc.ConnListener
+	hopHTTP *http.Server
 	// pub is non-nil for a public (Funnel) node (ADR-029); set at Create
 	// and never changed.
 	pub *publicState
+
+	// rejectedCancel stops the ready node's watchRejected (rejected.go).
+	rejectedCancel context.CancelFunc
+
+	// tomb ends a kill's tombstone once (tombstone_end.go).
+	tomb tombstoneEnd
+
+	// https is the tailnet HTTPS listener on :443 (tailnethttps.go).
+	https httpsState
 }
 
 // ObjectInfo is a snapshot of an object, safe to serialize.
@@ -313,6 +356,7 @@ func (r *Registry) Create(id string, opts ObjectOptions) (*Object, error) {
 	if !ValidObjectID(id) {
 		return nil, fmt.Errorf("netd: invalid object id %q (want a lowercase DNS label)", id)
 	}
+	r.endTombstoneOf(id) // tombstone_end.go (#364): before the new node takes the dir
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
@@ -340,6 +384,7 @@ func (r *Registry) Create(id string, opts ObjectOptions) (*Object, error) {
 	if opts.Public != nil {
 		o.pub = newPublicState(*opts.Public)
 	}
+	o.https.want = opts.HTTPS && opts.Public == nil // tailnethttps.go
 	if o.hostname == "" {
 		o.hostname = r.cfg.Hostname(id)
 	}
@@ -462,11 +507,14 @@ func (o *Object) start(ctx context.Context) error {
 	}
 	rejoin := hasState(o.dir)
 	var key string
+	reminted := false
 	if !rejoin {
 		if r.cfg.Keys == nil {
 			return errors.New("no saved state and no KeySource")
 		}
-		k, err := r.cfg.Keys.AuthKey(ctx, KeyRequest{ObjectID: o.id, Hostname: o.hostname, Tags: o.tags, Ephemeral: o.ephemeral})
+		// Control rejected this object's last node after it was ready.
+		reminted = hasRemintMark(o.dir) // rejected.go
+		k, err := r.cfg.Keys.AuthKey(ctx, KeyRequest{ObjectID: o.id, Hostname: o.hostname, Tags: o.tags, Ephemeral: o.ephemeral, Remint: reminted})
 		if err != nil {
 			return fmt.Errorf("auth key: %w", err)
 		}
@@ -486,7 +534,6 @@ func (o *Object) start(ctx context.Context) error {
 	}
 	st := time.Now()
 	lc, sst, err := o.up(ctx, key, rejoin)
-	reminted := false
 	if errors.Is(err, errSavedStateRejected) {
 		// The device is gone from control (an ephemeral node that was
 		// offline during a restart, or one an admin removed). Drop the
@@ -506,6 +553,9 @@ func (o *Object) start(ctx context.Context) error {
 	}
 	if err != nil {
 		return err
+	}
+	if reminted {
+		clearRemintMark(o.dir)
 	}
 	joinDur := time.Since(st)
 	o.mu.Lock()
@@ -561,7 +611,13 @@ func (o *Object) start(ctx context.Context) error {
 	o.svcHTTP = &http.Server{Handler: hs.Handler, ReadHeaderTimeout: hs.ReadHeaderTimeout, ErrorLog: hs.ErrorLog}
 	o.svcHTTP.SetKeepAlivesEnabled(false) // until a Service is advertised
 	svcHS := o.svcHTTP
+	hopHS, hopLn := o.startHopLocked(hs) // samehost.go
 	o.state = StateReady
+	// Control can still reject the node now that it is ready (#200,
+	// rejected.go).
+	rctx, rcancel := context.WithCancel(r.ctx)
+	o.rejectedCancel = rcancel
+	go o.watchRejected(rctx, lc)
 	hostname := o.hostname // SetHostname may change it once ready
 	if o.pub == nil {
 		close(o.ready)
@@ -593,8 +649,10 @@ func (o *Object) start(ctx context.Context) error {
 		close(o.ready)
 	} else {
 		go hs.Serve(o.ln)
+		o.openHTTPSIfWanted() // tailnethttps.go
 	}
 	go svcHS.Serve(svcLn)
+	go hopHS.Serve(hopLn)
 	r.log.Info("object ready", "object", o.id, "hostname", hostname, "ip", ip4.String(),
 		"node", string(o.nodeID), "join_ms", joinDur.Milliseconds(), "rejoined", rejoin, "reminted", reminted, "spans", o.spans.get())
 	return nil
@@ -641,7 +699,7 @@ func (o *Object) up(ctx context.Context, key string, rejoin bool) (*local.Client
 		return nil, nil, fmt.Errorf("start %s: %w", o.hostname, err)
 	}
 	o.spans.at(func(s *JoinSpans) *float64 { return &s.Start })
-	lc, err := srv.LocalClient()
+	lc, err := tsnetlc.Client(srv) // Close drains it (#245)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -726,7 +784,7 @@ func (o *Object) dropSavedState() {
 	o.srv = nil
 	o.mu.Unlock()
 	if srv != nil {
-		srv.Close()
+		tsnetlc.Close(srv)
 	}
 	os.Remove(filepath.Join(o.dir, "tailscaled.state"))
 }
@@ -756,15 +814,24 @@ func (o *Object) teardown() {
 	}
 	o.closePublic()
 	o.stopPublicFlusher()
+	o.stopCertPrefetch()
+	o.stopHTTPS() // tailnethttps.go
 	o.mu.Lock()
 	srv, hs, tr, ts, shs := o.srv, o.httpSrv, o.tr, o.tombSrv, o.svcHTTP
+	hop := o.hopHTTP
 	o.services = nil // a closed node advertises nothing
+	if o.rejectedCancel != nil {
+		o.rejectedCancel() // before srv.Close, which waits on open LocalAPI streams
+	}
 	o.mu.Unlock()
 	if hs != nil {
 		hs.Close()
 	}
 	if shs != nil {
 		shs.Close()
+	}
+	if hop != nil {
+		hop.Close()
 	}
 	if ts != nil {
 		ts.Close()
@@ -773,7 +840,7 @@ func (o *Object) teardown() {
 		tr.CloseIdleConnections()
 	}
 	if srv != nil {
-		srv.Close()
+		tsnetlc.Close(srv)
 	}
 	o.reg.forgetIPs(o)
 }

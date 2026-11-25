@@ -12,6 +12,7 @@ import (
 // the same lease have one winner, the epoch goes up by one, and the old
 // holder can no longer renew (I1: one holder per lease, always).
 func TestLeaseMove(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		now := time.UnixMilli(1_000_000)
@@ -56,6 +57,7 @@ func TestLeaseMove(t *testing.T) {
 // TestStoreHostPaths: per-(host, tenant) replace, tenant isolation,
 // retention, host delete.
 func TestStoreHostPaths(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		now := time.UnixMilli(5_000_000_000)

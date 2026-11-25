@@ -18,6 +18,7 @@ import (
 // two ready reports for one node. One start, one ready, however many syncs
 // overlap the deploy.
 func TestPublicIngressConcurrentApply(t *testing.T) {
+	t.Parallel()
 	ff := &fakeFunnel{addrs: map[string]string{}}
 	s := startSuiteCapsOpts(t, fakemgmt.Config{}, nil, func(o *hostdtest.Options) { o.PublicListen = ff.listen })
 	e := s.e

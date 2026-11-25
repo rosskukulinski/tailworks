@@ -27,19 +27,26 @@ import (
 	"hash"
 	"io"
 	"net/http"
-	"regexp"
 	"strconv"
 
 	"github.com/rosskukulinski/tailworks/hostd/r2"
+	"github.com/rosskukulinski/tailworks/internal/replicaname"
 )
 
-// replicaSuffixRE is a replica's suffix ("<workload>--r<n>", n ≥ 2): a
-// replica uses its workload's buckets, as it uses its stores.
-var replicaSuffixRE = regexp.MustCompile(`--r([2-9]|[1-9][0-9]+)$`)
-
-// r2Group is the workload whose buckets name's blobs belong to.
+// r2Group is the workload whose buckets name's blobs belong to: a replica
+// ("<workload>--r<n>", n ≥ 2) uses its workload's buckets, as it uses its
+// stores.
+//
+// hostd has only the name to go by here. mgmt resolves a replica's stores
+// and secrets from its deployment record (replicaGroupOf), and refuses a
+// workload that is not a replica a name shaped like one (checkReplicaName,
+// #348), reading names with the same replicaname.Group. So the blob prefix
+// and the index scope are the same workload for every name mgmt deploys.
+// The exception is a workload deployed under such a name before mgmt had
+// that check: it keeps its own index and, as before, shares the blob
+// prefix of the workload it is named after, until it is renamed.
 func r2Group(name string) string {
-	if g := replicaSuffixRE.ReplaceAllString(name, ""); g != "" {
+	if g, ok := replicaname.Group(name); ok {
 		return g
 	}
 	return name

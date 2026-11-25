@@ -17,6 +17,11 @@ const (
 // Kinds are the valid fragment kinds.
 var Kinds = []string{KindFeature, KindFix, KindBreaking, KindSecurity}
 
+// SecuritySection is the heading Markdown gives the security notes. A
+// release body with it is a security release (HasSecurityNotes; the tw
+// update check reads it: cmd/tw/updatecheck.go).
+const SecuritySection = "Security"
+
 // UpgradeKinds are the valid "upgrade" items of a fragment.
 var UpgradeKinds = []string{
 	"cli-json",
@@ -145,7 +150,7 @@ func Markdown(title string, notes []Note) string {
 	}
 	kind := func(k string) func(Note) bool { return func(n Note) bool { return n.Kind == k } }
 	section("Breaking", kind(KindBreaking))
-	section("Security", kind(KindSecurity))
+	section(SecuritySection, kind(KindSecurity))
 	section("Upgrade actions", Note.IsAction)
 	section("Features", kind(KindFeature))
 	section("Fixes", kind(KindFix))

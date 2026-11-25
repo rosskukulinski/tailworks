@@ -8,4 +8,8 @@
       { "name": "PLAIN", "class_name": "Plain" },
     ],
   },
+  "triggers": {
+    // Run by the tests only (RunCron): egress from scheduled().
+    "crons": ["0 0 1 1 *"],
+  },
 }

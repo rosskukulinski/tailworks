@@ -26,25 +26,25 @@ type Alias struct {
 	From string `json:"from"`
 	To   string `json:"to"`
 	Arch string `json:"arch"` // "" = every arch
+
+	// Source, if set, is a digest-pinned external image that fills To
+	// when To is not in tailworks' registry yet (aliassource.go).
+	Source string `json:"source,omitempty"`
 }
 
-// DefaultAliases are tailworks' arm64 rebuilds (guest/images/README.md). The
-// operator pushes them into the public namespace (tw image push).
+// DefaultAliases are tailworks' arm64 rebuilds (guest/images/README.md).
+// mgmt fills each target from its published Source on first use; without
+// one (or with -no-mirror) the operator pushes it (tw image push).
 var DefaultAliases = []Alias{
-	{From: "docker.io/cloudflare/sandbox:0.12.14", To: "tw.local/cloudflare-sandbox:0.12.14-arm64", Arch: "arm64"},
-	{From: "docker.io/cloudflare/sandbox:1.0.0", To: "tw.local/cloudflare-sandbox:1.0.0-arm64", Arch: "arm64"},
-	{From: "docker.io/cloudflare/sandbox:1.0.1", To: "tw.local/cloudflare-sandbox:1.0.1-arm64", Arch: "arm64"},
+	{From: "docker.io/cloudflare/sandbox:0.12.14", To: "tw.local/cloudflare-sandbox:0.12.14-arm64", Arch: "arm64", Source: sandboxSource("0.12.14")},
+	{From: "docker.io/cloudflare/sandbox:1.0.0", To: "tw.local/cloudflare-sandbox:1.0.0-arm64", Arch: "arm64", Source: sandboxSource("1.0.0")},
+	{From: "docker.io/cloudflare/sandbox:1.0.1", To: "tw.local/cloudflare-sandbox:1.0.1-arm64", Arch: "arm64", Source: sandboxSource("1.0.1")},
 }
 
 // AliasFor returns the alias target of ref on arch ("" = none).
 func AliasFor(aliases []Alias, ref, arch string) string {
-	n := oci.Normalize(ref)
-	for _, a := range aliases {
-		if oci.Normalize(a.From) == n && (a.Arch == "" || a.Arch == arch) {
-			return a.To
-		}
-	}
-	return ""
+	a, _ := aliasFor(aliases, ref, arch)
+	return a.To
 }
 
 // PublicImages finds an operator-marked public base by its upstream
@@ -157,9 +157,10 @@ func (rs *Resolver) Pin(ctx context.Context, tenant string, classes []container.
 func (rs *Resolver) pinOne(ctx context.Context, tenant, ref, arch string) (container.Pin, error) {
 	p := container.Pin{Ref: ref, Arch: arch}
 	target := ref
-	if to := AliasFor(rs.Aliases, ref, arch); to != "" {
-		target = to
-		p.From = "alias " + to
+	alias, aliased := aliasFor(rs.Aliases, ref, arch)
+	if aliased {
+		target = alias.To
+		p.From = "alias " + alias.To
 	}
 	r, err := oci.ParseRef(target)
 	if err != nil {
@@ -170,6 +171,12 @@ func (rs *Resolver) pinOne(ctx context.Context, tenant, ref, arch string) (conta
 		// name public/<that path>, never the other tenant's images.
 		p.Repository = LocalRepo(tenant, r.Repository)
 		d, err := oci.Resolve(ctx, rs.Reg, p.Repository, r.Reference(), arch)
+		if err != nil && oci.IsNotFound(err) && aliased && alias.Source != "" {
+			d, err = rs.fillAliasTarget(ctx, alias, r, p)
+			if err != nil {
+				return p, err
+			}
+		}
 		if err != nil {
 			if oci.IsNotFound(err) {
 				return p, fmt.Errorf("%s is not in tailworks' registry (%s): push it (tw deploy builds and pushes; the operator pushes public images with `tw image push`)", target, p.Repository)

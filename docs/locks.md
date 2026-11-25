@@ -23,22 +23,30 @@ This page covers:
 | Question | Answer | Measured by |
 |---|---|---|
 | Can two copies of one named object run at once on the same host? | No. workerd routes every request for a name to one single-threaded instance. 20 concurrent `acquire`s from 4 tailnet nodes produced exactly 1 winner | `hostd:TestLockTemplate/ContendedAcquireOneWinner` |
-| A host is cut off from mgmt but still on the tailnet. Can a second copy start elsewhere while the first still serves? | No. The cut-off host stops serving its stateful workloads (it *fences* itself) 30 s after its last successful heartbeat. mgmt won't let another host take the workload until the lease runs out, 45 s after the last renewal by the database's clock. Measured with default timings: h1 answered its last lock request at t0+32.8 s (t0 is the moment it was cut off). The takeover was accepted at t0+45.3 s, and h2 granted the lock at t0+47.9 s | `e2e/locks:TestLocksFailover` |
-| Side effects outside storage (egress calls)? | The fence stops the old copy, alarms included. In the test, a Durable Object made an egress call every 250 ms. h1's last call arrived at t0+32.7 s and h2's first at t0+48.1 s, so the two never overlapped. When h1 reconnected, mgmt revoked the workload and h1 stayed silent. **What the fence can't do** is recall a request that left before it: a packet still in flight, or a retry inside the system you called, can arrive after the new copy has started. Use [fencing tokens](#fencing-tokens) for that | `e2e/locks:TestLocksFailover` |
-| Storage writes? | A Durable Object's storage lives on its host's disk and **doesn't move**. After a takeover, the object starts **empty** on the new host. The old copy's writes stay on the old disk and are never served again, so nothing is corrupted, but they are lost to the new copy. A lock held at that moment is forgotten (see [failure modes](#failure-modes)) | `e2e/locks:TestLocksFailover` (B's acquire on h2 sees no holder) |
+| A host is cut off from mgmt but still on the tailnet. Can a second copy start elsewhere while the first still serves? | No. The cut-off host stops serving its stateful workloads (it *fences* itself) 30 s after its last successful heartbeat. mgmt won't let another host take the workload until the lease runs out, 45 s after the last renewal by the database's clock. Measured with default timings: h1 answered its last lock request at t0+32.8 s (t0 is the moment it was cut off). The takeover was accepted at t0+45.3 s, and h2 granted the lock at t0+47.9 s. The chaos loop repeats this with seeded faults: SIGSTOP of the whole host or of hostd alone, and cut-offs past the lease, each followed by `--force-takeover`. In 37 takeovers on macOS and 38 on Linux (since #501), some of them of a host whose clock had been stepped minutes forward or back, no stale copy answered after the new one | `e2e/locks:TestLocksFailover`, `e2e/dataplane:TestDataplane` (D1, D2) |
+| Side effects outside storage (egress calls)? | The fence stops the old copy, alarms included. In the test, a Durable Object made an egress call every 250 ms. h1's last call arrived at t0+32.7 s and h2's first at t0+48.1 s, so the two never overlapped. When h1 reconnected, mgmt revoked the workload and h1 stayed silent. **What the fence can't do** is recall a request that left before it: a packet still in flight, or a retry inside the system you called, can arrive after the new copy has started. Use [fencing tokens](#fencing-tokens) for that. A host that was *stalled* (a paused VM, a frozen process) past the lease is covered too: on resume its stateful workloads refuse ingress and egress (`upstream_unavailable`) until a heartbeat sent after the stall succeeds, and that heartbeat's revoke is applied first (#501) | `e2e/locks:TestLocksFailover`, `e2e/dataplane:TestDataplane` (D1: Pulse), `hostd:TestStallFence` |
+| Storage writes? | A Durable Object's storage lives on its host's disk and **doesn't move**. After a takeover, the object starts **empty** on a host that never ran it. The old copy's writes stay on the old disk, so nothing is corrupted, but they are lost to the new copy. If the workload later moves back to that host, they are served again: the object resumes the state it had when the lease left, and Workflow instances resume ([#565](https://github.com/rosskukulinski/tailworks/issues/565)). A lock held at that moment is forgotten (see [failure modes](#failure-modes)) | `e2e/locks:TestLocksFailover` (B's acquire on h2 sees no holder), `e2e/dataplane:TestDataplaneWorkflows` (W4: instances resume after a move back) |
 | How long is the takeover gap? | About **45 s** from the old host's last successful heartbeat (measured: 15.1 s between h1's last answer and h2's first grant). Tailworks has **no automatic failover**: someone has to redeploy with `--force-takeover` (or remove the host). Until then the lock is unavailable, so it fails closed | `e2e/locks:TestLocksFailover` |
 | Are fencing tokens monotonic across a host failover? | Yes, with the template. Tokens include the workload's lease epoch, which mgmt raises on every deploy and every move. They went from 1000000001 (epoch 1, h1) to 2000000001 (epoch 2, h2), and the example store refused the old holder's late write | `e2e/locks:TestLocksFailover`, `hostd:TestLockTemplate/RedeployKeepsHolderTokenCarriesEpoch` |
 
 The safety argument is two timeouts, both measured on one clock each:
 
 - The host fences after `FenceAfter` (30 s) on its **monotonic** clock.
+  A host that was stopped and never ran that check fences anyway: its
+  stateful workloads serve and send only while the last heartbeat that
+  succeeded was *sent* within `FenceAfter` (`hostd:TestStallFence`).
 - mgmt hands the lease to another host only after `NamespaceLeaseTTL`
   (45 s) by the **database's** clock.
 
 hostd refuses to start with a fence above 40 s, which leaves a 5 s margin
 for heartbeat round trips and clock-rate drift
 (`hostd:TestFenceBelowLease`). Wall-clock skew between machines doesn't
-matter (ADR-028 §1).
+matter (ADR-028 §1). The chaos loop checks this by stepping a host's
+clock 1–6 minutes forward or back (hostd and its workerds) and then taking
+the workload over or moving it. No stale copy answered or acted
+(`e2e/dataplane:TestDataplane`, D1 and D2 with the `skew` fault). The lock
+template's own lease is another matter: see "Clocks" under
+[failure modes](#failure-modes).
 
 ## Pattern 1: a named DO as a mutex
 
@@ -140,11 +148,9 @@ calls are `acquire`, `tryAcquire`, `renew`, `release` and `status`.
 - Put the `Lock` class in the same app (Pattern 1's binding) when only that
   app takes the lock.
 - Deploy it as its own workload when other workloads, replicas or machines
-  take it. Calls from a workload **on the same host** over the tailnet are
-  refused today: netd blocks sibling hairpins (`forbidden_destination`,
-  ADR-019). So run the lock workload on a host its clients aren't on
-  (`tw deploy --host`), or use `tw up --allow-sibling-egress` on a
-  single-host setup.
+  take it. A client workload on the **same host** reaches it as one on
+  another host does: netd delivers the call in process after the same
+  netmap and packet-filter checks (RFC §4.8), so it still needs the grant.
 
 ## Fencing tokens
 
@@ -169,8 +175,8 @@ token = max(lastToken + 1, epoch × 1 000 000 000 + 1)
 move, and never reuses one. So even when a takeover starts the lock with
 empty storage on another host, its first token beats anything the old host
 handed out. That holds across a restore of mgmt's store from a backup too:
-the restore fence (`tw-mgmt restore-fence`, run by `tw upgrade`'s
-rollback; [upgrading.md](upgrading.md)) raises every lease epoch by 2²⁰, far
+the restore fence (`tw-mgmt restore-fence`, run by `tw restore` and
+`tw upgrade`'s rollback; [upgrading.md](upgrading.md)) raises every lease epoch by 2²⁰, far
 past anything handed out after the backup.
 
 **Worked example.** A report table in Postgres (or any store with a
@@ -295,11 +301,12 @@ const isLeader = () => !!lease && Date.now() < lease.deadline;
   holders' leases are still running. Tokens still order them correctly.
   Don't force-move the lock workload while its locks are in use. (This is
   from the code, `mgmt.Deploy` with `Replace`; `e2e/locks` doesn't run it.)
-- **`tw host rm --drain` of a host that is actually still running**
+- **`tw host rm --force` of a host that is actually still running**
   releases its leases at once (by reading the code: `mgmt.DeleteHost`; not
   exercised in `e2e/locks`). If that host is only cut off, it keeps serving
   until it fences, up to 30 s, while the new host starts. The lease refusal
-  message suggests `tw host rm`. For a host that may still be running,
+  message suggests `tw host rm --force` only for a host that is gone for
+  good. For a host that may still be running,
   prefer `--force-takeover`: it waits for the lease to run out.
 - **The fence can't recall requests already sent.** A request that left the
   old host before it fenced can arrive later. Anything outside tailworks that the
@@ -308,7 +315,11 @@ const isLeader = () => !!lease && Date.now() < lease.deadline;
   client's deadline on the client's own clock, counted from when its request
   was sent. Neither compares two machines' wall clocks. A client whose
   process pauses for longer than the lease (GC, VM suspend) can act late:
-  that's what the token is for.
+  that's what the token is for. A *step* of the lock host's own clock does
+  matter: stepped forward, it ends a live holder's lease early and a second
+  client can be granted the lock; stepped back, leases last longer (#569,
+  measured by `e2e/dataplane`'s skew fault). The token still protects the
+  resource.
 - **Same-host callers.** A workload can't call the lock workload over the
   tailnet when both run on the same host (see
   [Where to run it](#pattern-2-leases-with-renewal-the-lock-template)).
@@ -320,4 +331,5 @@ const isLeader = () => !!lease && Date.now() < lease.deadline;
 | Test | What it shows |
 |---|---|
 | `hostd:TestLockTemplate` (`make test`) | the template on tw-hostd + stock workerd, with 4 tailnet client nodes, a Worker using the client, and the example store: one winner under contention, holder-bound renew and release, alarm expiry, strictly increasing tokens, `withLock` renewal and fencing, killing the holder vs killing the lock, tokens carrying the epoch across a redeploy |
+| `e2e/dataplane:TestDataplane`, `deploys-*` scenarios (`make e2e-dataplane-deploys`) | deploys, rollbacks and previews racing each other through three mgmt replicas while hosts are killed, stopped or cut off mid-activation: per workload one active deployment, epochs that only go up (`ctx.tailnet.self().epoch`, the base of fencing tokens: `hostd:TestDeployNeverLowersEpoch`, #584), and a live `--replace --force-takeover` move whose old copy stops within 5 s |
 | `e2e/locks:TestLocksFailover` (`make e2e-locks`) | real tw-mgmt and two tw-hostd processes, default timings. h1 is cut off from mgmt while still on the tailnet: it fences before h2 can take over; side effects don't overlap; tokens increase across the move; the store refuses the old holder; h1 is revoked when it reconnects |

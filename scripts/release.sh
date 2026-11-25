@@ -5,7 +5,7 @@
 #   dist/SHA256SUMS
 #   dist/SHA256SUMS.sig                     (signed builds: TW_RELEASE_SIGNING_KEY, below)
 #
-# Each tarball holds: bin/{tw,tw-mgmt,tw-hostd,tw-netd} (CGO_ENABLED=0,
+# Each tarball holds: bin/{tw,tw-mgmt,tw-hostd} (CGO_ENABLED=0,
 # esbuild built into tailworks), bin/workerd (the pinned npm
 # @cloudflare/workerd-<os>-<arch>, integrity-checked against
 # package-lock.json), share/tailworks/create-tailworks (templates + build.mjs),
@@ -96,7 +96,9 @@ for t in $TARGETS; do
 	echo "release: $name"
 
 	# Go binaries
-	cmds="./cmd/tw ./cmd/tw-mgmt ./cmd/tw-hostd ./cmd/tw-netd"
+	# cmd/tw-netd is not shipped: tw-hostd links netd as a library, and the
+	# binary is only the e2e-local test harness.
+	cmds="./cmd/tw ./cmd/tw-mgmt ./cmd/tw-hostd"
 	[ "$os" = linux ] && cmds="$cmds ./cmd/tw-vmhelper"
 	CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags "-s -w $VLDFLAGS" \
 		-o "$st/bin/" $cmds

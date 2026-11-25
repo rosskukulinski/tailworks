@@ -5,6 +5,8 @@
   "compatibility_flags": ["nodejs_compat"],
   "durable_objects": { "bindings": [{ "name": "AiAgent", "class_name": "AiAgent" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AiAgent"] }],
-  // MCP_URL: a tailworks MCP server on the tailnet (e.g. the `mcp` template's node)
-  "vars": { "MCP_URL": "http://mcp/mcp" }
+  // MCP_URL: a tailworks MCP server on the tailnet. The default is the `mcp`
+  // template deployed as workload "mcp": its node is tw-mcp (tw up's
+  // --hostname-prefix, default "tw-", plus the workload name).
+  "vars": { "MCP_URL": "http://tw-mcp/mcp" }
 }

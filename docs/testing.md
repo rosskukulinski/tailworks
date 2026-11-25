@@ -155,7 +155,7 @@ await worker.fetch(req, env, tw.ctx());
 tw.spawned;  // [{class, name, caps, ttl, principal, objectId}]
 tw.killed;   // [{reason, cascade, target, killed}]
 tw.audits;   // records passed to ctx.tailnet.audit()
-tw.fetches;  // requests sent through ctx.tailnet.fetch()/forward()
+tw.fetches;  // requests sent through ctx.tailnet.fetch()
 ```
 
 `withCaller(req, who)`: `who` is `{login}` (a user's node) or `{tags}` (a
@@ -164,7 +164,8 @@ tagged node), never both, plus optional `nodeId`, `hostname`, `node`,
 derived from the login or tag (`alice@example.com` → node ID `test-alice`,
 node `alice.test.ts.net`).
 
-`createTestTailnet(opts)`: `self` (what `self()` answers; default epoch 1),
+`createTestTailnet(opts)`: `self` (what `self()` answers; default workload
+`test-workload`, deployment `test-deployment`, epoch 1),
 `fetch` (answers `ctx.tailnet.fetch`; by default every destination is
 refused with `forbidden_destination`, and any response with a `tw-error`
 header is thrown as a `TailnetError`, as on tailworks), `onSpawn` (throw to fail a
@@ -187,7 +188,7 @@ a deployed app. As a guard against a stray import, the top-level
 `withCaller()` / `withPublic()` throw unless the test opted in with
 `enableTestCallers()` or `createTestTailnet()`.
 
-## The Node tier
+## The Node runtime
 
 The `node-workflow` template's test is a black-box test too
 (`startDev`, `/whoami` as a caller). `@tailworks/node` verifies a signed caller

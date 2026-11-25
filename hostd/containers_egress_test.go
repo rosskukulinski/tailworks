@@ -62,6 +62,7 @@ func internetStandIn(t *testing.T) (*hostd.ContainerInternet, *[]string) {
 // through real workerd and the ctx.container polyfill (the fake backend
 // hands its "guest" flows to the same egress proxy a microVM's NIC does).
 func TestContainerEgress(t *testing.T) {
+	t.Parallel()
 	procs := &sandboxtest.Procs{}
 	st, err := sandboxtest.ImageStore(t.TempDir(), []string{"sleep", "3600"}, "tw.test/box:1")
 	if err != nil {

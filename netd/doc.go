@@ -11,9 +11,11 @@
 //   - egress: an attributed HTTP proxy. A request names its object in
 //     x-tw-object (set by the trusted platform Egress entrypoint) and leaves via
 //     that object's own node. Per ADR-019, destinations are resolved from the
-//     object's netmap only, only tailnet IPs are allowed, the object itself, its
-//     same-host siblings, the host, loopback and link-local are refused, and netd
-//     never falls back to the host network or host DNS. Refusals are typed JSON
+//     object's netmap only, only tailnet IPs are allowed, the object itself, the
+//     host, loopback and link-local are refused, and netd never falls back to the
+//     host network or host DNS. A destination that is another object on this
+//     registry is delivered in process to its ingress, after the same netmap
+//     check and its packet filter (samehost.go). Refusals are typed JSON
 //     errors (peer_not_visible, forbidden_destination);
 //   - kill: abort (RST) every in-flight flow, then Close the node, then call an
 //     optional device-delete hook (kill tier 1 then tier 2).

@@ -127,7 +127,7 @@
 
 5. **Operator surface.** `tw d1 create|list|delete` are the generic store
    routes (`PUT|GET|DELETE …/stores/d1/{name}`; delete crypto-shreds).
-   `tw d1 execute <db> --command|--file` and `tw d1 export` use two new
+   `tw d1 execute <db> --command|--file` (or SQL on stdin) and `tw d1 export` use two new
    routes, `POST /v1/tenants/{id}/workloads/{w}/d1/{name}/query` (a batch,
    `200` with D1's per-statement results, `400 d1_error` when a statement
    fails) and `GET …/d1/{name}/export` (SQL text in `wrangler d1 export`'s
@@ -141,6 +141,11 @@
    audited (`d1_write`, with the statement count, never the SQL); a read
    is logged. Export is the backup: the journal in mgmt is the off-host
    durable copy and is backed up with mgmt's database (sealed).
+   The two routes stay under `…/d1/{name}` rather than moving under
+   `…/stores/d1/{name}` next to KV's and R2's data routes: `/v1` is
+   additive-only with a two-release deprecation (ADR-041 §2), and unlike
+   those, they are not a fold of the journal in mgmt but a call to the
+   lease holder's running workerd.
 
 6. **Sessions.** A bookmark is the store's journal position, zero-padded,
    plus its incarnation (`0000000000000042.si_…`), so upstream's

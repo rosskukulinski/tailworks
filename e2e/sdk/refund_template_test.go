@@ -62,6 +62,10 @@ func TestRefundApprovalTemplate(t *testing.T) {
 		if code != 200 || id == "" {
 			t.Fatalf("refund %s: %d %s", order, code, b)
 		}
+		// The hint names the workload, read from ctx.tailnet.self().workload.
+		if r["approve"] != "tw approve refunds "+id {
+			t.Errorf("refund %s: approve hint %v", order, r["approve"])
+		}
 		return id
 	}
 	state := func(id string) map[string]any {

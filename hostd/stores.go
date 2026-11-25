@@ -15,16 +15,31 @@ package hostd
 // deployment declares (bundle.App.Stores) are reachable.
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
 )
 
 // storeBodyLimit bounds a store API body (an append: base64 data + JSON).
 const storeBodyLimit = 6 << 20
+
+// storeReadTimeout bounds one journal read (a catch-up page, at most
+// mgmt.StoreReadMaxBytes) against a slow or black-holed mgmt. The store
+// object stops waiting for a catch-up long before this and serves its
+// local copy (READ_WAIT_MS in gen/js/store.js); this bounds how long a
+// stuck catch-up holds the object's queue, where the writes and syncs
+// behind it wait. 10 s leaves room for a full page over a slow link (a
+// store rebuilding on a new host reads page after page). Appends keep
+// the request's own context and the mgmt client's 30 s timeout: a write
+// is acknowledged only once mgmt has it (RPO 0).
+const storeReadTimeout = 10 * time.Second
 
 type storeReq struct {
 	Kind        string                 `json:"kind"`
@@ -41,6 +56,7 @@ type storeReq struct {
 var storeErrStatus = map[string]int{
 	"bad_request":             400,
 	"store_limit":             400,
+	"storage_quota_exceeded":  429,
 	mgmtapi.CodeStoreConflict: 409,
 	mgmtapi.CodeLeaseLost:     409,
 	"store_degraded":          409,
@@ -84,7 +100,13 @@ func (h *Host) storeAPI(inst *instance, w http.ResponseWriter, r *http.Request) 
 	ctx := r.Context()
 	switch strings.TrimPrefix(r.URL.Path, "/v1/store/") {
 	case "read":
-		p, err := h.mgmt.ReadStoreJournal(ctx, wl.tenantID, wl.name, req.Kind, req.Name, epoch, req.After, 0)
+		rctx, cancel := context.WithTimeout(ctx, storeReadTimeout)
+		p, err := h.mgmt.ReadStoreJournal(rctx, wl.tenantID, wl.name, req.Kind, req.Name, epoch, req.After, 0)
+		cancel()
+		if err != nil && errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+			writeStoreError(w, &apiError{Code: "store_unavailable", Detail: fmt.Sprintf("mgmt did not answer a store journal read within %s", storeReadTimeout)})
+			return
+		}
 		if err != nil {
 			writeStoreError(w, asAPIError(err))
 			return

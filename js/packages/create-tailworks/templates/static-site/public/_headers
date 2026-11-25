@@ -1,0 +1,4 @@
+# headers for files served from public/ (not for Worker responses)
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: same-origin

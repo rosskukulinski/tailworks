@@ -13,6 +13,7 @@ import (
 // ignored Host.Tiers, so a "microvm" workload could land on a process-only
 // host, where hostd fell back to the process tier with only a log warning.
 func TestPlacementTier(t *testing.T) {
+	t.Parallel()
 	const (
 		microvm = `{ "tier": "microvm", "tailnet": { "tags": ["tag:tw-web"] } }`
 		process = `{ "tier": "process", "tailnet": { "tags": ["tag:tw-web"] } }`
@@ -85,6 +86,7 @@ func TestPlacementTier(t *testing.T) {
 // A workload whose live host lacks the tier it now asks for is refused with
 // a fix, not left on the wrong tier (stickiness would otherwise keep it).
 func TestPlacementTierStickyHolder(t *testing.T) {
+	t.Parallel()
 	m, tn := tierTestMgmt(t)
 	ctx := context.Background()
 	m.RegisterHost(ctx, RegisterRequest{HostID: "hp", CapacityNodes: 1000, Tiers: []string{"process"}}, "", "")

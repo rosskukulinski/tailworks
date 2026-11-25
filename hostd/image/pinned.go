@@ -67,9 +67,10 @@ func pinScope(tenant string, p container.Pin) (string, error) {
 	}
 }
 
-// GetPinned returns the image of pin for tenant: from the cache, or pulled
-// from the registry by digest and converted now.
-func (s *Store) GetPinned(ctx context.Context, tenant string, p container.Pin) (*Image, error) {
+// getPinned returns the image of pin for tenant: from the cache, or pulled
+// from the registry by digest and converted now. GetPinnedHeld holds it and
+// then runs GC (hold.go).
+func (s *Store) getPinned(ctx context.Context, tenant string, p container.Pin) (*Image, error) {
 	if s.Puller == nil {
 		return nil, errors.New("this host has no registry to pull pinned images from")
 	}
@@ -111,9 +112,6 @@ func (s *Store) GetPinned(ctx context.Context, tenant string, p container.Pin) (
 	s.mu.Lock()
 	delete(s.inflight, key)
 	s.mu.Unlock()
-	if c.err == nil {
-		s.gc()
-	}
 	return c.img, c.err
 }
 

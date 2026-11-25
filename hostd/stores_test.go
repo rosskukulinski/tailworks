@@ -26,8 +26,11 @@ import (
 // host fenced the workload and lost its DO storage (a move to a new host,
 // as far as the store can tell).
 func TestPlatformStore(t *testing.T) {
+	t.Parallel()
 	hostdtest.RegisterProbeStore()
-	const fenceAfter = time.Second
+	// 5 s, not 1 s: ordinary calls must not trip the stall fence on a loaded
+	// runner (#556 gates stateful ingress on heartbeat freshness; #591).
+	const fenceAfter = 5 * time.Second
 	s := startSuiteCapsOpts(t, fakemgmt.Config{}, tailcfg.PeerCapMap{nettest.TestCap: []tailcfg.RawMessage{nettest.TestCapValue}}, func(o *hostdtest.Options) {
 		o.FenceAfter, o.HeartbeatEvery = fenceAfter, 100*time.Millisecond
 	})
@@ -99,7 +102,7 @@ func TestPlatformStore(t *testing.T) {
 		t.Fatal("no DO storage dir in status")
 	}
 	e.FM.SetHeartbeatsDown(true)
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(fenceAfter + 15*time.Second)
 	for workloadStatus(t, e, "storeprobe").PID != 0 {
 		if time.Now().After(deadline) {
 			t.Fatalf("workload not fenced: %+v", workloadStatus(t, e, "storeprobe"))

@@ -1,0 +1,13 @@
+{
+  // e2e/vm websockets_test.go: WebSockets to Durable Objects and the
+  // hibernation API on the microVM tier.
+  "name": "vmws",
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-01",
+  "durable_objects": {
+    "bindings": [
+      { "name": "ROOM", "class_name": "Room" },
+      { "name": "PLAIN", "class_name": "PlainRoom" },
+    ],
+  },
+}

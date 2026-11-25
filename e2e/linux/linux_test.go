@@ -2,19 +2,21 @@
 
 // E2E-LINUX (docs/install-testing.md, "Linux requirements" item 2): the
 // e2e-mbp flow against a fresh Lima VM that mounts nothing from this Mac. From here: `limactl copy` the linux
-// release tarball and the tailnet-1 API key file into the VM
-// (~/.tailworks-e2e, 0700 dir, 0600 key), run install.sh and `tw doctor`
+// release tarball and this run's own OAuth client file into the VM
+// (~/.tailworks-e2e, 0700 dir, 0600 file; tailworks mints in OAuth mode and
+// never sees the harness's API key, which stays on this Mac to create and
+// delete that client and to clean up), run install.sh and `tw doctor`
 // there, then `tw up --service` (a systemd user unit) / `tw init` /
 // `tw deploy` in the VM over ssh. The tag:ttest test client and the
 // private echo run HERE as tsnet nodes, so checks (a)–(f) cross machines
 // over tailnet 1. Then `systemctl --user restart tw` must come back and
 // stay reachable, `tw down` + `tw down --service`, uninstall, remove
-// ~/.tailworks-e2e (the key file goes even on failure: t.Cleanup here, and the
+// ~/.tailworks-e2e (the OAuth client file goes even on failure: t.Cleanup here, and the
 // trap in scripts/e2e-linux-one.sh), and zero leftover devices and keys
 // from this run, by ID.
 //
-// Safety: tailnet 1 only (allow list); no policy writes (M4 added the
-// grants); keys are never printed; the VM's own tailscaled (if any) is
+// Safety: tailnet 1 only (allow list); no policy writes unless
+// TW_E2E_APPLY_POLICY=1 (additions only, with a saved copy); keys are never printed; the VM's own tailscaled (if any) is
 // never logged in or used.
 package linux
 
@@ -77,6 +79,26 @@ func (v *vm) must(cmd string) string {
 	return so
 }
 
+// matrixVM reports whether name is a matrix VM this suite may wipe:
+// twl-<distro> (scripts/e2e-linux-one.sh), or twdl-<distro> from before the
+// rename (TW_E2E_VM_PREFIX=twdl-).
+func matrixVM(name string) bool {
+	return strings.HasPrefix(name, "twl-") || strings.HasPrefix(name, "twdl-")
+}
+
+// warmKeyIDs returns the distinct keyIDs in mgmt's "warm key minted" log lines.
+func warmKeyIDs(log string) []string {
+	var ids []string
+	for _, m := range warmKeyRE.FindAllStringSubmatch(log, -1) {
+		if !slices.Contains(ids, m[1]) {
+			ids = append(ids, m[1])
+		}
+	}
+	return ids
+}
+
+var warmKeyRE = regexp.MustCompile(`keyID=([A-Za-z0-9]+)`)
+
 func shq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 // timed runs argv in dir in the VM; the VM measures its own wall time
@@ -136,8 +158,8 @@ func TestE2ELinux(t *testing.T) {
 	if !allowedTailnets[tailnet] {
 		t.Fatalf("refusing to run against tailnet %q (not in the allow list)", tailnet)
 	}
-	if !strings.HasPrefix(vmName, "twl-") {
-		t.Fatalf("refusing to use VM %q (matrix VMs are twl-*)", vmName)
+	if !matrixVM(vmName) {
+		t.Fatalf("refusing to use VM %q (matrix VMs are twl-* or twdl-*)", vmName)
 	}
 	if _, err := os.Stat(tarball); err != nil {
 		t.Fatalf("tarball: %v (make release)", err)
@@ -156,12 +178,32 @@ func TestE2ELinux(t *testing.T) {
 		t.Fatal(err)
 	}
 	api := &tsapi.Client{Tailnet: tailnet, APIKey: apiKey}
-	// tailworks mints with an OAuth client: this run's own, created with the
-	// harness's API key and deleted when the test ends.
-	oauthFile := cliflow.RealOAuthClient(t, keyFile, tailnet, t.TempDir(), "tw-e2e-linux-oauth")
 	b := make([]byte, 3)
 	rand.Read(b)
 	run := hex.EncodeToString(b)
+	// TW_E2E_APPLY_POLICY=1 (make e2e-linux LINUX_APPLY_POLICY=1): add the
+	// scenario's tagOwners and grants first (additions only, validated,
+	// If-Match; the previous policy is saved next to the credentials), as
+	// e2e/mac does. Otherwise the policy is only read, below.
+	var policyNote string
+	if os.Getenv("TW_E2E_APPLY_POLICY") == "1" {
+		pctx, pcancel := context.WithTimeout(context.Background(), time.Minute)
+		ar, err := policy.ApplyWith(pctx, api, cliflow.Policy(), policy.Options{AllowTags: []string{cliflow.TestTag}})
+		pcancel()
+		if err != nil {
+			t.Fatalf("policy: %v", netd.RedactError(err))
+		}
+		if ar.Changed {
+			bk := filepath.Join(filepath.Dir(keyFile), "tailnet1_acl.pre-l1-"+run+"-"+time.Now().Format("20060102")+".hujson")
+			if err := os.WriteFile(bk, ar.Before, 0o600); err != nil {
+				t.Fatalf("policy backup: %v", err)
+			}
+			policyNote = "policy changed (validated, If-Match " + ar.OldETag + "): added " + ar.Added.HuJSON() + " (previous copy: " + filepath.Base(bk) + ")"
+		}
+	}
+	// tailworks mints with an OAuth client: this run's own, created with the
+	// harness's API key and deleted when the test ends.
+	oauthFile := cliflow.RealOAuthClient(t, keyFile, tailnet, t.TempDir(), "tw-e2e-linux-oauth")
 	testPrefix, twPrefix, _ := cliflow.RunPrefixes("l1", run) // this Mac's client + echo; every node tw creates in the VM
 	root, _ := nettest.FindRepoRoot()
 	res := cliflow.NewResults("l1-"+vmName+"-"+run, tailnet)
@@ -181,7 +223,11 @@ func TestE2ELinux(t *testing.T) {
 	if miss, err := policy.Missing(pol, cliflow.Policy()); err != nil || !miss.Empty() {
 		t.Fatalf("tailnet 1's policy lacks the scenario's grants/tagOwners (not writing it in this run): %v %s", err, miss.HuJSON())
 	}
-	res.Notes = append(res.Notes, "policy has the scenario's tagOwners and grants (read only; not written)")
+	if policyNote != "" {
+		res.Notes = append(res.Notes, policyNote)
+	} else {
+		res.Notes = append(res.Notes, "policy has the scenario's tagOwners and grants (read only; not written)")
+	}
 
 	home, _ := os.UserHomeDir()
 	v := &vm{t: t, name: vmName, cfg: filepath.Join(home, ".lima", vmName, "ssh.config")}
@@ -225,6 +271,8 @@ func TestE2ELinux(t *testing.T) {
 		// --service: an --ephemeral node that goes offline for a restart
 		// may be removed by control and then can't rejoin (see STATUS L1).
 		UpArgs: []string{"--service"}, Persistent: true,
+		// TW_E2E_LAYOUT=single: tw up's default single-process layout (else --separate-host).
+		SingleProcess: os.Getenv("TW_E2E_LAYOUT") == "single",
 		Exec: func(args []string) (string, string, time.Duration, error) {
 			return v.timed(rWork, append([]string{rTw}, args...)...)
 		},
@@ -284,6 +332,19 @@ func TestE2ELinux(t *testing.T) {
 		for _, n := range nodes {
 			n.Close()
 		}
+		// Warm keys (mgmt's pre-minted join keys) appear in mgmt's log, not
+		// the audit chain: read their IDs before the state dir goes, so the
+		// check below can see whether tw down revoked them (#158).
+		warmLog, _, _ := v.run(`grep -ho 'warm key minted.*keyID=[A-Za-z0-9]*' ~/.tailworks-e2e/state/logs/mgmt.log* 2>/dev/null; true`, nil)
+		warmKeys := warmKeyIDs(warmLog)
+		// The VM's tailworks logs (and the unit's journal), kept next to the
+		// results: the timings above are explained by them (#245).
+		if logs, _, err := v.run(`for f in $(find ~/.tailworks-e2e -name '*.log' -path '*logs*' 2>/dev/null); do echo "==== $f"; cat "$f"; done
+			echo "==== journalctl --user -u tw.service"; journalctl --user -u tw.service --no-pager -o short-precise 2>/dev/null | tail -400; true`, nil); err == nil {
+			if err := os.WriteFile(strings.TrimSuffix(resultsTo, ".json")+".logs.txt", []byte(netd.Redact(logs)), 0o600); err != nil {
+				t.Logf("saving the VM logs: %v", err)
+			}
+		}
 		us := time.Now()
 		so, se, err := v.run(`systemctl --user disable --now tw.service >/dev/null 2>&1; rm -f ~/.config/systemd/user/tw.service; systemctl --user daemon-reload 2>/dev/null
 			pkill -TERM -f "$HOME/.tailworks/bin/" 2>/dev/null; sleep 0.5; pkill -KILL -f "$HOME/.tailworks/bin/" 2>/dev/null
@@ -307,6 +368,18 @@ func TestE2ELinux(t *testing.T) {
 		res.Cleanup["tw_keys_tracked"] = len(res.KeyIDs)
 		res.Cleanup["tw_devices_left_after_down"] = len(devs)
 		res.Cleanup["tw_keys_valid_after_down"] = len(keys)
+		var warmLeft []string
+		for _, id := range warmKeys {
+			if k, err := api.GetKey(cctx, id); err == nil && !k.Invalid && k.Revoked == "" {
+				warmLeft = append(warmLeft, id)
+				api.DeleteKey(cctx, id)
+			}
+		}
+		res.Cleanup["warm_keys_minted"] = len(warmKeys)
+		res.Cleanup["warm_keys_valid_after_down"] = len(warmLeft)
+		if len(warmLeft) > 0 {
+			t.Errorf("after tw down: %d of %d warm keys still valid (deleted by cleanup): %v", len(warmLeft), len(warmKeys), warmLeft)
+		}
 		for _, id := range res.NodeIDs {
 			tracker.Track(id, "tw")
 		}
@@ -360,7 +433,7 @@ func TestE2ELinux(t *testing.T) {
 	if m := strings.TrimSpace(v.must("stat -c %a " + shq(rKey))); m != "600" {
 		t.Fatalf("key file mode in the VM: %s", m)
 	}
-	res.Checks["copy"] = "PASS tarball + key file (0600, in a 0700 dir) via limactl copy"
+	res.Checks["copy"] = "PASS tarball + OAuth client file (0600, in a 0700 dir) via limactl copy"
 
 	// install.sh
 	tgz := filepath.Base(tarball)
@@ -413,7 +486,7 @@ func TestE2ELinux(t *testing.T) {
 	res.Checks["microvm_tier"] = "INFO " + mv
 	res.Pass("doctor", fmt.Sprintf("%d checks in %.0f ms, none failed: %s", len(doc.Checks), msOf(d), strings.Join(summary, " ")))
 
-	if _, se, _, err := e.Tw("init", rWork+"/ai", "--template", "ai-agent", "--keep-tags", "--json"); err != nil {
+	if _, se, _, err := e.Tw("init", rWork+"/ai", "--template", "ai-agent", "--json"); err != nil {
 		t.Fatalf("tw init --template ai-agent in the VM: %v %s", err, se)
 	}
 	res.Pass("init_ai_agent_offline", "tw init --template ai-agent in the VM (no npm); bundled offline by doctor")
@@ -739,6 +812,17 @@ func TestE2ELinux(t *testing.T) {
 			t.Fatalf("ephemeral: systemctl --user restart tw: %v %s", err, se)
 		}
 		t0 := time.Now()
+		// `tw ls` fails (t.Fatal in FindObject) until the new supervisor's
+		// mgmt is serving again: `systemctl restart` returns before that.
+		for time.Since(t0) < scale(3*time.Minute) {
+			var stt struct {
+				Healthy bool `json:"healthy"`
+			}
+			if so, _, _, err := e.Tw("status", "--json"); err == nil && json.Unmarshal([]byte(so), &stt) == nil && stt.Healthy {
+				break
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
 		var child2 cliflow.Object
 		var readyAt time.Duration
 		for time.Since(t0) < scale(4*time.Minute) {

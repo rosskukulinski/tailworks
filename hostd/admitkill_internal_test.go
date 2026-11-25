@@ -84,6 +84,7 @@ func liveObject(h *Host, id, class, name string) *object {
 // without a new admit) must be refused, and mgmt must never be asked to
 // mint a node for it.
 func TestRT3_H19_AdmitCacheAfterKill(t *testing.T) {
+	t.Parallel()
 	as := func(class, name string) map[string]any {
 		return map[string]any{"as": map[string]any{"class": class, "name": name}}
 	}
@@ -168,6 +169,7 @@ func TestRT3_H19_AdmitCacheAfterKill(t *testing.T) {
 // TestTenantPurgeDropsAdmissions (#153, #107): a deleted tenant leaves no
 // pending create admission and no public.create record on the host.
 func TestTenantPurgeDropsAdmissions(t *testing.T) {
+	t.Parallel()
 	h, inst, _ := admitKillHost(t)
 	if code, r := platformCall(t, h, inst, "admit", map[string]any{"class": "Room", "name": "d", "as": map[string]any{"class": "Room", "name": "parent"}}); code != 200 {
 		t.Fatalf("admit Room/d: %d %v", code, r)

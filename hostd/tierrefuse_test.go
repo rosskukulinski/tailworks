@@ -21,6 +21,7 @@ import (
 // mgmt sees the typed failure on the deployment. Before, hostd ran it in the
 // process tier with only a log warning.
 func TestMicroVMRefusedWithoutBackend(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("short")
 	}

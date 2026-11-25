@@ -15,6 +15,8 @@
 #     workerd's floor. BASE_ROOTFS=<dir> uses an extracted rootfs instead
 #     (and its CA bundle);
 #   - the CA bundle: built from Ubuntu's ca-certificates .deb (sha256-pinned);
+#   - the Pyodide bundles Python Workers run on (internal/pyodide/bundles.txt,
+#     sha256-checked), read-only in /usr/share/tailworks/pyodide (ADR-055);
 #   - mke2fs (e2fsprogs) and its libraries, from the same base rootfs: the
 #     macOS (vz) backend has the guest format a new DO volume (the host has
 #     no mkfs.ext4; it decrypts, the guest sees plaintext either way).
@@ -137,6 +139,19 @@ for lib in $( (readelf -d "$WORKERD"; readelf -d "$STAGE/usr/sbin/mke2fs") | sed
   [ "$(elf_machine "$STAGE/usr/lib/$LIBDIR/$lib")" = "$GARCH" ] || { echo "build-image: $lib is not $GARCH" >&2; exit 1; }
 done
 
+# The Pyodide bundles (Python Workers): workerd reads them with
+# --pyodide-bundle-disk-cache-dir; the guest has no network to fetch them.
+mkdir -p "$STAGE/$PYODIDE_GUEST_DIR"
+PYODIDE_JSON=
+while read -r pf psha psize; do
+  case $pf in '' | '#'*) continue ;; esac
+  src=$(fetch "$PYODIDE_URL/$pf" "$psha")
+  [ "$(stat -c %s "$src")" = "$psize" ] || { echo "build-image: $pf: size $(stat -c %s "$src"), want $psize" >&2; exit 1; }
+  install -m 0444 "$src" "$STAGE/$PYODIDE_GUEST_DIR/$pf"
+  PYODIDE_JSON="$PYODIDE_JSON${PYODIDE_JSON:+, }{\"file\": \"$pf\", \"sha256\": \"$psha\"}"
+done <"$PYODIDE_LIST"
+[ -n "$PYODIDE_JSON" ] || { echo "build-image: no Pyodide bundles in $PYODIDE_LIST" >&2; exit 1; }
+
 printf 'root:x:0:0:root:/tmp:/sbin/tw-guestd\n' >"$STAGE/etc/passwd"
 printf 'root:x:0:\n' >"$STAGE/etc/group"
 printf 'tw-guest\n' >"$STAGE/etc/hostname"
@@ -240,6 +255,7 @@ cat >"$OUT/manifest.json" <<EOF
   "libc_sha256": "$(sha "$STAGE/usr/lib/$LIBDIR/libc.so.6")",
   "ca_from": "$CA_FROM",
   "ca_sha256": "$(sha "$CA")",
+  "pyodide": [$PYODIDE_JSON],
   "packages": [
 $PACKAGES
   ]

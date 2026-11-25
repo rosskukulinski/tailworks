@@ -183,13 +183,9 @@ class ConformanceAgent extends Agent<Env, State> {
           exports: typeof (this.ctx as any).exports,
           facets: typeof (this.ctx as any).facets,
         };
-        try {
-          const { EmailMessage } = await import("cloudflare:email");
-          new (EmailMessage as any)("a@example.com", "b@example.com", "raw");
-          out.email = "constructed";
-        } catch (e) {
-          out.email = errOf(e);
-        }
+        // cloudflare:email: not imported here. The built-in bundler refuses
+        // the app's own import (TestCloudflareAgents/UnsupportedBindings
+        // checks that, and that the `agents` import of it is stubbed).
         try {
           await (this as any).subAgent?.(PlainAgent, "sub-1");
           out.subAgent = "ok";

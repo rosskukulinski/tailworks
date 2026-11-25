@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/rosskukulinski/tailworks/internal/caps"
+	"github.com/rosskukulinski/tailworks/internal/tssvc"
 	"tailscale.com/client/tailscale/apitype"
 )
 
@@ -158,13 +159,15 @@ func (o *Object) serveIngress(w http.ResponseWriter, req *http.Request) {
 	}
 	// limits.md#whois-timeout
 	ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
-	who, err := lc.WhoIs(ctx, req.RemoteAddr)
+	// Caps scoped to the address dialed: a Service VIP gets svc: grants (H22).
+	who, err := tssvc.WhoIs(ctx, lc, req.RemoteAddr)
 	cancel()
 	if err != nil {
 		WriteError(w, newErr(CodeNoIdentity, "WhoIs failed for the transport peer"))
 		return
 	}
 	stripIdentityHeaders(req.Header)
+	markTLS(req) // tailnethttps.go: arrived on :443
 	var blob CFBlob
 	blob.Tailscale.Caller = CallerFromWhoIs(who)
 	o.reg.applyCert(req.Context(), &blob.Tailscale.Caller)
@@ -190,15 +193,16 @@ func UnixUpstream(path string) http.Handler {
 			return (&net.Dialer{}).DialContext(ctx, "unix", path)
 		},
 		MaxIdleConnsPerHost: 64,
-		IdleConnTimeout:     60 * time.Second,
+		IdleConnTimeout:     UpstreamIdleTimeout, // below workerd's idle close (#287)
 	}
 	target := &url.URL{Scheme: "http", Host: "workerd"}
 	return &httputil.ReverseProxy{
-		Transport:     tr,
+		Transport:     KeepEarlyAnswer(tr), // upstream_early.go (#288)
 		FlushInterval: -1,
 		ErrorLog:      log.New(io.Discard, "", 0), // errors are reported via ErrorHandler
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
+			KeepBodyEOF(pr) // proxybody.go (#138)
 			pr.Out.Host = pr.In.Host
 			KeepForwarded(pr)
 		},

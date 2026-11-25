@@ -13,6 +13,7 @@ import (
 // another), tags move, public bases replace by (ref, arch), and deleting a
 // tenant drops its namespace's links and tags but no other namespace's.
 func TestStoreRegistryMeta(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		const d1 = "sha256:1111111111111111111111111111111111111111111111111111111111111111"

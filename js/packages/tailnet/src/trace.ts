@@ -22,6 +22,8 @@ export interface SpanRecord {
   end: number;
   error: boolean;
   attrs: Record<string, string | number>;
+  /** "server" for an entry span (DO RPC, alarm); absent for CLIENT. */
+  kind?: "server";
 }
 
 interface TraceState {
@@ -192,4 +194,61 @@ export async function tracedStubFetch(cls: string, name: string, args: unknown[]
     done();
     throw e;
   }
+}
+
+/**
+ * startChild opens a CLIENT span under the running handler's context
+ * (undefined outside one). finish records it for the handler's report.
+ */
+export function startChild(name: string, attrs: Record<string, string | number>): { traceparent: string; finish(error: boolean): void } | undefined {
+  const st = als?.getStore();
+  if (!st) return undefined;
+  const rec: SpanRecord = { traceId: st.traceId, spanId: newSpanId(), parentSpanId: st.spanId, name, start: Date.now(), end: 0, error: false, attrs };
+  return {
+    traceparent: `00-${st.traceId}-${rec.spanId}-${st.flags}`,
+    finish(error: boolean) {
+      rec.end = Date.now();
+      rec.error = error;
+      if (st.spans.length < MAX_SPANS) st.spans.push(rec);
+    },
+  };
+}
+
+/**
+ * runEntry runs fn, an entry point that gets no traceparent header (a DO
+ * RPC method, an alarm), under its own SERVER span: a child of parent (a
+ * traceparent value) or, without a valid one, the root of a new trace.
+ * The span and every span recorded during fn are handed to flush when fn
+ * settles.
+ */
+export async function runEntry<T>(
+  parent: string | null,
+  name: string,
+  attrs: Record<string, string | number>,
+  fn: () => T | Promise<T>,
+  flush?: (spans: SpanRecord[]) => void,
+): Promise<T> {
+  if (!als) return fn();
+  const tp = parseTraceparent(parent);
+  const st: TraceState = { traceId: tp?.traceId ?? randHex(16), spanId: newSpanId(), flags: tp?.flags ?? "01", incoming: "", spans: [] };
+  const rec: SpanRecord = { traceId: st.traceId, spanId: st.spanId, parentSpanId: tp?.spanId ?? "", name, start: Date.now(), end: 0, error: false, attrs, kind: "server" };
+  return als.run(st, async () => {
+    try {
+      return await fn();
+    } catch (e) {
+      rec.error = true;
+      throw e;
+    } finally {
+      rec.end = Date.now();
+      // The entry span is always reported, even past MAX_SPANS children.
+      const spans = [rec, ...st.spans.splice(0, MAX_SPANS - 1)];
+      if (flush) {
+        try {
+          flush(spans);
+        } catch {
+          /* reporting is best effort */
+        }
+      }
+    }
+  });
 }

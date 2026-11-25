@@ -61,6 +61,7 @@ const objectsV0 = `[
 ]`
 
 func TestObjectsFormatFixtures(t *testing.T) {
+	t.Parallel()
 	created := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
 	v1 := func() []byte {
 		b, _ := json.MarshalIndent([]*object{
@@ -99,6 +100,7 @@ func TestObjectsFormatFixtures(t *testing.T) {
 
 // TestSaveObjectsWritesVersion: saveObjects stamps every record.
 func TestSaveObjectsWritesVersion(t *testing.T) {
+	t.Parallel()
 	h := &Host{cfg: Config{DataDir: t.TempDir()}, objects: map[string]*object{"obj_1": {ID: "obj_1"}}}
 	h.saveObjects()
 	b, err := os.ReadFile(h.objectsPath())

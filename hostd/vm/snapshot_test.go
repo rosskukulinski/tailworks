@@ -32,7 +32,8 @@ func snapBackend(t *testing.T, pool int) *Backend {
 			t.Skip("TW_VM_KERNEL / TW_VM_ROOTFS not set")
 		}
 		b, err := New(Config{Kernel: kernel, Rootfs: rootfs, Helper: os.Getenv("TW_VM_HELPER"), HugePages: os.Getenv("TW_VM_HUGEPAGES"),
-			Pool: pool, Snapshot: true, SnapshotRefill: pool >= 0})
+			Pool: pool, Snapshot: true, SnapshotRefill: pool >= 0,
+			VCPUs: envInt("TW_VM_VCPUS")})
 		if err != nil {
 			t.Skip(err)
 		}

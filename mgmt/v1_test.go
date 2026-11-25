@@ -42,6 +42,7 @@ func v1Host(t *testing.T, e *testEnv, id string) *apiClient {
 }
 
 func TestV1Pagination(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	c := e.c
 	var ids []string
@@ -154,6 +155,7 @@ func TestV1Pagination(t *testing.T) {
 }
 
 func TestV1TenantPatchAndETag(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	c := e.c
 	tn := v1Tenant(t, e, "t.ts.net", map[string]any{"maxObjects": 10})
@@ -211,6 +213,7 @@ func TestV1TenantPatchAndETag(t *testing.T) {
 }
 
 func TestV1DeleteSemantics(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	c := e.c
 	tn := v1Tenant(t, e, "t.ts.net", nil)
@@ -325,6 +328,7 @@ func TestV1DeleteSemantics(t *testing.T) {
 // gate as a host, an admin and a non-admin, so a route can't be added
 // without its x-tw-role being enforced.
 func TestV1RoleMatrix(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	srv := &Server{M: e.m, Self: SelfInfo{DNSName: "tw-mgmt.t.ts.net", Tailnet: "t.ts.net"}}
 	whois := func(ctx context.Context, addr string) (WhoIsInfo, error) {
@@ -429,6 +433,7 @@ func TestV1RoleMatrix(t *testing.T) {
 }
 
 func TestV1HostJoinKey(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	c := e.c
 	tn := v1Tenant(t, e, "op.ts.net", nil)
@@ -484,6 +489,7 @@ func TestV1HostJoinKey(t *testing.T) {
 
 // TestV1Status: the operational counters and the transport label.
 func TestV1Status(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	v1Tenant(t, e, "t.ts.net", nil)
 	v1Host(t, e, "h1")

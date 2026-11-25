@@ -37,6 +37,7 @@ func writeFiles(t *testing.T, dir string, files map[string]string) {
 }
 
 func TestFindWranglerConfigPrecedence(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if f, _ := findWranglerConfig(dir); f != "" {
 		t.Fatalf("empty dir: %q", f)
@@ -56,6 +57,7 @@ func TestFindWranglerConfigPrecedence(t *testing.T) {
 }
 
 func TestReadWranglerTOML(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFiles(t, dir, map[string]string{"wrangler.toml": `
 name = "t"
@@ -94,6 +96,7 @@ crons = ["*/5 * * * *"]
 }
 
 func TestApplyWranglerEnv(t *testing.T) {
+	t.Parallel()
 	cfg := map[string]any{
 		"name": "app", "main": "src/i.ts", "compatibility_date": "2026-04-01",
 		"migrations": []any{"m"}, "triggers": map[string]any{"crons": []any{"* * * * *"}},
@@ -141,6 +144,7 @@ func errFix(err error) string {
 }
 
 func TestWranglerWarnings(t *testing.T) {
+	t.Parallel()
 	cfg := map[string]any{
 		"name": "a", "main": "m.ts", "compatibility_date": "x", "compatibility_flags": []any{}, "vars": map[string]any{},
 		"migrations": []any{}, "triggers": map[string]any{}, "placement": map[string]any{}, "containers": []any{},
@@ -153,7 +157,9 @@ func TestWranglerWarnings(t *testing.T) {
 		"kv_namespaces": []any{map[string]any{"binding": "KV", "id": "k"}},
 		"r2_buckets":    []any{map[string]any{"binding": "BUCKET", "bucket_name": "b"}},
 		"ai":            map[string]any{"binding": "AI"},
+		// Static assets (ADR-050): no line; Workers Sites still has one.
 		"assets":        map[string]any{"directory": "public"},
+		"site":          map[string]any{"bucket": "./public"},
 		"build":         map[string]any{"command": "npm run build"},
 		"observability": map[string]any{"enabled": true},
 		"frobnicate":    1,
@@ -164,11 +170,10 @@ func TestWranglerWarnings(t *testing.T) {
 	got := wranglerWarnings("wrangler.toml", cfg, "esbuild")
 	want := []string{
 		"wrangler.toml: ai: no such binding on tailworks: env.AI will be undefined",
-		"wrangler.toml: assets: not supported",
-		"wrangler.toml: build: needs wrangler's bundler",
 		"wrangler.toml: frobnicate: unknown key, ignored",
 		"wrangler.toml: observability: ignored by tailworks",
 		"wrangler.toml: routes: ignored",
+		"wrangler.toml: site: not supported",
 		"wrangler.toml: vectorize: no such binding on tailworks: env.CACHE, env.SESSIONS will be undefined",
 		"wrangler.toml: workers_dev: ignored",
 		"wrangler.toml: durable_objects binding REMOTE: script_name",
@@ -400,6 +405,7 @@ func TestReadWranglerOutEntry(t *testing.T) {
 // TestWranglerWarningsStoreKinds: a key registered as a platform store
 // binding (ADR-044) is supported, so it isn't warned about.
 func TestWranglerWarningsStoreKinds(t *testing.T) {
+	t.Parallel()
 	cfg := map[string]any{hostdtest.ProbeStoreKey: []any{map[string]any{"binding": "P", "name": "main"}}}
 	if w := wranglerWarnings("wrangler.toml", cfg, "esbuild"); len(w) != 1 || !strings.Contains(w[0], "unknown key") {
 		t.Fatalf("unregistered: %q", w)

@@ -47,6 +47,9 @@ type Row struct {
 	Status string
 	Tests  []string // COMPAT.md rows only
 	Line   int
+
+	// TestsCell is the raw last cell (COMPAT.md rows only).
+	TestsCell string
 }
 
 var (
@@ -115,7 +118,7 @@ func ParseCompat(md []byte) ([]Row, []error) {
 			errs = append(errs, fmt.Errorf("docs/COMPAT.md:%d: surface row %q needs a status and a tests cell", n, m[1]))
 			continue
 		}
-		r := Row{ID: m[1], Status: status(c[1]), Line: n}
+		r := Row{ID: m[1], Status: status(c[1]), Line: n, TestsCell: c[len(c)-1]}
 		for _, b := range backtick.FindAllStringSubmatch(c[len(c)-1], -1) {
 			if testRefRE.MatchString(b[1]) {
 				r.Tests = append(r.Tests, b[1])
@@ -205,6 +208,9 @@ func CheckDocs(root string, readme, compat []byte) []error {
 			if err := resolveTest(root, ref); err != nil {
 				errs = append(errs, fmt.Errorf("docs/COMPAT.md:%d: surface %q: test `%s`: %v", r.Line, r.ID, ref, err))
 			}
+		}
+		if err := checkNightly(root, r); err != nil {
+			errs = append(errs, err)
 		}
 	}
 	inReadme := map[string]bool{}

@@ -24,5 +24,11 @@ func (h *Host) features() []string {
 	if h.cfg.SelfUpgrade && h.cfg.Restart != nil && h.cfg.InstallPrefix != "" {
 		fs = append(fs, FeatureSelfUpgrade)
 	}
+	if h.cfg.WorkerInternet.ExitNode() {
+		fs = append(fs, features.InternetExitNode)
+	}
+	if h.cfg.AllowExperimentalFlags {
+		fs = append(fs, features.ExperimentalFlags)
+	}
 	return fs
 }

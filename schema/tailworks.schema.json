@@ -33,8 +33,8 @@
           "additionalProperties": { "type": "string" },
           "description": "Extra environment variables."
         },
-        "listen": { "type": "string", "description": "Where the app listens." },
-        "health": { "type": "string", "description": "Health check path." },
+        "listen": { "type": "string", "description": "Where the app listens: \"tcp\" (default: PORT on 127.0.0.1) or \"unix\" (TW_SOCKET). \"unix\" keeps AF_UNIX open to the app, so a host with a reachable system tailscaled socket can't be shared with other tenants (docs/node-tier.md); prefer the default." },
+        "health": { "type": "string", "description": "Health check path. Default \"/\": any HTTP answer there counts as up, so most apps don't need it." },
         "args": { "type": "array", "items": { "type": "string" }, "description": "Extra node arguments." }
       }
     },
@@ -55,16 +55,16 @@
       "properties": {
         "mode": { "type": "string", "enum": ["smart", "off"], "description": "Default \"smart\" when tailnet.connects or targets are set." },
         "targets": { "type": "array", "items": { "type": "string" }, "description": "Peers (tags or names) to place close to. Default: tailnet.connects." },
-        "aggregate": { "type": "string", "enum": ["worst", "sum"], "description": "How several targets combine." },
-        "region": { "type": "string", "description": "Cloudflare hint; ignored." },
-        "host": { "type": "string", "description": "Cloudflare hint: one target." },
-        "hostname": { "type": "string", "description": "Cloudflare hint: one target." }
+        "aggregate": { "type": "string", "enum": ["worst", "sum"], "description": "Advanced: how several targets combine (default \"worst\")." },
+        "region": { "type": "string", "deprecated": true, "description": "Cloudflare hint, accepted and ignored." },
+        "host": { "type": "string", "deprecated": true, "description": "Cloudflare hint: the same as targets: [host]." },
+        "hostname": { "type": "string", "deprecated": true, "description": "Cloudflare hint: the same as targets: [hostname]." }
       }
     },
     "public": { "$ref": "#/$defs/public" },
     "containers": {
       "type": ["array", "object"],
-      "description": "Container classes (docs/containers.md): wrangler's array form, or per-class image pins that tw deploy writes."
+      "description": "Container classes (docs/containers.md): wrangler's array form, or per-class image refs you pin; mgmt records the digests it resolves in the deployment."
     },
     "tailnet": {
       "type": "object",
@@ -80,16 +80,21 @@
           "type": ["boolean", "string"],
           "description": "true (\"svc:<workload>\") or a Tailscale Service name: a stable name and VIP (docs/services.md)."
         },
+        "https": {
+          "type": "boolean",
+          "description": "Also serve the workload node on https://<name>.<tailnet>.ts.net (port 443, its ts.net certificate); requests that arrive that way see an https:// request.url. Needs HTTPS certificates on the tailnet. Plain http:// on port 80 keeps working (docs/tailworks-jsonc.md#tailnethttps)."
+        },
         "connects": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Declared dependencies (tags or names). tw deploy preflights these grants."
+          "description": "Declared dependencies (tags or names), optionally with the TCP port the workload dials (\"tag:db:5432\"; default tcp:80). tw deploy preflights these grants."
         },
         "egress": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "internet": { "type": "array", "items": { "type": "string" }, "description": "Internet hosts the workload's containers may reach when started with enableInternet: true (docs/containers.md). Worker code has no internet egress either way (docs/recipes.md#call-an-internet-api)." }
+            "internet": { "type": ["boolean", "array"], "items": { "type": "string" }, "description": "Internet egress for Worker code and containers (docs/tailworks-jsonc.md#tailnetegressinternet). Absent: Workers may reach any public host, containers none. true: both may reach any public host. false or []: neither. A list of hosts (\"*.suffix\", IPs, CIDRs, each with an optional :port): both only those; an entry with a port covers that port only. TCP port 25 is refused unless an entry names it (\"smtp.example.com:25\"). Private, link-local, loopback and tailnet addresses are always refused." },
+            "via": { "type": "string", "enum": ["exit-node"], "description": "\"exit-node\": run only on a host whose internet egress leaves through a tailnet exit node (docs/tailworks-jsonc.md#tailnetegressvia). Absent: whatever the host offers." }
           }
         },
         "spawn": {
@@ -97,8 +102,8 @@
           "description": "Limits on ctx.tailnet.spawn().",
           "additionalProperties": false,
           "properties": {
-            "maxLive": { "type": "integer", "minimum": 0 },
-            "maxDepth": { "type": "integer", "minimum": 0 }
+            "maxLive": { "type": "integer", "minimum": 0, "default": 64, "description": "The most live sub-agents (ctx.tailnet.spawn) under one root object. Default and ceiling 64: a deployment may only lower it; a larger value is lowered to 64, and 0 or absent means 64." },
+            "maxDepth": { "type": "integer", "minimum": 0, "default": 3, "description": "The deepest spawn chain. Default and ceiling 3: a deployment may only lower it; a larger value is lowered to 3, and 0 or absent means 3." }
           }
         },
         "objects": {
@@ -115,10 +120,10 @@
       "additionalProperties": false,
       "properties": {
         "tags": { "type": "array", "items": { "type": "string", "pattern": "^tag:" }, "description": "Tags of each instance's node." },
-        "agent": { "type": "boolean", "description": "An Agents SDK Agent class." },
-        "ttl": { "type": "string", "description": "Idle lifetime, e.g. \"10m\"." },
-        "node": { "type": "boolean", "description": "false: an internal class with no tailnet node." },
-        "egress": { "type": "string", "enum": ["object", "workload"], "description": "\"object\" (default, facet mode): egress leaves from each instance's own node. \"workload\": plain-DO mode, egress leaves as the workload node." },
+        "agent": { "type": "boolean", "deprecated": true, "description": "Accepted and ignored (it used to mark Agents SDK classes)." },
+        "ttl": { "type": "string", "description": "Lifetime from creation, e.g. \"10m\"; the default for spawn()." },
+        "node": { "type": "boolean", "description": "false: an internal class with no tailnet node; its egress leaves as the workload node." },
+        "egress": { "type": "string", "enum": ["object", "workload"], "description": "\"object\" (default, facet mode): egress leaves from each instance's own node. \"workload\": plain-DO mode, egress leaves as the workload node. \"node\": false implies \"workload\"; don't set both." },
         "fence": { "type": "string", "enum": ["never"], "description": "\"never\": instances tolerate running on two hosts, so mgmt may move it without --force-takeover." },
         "public": {
           "type": "object",

@@ -1,0 +1,42 @@
+{
+  "name": "tailworks",
+  "version": "0.5.0",
+  "description": "The tailworks CLI (tw): run Cloudflare-style Workers and Durable Objects on your own machines, on your Tailscale tailnet",
+  "keywords": [
+    "tw",
+    "tailworks",
+    "tailscale",
+    "workers",
+    "workerd",
+    "durable-objects"
+  ],
+  "bin": {
+    "tailworks": "bin/tw.js",
+    "tw": "bin/tw.js"
+  },
+  "files": [
+    "bin"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "optionalDependencies": {
+    "@tailworks/cli-darwin-arm64": "0.5.0",
+    "@tailworks/cli-linux-amd64": "0.5.0",
+    "@tailworks/cli-linux-arm64": "0.5.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rosskukulinski/tailworks.git",
+    "directory": "js/cli/tailworks"
+  },
+  "homepage": "https://github.com/rosskukulinski/tailworks#readme",
+  "bugs": "https://github.com/rosskukulinski/tailworks/issues",
+  "license": "BSD-3-Clause"
+}

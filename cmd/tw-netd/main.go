@@ -1,5 +1,8 @@
-// tw-netd runs one tenant's object nodes on this host: ingress to a workerd
-// socket, the attributed egress proxy, and a local control socket.
+// tw-netd is the netd test harness: it runs one tenant's object nodes as a
+// standalone process (ingress to a workerd socket, the attributed egress
+// proxy, and a local control socket) for e2e/local. It is not shipped in
+// release tarballs; tw-hostd links netd as a library and runs one registry
+// per tenant in its own process.
 //
 //	tw-netd -control-url URL -state-dir DIR -run-dir DIR \
 //	  [-authkey-file F | -mint-oauth-client-file F -tailnet T -tags tag:x] \
@@ -61,7 +64,7 @@ func run() error {
 		rejoin        = flag.Bool("rejoin", true, "rejoin every object with saved state at start")
 		joinPar       = flag.Int("join-parallel", 16, "max concurrent node joins")
 		port          = flag.Int("ingress-port", 80, "ingress port on each object node")
-		siblings      = flag.Bool("allow-siblings", false, "allow egress to other objects on this host")
+		siblings      = flag.Bool("allow-siblings", false, "dial other objects on this host over WireGuard instead of the in-process hop")
 		logLevel      = flag.String("log-level", "info", "debug|info|warn|error")
 		tsnetLogs     = flag.Bool("tsnet-logs", false, "forward tsnet logs at debug level")
 	)
@@ -118,6 +121,9 @@ func run() error {
 	if err := os.Chmod(*runDir, 0o700); err != nil {
 		return err
 	}
+	// A node control rejects after it is ready is re-minted (#200).
+	var reg *netd.Registry
+	cfg.OnRejected = func(id string) { reg.Create(id, netd.ObjectOptions{}) }
 	reg, err := netd.New(cfg)
 	if err != nil {
 		return err

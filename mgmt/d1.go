@@ -25,8 +25,8 @@ import (
 )
 
 const (
-	// d1BodyLimit bounds a QueryD1 body (a migration).
-	d1BodyLimit = 8 << 20
+	// D1BodyLimit bounds a QueryD1 body (a migration, tw d1 execute's SQL).
+	D1BodyLimit = 8 << 20
 	// d1RespLimit bounds what a host answers (results, an export).
 	d1RespLimit = 64 << 20
 )
@@ -142,9 +142,9 @@ func (m *Mgmt) d1Admin(ctx context.Context, tenantID, workload, name, action str
 
 func (a *v1api) QueryD1(w http.ResponseWriter, r *http.Request, id v1.TenantID, workload v1.WorkloadName, name v1.StoreName) {
 	ctx := r.Context()
-	raw, err := io.ReadAll(io.LimitReader(r.Body, d1BodyLimit+1))
-	if err != nil || len(raw) > d1BodyLimit {
-		writeErr(w, r, errf(400, "bad_request", "the body is over %d bytes", d1BodyLimit))
+	raw, err := io.ReadAll(io.LimitReader(r.Body, D1BodyLimit+1))
+	if err != nil || len(raw) > D1BodyLimit {
+		writeErr(w, r, errf(400, "bad_request", "the body is over %d bytes", D1BodyLimit))
 		return
 	}
 	var q v1.D1Query

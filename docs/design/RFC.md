@@ -25,27 +25,28 @@ Status: **Built** as designed · **Differs**: built, but not as this RFC says ·
 | §1, §4.8 | Tenant code runs in Firecracker microVMs | Differs | The default is the process tier: workerd as a sandboxed process (Landlock and seccomp on Linux, Seatbelt on macOS; ADR-023). The microVM tier (Firecracker on Linux, Virtualization.framework on macOS; ADR-024, ADR-030) is opt-in, one VM per workload |
 | §4.8 | One VM per trust domain (`isolation: "tenant"`, `"principal"`, `"object"`) | Not built | The unit of isolation is the workload |
 | §4.8 | Per-object egress through a platform wrapper with a request MAC | Differs | Facet mode (the default) sends each object's `fetch()` from its own node; plain-DO mode sends it from the workload's node ([egress-modes.md](../egress-modes.md)) |
-| §4.8 | Internet egress opt-in per class (`egress.internet`) | Differs | Workers reach tailnet peers only. Only containers have an `egress.internet` allowlist (ADR-032) |
+| §4.8 | Internet egress opt-in per class (`egress.internet`) | Revised | Internet egress is on by default per workload and leaves from the host's network through netd's SSRF guard, not via an exit node or gateway. `tailnet.egress.internet` (`false`, or an allowlist) turns it off or limits it, for Workers and containers alike (ADR-049, ADR-032); see §4.8 |
+| §4.1, §4.2 | `netd[tenant]`: one process per (tenant, host), supervised by `tw-hostd` | Differs | netd is a Go library inside `tw-hostd`: one registry per tenant in the `tw-hostd` process, no separate daemon. `cmd/tw-netd` is a test harness for `make e2e-local` and is not shipped |
 | §4.2, §4.8, §15 | `stord` (`tw-stord`): DO storage over vsock, encrypted per object, shipped to a tenant bucket | Not built | DO storage is a host-local directory (on the microVM tier, a per-workload volume). KV, D1 and R2 indexes are journaled in mgmt (ADR-044); Queues live in mgmt (ADR-039) |
-| §4.9, §9, §10 | Async encrypted DO backup, RPO ≤ 5 s, `tw restore --namespace` drilled in CI | Not built | [ADR-012](adr/012-mvp-single-host-per-tenant-namespace.md) is amended. Back up the state directory ([INSTALL.md](../INSTALL.md#back-up-and-restore)). Moving a workload with Durable Objects to another host starts them empty (`tw host drain --allow-local-state-loss`); see [#38](https://github.com/rosskukulinski/tailworks/issues/38) |
+| §4.9, §9, §10 | Async encrypted DO backup, RPO ≤ 5 s, a per-namespace restore drilled in CI | Not built | [ADR-012](adr/012-mvp-single-host-per-tenant-namespace.md) is amended. Back up the state directory ([INSTALL.md](../INSTALL.md#back-up-and-restore)). Moving a workload with Durable Objects to another host starts them empty (`tw host drain --allow-local-state-loss`); see [#38](https://github.com/rosskukulinski/tailworks/issues/38) |
 | §4.9 | Namespace lease on S3 or Postgres, TTL 15 s, renew 5 s | Differs | The database is the lease clock (ADR-028): SQLite or Postgres, no S3. The namespace lease TTL is 45 s, and hosts fence themselves after 30 s without a renewal |
-| §4.9, §9 | Parking, `gcAfter`, 500 online nodes per netd | Not built | Nodes stay online until their object is killed, reaped or undeployed. Hosts advertise a node capacity to placement (`tw-hostd -capacity-nodes`, default 1000). Pool nodes (ADR-031) and warm keys make new objects faster |
+| §4.9, §9 | Parking, `gcAfter`, 500 online nodes per netd | Not built | Nodes stay online until their object is killed, reaped or undeployed. Hosts advertise a node capacity to placement (`tw-hostd -capacity-nodes`; by default a quarter of RAM at 8 MiB per node, 50 to 1000, from measurements: [limits.md](../limits.md#per-node-memory-measured)). Pool nodes (ADR-031) and warm keys make new objects faster. Whether parking and `gcAfter` are built or dropped is an open decision ([§4.9](#49-do-lifecycle)) |
 | §4.9 | macOS pre-sleep hook | Not built | A sleeping Mac takes its nodes offline |
 | §4.4 | Minting with a tenant OAuth client; single-use keys; warm keys; registration throttle | Built | ADR-042. The WIF and API-key modes were built, then removed. Headscale mints with a Headscale API key (ADR-015) |
 | §4.3, §4.4 | Mint-time node attributes (`custom:tw-*`) | Not built | Auth keys carry tags only; lineage lives in tailworks' audit |
 | §4.3, §8 | Node keys rotated on migration and every 30 days | Not built | A node keeps its key for its lifetime |
 | §4.4, §4.8 | Node keys and DEKs in setec; the OBO root key in KMS | Differs | Node state lives in the host's state directory. mgmt's custody is a file store (AES-GCM, the default) or setec (`tw-mgmt -custody setec`); there is no KMS and no per-object DEK ([ADR-018](adr/018-use-setec-node-key-dek-custody.md) stays Proposed) |
-| §4.4 | `tw login` (browser OIDC); CI deploys by OIDC token exchange | Not built | Developers, agents and CI runners on the tailnet use `tw link`: mgmt identifies the machine by WhoIs |
+| §4.4 | Browser OIDC login; CI deploys by OIDC token exchange | Not built | Developers, agents and CI runners on the tailnet use `tw link`: mgmt identifies the machine by WhoIs |
 | §4.5 | `getCaller()`: WhoIs at ingress, `request.cf`, client identity headers stripped | Built | [COMPAT.md](../COMPAT.md#identity) |
 | §4.6 | Node certificates with `lim`; spawn budgets (64 live, depth 3); `--cascade` | Built | ADR-025 |
-| §4.6, §6 | Per-request on-behalf-of assertions (`Tailnet-Assertion`, `actingFor`); `forward()` re-signs the act chain | Not built | A receiver sees the calling node, not the human it acts for. `ctx.tailnet.forward()` re-sends the request from the calling node ([COMPAT.md](../COMPAT.md#identity)) |
-| §6.1 | `ctx.tailnet.connect()` | Not built | Throws `plan_feature_missing`; egress is HTTP only |
+| §4.6, §6 | Per-request on-behalf-of assertions (`Tailnet-Assertion`, `actingFor`); `forward()` re-signs the act chain | Not built | A receiver sees the calling node, not the human it acts for. The SDK has no `actingFor`, `chain` or `forward()`: to call on, re-send the request from the calling node with `ctx.tailnet.fetch(new Request(url, request))` ([COMPAT.md](../COMPAT.md#identity)) |
+| §4.8, §6.1 | Stock `connect()` and `ctx.tailnet.connect()` | Built, differs | Raw TCP egress through the platform's egress entrypoints and netd's `DialEgress` (ADR-052). `ctx.tailnet.connect()` throws `not_supported` in plain-DO mode (no per-object identity before WD-3); stock `secureTransport` TLS doesn't work through workerd's `connect()` handlers, so TLS is `tls: "netd"` (hostd originates it) or off on the tailnet |
 | §6.2, §6.3 | Go and Python verifiers | Not built | The packages are `@tailworks/tailnet`, `@tailworks/mcp`, `@tailworks/node` and `create-tailworks` |
 | §4.11, §5.5 | Kill tiers 1 and 2 | Built | Tier 1 resets flows and closes the node; tier 2 deletes the device after a tombstone window |
 | §4.11, §5.5 | Kill tier 3 (posture flip on `custom:tw-live`) | Not built | `tw kill` reports it as unavailable |
 | §4.10 | Hash-chained, host-signed audit; `tw audit`; trace IDs | Built | Request logs, metrics and traces are ADR-045 (`tw logs`, `tw telemetry`) |
-| §4.10 | `tw tail` | Not built | `tw logs -f` |
-| §3, §5.1, §7.2 | `tw connect` | Not built | `tw up --oauth-client-file` serves the first tailnet, `tw tenant add` the next ones; `tw up --control=headscale` for Headscale |
+| §4.10 | A live log tail | Built | `tw logs -f` (ADR-045) |
+| §3, §5.1, §7.2 | One command that connects a tailnet | Differs | `tw up --oauth-client-file` serves the first tailnet, `tw tenant add` the next ones; `tw up --control=headscale` for Headscale |
 | §4.5, §4.6, §7, §9, §12 | `tw policy lint`, `tw policy test`, `tw policy push`, `policy.tw-tests.hujson` | Not built | `tw policy [dir]` prints the policy snippet an app needs, checked against the live policy; `tw deploy` runs the same preflight |
 | §4.7 | A Tailscale Service per workload | Built | Opt-in per workload ([services.md](../services.md)) |
 | §3 | Non-goals: KV, R2, D1 and Queues out of scope; not a VM platform | Revised | KV, R2, D1, Queues, Workflows (ADR-036 to ADR-040) and containers (ADR-032) ship; see §3 |
@@ -190,9 +191,9 @@ flowchart LR
 | Principal | Tailnet representation | MagicDNS name | Tags |
 |---|---|---|---|
 | Tenant | A trust domain in one tailnet, bound by its own OAuth client (§4.4). A tailnet may hold several, one per team, each with its own owner tag and name prefix ([ADR-043](adr/043-team-tenants.md)) | — (with a name prefix, every generated name is `<prefix>-<name>`) | Its owner tag (`tag:tw` by default) owns its tags through `tagOwners` |
-| Workload (a Worker) | One node per (workload, host), advertising `svc:<workload>` where Services exist | `<workload>-<host>`; Service `<workload>` | `tag:tw-wl-<workload>` |
+| Workload (a Worker) | One node per (workload, host), advertising `svc:<workload>` where Services exist | `<workload>-<host>`; Service `<workload>` | `tailnet.tags`, by default `tag:tw-wl-<workload>` (2026-11-24, #491: also when `tailworks.jsonc` leaves `tailnet.tags` out) |
 | Object (a DO instance) | **One persistent node per object** | `<class>-<b32(hmac(id))[:10]>` by default; `<class>-<slug>` if the class sets `publicNames` | From class config, e.g. `tag:tw-do-room` |
-| Agent | An object whose class sets `agent: true` | as for objects | e.g. `tag:tw-agent-support` |
+| Agent | An object of an Agents SDK class | as for objects | e.g. `tag:tw-agent-support` |
 | Sub-agent | An object spawned by an agent, with its own persistent node, reaped at TTL | as for objects | A child tag whose grants are ⊆ the parent's |
 | Human | Their own devices. Tailworks never impersonates them | — | — |
 | Operator plane | Nodes in the operator tailnet only | `tw-mgmt-*`, `tw-host-*` | `tag:tw-mgmt`, `tag:tw-host` |
@@ -246,7 +247,7 @@ We call the REST API ourselves because tsnet can't set `nodeAttributes` on a joi
 | `tw dev` | None. An embedded control plane | No |
 
 **Developers and CI** (no secret anywhere):
-- `tw login`: self-hosted tw-mgmt identifies the developer by WhoIs over the tailnet; hosted tw-mgmt uses a browser OIDC flow. (Not built: `tw link` does the WhoIs part.)
+- `tw link`: self-hosted tw-mgmt identifies the developer by WhoIs over the tailnet. (Hosted tw-mgmt's browser OIDC login is not built.)
 - CI deploys exchange GitHub/GitLab OIDC tokens with tw-mgmt (trust rules per repo and environment). (Not built.)
 - Hosts enrol in the operator tailnet with a single-use key minted by tw-mgmt, then persist their node key.
 - `tw link` binds a checkout to a tenant and namespace in `.tailworks/`, which is gitignored.
@@ -341,6 +342,8 @@ The egress proxy:
 - strips identity headers and originates TLS for `https://` URLs;
 - **denies the public internet by default.** A class opts in with `egress.internet: ["api.openai.com"]`, routed through an exit node or a gateway such as Aperture.
 
+> Revised (ADR-049). Internet egress is **on** by default, per workload, as on Cloudflare. It leaves from the host's own network, never from a tailnet node, after an SSRF guard that refuses loopback, private, link-local (metadata), CGNAT/tailnet and host addresses on the address actually dialled. `tailnet.egress.internet: false` turns it off, and a list limits it, for Workers and containers alike. A gateway on the tailnet remains the way to get a fixed source address.
+
 **Per-object egress attribution** must be set by the platform, and tenant code must not be able to change it. Stock workerd sets `globalOutbound` per Worker, not per DO instance. The MVP uses a generated platform wrapper:
 - The wrapper subclasses each DO class and runs every entrypoint (fetch, alarm, webSocket\*, RPC) inside a platform-held context frame `{objectId, principal}`.
 - It replaces global `fetch` before tenant modules evaluate. It stamps `x-tw-object` and a per-request MAC bound to (objectId, method, URL, nonce), under a VM key held in a module-private closure.
@@ -379,6 +382,32 @@ No bucket credential enters the guest, and no storage service is shared across t
 - **Parking.** Objects are parked LRU-first when the host exceeds its node budget (§9).
 - **GC.** Parked objects are deleted after `gcAfter`, a first-class setting that bounds the device count.
 
+> As built (v0.2.0), and **open: a decision for Ross.** Neither parking
+> nor `gcAfter` is built. A node stays online until its object is killed,
+> reaped or undeployed, and placement stops sending a host objects at its
+> node capacity, which is now derived from RAM with measured per-node
+> costs: about 2.5 MB idle and 4 MB under load per node with scoped peers
+> ([limits.md](../limits.md#per-node-memory-measured)). At that cost a
+> 16 GiB host's default 512 nodes use about 2 GB, so memory alone doesn't
+> force parking yet. The options:
+>
+> 1. **Drop both.** Keep nodes online; bound a host by its capacity and a
+>    tenant by its quota; spread across hosts. Simplest, and what runs
+>    today. An object that is never used again keeps its node and device
+>    until it is deleted, so device count tracks object count.
+> 2. **Parking only.** Close the least recently used idle nodes when a
+>    host is over its budget, keeping their state so the next request
+>    through the workload rejoins them from saved state (no new
+>    registration, same address). Frees RAM; devices stay (offline). Costs
+>    a wake path through the workload and a first request that waits for
+>    the rejoin.
+> 3. **Parking and `gcAfter`.** Option 2, plus deleting the devices of
+>    objects parked longer than `gcAfter`. Bounds the device count. A
+>    woken object then registers again and gets a new node: a new address
+>    and a new device in flow logs.
+> 4. **Defer.** Keep option 1 and revisit when a host reaches its node
+>    capacity in practice, or when device count becomes the constraint.
+
 **Creation is asynchronous.** `create()` (an implicit first `getByName`, or `ctx.tailnet.spawn`) records the object and returns immediately. The node becomes ready later.
 - Until the node is ready, inbound requests through the workload queue at netd, and the object's own egress waits on `ready`. After `readyTimeout` (default 30 s), both fail with `identity_pending`. Egress never falls back to another identity.
 - tw-mgmt mints and registers through a **per-tenant registration throttle**, `registrationsPerMinute`, which is configurable and defaults to 200. On 429s or 5xx it backs off adaptively (AIMD with jitter), so it **respects the coordination server's registration rate limits**. Queue depth is exported as `tw_registration_queue` and pages when it keeps growing.
@@ -406,7 +435,7 @@ No bucket credential enters the guest, and no storage service is shared across t
 
 - **Attribution chain.** Lineage lives in tw-mgmt (`human → agent → sub-agent`). Each request carries a signed `act` chain. Each object has its own node ID in Tailscale flow logs, where the plan includes flow logs. Joining the node ID to the object record to the lineage is `tw audit`.
 - **Trace ID.** netd generates the W3C trace ID; the guest can't set it. A guest-supplied ID is kept only as `parentHint`. The ID goes into the assertion's `txn`, so it survives hops through platform and non-platform servers.
-- **Audit log.** netd writes L7 records `{ts, tenant, srcNode, dstNode, srcObject, dstObject, sub, chain, tool, verdict, grant, traceId}`. Records are **hash-chained per host and signed with the host key**, exported over OTLP, and indexed by tw-mgmt. Commands are `tw audit <object|human|trace>` and `tw logs -f` (the design's `tw tail` was not built).
+- **Audit log.** netd writes L7 records `{ts, tenant, srcNode, dstNode, srcObject, dstObject, sub, chain, tool, verdict, grant, traceId}`. Records are **hash-chained per host and signed with the host key**, exported over OTLP, and indexed by tw-mgmt. Commands are `tw audit <object|human|trace>` and `tw logs -f`.
 - **Independent cross-check.** The Tailscale configuration audit log records every mint and delete under the federated credentials.
 
 ### 4.11 Safety and kill switch
@@ -424,7 +453,7 @@ No bucket credential enters the guest, and no storage service is shared across t
 | 2 | tw-mgmt deletes the device. Peers drop it on the next netmap | seconds (to measure) | Lifecycle credential |
 | 3 | Set `custom:tw-live=false`, so every grant with `srcPosture: posture:tw-live` stops matching. Applies per object or to a whole tag | netmap propagation (unpublished; to measure) | Lifecycle credential and custom-posture plan; not on Headscale |
 
-- **Cascade.** `--cascade` follows `lineage.root`.
+- **Cascade.** `tw kill` cascades by default (`--cascade=false` opts out; the reaper then kills the orphans), following `lineage.root`.
 - **Bypasses closed.** In-VM bindings are policy-checked (§4.5), and assertions expire within 60 s.
 
 ## 5. Sequence diagrams
@@ -833,8 +862,11 @@ Measured on Headscale v0.29.7 (ADR-015 has the details):
 
 > Revised (as built, v0.2.0). Parking, `gcAfter` and the per-netd node
 > budget below were not built: nodes stay online, and each host
-> advertises a node capacity to placement (`-capacity-nodes`, default
-> 1000). The RPO targets assume the DO backup, which was not built
+> advertises a node capacity to placement (`-capacity-nodes`, by default
+> derived from RAM). Linux and macOS measurements at N = 10–500, idle and
+> under request load, with scoped and full-mesh peer visibility, are in
+> [limits.md](../limits.md#per-node-memory-measured): about 2.5 MB idle and
+> 4 MB under load per node when objects see only their callers. The RPO targets assume the DO backup, which was not built
 > ([ADR-012](adr/012-mvp-single-host-per-tenant-namespace.md)).
 
 **Derived budgets:**
@@ -865,7 +897,7 @@ Measured on Headscale v0.29.7 (ADR-015 has the details):
 | Mode | Host crash (disk survives) | Host lost | netd crash/upgrade | Store down | Tailscale control down | tw-mgmt down |
 |---|---|---|---|---|---|---|
 | `tw dev` (macOS process tier) | no SLO | — | — | — | n/a (embedded) | n/a |
-| MVP single-host, `local` | RTO ≈ VM boot + 500/11 s ≈ 1 min (hot objects ≈ 5 s); **RPO 0** | RTO = lease expiry (15 s) + restore + rejoin, minutes; **RPO ≤ backup lag (target 5 s)** | RTO ≈ rejoin (≤ 1 min); RPO 0 | Placement frozen; running objects unaffected | Existing flows continue; creates fail (`bootstrap_failed`); no moves | Running objects unaffected; Tier-1 kill works; no creates or spawns |
+| MVP single-host, `local` | RTO ≈ VM boot + 500/11 s ≈ 1 min (hot objects ≈ 5 s); **RPO 0** | RTO = lease expiry (15 s) + restore + rejoin, minutes; **RPO ≤ backup lag (target 5 s)** | RTO ≈ rejoin (≤ 1 min); RPO 0 | Placement frozen; the heartbeat fails, so as for tw-mgmt down | Existing flows continue; creates fail (`bootstrap_failed`); no moves | Workloads with a fenceable DO class stop after `FenceAfter` (30 s, ADR-028); the rest keep serving, platform-store reads from the host's copy and writes failing (ADR-044 §8); Tier-1 kill works; no creates or spawns |
 | v1 cluster, `sync` (≥3 hosts) | RTO ≈ workerd lease (~20 s) + rejoin; RPO 0 | same; RPO 0 | same | v1 requires degrade-to-read-only upstream | same | same |
 
 Other targets:
@@ -966,7 +998,7 @@ Drains are refused while placement is frozen.
 
 - Encrypted WAL plus periodic SQLite snapshots per object, in the tenant prefix. Versioning is on.
 - The durable store (leases, object records, lineage, wrapped DEKs) is backed up with point-in-time recovery. KMS keys are backed up separately.
-- `tw restore --namespace` is drilled in CI. (Not built.)
+- A per-namespace restore is drilled in CI. (Not built.)
 - If the store is lost permanently, the system is restored from backup. Running hosts keep serving until their leases expire.
 
 ## 11. Alternatives considered
@@ -1034,7 +1066,7 @@ Headscale: tailworks needs no Headscale changes, only the profile (§7.2).
 
 ## 13. Open questions
 
-1. What per-tailnet registration rate (sustained and burst) applies to API-minted single-use keys from a few source hosts? Does parallelism across processes add up?
+1. What per-tailnet registration rate (sustained and burst) applies to API-minted single-use keys from a few source hosts? Does parallelism across processes add up? *Partly answered (2026-11-21, [limits.md](../limits.md#registration-rate-measured)):* one host registered bursts of 50 fresh nodes in 2.6–6.3 s, with single-use keys minted per object or one reusable key, and the register round trip stayed at 0.43 s with 50 at once. Up to 50 nodes the rate is set by netd's join concurrency, not by control. Still open: sustained rates beyond 50 nodes, and several hosts at once.
 2. What are the TTL and rate limits for `/oauth/token`, `POST /keys`, device attribute writes, and `DELETE /device`?
 3. How quickly do posture-attribute changes and device deletes propagate to peers? Is there a published SLO?
 4. Can OAuth client scopes be restricted to tagged devices (TS-5)?
@@ -1099,4 +1131,4 @@ docs/  e2e/
 - Operator pre-auth keys; no posture; no Services (MagicDNS names only).
 - String-only `nodeAttrs`; caps in grants only; no flow logs.
 - Kill Tiers 1 and 2.
-- `tw up --control=headscale --policy-apply` writes a policy that Headscale's parser accepts; `make e2e-headscale` checks it against a pinned release.
+- `tw up --control=headscale --apply-policy` writes a policy that Headscale's parser accepts; `make e2e-headscale` checks it against a pinned release.

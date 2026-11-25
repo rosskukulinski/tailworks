@@ -33,24 +33,31 @@ type notifyView struct {
 	Error     string `json:"error,omitempty"`
 }
 
-func cmdNotify(args []string) error {
-	sub, rest := "show", args
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		if !strings.HasPrefix(a, "-") {
-			sub, rest = a, append(append([]string{}, args[:i]...), args[i+1:]...)
-			break
-		}
-		if (a == "--state-dir" || a == "-state-dir" || a == "--tenant" || a == "-tenant") && i+1 < len(args) {
-			i++
-		}
+// notifyOpts are tw notify's flags. Only set has its own (notifyFlags).
+type notifyOpts struct {
+	tenant *string
+
+	// set
+	webhook *string
+	headers *repeated
+}
+
+// notifyFlags registers verb's flags (anyVerb: every verb's) on f.
+func notifyFlags(f *flags, verb string) *notifyOpts {
+	o := &notifyOpts{webhook: new(string), headers: &repeated{}}
+	o.tenant = tenantFlag(f)
+	if onVerb(verb, "set") {
+		o.webhook = f.String("webhook", "", "the URL mgmt POSTs to (https://hooks.slack.com/services/…, http://chat-bot/notify); - reads it from stdin")
+		f.Var(o.headers, "header", "a header for every notification, NAME=VALUE, or NAME alone to read its value from stdin (repeatable)")
 	}
+	return o
+}
+
+func cmdNotify(args []string) error {
+	sub, rest := scanVerbOr(args, func(f *flags) { notifyFlags(f, anyVerb) }, "show")
 	f := newFlags("notify")
-	tenantF := tenantFlag(f)
-	hook := f.String("webhook", "", "set: the URL mgmt POSTs to (https://hooks.slack.com/services/…, http://chat-bot/notify); - reads it from stdin")
-	var headers repeated
-	f.Var(&headers, "header", "set: a header for every notification, NAME=VALUE, or NAME alone to read its value from stdin (repeatable)")
-	events := f.String("events", "", "set: what to send, comma-separated (default approval_requested)")
+	o := notifyFlags(f, sub)
+	tenantF, hook := o.tenant, o.webhook
 	pos, err := f.parse(rest)
 	if err != nil {
 		return err
@@ -58,14 +65,12 @@ func cmdNotify(args []string) error {
 	if len(pos) != 0 {
 		return fail("bad_request", "unexpected arguments", "usage: tw "+usageOf("notify"))
 	}
-	if sub != "set" && (*hook != "" || len(headers) > 0 || *events != "") {
-		return fail("bad_request", "--webhook, --header and --events are for tw notify set")
-	}
+	headers := *o.headers
 	put := map[string]any{}
 	switch sub {
 	case "show", "ls":
 		sub = "show"
-	case "rm", "delete", "off":
+	case "rm", "off":
 		sub = "rm"
 	case "test":
 	case "set":
@@ -80,9 +85,6 @@ func cmdNotify(args []string) error {
 			return fail("bad_request", "--webhook must be an http:// or https:// URL").withFix("tw notify set --webhook -   (paste the URL; it is a secret)")
 		}
 		put["url"] = u
-		if *events != "" {
-			put["events"] = strings.Split(*events, ",")
-		}
 		hs := map[string]string{}
 		for _, h := range headers {
 			name, value, ok := strings.Cut(h, "=")

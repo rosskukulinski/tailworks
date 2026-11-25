@@ -23,6 +23,7 @@ func newVersionedEnv(t *testing.T, v string) *testEnv {
 }
 
 func TestHostVersionSkew(t *testing.T) {
+	t.Parallel()
 	e := newVersionedEnv(t, "0.3.0")
 	reg := func(id, v string) map[string]any {
 		return map[string]any{"capacityNodes": 10, "tiers": []string{"process"}, "version": v, "os": "linux",
@@ -62,6 +63,7 @@ func TestHostVersionSkew(t *testing.T) {
 }
 
 func TestFeatureGatedPlacementAndCordon(t *testing.T) {
+	t.Parallel()
 	e := newVersionedEnv(t, "0.2.0")
 	var tn struct{ TenantID string }
 	e.c.ok("POST", "/v1/tenants", map[string]any{"tailnet": "t.ts.net", "mintMode": "oauth", "oauthClientFile": e.keyFile}, &tn)
@@ -114,6 +116,7 @@ func TestFeatureGatedPlacementAndCordon(t *testing.T) {
 }
 
 func TestUpgradeRun(t *testing.T) {
+	t.Parallel()
 	// The target must not be in the built-in catalog (which ends at this
 	// tree's VERSION), so it is the next minor; the hosts run a patch of the
 	// current minor, inside the skew window.
@@ -230,6 +233,7 @@ func TestUpgradeRun(t *testing.T) {
 }
 
 func TestReleaseArtifacts(t *testing.T) {
+	t.Parallel()
 	e := newVersionedEnv(t, "0.2.0")
 	name := "tailworks-0.2.0-linux-amd64.tar.gz"
 	body := []byte("not really a tarball")
@@ -281,6 +285,7 @@ func TestReleaseArtifacts(t *testing.T) {
 // Workflow instances live in the workload's DO storage on its host: a
 // Workflows app is stateful (fenced, and a drain doesn't move it).
 func TestBundleStatefulWorkflows(t *testing.T) {
+	t.Parallel()
 	b := makeBundle(t, map[string]string{
 		"tailworks.jsonc": `{"tailnet": {"tags": ["tag:w"]}}`,
 		"wrangler.jsonc":  `{"name": "w", "main": "dist/index.js", "workflows": [{"name": "refunds", "binding": "R", "class_name": "Refund"}]}`,

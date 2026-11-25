@@ -33,14 +33,20 @@ func putSecret(t *testing.T, e *hostdtest.Env, workload, name, value string) {
 // deploy through the lease-fenced grant, and are written only inside the
 // instance directory.
 func TestWorkerSecrets(t *testing.T) {
-	s := startSuite(t, fakemgmt.Config{})
+	t.Parallel()
+	testWorkerSecrets(t, hostdtest.BackendFake)
+}
+
+// testWorkerSecrets is TestWorkerSecrets against backend (realmgmt_test.go).
+func testWorkerSecrets(t *testing.T, backend string) {
+	s := startSuiteBackend(t, fakemgmt.Config{}, backend)
 	e := s.e
 	putSecret(t, e, "secrets", "API_KEY", testSecret)
 	putSecret(t, e, "secrets", "MULTI", "two")
 	dep := e.Deploy(hostdtest.Fixture("secrets"), "secrets", nil)
 	wl := e.WaitActive("secrets", dep, 60*time.Second)
 	s.waitPeer(wl.IP)
-	if n := e.FM.SecretGrants(); n != 1 {
+	if n := e.Hooks.SecretGrants(); n != 1 {
 		t.Fatalf("secret grants %d, want 1 (one per deploy)", n)
 	}
 	check := func(path string) {
@@ -110,6 +116,7 @@ func TestWorkerSecrets(t *testing.T) {
 // exec-time environment (on macOS any same-user process can read that), and
 // the preload deletes its file once it has read it.
 func TestNodeSecrets(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("short")
 	}

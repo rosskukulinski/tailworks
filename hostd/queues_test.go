@@ -35,14 +35,26 @@ type queueRec struct {
 // export's queue() with workerd's MessageBatch: batching by size and by
 // max_batch_timeout, retry() with a delay, max_retries landing in the
 // dead-letter queue, a throw retrying the batch but not an explicit ack,
-// queue() creating a Durable Object (the batch's create ticket), a
+// queue() creating a Durable Object (the batch's create ticket), a slow
+// heartbeat cancelling a run and the batch handed back uncounted, a
 // workerd crash mid-batch losing nothing, and a fenced host consuming
 // nothing until it is back.
 func TestQueues(t *testing.T) {
-	s := startSuiteCapsOpts(t, fakemgmt.Config{}, tailcfg.PeerCapMap{nettest.TestCap: []tailcfg.RawMessage{nettest.TestCapValue}}, func(o *hostdtest.Options) {
-		o.FenceAfter, o.HeartbeatEvery = time.Second, 100*time.Millisecond
+	t.Parallel()
+	testQueues(t, hostdtest.BackendFake)
+}
+
+// testQueues is TestQueues against backend (realmgmt_test.go).
+func testQueues(t *testing.T, backend string) {
+	s := startSuiteCapsOpts(t, fakemgmt.Config{}, tailcfg.PeerCapMap{nettest.TestCap: []tailcfg.RawMessage{nettest.TestCapValue}}, onBackend(backend, func(o *hostdtest.Options) {
+		// FenceAfter is short so FencedHostConsumesNothing fences quickly,
+		// but not 1 s: on a loaded runner a heartbeat round trip or an
+		// assignment sync now and then takes over a second, and every such
+		// moment stopped the consumer loops. A loop stopped just as its
+		// claim landed lost the claim, counted as an attempt (#392).
+		o.FenceAfter, o.HeartbeatEvery = 3*time.Second, 100*time.Millisecond
 		o.QueueVisibility = 3 * time.Second
-	})
+	}))
 	e := s.e
 	dep := e.Deploy(hostdtest.Fixture("queues"), "queues", nil)
 	wl := e.WaitActive("queues", dep, 60*time.Second)
@@ -212,6 +224,25 @@ func TestQueues(t *testing.T) {
 		}
 	})
 
+	t.Run("SlowHeartbeatReleasesBatch", func(t *testing.T) {
+		// A heartbeat later than FenceAfter (3 s here: a loaded host, a slow
+		// mgmt) makes the host's lease stale, and its consumer loops stop
+		// until the next good one. The run they were in is cancelled; hostd
+		// hands the batch back uncounted, so the message comes again as
+		// attempt 1. (#387: it was retried as attempt 2, and a wait for
+		// attempt 1 never ended.)
+		call("/send", "k", "sh1", "do", "slow-once") // its first run takes 8 s
+		time.Sleep(1500 * time.Millisecond)          // past max_batch_timeout: queue() is running
+		e.Hooks.DelayHeartbeat(4 * time.Second)      // stale 3 s in, fresh again at 4 s
+		wait("sh1", 1, 20*time.Second)
+		time.Sleep(time.Second)
+		for _, r := range recs() {
+			if r.K == "sh1" && r.Attempts != 1 {
+				t.Fatalf("a delivery hostd cancelled counted as an attempt: %+v", r)
+			}
+		}
+	})
+
 	t.Run("ConsumerCrash", func(t *testing.T) {
 		call("/send", "k", "h1", "do", "hang-once")
 		wait("h1", 1, 15*time.Second)
@@ -228,7 +259,7 @@ func TestQueues(t *testing.T) {
 	})
 
 	t.Run("FencedHostConsumesNothing", func(t *testing.T) {
-		e.FM.SetHeartbeatsDown(true)
+		e.Hooks.SetHeartbeatsDown(true)
 		deadline := time.Now().Add(10 * time.Second)
 		for workloadStatus(t, e, "queues").PID != 0 {
 			if time.Now().After(deadline) {
@@ -239,19 +270,19 @@ func TestQueues(t *testing.T) {
 		// An operator sends while the host is cut off: it waits in mgmt,
 		// unclaimed. (A fenced host's long poll used to claim it and hand it
 		// back, #140: with a workerd still up it could have consumed it.)
-		claims := e.FM.QueueClaims(e.TenantID, "jobs")
+		claims := e.Hooks.QueueClaims(e.TenantID, "jobs")
 		if err := e.Mgmt.Do(context.Background(), "POST", "/v1/tenants/"+e.TenantID+"/queues/jobs/messages",
 			map[string]any{"messages": []any{map[string]any{"body": []byte(`{"k":"op1"}`), "contentType": "json"}}}, nil); err != nil {
 			t.Fatal(err)
 		}
 		time.Sleep(1500 * time.Millisecond)
-		if n := e.FM.QueueBacklog(e.TenantID, "jobs"); n < 1 {
+		if n := e.Hooks.QueueBacklog(e.TenantID, "jobs"); n < 1 {
 			t.Fatalf("backlog while fenced: %d", n)
 		}
-		if n := e.FM.QueueClaims(e.TenantID, "jobs") - claims; n != 0 {
+		if n := e.Hooks.QueueClaims(e.TenantID, "jobs") - claims; n != 0 {
 			t.Fatalf("the fenced host claimed %d message(s)", n)
 		}
-		e.FM.SetHeartbeatsDown(false)
+		e.Hooks.SetHeartbeatsDown(false)
 		wl = e.WaitActive("queues", dep, 60*time.Second)
 		s.waitPeer(wl.IP)
 		wait("op1", 1, 30*time.Second)

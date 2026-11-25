@@ -46,6 +46,10 @@ var allowedTailnets = map[string]bool{"tail7906d5.ts.net": true}
 // snippet; tag:ttest for the linked CLI node).
 func Policy() policy.Snippet {
 	s := cliflow.Policy()
+	// The remote deploy (step 5) is `tw init mcp2 --template mcp`, and tw
+	// init names the workload tag after the app (tag:tw-wl-mcp2), so
+	// deploy's preflight needs it owned.
+	s.TagOwners["tag:tw-wl-mcp2"] = []string{"autogroup:admin", "tag:tw"}
 	s.Grants = append(s.Grants,
 		policy.AdminGrant("autogroup:admin", mgmt.MgmtTag, mgmt.AdminCap),
 		policy.AdminGrant(cliflow.TestTag, mgmt.MgmtTag, mgmt.AdminCap))
@@ -308,7 +312,7 @@ func TestE2EOAuth(t *testing.T) {
 	// 5. Remote deploy (bundled on the dev box, uploaded over https), ls by
 	// the WhoIs actor, remote kill (device deleted via devices:core), audit.
 	rdir := filepath.Join(work, "remote", "mcp2")
-	dev.MustJSON(nil, "init", rdir, "--template", "mcp", "--keep-tags")
+	dev.MustJSON(nil, "init", rdir, "--template", "mcp")
 	var dep struct {
 		DeploymentID string
 		Endpoint     struct{ Node, MagicDNS string }

@@ -138,6 +138,13 @@ type Loopback struct {
 	DNSName   string `json:"dnsName,omitempty"`
 	HTTPS     bool   `json:"https"`
 	PID       int    `json:"pid"`
+
+	// mgmt's node as tw up checks it after the join (tw up no longer
+	// joins the node itself).
+	NodeID  string   `json:"nodeID,omitempty"`
+	Tailnet string   `json:"tailnet,omitempty"` // MagicDNS suffix
+	Tags    []string `json:"tags,omitempty"`
+	Funnel  bool     `json:"funnel,omitempty"` // the node has the funnel attribute
 }
 
 // String never prints the credential.
@@ -171,6 +178,10 @@ func writeErr(w http.ResponseWriter, r *http.Request, err error) {
 		w.Header().Set("Retry-After", strconv.Itoa(e.RetryAfter))
 	}
 	w.Header().Set("Tw-Error", e.Code)
+	if htmlErrPage(r) { // a browser on /, /ui: errors_html.go
+		writeErrHTML(w, &e)
+		return
+	}
 	writeJSON(w, e.Status, e)
 }
 

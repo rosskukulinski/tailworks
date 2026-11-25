@@ -46,9 +46,11 @@ type storeJournal interface {
 	// head is after (errStoreConflict otherwise), giving them after+1….
 	// seal turns an entry's plaintext into what is stored, given its seq.
 	// An entry with a ckey deletes every earlier entry with that ckey.
-	// errStoreFull if the kept bytes would exceed maxBytes.
+	// errStoreFull if the kept bytes would exceed maxBytes; a *quotaError
+	// if an append that grows the store would take the tenant's stores
+	// past tenantMax (0 = no tenant quota; quota.go).
 	AppendStore(ctx context.Context, tenantID, workload, kind, name, inc string, after int64, entries []storeEntryIn,
-		seal func(seq int64, data []byte) ([]byte, error), maxBytes, now int64) (StoreInfo, error)
+		seal func(seq int64, data []byte) ([]byte, error), maxBytes, tenantMax, now int64) (StoreInfo, error)
 	// ReadStore returns the entries of incarnation inc with seq > after (at
 	// most limit, and stopping once maxBytes of stored data are read), and
 	// whether more remain.
@@ -154,7 +156,7 @@ func (s *SQLStore) DeleteStore(ctx context.Context, tenantID, workload, kind, na
 }
 
 func (s *SQLStore) AppendStore(ctx context.Context, tenantID, workload, kind, name, inc string, after int64, entries []storeEntryIn,
-	seal func(seq int64, data []byte) ([]byte, error), maxBytes, now int64) (StoreInfo, error) {
+	seal func(seq int64, data []byte) ([]byte, error), maxBytes, tenantMax, now int64) (StoreInfo, error) {
 	var st StoreInfo
 	err := s.tx(ctx, func(tx *sql.Tx) error {
 		var err error
@@ -166,6 +168,7 @@ func (s *SQLStore) AppendStore(ctx context.Context, tenantID, workload, kind, na
 		if st.Incarnation != inc || st.Head != after {
 			return errStoreConflict
 		}
+		before := st.Bytes
 		for _, e := range entries {
 			st.Head++
 			if e.CKey != "" {
@@ -195,6 +198,9 @@ func (s *SQLStore) AppendStore(ctx context.Context, tenantID, workload, kind, na
 		}
 		if st.Bytes > maxBytes {
 			return errStoreFull
+		}
+		if err := s.checkTenantStoreBytes(ctx, tx, st, before, tenantMax); err != nil { // sqlstore_quota.go
+			return err
 		}
 		st.UpdatedAt = now
 		_, err = tx.ExecContext(ctx, s.q("UPDATE stores SET head=?, entries=?, bytes=?, updated_at=? WHERE tenant_id=? AND workload=? AND kind=? AND name=?"),

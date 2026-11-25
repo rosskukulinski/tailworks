@@ -14,7 +14,6 @@ import (
 	"io"
 	"net/url"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
@@ -38,38 +37,28 @@ type secretResult struct {
 	Created  bool                 `json:"created,omitempty"`
 }
 
+// secretFlags registers tw secret's flags, the same for every verb.
+func secretFlags(f *flags) (tenant, workload *string) {
+	return tenantFlag(f), f.String("workload", "", "workload (default: the app in the current directory, as tw deploy names it)")
+}
+
 func cmdSecret(args []string) error {
-	// Global flags (--state-dir X, --json) may precede the subcommand.
-	sub := -1
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		if !strings.HasPrefix(a, "-") {
-			sub = i
-			break
-		}
-		if (a == "--state-dir" || a == "-state-dir") && i+1 < len(args) {
-			i++
-		}
-	}
-	if sub < 0 {
-		return fail("bad_request", "tw secret needs a subcommand: put | ls | rm", "usage: tw "+usageOf("secret"))
-	}
-	return cmdSecretSub(args[sub], append(append([]string{}, args[:sub]...), args[sub+1:]...))
+	sub, args, _ := scanVerb(args, func(f *flags) { secretFlags(f) }, func(string) int { return 1 })
+	return cmdSecretSub(sub, args)
 }
 
 func cmdSecretSub(sub string, args []string) error {
 	f := newFlags("secret")
-	tenantF := tenantFlag(f)
-	workloadF := f.String("workload", "", "workload (default: the app in the current directory, as tw deploy names it)")
+	tenantF, workloadF := secretFlags(f)
 	pos, err := f.parse(args)
 	if err != nil {
 		return err
 	}
-	switch sub {
-	case "list":
-		sub = "ls"
-	case "delete":
-		sub = "rm"
+	if sub == "" {
+		return needsSubcommand("secret")
+	}
+	if sub == "bulk" {
+		return cmdSecretBulk(f, *tenantF, *workloadF, pos)
 	}
 	switch {
 	case sub == "ls" && len(pos) != 0:
@@ -82,7 +71,7 @@ func cmdSecretSub(sub string, args []string) error {
 	case (sub == "put" || sub == "rm") && len(pos) != 1:
 		return fail("bad_request", "tw secret "+sub+" needs the secret's NAME", "usage: tw "+usageOf("secret"))
 	case sub != "put" && sub != "ls" && sub != "rm":
-		return fail("bad_request", fmt.Sprintf("unknown subcommand %q (put, ls or rm)", sub), "usage: tw "+usageOf("secret"))
+		return fail("bad_request", fmt.Sprintf("unknown subcommand %q (put, bulk, ls or rm)", sub), "usage: tw "+usageOf("secret"))
 	}
 	name := ""
 	if len(pos) == 1 {
@@ -92,17 +81,9 @@ func cmdSecretSub(sub string, args []string) error {
 			return fail("bad_request", "the secret name must be a JS identifier and environment variable name ([A-Za-z_][A-Za-z0-9_]*, ≤128), not starting with TW_ or __TW")
 		}
 	}
-	workload := *workloadF
-	if workload == "" {
-		a, err := loadApp(".", "")
-		if err != nil {
-			return fail("bad_request", "no app in the current directory to take the workload from").
-				withFix("cd <app dir> && tw secret "+sub+" …", "tw secret "+sub+" … --workload <workload>")
-		}
-		workload = a.Name
-	}
-	if workloadLabel(workload) != workload {
-		return fail("bad_request", fmt.Sprintf("workload %q is not a DNS label", workload))
+	workload, err := secretWorkload(*workloadF, sub)
+	if err != nil {
+		return err
 	}
 	var value string
 	if sub == "put" {
@@ -171,6 +152,21 @@ func cmdSecretSub(sub string, args []string) error {
 		})
 	}
 	return nil
+}
+
+// secretWorkload is --workload, or else the app in the current directory's
+// workload, for tw secret sub.
+func secretWorkload(workload, sub string) (string, error) {
+	if workload == "" {
+		var err error
+		if workload, err = appWorkload("secret " + sub); err != nil { // appworkload.go
+			return "", err
+		}
+	}
+	if workloadLabel(workload) != workload {
+		return "", fail("bad_request", fmt.Sprintf("workload %q is not a DNS label", workload))
+	}
+	return workload, nil
 }
 
 // readSecretValue reads one secret value: a hidden prompt on a terminal,

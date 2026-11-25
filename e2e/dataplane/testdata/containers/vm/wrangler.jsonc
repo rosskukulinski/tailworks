@@ -1,0 +1,6 @@
+{
+  "name": "vmw",
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-01",
+  "vars": { "REC": "http://rec.invalid" },
+}

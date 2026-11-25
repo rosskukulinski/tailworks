@@ -77,6 +77,7 @@ func publicStatus(e *hostdtest.Env, workload string) *hostd.PublicStatus {
 // whose Funnel listener delivers to the workload's default export with an
 // unforgeable {kind:"public"} requester, never a tailnet caller.
 func TestPublicIngress(t *testing.T) {
+	t.Parallel()
 	ff := &fakeFunnel{addrs: map[string]string{}, src: netip.MustParseAddrPort("203.0.113.7:40000")}
 	s := startSuiteCapsOpts(t, fakemgmt.Config{}, nil, func(o *hostdtest.Options) { o.PublicListen = ff.listen })
 	e := s.e
@@ -150,11 +151,21 @@ func TestPublicIngress(t *testing.T) {
 	if strings.Contains(js(seen), "nFORGED") {
 		t.Fatalf("forged cf blob reached the app: %s", js(seen))
 	}
+	assertNoCfGeo(t, "public /hook/echo", r) // cfgeo_test.go (#302)
+	// Funnel terminates TLS: the Worker sees the https:// URL it was
+	// called at (#360), as on Cloudflare.
+	if r["url"] != "https://pubprobe.ttest.ts.net/hook/echo?token=secret" {
+		t.Fatalf("public request.url %v, want https://", r["url"])
+	}
 
 	// The same handler over the tailnet still sees the tailnet caller.
 	tcode, tr := s.getJSON("http://" + wl.IP + "/hook/echo")
 	if tcode != 200 || get(tr, "requester", "kind") != "tailnet" || get(tr, "requester", "nodeId") != s.clientID || tr["callerError"] != nil {
 		t.Fatalf("tailnet /hook/echo: %d %s", tcode, js(tr))
+	}
+	assertNoCfGeo(t, "tailnet /hook/echo", tr)
+	if u, _ := tr["url"].(string); !strings.HasPrefix(u, "http://") {
+		t.Fatalf("tailnet request.url %v, want http:// (no tailnet.https)", tr["url"])
 	}
 
 	// 2. Routes: only the listed prefixes; /_tw and odd paths never.

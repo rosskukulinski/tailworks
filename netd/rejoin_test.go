@@ -50,7 +50,8 @@ func TestRejoinExpiredStillLoggedInRemints(t *testing.T) {
 			// Start without tailscale's netmap cache, which is written a
 			// moment after the first netmap (so only sometimes before
 			// Close). With it the backend is Running from the cached netmap
-			// before control answers; that case is issue #200.
+			// before control answers; that case (issue #200) is
+			// TestRejoinFromNetmapCacheRejectedRemints.
 			os.RemoveAll(filepath.Join(root, "p", "profile-data"))
 			ctl.Server.SetExpireAllNodes(true)
 			remints := 0

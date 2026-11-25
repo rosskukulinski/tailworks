@@ -7,8 +7,8 @@
 #   2. the e2elinux Go test (e2e/linux) against it, with the release tarball
 #      for its arch (TW_E2E_TARBALL_<arch>);
 #   3. on exit (pass, fail, timeout or ^C): inside the VM, tw down --purge
-#      --service, stop tailworks processes, uninstall, rm ~/.tailworks-e2e (with the API
-#      key file); then `limactl stop` the VM (kept, not deleted).
+#      --service, stop tailworks processes, uninstall, rm ~/.tailworks-e2e (with the
+#      run's OAuth client file); then `limactl stop` the VM (kept, not deleted).
 #
 # Distros: ubuntu24-arm64 debian12-arm64 ubuntu22-arm64 ubuntu24-amd64
 # fedora-arm64, and the unsupported-host checks debian11-arm64 alpine-arm64
@@ -19,7 +19,7 @@ distro=$1
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 OUT=${TW_E2E_OUT:-$ROOT/e2e/real/results/linux}
 mkdir -p "$OUT"
-vm=twl-$distro
+vm=${TW_E2E_VM_PREFIX:-twl-}$distro # twl- or twdl- (pre-rename VMs); see matrixVM in e2e/linux
 arch=arm64 vmtype=vz slow=1 extra=
 # The reference row also proves reboot survival (enable-linger + limactl
 # stop/start) and ephemeral nodes across a service restart (re-mint).

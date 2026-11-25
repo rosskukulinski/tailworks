@@ -18,9 +18,9 @@
     <div class="value">{{if .Who.Admin}}{{.Status.Objects}}{{else}}{{len .Objects}}{{end}}</div>
     {{if .Who.Admin}}<div class="sub" title="Devices deleted from the tailnet once the tombstone window passes">{{.Status.PendingDeviceDeletes}} device deletes pending</div>{{end}}
   </a>
-  {{if .Who.Admin}}<a class="tile {{if .Verification.OK}}good{{else}}alert{{end}}" href="/ui/audit">
+  {{if and .Who.Admin (not .Verification.OK)}}<a class="tile alert" href="/ui/audit">
     <div class="label">Audit log</div>
-    <div class="value">{{if .Verification.OK}}Verified{{else}}NOT VERIFIED{{end}}</div>
+    <div class="value">NOT VERIFIED</div>
     {{if .Verification.VerifiedAt}}<div class="sub">checked {{since .Verification.VerifiedAt}}</div>{{end}}
   </a>{{end}}
 </div>
@@ -61,7 +61,7 @@
     <thead><tr><th>Workload</th><th>Status</th><th>Address</th><th>Tenant</th><th>Host</th><th>Deployed by</th><th>Deployed</th><th>Deployment ID</th></tr></thead>
     <tbody>
     {{range .Deployments}}<tr>
-      <td><a href="/ui/deployments/{{.DeploymentID}}"><b>{{.Workload}}</b></a></td>
+      <td><a href="/ui/deployments/{{.DeploymentID}}"><b>{{.Workload}}</b></a> <a class="small" href="/ui/tenants/{{.TenantID}}/workloads/{{.Workload}}/logs">logs</a></td>
       <td>{{template "status" .Status}}{{if .Error}}<div class="small bad-text" title="{{.Error}}">{{errSummary .Error}}</div>{{end}}</td>
       <td class="mono">{{if .Endpoint.MagicDNS}}<a href="http://{{.Endpoint.MagicDNS}}/" rel="noreferrer">{{.Endpoint.MagicDNS}}</a> {{template "status" .Endpoint.Status}}{{if eq .Status "failed"}}<div class="small muted">node up; the deployment failed</div>{{end}}{{else}}<span class="muted">—</span>{{end}}</td>
       <td class="mono"><a href="/ui/tenants/{{.TenantID}}">{{.TenantID}}</a></td>
@@ -82,7 +82,7 @@
   </div></div>
   <div class="tbl">
   <table>
-    <thead><tr><th>Host</th><th>Status</th><th>Last heartbeat</th><th>Nodes (live / capacity)</th><th>Tiers</th><th>Pool</th><th>Push</th><th>Leases</th><th>Node ID</th></tr></thead>
+    <thead><tr><th>Host</th><th>Status</th><th>Last heartbeat</th><th>Nodes (live / capacity)</th><th>Offers</th><th>Pool</th><th>Push</th><th>Leases</th><th>Node ID</th></tr></thead>
     <tbody>
     {{range .Hosts}}<tr>
       <td class="mono"><a href="/ui/hosts/{{.HostID}}"><b>{{.HostID}}</b></a>{{if .DNSName}}<div class="sub-line">{{.DNSName}}</div>{{end}}</td>
@@ -107,7 +107,7 @@
   </div></div>
   <div class="tbl">
   <table>
-    <thead><tr><th>Tailnet</th><th>Auth</th><th>Max objects</th><th>Registrations / min</th><th>Effective / min</th><th>Waiting to join</th><th>Pool / tier</th><th>Created</th></tr></thead>
+    <thead><tr><th>Tailnet</th><th title="How mgmt gets node keys from this tailnet's control plane (oauth, headscale, …)">Mint mode</th><th>Max objects</th><th>Registrations / min</th><th>Effective / min</th><th title="Objects waiting for a node key (registration throttle)">Mint queue</th><th>Pool / tier</th><th>Created</th></tr></thead>
     <tbody>
     {{range .Tenants}}<tr>
       <td class="mono"><a href="/ui/tenants/{{.TenantID}}"><b>{{.Tailnet}}</b></a><div class="sub-line">{{.TenantID}}</div></td>
@@ -140,7 +140,7 @@
 <section id="activity" data-live="audit">
   <div class="sect-head"><div>
     <h2>Recent activity <span class="count">{{len .Audit}}</span></h2>
-    <p class="hint">The newest entries in the tamper-evident audit log. <a href="/ui/audit">See the full audit log →</a></p>
+    <p class="hint">Who did what, newest first. <a href="/ui/audit">See the full audit log →</a></p>
   </div></div>
   <div class="tbl">
   <table>
@@ -148,7 +148,7 @@
     <tbody>{{template "auditrows" (auditSet .Audit .Names)}}{{if not .Audit}}<tr><td colspan="6" class="empty">There are no audit records yet.</td></tr>{{end}}</tbody>
   </table>
   </div>
-  {{if .Who.Admin}}<p class="chains">{{template "chains" .Verification.Chains}}</p>{{end}}
+  {{if and .Who.Admin (not .Verification.OK)}}<p class="chains">{{template "chains" .Verification.Chains}}</p>{{end}}
 </section>
 
 {{if not .Who.Admin}}<p class="hint">You're a tenant admin: this shows the tenants your <span class="mono">github.com/rosskukulinski/tailworks/cap/tenant-admin</span> grant names. Hosts and the control plane are the admins'.</p>{{else}}<details class="more card">
@@ -159,7 +159,7 @@
     <dt>Version</dt><dd class="mono">{{or .Status.Version "—"}}</dd>
     <dt>Listeners</dt><dd class="mono">{{if .Status.Listeners}}{{join .Status.Listeners}}{{else}}—{{end}}</dd>
     <dt>Transport</dt><dd class="mono">{{.Status.Transport}}{{if .Who.Mgmt.HTTPS}} · https{{end}}</dd>
-    <dt>Tenant auth modes</dt><dd class="mono">{{if .MintModes}}{{join .MintModes}}{{else}}<span class="muted">no tenants</span>{{end}}</dd>
+    <dt>Tenant mint modes</dt><dd class="mono">{{if .MintModes}}{{join .MintModes}}{{else}}<span class="muted">no tenants</span>{{end}}</dd>
     <dt>Your connection</dt><dd><span class="mono">{{.Who.Actor}}</span> · {{.Who.Kind}}{{if .Who.Admin}} · admin{{end}}</dd>
   </dl>
 </details>{{end}}

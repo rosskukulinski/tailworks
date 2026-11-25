@@ -51,6 +51,10 @@ type TelemetryOptions struct {
 	ExportEvery, MetricsEvery, RefreshEvery time.Duration
 	// QueueMax bounds each workload's export queue per signal (4096).
 	QueueMax int
+
+	// RecordMaxAge also drops request records older than this
+	// (telemetry_retention.go; 0 = only the size rotation, the default).
+	RecordMaxAge time.Duration
 }
 
 func (o TelemetryOptions) withDefaults() TelemetryOptions {
@@ -107,6 +111,10 @@ type telemetry struct {
 	logs    map[string]*recordLog   // tenant/workload
 	exps    map[string]*exporter    // tenant/workload
 
+	// entries joins DO RPC and alarm records with their runtime entry
+	// spans (telemetry_entries.go); made on first use.
+	entries *entryJoin
+
 	stop chan struct{}
 	wg   sync.WaitGroup
 }
@@ -155,6 +163,7 @@ func newTelemetry(h *Host) *telemetry {
 func (t *telemetry) start() {
 	t.wg.Add(1)
 	go t.loop()
+	t.startRecordPruner() // telemetry_retention.go
 }
 
 func (t *telemetry) close() {
@@ -476,6 +485,9 @@ type runtimeSpan struct {
 	End          float64        `json:"end"`
 	Error        bool           `json:"error"`
 	Attrs        map[string]any `json:"attrs"`
+
+	// Kind is "server" for an entry span (DO RPC, alarm); else CLIENT.
+	Kind string `json:"kind"`
 }
 
 // maxTailBody bounds one POST /v1/tail (the platform slims events first).
@@ -551,7 +563,15 @@ func (t *telemetry) tail(inst *instance, as *attested, ev *tailEvent) {
 	t.invocations.Add(1, w.tenantID, w.name, rec.Class, ev.Event, ev.Outcome)
 	if tc, ok := obs.ParseTraceparent(ev.Traceparent); ok {
 		rec.TraceID, rec.SpanID = tc.TraceID, tc.SpanID
+		if ev.Event == "scheduled" {
+			t.emit(w, rec) // a cron run: hostd's root span, no ingress half
+			return
+		}
 		t.join(w, rec, false)
+		return
+	}
+	if k, ok := recordEntryKey(w, rec); ok {
+		t.entryRecord(k, w, rec) // DO RPC, alarm: telemetry_entries.go
 		return
 	}
 	t.emit(w, rec)
@@ -578,7 +598,14 @@ func (t *telemetry) runtimeSpans(inst *instance, as *attested, spans []runtimeSp
 		if as != nil {
 			attrs = append(attrs, obs.A(attrClass, as.Class), obs.A("tw.object.name", as.Name))
 		}
-		for _, k := range []string{"tw.do.class", "tw.do.name", "http.request.method"} {
+		for _, k := range []string{
+			"tw.do.class",
+			"tw.do.id",
+			"tw.do.name",
+			"tw.trigger",
+			"http.request.method",
+			"rpc.method",
+		} {
 			if v, ok := rs.Attrs[k].(string); ok && len(v) <= 256 {
 				attrs = append(attrs, obs.A(k, v))
 			}
@@ -594,7 +621,14 @@ func (t *telemetry) runtimeSpans(inst *instance, as *attested, spans []runtimeSp
 		if rs.Error {
 			sc = obs.StatusError
 		}
-		t.span(w, obs.Span{TraceID: rs.TraceID, SpanID: rs.SpanID, ParentSpanID: rs.ParentSpanID, Name: name, Kind: obs.SpanKindClient,
+		kind := obs.SpanKindClient
+		if rs.Kind == "server" {
+			kind = obs.SpanKindServer
+		}
+		if k, ok := spanEntryKey(w, as, &rs); ok {
+			t.entrySpanArrived(k, entrySpan{traceID: rs.TraceID, spanID: rs.SpanID, parent: rs.ParentSpanID, start: st})
+		}
+		t.span(w, obs.Span{TraceID: rs.TraceID, SpanID: rs.SpanID, ParentSpanID: rs.ParentSpanID, Name: name, Kind: kind,
 			Start: st, End: en, Attrs: attrs, Status: sc})
 	}
 }
@@ -660,6 +694,7 @@ func (t *telemetry) flushPending(now time.Time) {
 	for _, p := range due {
 		t.emit(p.w, p.rec)
 	}
+	t.flushEntries(now)
 }
 
 // ---- output ----

@@ -71,7 +71,8 @@ type Store struct {
 	// (GetPinned; nil: pinned images are unavailable).
 	Puller Puller
 	// MaxBytes caps the converted images on disk (0 = no cap): past it the
-	// least recently used ones not in use (Hold) are removed.
+	// least recently used ones not in use (Hold) are removed. Images in use,
+	// including the one GetHeld just returned, stay even past the cap.
 	MaxBytes int64
 	// Limits caps one conversion's layers, entries and uncompressed bytes
 	// (zero fields: the defaults; see Limits).
@@ -203,8 +204,9 @@ func (s *Store) Runs(arch string) bool {
 
 var scopeRE = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
 
-// Get returns ref converted for tenant (from the cache, or converted now).
-func (s *Store) Get(ctx context.Context, tenant, ref string) (*Image, error) {
+// get returns ref converted for tenant (from the cache, or converted now);
+// GetHeld holds it and then runs GC (hold.go).
+func (s *Store) get(ctx context.Context, tenant, ref string) (*Image, error) {
 	r := s.Resolve(ref)
 	scope := tenant
 	if s.Public[NormalizeRef(r)] || s.Public[r] {
@@ -249,9 +251,6 @@ func (s *Store) Get(ctx context.Context, tenant, ref string) (*Image, error) {
 	s.mu.Lock()
 	delete(s.inflight, key)
 	s.mu.Unlock()
-	if c.err == nil {
-		s.gc()
-	}
 	return c.img, c.err
 }
 

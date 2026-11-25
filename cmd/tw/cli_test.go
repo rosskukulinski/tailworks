@@ -129,14 +129,14 @@ func (f *fakeTS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func TestCLIEndToEnd(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("short")
 	}
-	wd, err := nettest.WorkerdBinary()
+	_, err := nettest.WorkerdBinary()
 	if err != nil || !hostdtest.HasNode() {
 		t.Skip("needs workerd and node (make deps)")
 	}
-	t.Setenv("TW_WORKERD", wd)
 	ctl, err := nettest.StartControl()
 	if err != nil {
 		t.Fatal(err)
@@ -187,7 +187,7 @@ func TestCLIEndToEnd(t *testing.T) {
 		os.RemoveAll(state)
 	})
 	e.Run()
-	e.Down()
+	downRevokesWarmKeys(t, e, fts)
 	// `tw down --purge && tw up && tw deploy` on the same state dir.
 	e.RedeployAfterPurge()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -197,7 +197,7 @@ func TestCLIEndToEnd(t *testing.T) {
 		t.Fatalf("after tw down: %d node IDs tracked, leftover devices %v, keys %v", len(res.NodeIDs), devs, keys)
 	}
 	if fts.setPolicy != 0 {
-		t.Fatalf("tw wrote the policy without --policy-apply (%d times)", fts.setPolicy)
+		t.Fatalf("tw wrote the policy without --apply-policy (%d times)", fts.setPolicy)
 	}
 	b, _ := json.MarshalIndent(res, "", "  ")
 	t.Logf("results:\n%s", b)
@@ -214,11 +214,10 @@ func TestCLILink(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short")
 	}
-	wd, err := nettest.WorkerdBinary()
+	_, err := nettest.WorkerdBinary()
 	if err != nil || !hostdtest.HasNode() {
 		t.Skip("needs workerd and node (make deps)")
 	}
-	t.Setenv("TW_WORKERD", wd)
 	ctl, err := nettest.StartControl()
 	if err != nil {
 		t.Fatal(err)
@@ -265,12 +264,16 @@ func TestCLILink(t *testing.T) {
 	if up.MgmtIP == "" || up.MgmtNode == "" || up.MintMode != "oauth" {
 		t.Fatalf("tw up with a mgmt node: %+v", up)
 	}
-	if _, se, _, err := host.Tw("up", "--api-key-file", keyFile, "--yes", "--control-url", ctl.URL); err == nil || !strings.Contains(se, "mint_mode_removed") {
+	if _, se, _, err := host.Tw("up", "--control", "tailscale", "--api-key-file", keyFile, "--yes", "--control-url", ctl.URL); err == nil || !strings.Contains(se, "mint_mode_removed") {
 		t.Fatalf("tw up --api-key-file (Tailscale) should be mint_mode_removed: %v %s", err, se)
 	}
 	// A second tw up (supervisor running) must not touch the node.
 	host.MustJSON(nil, "up", "--oauth-client-file", keyFile, "--tailnet", "ttest.ts.net", "--yes", "--ephemeral", "--control-url", ctl.URL,
 		"--tsapi-url", api.URL, "--hostname-prefix", "tw-l-", "--mgmt-hostname", "tw-mgmt")
+	// tw status names the saved --ephemeral (#456); nothing unsafe is saved.
+	if st := checkStatus(t, host, "› saved       --ephemeral"); st["unsafeFlags"] == nil || len(st["unsafeFlags"].([]any)) != 0 {
+		t.Fatalf("host status unsafeFlags: %v", st["unsafeFlags"])
+	}
 
 	// The developer box: linked through its own tsnet node (test transport;
 	// the product path is the machine's Tailscale). No HTTPS on testcontrol.
@@ -278,7 +281,7 @@ func TestCLILink(t *testing.T) {
 	// Auto-discovery resolves `tw-mgmt` through this machine's MagicDNS;
 	// a developer Mac may run a real tw-mgmt there, so point it at a name
 	// that can't resolve (the test never talks to the machine's tailnet).
-	t.Setenv("TW_LINK_DISCOVER_NAME", "tw-mgmt-hermetic.invalid")
+	t.Setenv("TW_TEST_LINK_NAME", "tw-mgmt-hermetic.invalid")
 	if _, se, _, err := dev.Tw("link"); err == nil || !strings.Contains(se, "mgmt_not_found") {
 		t.Fatalf("link auto-discovery without MagicDNS should fail mgmt_not_found: %v %s", err, se)
 	}
@@ -300,7 +303,7 @@ func TestCLILink(t *testing.T) {
 	}
 	// Remote deploy (bundled locally, uploaded), ls with deployedBy, kill, audit.
 	agentDir := filepath.Join(work, "agent")
-	dev.MustJSON(nil, "init", agentDir, "--template", "agent", "--keep-tags")
+	dev.MustJSON(nil, cliflow.InitArgs(agentDir, "agent")...)
 	var dep struct {
 		DeploymentID string
 		Endpoint     struct{ Node, MagicDNS string }
@@ -317,6 +320,10 @@ func TestCLILink(t *testing.T) {
 	dev.MustJSON(&ls, "ls")
 	if len(ls.Deployments) != 1 || ls.Deployments[0].DeployedBy != lk.Actor || !strings.Contains(ls.Deployments[0].DeployedBy, "ttest-dev") && !strings.Contains(ls.Deployments[0].DeployedBy, "@") {
 		t.Fatalf("remote ls deployedBy: %+v (actor %q)", ls.Deployments, lk.Actor)
+	}
+	// Linked tw status: a count per tenant, and the same $defs/status (#455).
+	if st := checkStatus(t, dev, "1 deployment (tw ls)"); st["stateDir"] == "" || st["linked"] == nil {
+		t.Fatalf("linked status: stateDir %v linked %v", st["stateDir"], st["linked"])
 	}
 	// The workload's log, read by mgmt from the host over the push channel.
 	if _, se, _, err := dev.Tw("logs", ls.Deployments[0].Workload, "-n", "5"); err != nil {
@@ -375,18 +382,18 @@ func TestCLILink(t *testing.T) {
 }
 
 func TestDevOnce(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("short")
 	}
-	wd, err := nettest.WorkerdBinary()
+	_, err := nettest.WorkerdBinary()
 	if err != nil || !hostdtest.HasNode() {
 		t.Skip("needs workerd and node (make deps)")
 	}
-	t.Setenv("TW_WORKERD", wd)
 	bin := cliflow.BuildBinaries(t)
 	work := t.TempDir()
 	e := &cliflow.Env{T: t, BinDir: bin, StateDir: filepath.Join(work, "state"), WorkDir: work}
-	e.MustJSON(nil, "init", filepath.Join(work, "hello"), "--template", "hello", "--keep-tags")
+	e.MustJSON(nil, "init", filepath.Join(work, "hello"), "--template", "hello")
 	var r struct {
 		Smoke struct {
 			Status float64 `json:"status"`
@@ -405,14 +412,14 @@ func TestDevOnce(t *testing.T) {
 // tenant A (testcontrol A) and tenant B (`tw tenant add`, testcontrol B)
 // with the same agent app; e2e/cliflow MultiEnv checks (a)–(f).
 func TestCLIMultiTenant(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("short")
 	}
-	wd, err := nettest.WorkerdBinary()
+	_, err := nettest.WorkerdBinary()
 	if err != nil || !hostdtest.HasNode() {
 		t.Skip("needs workerd and node (make deps)")
 	}
-	t.Setenv("TW_WORKERD", wd)
 	ctls := map[string]*nettest.Control{}
 	for _, k := range []string{"a", "b"} {
 		c, err := nettest.StartControl()
@@ -468,21 +475,21 @@ func TestCLIMultiTenant(t *testing.T) {
 	m.Run()
 	m.Down()
 	if fts.setPolicy != 0 {
-		t.Fatalf("tw wrote a policy without --policy-apply (%d times)", fts.setPolicy)
+		t.Fatalf("tw wrote a policy without --apply-policy (%d times)", fts.setPolicy)
 	}
 	b, _ := json.MarshalIndent(m.Res, "", "  ")
 	t.Logf("results:\n%s", b)
 }
 
 func TestDoctor(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("short")
 	}
-	wd, err := nettest.WorkerdBinary()
+	_, err := nettest.WorkerdBinary()
 	if err != nil {
 		t.Skip("needs workerd (make deps)")
 	}
-	t.Setenv("TW_WORKERD", wd)
 	bin := cliflow.BuildBinaries(t)
 	work := t.TempDir()
 	e := &cliflow.Env{T: t, BinDir: bin, StateDir: filepath.Join(work, "state"), WorkDir: work}
@@ -498,7 +505,32 @@ func TestDoctor(t *testing.T) {
 		got[c.Name] = c.Status
 	}
 	want := map[string]string{"binaries": "ok", "workerd": "ok", "bundler": "ok", "tw_home_writable": "ok",
-		"state_dir_writable": "ok", "mint_mode": "skip", "transport": "skip", "api_key": "skip", "https_certs": "skip", "sandbox": "skip", "host_sockets": "skip", "node_egress": "skip", "system_tailscaled_not_used": "ok"}
+		"state_dir_writable": "ok", "mint_mode": "skip", "transport": "skip", "api_key": "skip", "https_certs": "skip", "sandbox": "skip", "host_sockets": "skip", "worker_internet": "skip", "node_egress": "skip", "system_tailscaled_not_used": "ok",
+		"store_sizes": "skip",
+		"containers":  "skip",
+		"node_budget": "skip",
+		"install":     "info", // a test build: not an install.sh prefix or npm package (npm_install_test.go covers those)
+	}
+	// data_disk depends on the machine's free space: present, ok or warn.
+	if st := got["data_disk"]; st != "ok" && st != "warn" {
+		t.Fatalf("doctor: data_disk = %q: %v", st, r.Checks)
+	}
+	delete(got, "data_disk")
+	// workerd_age depends on today's date: ok while the pin is under 30 days old, warn after (doctor_workerdage.go).
+	if st := got["workerd_age"]; st != "ok" && st != "warn" {
+		t.Fatalf("doctor: workerd_age = %q: %v", st, r.Checks)
+	}
+	delete(got, "workerd_age")
+	// side_channels depends on the host's CPU and kernel: on Linux ok or
+	// warn, never a failure (doctor_sidechannel.go); elsewhere skip.
+	want["side_channels"] = "skip"
+	if runtime.GOOS == "linux" {
+		if st := got["side_channels"]; st != "ok" && st != "warn" {
+			t.Fatalf("doctor: side_channels = %q: %v", st, r.Checks)
+		}
+		delete(got, "side_channels")
+		delete(want, "side_channels")
+	}
 	if runtime.GOOS == "linux" {
 		want["host_sockets"] = "ok"
 		if hs := procsb.ScanHostSockets(); len(hs.Hard) > 0 {
@@ -554,14 +586,14 @@ func sandboxAvailable() bool {
 // before anything is minted), then the whole E2E-MAC scenario (a)–(f) in
 // oauth mode, with every key minted by OAuth access tokens.
 func TestCLIOAuth(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("short")
 	}
-	wd, err := nettest.WorkerdBinary()
+	_, err := nettest.WorkerdBinary()
 	if err != nil || !hostdtest.HasNode() {
 		t.Skip("needs workerd and node (make deps)")
 	}
-	t.Setenv("TW_WORKERD", wd)
 	ctl, err := nettest.StartControl()
 	if err != nil {
 		t.Fatal(err)
@@ -608,11 +640,8 @@ func TestCLIOAuth(t *testing.T) {
 	})
 	up := []string{"up", "--oauth-client-file", cred, "--tailnet", "ttest.ts.net", "--yes", "--control-url", ctl.URL, "--tsapi-url", api.URL,
 		"--hostname-prefix", "tw-o-", "--mgmt-hostname", "tw-o-mgmt", "--host-id", "tw-o", "--ephemeral", "--allow-sibling-egress"}
-	// 1. A group/world-readable client file is refused before anything happens.
-	if _, se, _, err := e.Tw(up...); err == nil || !strings.Contains(se, "credential_file_insecure") || !strings.Contains(se, "chmod 600") {
-		t.Fatalf("0644 client file: %v %s", err, se)
-	}
-	os.Chmod(cred, 0o600)
+	// 1. A group/world-readable client file (still 0644 here) is tightened
+	// to 0600, not refused: it is the operator's own file. Checked after 2.
 	// 2. Policy lacks tag:tw as an owner of the infra tags: typed error with
 	// the snippet, BEFORE any key is minted or node joined.
 	fts.mu.Lock()
@@ -621,9 +650,14 @@ func TestCLIOAuth(t *testing.T) {
 	minted := fts.n
 	fts.mu.Unlock()
 	_, se, _, err := e.Tw(up...)
-	if err == nil || !strings.Contains(se, "policy_missing_tag_owners") || !strings.Contains(se, `"tag:tw-mgmt": ["autogroup:admin","tag:tw"]`) {
+	if err == nil || !strings.Contains(se, "policy_missing_tag_owners") || !strings.Contains(se, `"tag:tw-mgmt": ["autogroup:admin", "tag:tw"]`) {
 		t.Fatalf("policy without tag:tw owners: %v %s", err, se)
 	}
+	upApplyPolicyRefusals(t, e, up, func() (int, int) { // up_policyapply_ext_test.go
+		fts.mu.Lock()
+		defer fts.mu.Unlock()
+		return fts.n - minted, fts.setPolicy
+	})
 	fts.mu.Lock()
 	if fts.n != minted {
 		t.Fatalf("%d keys minted before the policy was fixed", fts.n-minted)
@@ -633,7 +667,10 @@ func TestCLIOAuth(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(state, "mgmt", "tsnet", "tailscaled.state")); err == nil {
 		t.Fatal("mgmt's node joined before the policy was fixed")
 	}
-	res.Pass("oauth_refusals", "0644 → credential_file_insecure; no tag:tw owner → policy_missing_tag_owners, nothing minted")
+	if st, err := os.Stat(cred); err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("0644 client file not tightened to 0600: %v %v", st.Mode(), err)
+	}
+	res.Pass("oauth_refusals", "0644 → tightened to 0600; no tag:tw owner → policy_missing_tag_owners, nothing minted")
 
 	// 3. The scenario (a)–(f) in oauth mode.
 	e.Run()
@@ -692,14 +729,14 @@ func TestCLIOAuth(t *testing.T) {
 // join key, status/doctor describe it, --separate-host on this state is a
 // state_conflict, and tw down stops everything.
 func TestCLISingleProcess(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("short")
 	}
-	wd, err := nettest.WorkerdBinary()
+	_, err := nettest.WorkerdBinary()
 	if err != nil || !hostdtest.HasNode() {
 		t.Skip("needs workerd and node (make deps)")
 	}
-	t.Setenv("TW_WORKERD", wd)
 	ctl, err := nettest.StartControl()
 	if err != nil {
 		t.Fatal(err)
@@ -801,9 +838,10 @@ func TestCLISingleProcess(t *testing.T) {
 	if !strings.Contains(string(mlog), "tailnet node") || !strings.Contains(string(hlog), "transport=embedded") {
 		t.Fatalf("component logs: mgmt %d bytes, hostd %d bytes (hostd must say transport=embedded)", len(mlog), len(hlog))
 	}
+	backupRestoreRunning(t, e, work) // issue #120
 	e.Down()
 	if fts.setPolicy != 0 {
-		t.Fatalf("tw wrote the policy without --policy-apply (%d times)", fts.setPolicy)
+		t.Fatalf("tw wrote the policy without --apply-policy (%d times)", fts.setPolicy)
 	}
 	out, _ := json.MarshalIndent(res, "", "  ")
 	t.Logf("results:\n%s", out)

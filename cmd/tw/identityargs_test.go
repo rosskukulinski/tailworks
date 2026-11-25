@@ -9,6 +9,7 @@ import (
 // tw up's fast-identity flags reach the children, and state written
 // before they existed keeps the binaries' defaults (never "0 = off").
 func TestIdentityArgs(t *testing.T) {
+	t.Parallel()
 	zero, five, two := 0, 5, 2
 	for _, tc := range []struct {
 		name        string

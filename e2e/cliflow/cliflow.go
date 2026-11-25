@@ -70,12 +70,19 @@ func Policy() policy.Snippet {
 // BuildBinaries builds tailworks, tw-mgmt and tw-hostd into a temp dir.
 func BuildBinaries(t testing.TB) string {
 	t.Helper()
+	return BuildBinariesTags(t, "")
+}
+
+// BuildBinariesTags is BuildBinaries with build tags, for a test hook that
+// only a test build has (twtestclock: internal/wallclock).
+func BuildBinariesTags(t testing.TB, tags string) string {
+	t.Helper()
 	root, err := nettest.FindRepoRoot()
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	cmd := exec.Command("go", "build", "-o", dir+"/", "./cmd/tw", "./cmd/tw-mgmt", "./cmd/tw-hostd")
+	cmd := exec.Command("go", "build", "-tags="+tags, "-o", dir+"/", "./cmd/tw", "./cmd/tw-mgmt", "./cmd/tw-hostd")
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=local")
 	if b, err := cmd.CombinedOutput(); err != nil {
@@ -387,7 +394,8 @@ func (e *Env) upArgs() []string {
 // deploy` on the SAME state dir, after Run and a purging Down: the agent
 // workload must deploy and its node be ready again (it was refused with
 // `bootstrap_failed: the workload node for agent is killed` before the
-// killed objects were forgotten by purge). It ends with another purging
+// killed objects were forgotten by purge). Then it undeploys and deploys
+// the agent again (redeployAfterUndeploy). It ends with another purging
 // `tw down`; the new node IDs are tracked for the leftover check.
 func (e *Env) RedeployAfterPurge() {
 	t, res := e.T, e.Res
@@ -412,6 +420,7 @@ func (e *Env) RedeployAfterPurge() {
 	e.TrackObjectNodes()
 	res.Numbers["redeploy_after_purge_ready_ms"] = dep.Timings["ready"]
 	res.pass("redeploy_after_purge", fmt.Sprintf("agent %s ready again on the same state dir in %v", dep.Endpoint.MagicDNS, d.Round(time.Millisecond)))
+	e.redeployAfterUndeploy() // redeploy.go (#364)
 	var dr struct {
 		Killed []string `json:"killed"`
 		Purged int      `json:"objectsPurged"`
@@ -499,8 +508,9 @@ func (e *Env) Run() {
 	d := e.MustJSON(&up, upArgs...)
 	res.Numbers["up_ready_ms"] = msOf(d)
 	e.TrackInfra(up.MgmtNodeID)
-	res.Numbers["up_mgmt_ready_ms"] = up.Timings["mgmt_ready"]
-	res.Numbers["up_host_ready_ms"] = up.Timings["host_ready"]
+	for phase, at := range up.Timings { // up_mgmt_ready_ms, up_host_ready_ms, …: ms from the start of tw up
+		res.Numbers["up_"+phase+"_ms"] = at
+	}
 	res.pass("up", fmt.Sprintf("tenant %s host %s in %v", up.TenantID, up.HostID, d.Round(time.Millisecond)))
 	var st struct {
 		Healthy bool `json:"healthy"`
@@ -514,7 +524,7 @@ func (e *Env) Run() {
 	// Apps from the templates.
 	agentDir, mcpDir, helloDir := filepath.Join(e.WorkDir, "agent"), filepath.Join(e.WorkDir, "mcp"), filepath.Join(e.WorkDir, "hello")
 	for dir, tmpl := range map[string]string{agentDir: "agent", mcpDir: "mcp", helloDir: "hello"} {
-		e.MustJSON(nil, "init", dir, "--template", tmpl, "--keep-tags")
+		e.MustJSON(nil, InitArgs(dir, tmpl)...)
 	}
 	// Declare the agent's dependency on the echo service (preflighted).
 	tj := filepath.Join(agentDir, "tailworks.jsonc")
@@ -533,6 +543,10 @@ func (e *Env) Run() {
 		}
 	}
 	patch(tj, addConnects)
+	// hello declares a dependency nothing grants (the template's connects is empty).
+	patch(filepath.Join(helloDir, "tailworks.jsonc"), func(b []byte) []byte {
+		return bytes.Replace(b, []byte(`"connects": []`), []byte(`"connects": ["tag:db"]`), 1)
+	})
 	if e.Tier != "" {
 		for _, d := range []string{agentDir, mcpDir} {
 			patch(filepath.Join(d, "tailworks.jsonc"), func(b []byte) []byte {

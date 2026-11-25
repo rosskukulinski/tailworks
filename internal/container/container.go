@@ -86,10 +86,51 @@ type Class struct {
 	// Arch is the image's architecture when the bundle states it ("" = not
 	// stated: any host offering containers; pinning at deploy fills it).
 	Arch string `json:"arch,omitempty"`
+	// Build is how tw deploy builds the class's Dockerfile images
+	// (wrangler image_build_context/image_vars, images.<name>.build_context/
+	// build_vars). Developer-machine only (ADR-032 D3): never serialized,
+	// so mgmt and hosts never see it.
+	Build *Build `json:"-"`
 	// Pins are what mgmt resolved every image reference to at deploy, per
 	// architecture (ADR-032 D3): a repository in tailworks' registry and an
 	// image manifest digest. Hosts pull exactly these and nothing else.
 	Pins []Pin `json:"pins,omitempty"`
+}
+
+// Build holds the build settings of a class's Dockerfile images, as
+// written in wrangler (paths relative to the config, as wrangler resolves
+// them).
+type Build struct {
+	// Context is the default image's build context ("" = the
+	// Dockerfile's directory); Vars are its build args.
+	Context string
+	Vars    map[string]string
+	// ImageContexts and ImageVars are the same per named image.
+	ImageContexts map[string]string
+	ImageVars     map[string]map[string]string
+}
+
+// ContextFor is the build context of image name ("" = the default image),
+// "" when none is set.
+func (b *Build) ContextFor(name string) string {
+	if b == nil {
+		return ""
+	}
+	if name == "" {
+		return b.Context
+	}
+	return b.ImageContexts[name]
+}
+
+// VarsFor is the build args of image name ("" = the default image).
+func (b *Build) VarsFor(name string) map[string]string {
+	if b == nil {
+		return nil
+	}
+	if name == "" {
+		return b.Vars
+	}
+	return b.ImageVars[name]
 }
 
 // Pin is one image reference of a class, resolved once at deploy for one
@@ -176,7 +217,8 @@ func IsBuildSource(s string) bool {
 }
 
 // entry is one "containers" element as written in wrangler.jsonc
-// (class_name, image, images, instance_type, max_instances) or tailworks.jsonc
+// (class_name, image, images, instance_type, max_instances,
+// image_build_context, image_vars) or tailworks.jsonc
 // (the same keys, plus "arch"; "class" is accepted for class_name, and
 // "images" maps a name straight to a pinned reference).
 type entry struct {
@@ -187,7 +229,18 @@ type entry struct {
 	InstanceType json.RawMessage `json:"instance_type"`
 	MaxInstances *int            `json:"max_instances"`
 	Arch         string          `json:"arch"`
+
+	// Wrangler only: how tw deploy builds the image.
+	ImageBuildContext string            `json:"image_build_context"`
+	ImageVars         map[string]string `json:"image_vars"`
 }
+
+// HonouredKeys are the keys of a wrangler "containers" entry tailworks
+// reads (tw warns once per other key). "name" is Cloudflare's label for
+// the application and changes nothing here; scheduling_policy is honoured
+// only as "default" or "durable_object", which is what tailworks does (a
+// container per Durable Object).
+var HonouredKeys = []string{"arch", "class_name", "image", "image_build_context", "image_vars", "images", "instance_type", "max_instances", "name", "scheduling_policy"}
 
 var (
 	identRE = regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$]*$`)
@@ -196,7 +249,8 @@ var (
 
 // entries reads a "containers" value: an array of entries (Cloudflare's
 // shape), or, in tailworks.jsonc, an object keyed by class ({"<Class>": {"image":
-// ref, "images": {name: ref}}}: the pins tw deploy writes).
+// ref, "images": {name: ref}}}: per-class image refs you pin; mgmt records
+// the digests it resolves in the deployment).
 func entries(src string, b []byte) ([]entry, error) {
 	var doc struct {
 		Containers json.RawMessage `json:"containers"`
@@ -274,11 +328,20 @@ func Parse(wrangler, tw []byte) ([]Class, error) {
 				if !IsBuildSource(e.Image) {
 					c.Image = e.Image
 				} else if src.name != "wrangler" {
-					return nil, fmt.Errorf("%s: containers.%s: image %q must be an image reference (tailworks.jsonc pins what tw deploy built)", src.name, name, e.Image)
+					return nil, fmt.Errorf("%s: containers.%s: image %q must be an image reference (tailworks.jsonc holds per-class image refs you pin; build sources go in wrangler.jsonc)", src.name, name, e.Image)
 				}
 			}
 			if err := c.setImages(src.name, e.Images, fromWrangler); err != nil {
 				return nil, err
+			}
+			if e.ImageBuildContext != "" || len(e.ImageVars) > 0 {
+				if src.name != "wrangler" {
+					return nil, fmt.Errorf("%s: containers.%s: image_build_context and image_vars go in wrangler.jsonc, with the Dockerfile", src.name, name)
+				}
+				if c.Build == nil {
+					c.Build = &Build{}
+				}
+				c.Build.Context, c.Build.Vars = e.ImageBuildContext, e.ImageVars
 			}
 			if e.MaxInstances != nil {
 				if *e.MaxInstances < 0 {
@@ -327,8 +390,10 @@ func (c *Class) setImages(src string, raw json.RawMessage, fromWrangler map[stri
 	}
 	if src == "wrangler" {
 		var ims map[string]struct {
-			Dockerfile string `json:"dockerfile"`
-			Image      string `json:"image"`
+			Dockerfile   string            `json:"dockerfile"`
+			Image        string            `json:"image"`
+			BuildContext string            `json:"build_context"`
+			BuildVars    map[string]string `json:"build_vars"`
 		}
 		if err := json.Unmarshal(raw, &ims); err != nil {
 			return fmt.Errorf("%s: containers.%s.images: %w", src, c.Class, err)
@@ -348,6 +413,23 @@ func (c *Class) setImages(src string, raw json.RawMessage, fromWrangler map[stri
 				c.ImageSources[n] = im.Dockerfile
 				if c.ImageSources[n] == "" {
 					c.ImageSources[n] = im.Image
+				}
+			}
+			if im.BuildContext != "" || len(im.BuildVars) > 0 {
+				if c.Build == nil {
+					c.Build = &Build{}
+				}
+				if im.BuildContext != "" {
+					if c.Build.ImageContexts == nil {
+						c.Build.ImageContexts = map[string]string{}
+					}
+					c.Build.ImageContexts[n] = im.BuildContext
+				}
+				if len(im.BuildVars) > 0 {
+					if c.Build.ImageVars == nil {
+						c.Build.ImageVars = map[string]map[string]string{}
+					}
+					c.Build.ImageVars[n] = im.BuildVars
 				}
 			}
 		}

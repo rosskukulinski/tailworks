@@ -64,9 +64,20 @@ func (e secretEntry) String() string {
 }
 
 // secretsMu serialises read-modify-write of a workload's custody entry in
-// this process. (Replicas sharing a setec custody could still race a
-// concurrent put of the same workload; the later write wins.)
+// this process when the store can't lock across replicas (lockSecrets).
 var secretsMu sync.Mutex
+
+// lockSecrets serialises read-modify-write of a workload's custody entry
+// across every replica of the store (#578: replicas sharing a setec
+// custody each had only their own mutex, and the later of two concurrent
+// writes erased the other: a deleted secret came back).
+func (m *Mgmt) lockSecrets(ctx context.Context, tenantID, workload string) (func(), error) {
+	if nl, ok := m.store.(nameLocker); ok {
+		return nl.LockName(ctx, secretsCustodyName(tenantID, workload))
+	}
+	secretsMu.Lock()
+	return secretsMu.Unlock, nil
+}
 
 // secretsCustodyName is where a workload's secrets live in custody.
 func secretsCustodyName(tenantID, workload string) string {
@@ -131,8 +142,11 @@ func (m *Mgmt) PutSecret(ctx context.Context, tenantID, workload, name, value, b
 	if !utf8.ValidString(value) {
 		return SecretMeta{}, false, errf(400, "bad_request", "secret value must be UTF-8 text")
 	}
-	secretsMu.Lock()
-	defer secretsMu.Unlock()
+	unlock, err := m.lockSecrets(ctx, tenantID, workload)
+	if err != nil {
+		return SecretMeta{}, false, err
+	}
+	defer unlock()
 	set, err := m.loadSecrets(ctx, tenantID, workload)
 	if err != nil {
 		return SecretMeta{}, false, err
@@ -160,8 +174,11 @@ func (m *Mgmt) DeleteSecret(ctx context.Context, tenantID, workload, name, by st
 	if err := m.checkSecretScope(ctx, tenantID, workload); err != nil {
 		return err
 	}
-	secretsMu.Lock()
-	defer secretsMu.Unlock()
+	unlock, err := m.lockSecrets(ctx, tenantID, workload)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	set, err := m.loadSecrets(ctx, tenantID, workload)
 	if err != nil {
 		return err

@@ -8,6 +8,7 @@ import (
 // Several tenants on one tailnet (ADR-043 D4, D5, D7).
 
 func TestTeamsTenantRules(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	c := e.c
 	mk := func(extra map[string]any) map[string]any {
@@ -71,6 +72,7 @@ func TestTeamsTenantRules(t *testing.T) {
 }
 
 func TestTeamsTagOwnership(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	e.ts.policy = `{"tagOwners": {
 		"tag:a-api": ["autogroup:admin", "tag:tw-t-a"],
@@ -109,10 +111,13 @@ func TestTeamsTagOwnership(t *testing.T) {
 }
 
 func TestTeamsPublicSnippet(t *testing.T) {
-	if s := publicFunnelSnippet(Tenant{}); s != PublicFunnelSnippet {
+	t.Parallel()
+	const want = `"tagOwners": { "tag:tw-public": ["autogroup:admin", "tag:tw"] },
+"nodeAttrs": [ { "target": ["tag:tw-public"], "attr": ["funnel"] } ]`
+	if s := publicPart(Tenant{}).Inline(); s != want {
 		t.Fatalf("default: %s", s)
 	}
-	if s := publicFunnelSnippet(Tenant{OwnerTag: "tag:tw-t-a"}); !strings.Contains(s, `"tag:tw-public": ["autogroup:admin", "tag:tw", "tag:tw-t-a"]`) {
+	if s := publicPart(Tenant{OwnerTag: "tag:tw-t-a"}).Inline(); !strings.Contains(s, `"tag:tw-public": ["autogroup:admin", "tag:tw", "tag:tw-t-a"]`) {
 		t.Fatalf("owner tag: %s", s)
 	}
 	if !prefixesClash("a", "a-b") || prefixesClash("a", "ab") || !prefixesClash("x", "x") {
@@ -121,6 +126,7 @@ func TestTeamsPublicSnippet(t *testing.T) {
 }
 
 func TestTeamsServiceName(t *testing.T) {
+	t.Parallel()
 	cfg := &TwConfig{}
 	cfg.Tailnet.Service = []byte("true")
 	classes := []ClassConfig{{Class: WorkloadNamespace, Tags: []string{"tag:x"}}}

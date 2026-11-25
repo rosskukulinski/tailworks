@@ -1,9 +1,9 @@
-# The Node process tier (opt-in, `"runtime": "node"`)
+# The Node runtime (opt-in, `"runtime": "node"`)
 
 ADR-022: some agent SDKs need a real Node.js (`node:vm`, child processes,
 native modules) and cannot run in workerd. Tailworks runs those as **one supervised
 `node` process per deployment with one tailnet identity** (the workload
-node). There are no per-object nodes in this tier. A Node process costs
+node). There are no per-object nodes in this runtime. A Node process costs
 ~70 MB (plain app) to ~320 MB (Vercel Workflow + AI SDK) of RSS, against a
 few MB per workerd isolate, so it suits a few long-lived services per tenant,
 not one per object.
@@ -15,8 +15,8 @@ not one per object.
   "runtime": "node",
   "main": "src/server.ts",          // bundled to dist/server.mjs by create-tailworks build-node
   "node": {
-    "health": "/healthz",           // any HTTP answer = up (default "/")
-    "listen": "tcp",                // tcp: PORT on 127.0.0.1 (default) | unix: TW_SOCKET
+    "health": "/healthz",           // optional: any HTTP answer on "/" (the default) already counts as up
+    "listen": "tcp",                // tcp: PORT on 127.0.0.1 (default) | unix: TW_SOCKET, keeps AF_UNIX (see "Linux sandbox limits")
     "env": { "LOG_LEVEL": "info" }, // TW_* is reserved
     "args": ["--enable-source-maps"]
   },
@@ -93,8 +93,9 @@ undici, so the template uses `@tailworks/node` `fetch` explicitly.
 **On Linux with Landlock (ABI ≥ 4, kernel 6.7+; Ubuntu 24.04's 6.8 has
 ABI 4), egress through the proxy is enforced, not cooperative.** tw-hostd
 starts every Node app under its Landlock sandbox (`internal/procsb`, L2):
-the app may bind and connect only its own app port (TCP listen mode) and
-connect only to its egress proxy's port. Every other TCP `connect()`, to
+the app may connect only to its own app port (TCP listen mode) and its
+egress proxy's port, and can't listen on anything itself (see
+[Listening](#listening)). Every other TCP `connect()`, to
 loopback, the LAN or the internet, fails with `EACCES` before a packet is
 sent, and a seccomp filter refuses UDP, ICMP, raw, MPTCP and SCTP sockets.
 So the undici pitfall above, an own dispatcher, or `net.connect` can no
@@ -108,9 +109,10 @@ pathname socket, so tailworks' own sockets (hostd's, mgmt's, the instance
 egress sockets) refuse sandboxed peers themselves; see INSTALL.md.
 
 **On macOS it is enforced too.** The Seatbelt profile refuses every
-network operation except TCP connects to `localhost:<proxy port>` and
-`localhost:<own port>`, a bind of its own port, and unix sockets in its own
-dirs; `make test-node` checks the same probes there (`EPERM`).
+network operation except IPv4 TCP connects to `127.0.0.1:<proxy port>` and
+`127.0.0.1:<own port>` (not `[::1]`), a bind of its own port, and unix
+sockets in its own dirs; `make test-node` checks the same probes there
+(`EPERM`).
 
 **Elsewhere it is cooperative.** On Linux kernels with Landlock ABI < 4
 (and under `tw-hostd -sandbox seatbelt-legacy`), a malicious or
@@ -139,8 +141,8 @@ whose caps were narrowed by its node certificate (RT-01).
 
 hostd makes the state visible and refuses the dangerous combination:
 - `tw status` and `GET /v1/status` show `egress unenforced` for every
-  Node-tier workload on such a host; `tw doctor` warns (`node_egress`);
-- a Node-tier deployment on a host **without any process sandbox** that
+  Node-runtime workload on such a host; `tw doctor` warns (`node_egress`);
+- a Node-runtime deployment on a host **without any process sandbox** that
   serves other tenants fails with `egress_unenforced` (and the general
   shared-host rule, `sandbox_unavailable`, applies to every process-tier
   workload there) unless the operator starts the host with
@@ -167,6 +169,29 @@ any AF_UNIX socket; `listen: "unix"` apps keep AF_UNIX, and a host with
 such an app and a reachable system tailscaled socket is not shareable (see
 INSTALL.md `host_sockets`).
 
+## Listening
+
+Under a sandbox, the app is reachable only through tailworks' ingress,
+never on the host's LAN address, even if it ignores `HOST` and calls
+`listen(PORT)` (which binds every interface). hostd owns the listener:
+
+- **Linux (Landlock):** hostd opens `127.0.0.1:<PORT>` (or the
+  `listen: "unix"` socket) and passes it to the app as fd 3. A seccomp rule
+  makes every `listen()` a no-op, so a socket the app opens itself never
+  listens.
+- **macOS (Seatbelt):** the app may not bind or listen on TCP at all. It
+  listens on a unix socket in its instance dir, which ingress dials, and
+  hostd forwards `127.0.0.1:<PORT>` to that socket for the app's
+  self-calls.
+
+A preload makes this invisible to the app: `server.listen(PORT[, host])`,
+`listen({ port: PORT })` and `listen(TW_SOCKET)` are pointed at hostd's
+listener, and `server.address()` still reports `127.0.0.1:<PORT>`. A
+listen on any other port, or a native module's own listener, fails with
+`EPERM`/`EACCES` (macOS, or Linux with Landlock ABI ≥ 4). On Linux with
+ABI < 4 such a listen returns 0, but the socket never listens. Without a
+sandbox (`-sandbox none`) the app binds its port itself, as before.
+
 ## Supervision and logs
 
 - **Restarts.** On exit, the app restarts with exponential backoff (250 ms,
@@ -191,7 +216,7 @@ INSTALL.md `host_sockets`).
   Durable runtimes such as Workflow's local World and SQLite files assume one
   process per data dir, so blue/green overlap is not used here.
 
-## Vercel Workflow on the Node tier
+## Vercel Workflow on the Node runtime
 
 The `node-workflow` template is a plain `node:http` server with a durable
 `"use workflow"` function (`workflows/support.ts`). In that function:
@@ -224,7 +249,7 @@ The `node-workflow` template is a plain `node:http` server with a durable
 
 ## Compatibility (M9)
 
-| Thing | Version | Status on the Node tier |
+| Thing | Version | Status on the Node runtime |
 |---|---|---|
 | Node.js | 25.1 (macOS), 24.x (Lima) | ✅ (needs ≥ 24 for `NODE_USE_ENV_PROXY`) |
 | `workflow` (Vercel Workflow SDK) | 5.6.1 | ✅ `"use workflow"`, steps, `sleep`, `createHook`/`resumeHook`, kill/resume |

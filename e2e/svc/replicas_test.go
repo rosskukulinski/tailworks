@@ -63,7 +63,7 @@ func TestE2EReplicas(t *testing.T) {
 	api := &tsapi.Client{Tailnet: tailnet, APIKey: apiKey}
 	// tailworks mints with an OAuth client: this run's own, created with the
 	// harness's API key and deleted when the test ends.
-	oauthFile := cliflow.RealOAuthClient(t, keyFile, tailnet, t.TempDir(), "tw-e2e-replicas-oauth")
+	oauthFile := cliflow.RealOAuthClientScopes(t, keyFile, tailnet, t.TempDir(), "tw-e2e-replicas-oauth", []string{"services"}) // the workload has a Service
 	b := make([]byte, 3)
 	rand.Read(b)
 	run := hex.EncodeToString(b)
@@ -146,7 +146,8 @@ func TestE2EReplicas(t *testing.T) {
 		MgmtNodeID string `json:"mgmtNodeID"`
 	}
 	e.MustJSON(&up, "up", "--oauth-client-file", oauthFile, "--tailnet", tailnet, "--yes", "--hostname-prefix", prefix,
-		"--control-url", prodControl, "--mgmt-hostname", prefix+"mgmt", "--host-id", strings.TrimSuffix(prefix, "-"), "--ephemeral")
+		"--control-url", prodControl, "--mgmt-hostname", prefix+"mgmt", "--host-id", strings.TrimSuffix(prefix, "-"), "--ephemeral",
+		"--separate-host") // the two-process layout this suite was written against (cliflow.Env.SingleProcess)
 
 	// Host B: a second tw-hostd on this machine, joined via `tw host add`.
 	var join struct {
@@ -208,7 +209,7 @@ func TestE2EReplicas(t *testing.T) {
 	clientID := string(cst.Self.ID)
 
 	dir := filepath.Join(work, "rephello")
-	e.MustJSON(nil, "init", dir, "--template", "hello", "--keep-tags")
+	e.MustJSON(nil, "init", dir, "--template", "hello")
 	writeCfg := func(n int) {
 		cfg := fmt.Sprintf(`{
   "name": "rephello",

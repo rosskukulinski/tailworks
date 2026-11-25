@@ -33,7 +33,7 @@ const readmeOK = "# x\n\n## Compatibility at a glance\n\n| Area | Surface | Stat
 const compatOK = "# c\n\n| Surface | Status | provides | Tests |\n|---|---|---|---|\n" +
 	"| <a id=\"fetch\"></a>fetch | ✅ | a \\| b | `pkg:TestThing/Sub`, `pkg:TestThing/Loop`, `js/x.test.js:does a thing` |\n" +
 	"| <a id=\"kv\"></a>KV | ❌ | — | — |\n" +
-	"| <a id=\"secrets\"></a>Secrets | ⚠ | — | `pkg:TestThing` |\n" +
+	"| <a id=\"secrets\"></a>Secrets | ⚠ | — | `pkg:TestThing` (nightly) |\n" +
 	"| not a surface | ✅ | | |\n"
 
 func TestParse(t *testing.T) {

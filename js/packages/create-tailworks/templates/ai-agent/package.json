@@ -8,15 +8,15 @@
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
-    "@tailworks/tailnet": "^0.3.0",
-    "@tailworks/mcp": "^0.3.0",
+    "@tailworks/tailnet": "^0.5.0",
+    "@tailworks/mcp": "^0.5.0",
     "ai": "7.0.177",
     "@ai-sdk/mcp": "2.0.101",
     "@ai-sdk/provider": "4.0.39",
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "5.20261118.1",
+    "@cloudflare/workers-types": "5.20261121.1",
     "typescript": "7.0.2"
   }
 }

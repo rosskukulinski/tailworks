@@ -110,6 +110,7 @@ func wantCode(t *testing.T, err error, code string) {
 // A host without a container backend refuses (never runs a container
 // another way), before it asks mgmt for anything.
 func TestContainerNeedsBackend(t *testing.T) {
+	t.Parallel()
 	h, q := admitHost(t, false, roomy)
 	_, err := h.AcquireContainer(context.Background(), testCtrKey("a"), lite)
 	wantCode(t, err, "tier_unavailable")
@@ -142,6 +143,7 @@ func TestContainerNeedsBackend(t *testing.T) {
 // Local capacity is checked before mgmt is asked: over any dimension is 503
 // capacity_exhausted (no spill), and a released slot frees its room.
 func TestContainerCapacity(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	for _, tc := range []struct {
 		name  string
@@ -184,6 +186,7 @@ func TestContainerCapacity(t *testing.T) {
 
 // Concurrent starts never overrun local capacity.
 func TestContainerCapacityConcurrent(t *testing.T) {
+	t.Parallel()
 	h, _ := admitHost(t, true, mgmtapi.HostCapacity{VMs: 3, VMMemMiB: 1 << 20, VCPUs: 64, VCPUOvercommit: 1, ScratchMiB: 1 << 20})
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -208,6 +211,7 @@ func TestContainerCapacityConcurrent(t *testing.T) {
 // mgmt's quota decides: a 429 is passed on typed, and the local capacity it
 // held is given back. The reservation is for the workload's lease epoch.
 func TestContainerQuotaRefused(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	h, q := admitHost(t, true, roomy)
 	q.max = 1
@@ -236,6 +240,7 @@ func TestContainerQuotaRefused(t *testing.T) {
 // of one whose reservation this host still holds (the same or a smaller
 // container). Once mgmt acknowledges the release, the exception is gone.
 func TestContainerFailClosedAndRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	h, q := admitHost(t, true, roomy)
 	q.setDown(true)
@@ -283,12 +288,15 @@ func TestContainerFailClosedAndRestart(t *testing.T) {
 // The capacity vector: VM dimensions only with a microVM backend; nodes
 // are capacityNodes; usage counts DO microVMs and containers.
 func TestCapacityVector(t *testing.T) {
+	t.Parallel()
+	total, _ := memInfo()
+	wantNodes := DefaultCapacityNodes(total) // -capacity-nodes 0: derived from RAM
 	h, _ := admitHost(t, false, roomy)
-	if c := h.capacity(); c.VMs != 0 || c.VMMemMiB != 0 || c.Nodes != 1000 {
+	if c := h.capacity(); c.VMs != 0 || c.VMMemMiB != 0 || c.Nodes != wantNodes {
 		t.Fatalf("no backend: %+v", c)
 	}
 	h, _ = admitHost(t, true, roomy)
-	if c := h.capacity(); c.VMs != 10 || c.Nodes != 1000 {
+	if c := h.capacity(); c.VMs != 10 || c.Nodes != wantNodes {
 		t.Fatalf("with a backend: %+v", c)
 	}
 	h.workloads["tn/w"].active = &instance{tier: "microvm"}

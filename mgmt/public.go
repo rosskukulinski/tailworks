@@ -188,11 +188,6 @@ func (m *Mgmt) GetWorkloadPublic(ctx context.Context, tenantID, workload string)
 	return m.store.GetWorkloadPublic(ctx, tenantID, workload)
 }
 
-// PublicFunnelSnippet is the policy a public workload needs (ADR-029 D6);
-// kept in step with internal/policy.PublicSnippet.
-const PublicFunnelSnippet = `"tagOwners": { "tag:tw-public": ["autogroup:admin", "tag:tw"] },
-"nodeAttrs": [ { "target": ["tag:tw-public"], "attr": ["funnel"] } ]`
-
 // ActingForPublic is CreateObjectRequest.ActingFor for an object a public
 // (Funnel) request created (ADR-029 D5); mgmt records origin "public".
 const ActingForPublic = "public"

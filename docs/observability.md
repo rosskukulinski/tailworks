@@ -207,9 +207,44 @@ caller ──▶ hostd ingress ─────────▶ Worker ──stub.
   its own tailnet node, so a trace shows which object called which.
 - Trace context is observability data. It never decides authorization,
   and the audit trail's trace IDs are always tailworks' own.
-- Not traced yet: RPC calls to a Durable Object (`stub.method()`), alarms
-  and cron runs (their records have no trace), and `ctx.tailnet.fetch`
-  beyond hostd's egress span.
+
+Invocations that have no request headers get their trace from the runtime
+or from hostd:
+
+- **RPC to a Durable Object** (`stub.method(...)`, through an `env`
+  binding) gets a CLIENT span `<Class> <method>` in the caller and a
+  SERVER span `<Class> <method>` in the object, its child. The runtime
+  carries the context as one extra trailing argument, and the object's
+  wrapper removes it before your method runs, so your method gets exactly
+  the arguments the caller passed. The object's invocation record carries
+  the SERVER span's trace and span IDs.
+- **An alarm** starts a new trace: a root SERVER span `<Class> alarm`. The
+  alarm's record carries it.
+- **A cron run** starts a new trace too. hostd opens the root SERVER span
+  `scheduled <workload>` (its trace ID is the run's audit trace ID), and
+  `scheduled()` runs inside it, so the run's record has the same trace.
+- Egress, `ctx.tailnet.fetch()`, stub `fetch()` and RPC made inside any of
+  these join that trace, as they do inside a request. `ctx.tailnet.fetch()`
+  uses the same propagating `fetch()`, so it always joins the caller's trace,
+  and hostd's egress span is the hop's CLIENT span.
+- workerd's tail event for an RPC call or an alarm has no headers, so it
+  can't carry a `traceparent`. hostd matches the record to the runtime's
+  SERVER span by object, by event (the alarm, or the RPC method) and by
+  start time (within 2 s). Two calls to the same method of the same
+  object that start within that window may get each other's trace IDs. A
+  record whose span never arrives is written after the join wait, with no
+  trace.
+
+Not traced yet:
+
+- RPC through a raw binding (one that skips tailworks' guarded `env`, such
+  as `import { env } from "cloudflare:workers"`), RPC to a Worker's own
+  entrypoints or a service binding, and RPC made while no handler's trace
+  is running (for example from a WebSocket event). The callee runs with no
+  trace.
+- WebSocket events (`webSocketMessage`, `webSocketClose`), queue consumer
+  batches, Workflow steps, and storage operations. Their records have no
+  trace.
 
 ## Volume bounds
 
@@ -220,9 +255,12 @@ One noisy object can't fill a host's disk:
 - each workload writes at most 200 records per second (bursts of 1000) to
   its request log. The rest are dropped and counted, and a
   `kind: "dropped"` record says how many;
-- a request log rotates at 8 MiB, keeping one previous file;
+- a request log rotates at 8 MiB, keeping one previous file. With
+  `tw up --request-log-max-age 168h` (`tw-hostd -request-log-max-age`)
+  the host also drops records older than that, every 10 minutes; off by
+  default;
 - `workerd.log` and the node runtime's `app.log` rotate at 16 MiB the same
-  way;
+  way, and `tw up`'s own `mgmt.log` and `hostd.log` at 32 MiB;
 - the export queue is 4096 items per signal and workload; overflow is
   dropped and counted, never buffered to disk.
 

@@ -21,9 +21,11 @@ import (
 // Egress entrypoint; serve it only on a socket tenant code cannot reach
 // directly (a 0700 directory shared with workerd).
 //
-// Each request leaves via its object's own node. Destinations are resolved
-// from that object's netmap only (ADR-019): names never go to host DNS and
-// non-tailnet IPs never go to the host network.
+// Each tailnet request leaves via its object's own node. Tailnet
+// destinations are resolved from that object's netmap only (ADR-019); a
+// tailnet-shaped name never goes to host DNS. A destination that is not on
+// the tailnet takes the internet path (internet.go,
+// ADR-049) when Config.Internet is set.
 func (r *Registry) EgressHandler() http.Handler {
 	rp := &httputil.ReverseProxy{
 		FlushInterval: -1,
@@ -38,6 +40,7 @@ func (r *Registry) EgressHandler() http.Handler {
 			}
 			stripIdentityHeaders(pr.Out.Header)
 			pr.Out.Header.Del("proxy-connection")
+			KeepBodyEOF(pr) // proxybody.go (#138)
 		},
 		ErrorHandler: func(w http.ResponseWriter, req *http.Request, err error) {
 			if e, ok := AsError(err); ok {
@@ -64,7 +67,8 @@ func (r *Registry) EgressHandler() http.Handler {
 			return
 		}
 		if req.Method == http.MethodConnect {
-			WriteError(w, &Error{Code: CodeBadRequest, Detail: "CONNECT is not supported; use ctx.tailnet.connect()", Object: id, status: http.StatusMethodNotAllowed})
+			// hostd serves workerd's CONNECT tunnels itself (DialEgress).
+			WriteError(w, &Error{Code: CodeBadRequest, Detail: "CONNECT is not supported on the HTTP egress proxy (hostd dials sockets with DialEgress)", Object: id, status: http.StatusMethodNotAllowed})
 			return
 		}
 		if !req.URL.IsAbs() || (req.URL.Scheme != "http" && req.URL.Scheme != "https") {
@@ -73,6 +77,9 @@ func (r *Registry) EgressHandler() http.Handler {
 		}
 		rctx, cancel := context.WithTimeout(req.Context(), r.cfg.ReadyTimeout)
 		err := o.Ready(rctx)
+		if err == nil {
+			err = r.gateEgress(rctx, o) // egressgate.go (#331)
+		}
 		cancel()
 		if err != nil {
 			e, _ := AsError(err)
@@ -81,7 +88,7 @@ func (r *Registry) EgressHandler() http.Handler {
 			return
 		}
 		// Resolve up front for a typed error; dialEgress re-checks at dial time.
-		if _, e := o.resolveEgress(req.Context(), req.URL.Host, req.URL.Scheme); e != nil {
+		if _, _, e := o.resolveEgress(req.Context(), req.URL.Host, req.URL.Scheme); e != nil {
 			WriteError(w, e)
 			return
 		}
@@ -103,6 +110,9 @@ func (r *Registry) DialEgress(ctx context.Context, id, hostport string) (net.Con
 	}
 	rctx, cancel := context.WithTimeout(ctx, r.cfg.ReadyTimeout)
 	err := o.Ready(rctx)
+	if err == nil {
+		err = r.gateEgress(rctx, o) // egressgate.go (#331)
+	}
 	cancel()
 	if err != nil {
 		e, _ := AsError(err)
@@ -150,15 +160,21 @@ func (egressTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 // request URL (a name or an IP); it is resolved and checked again here so no
 // code path can reach tsnet.Server.Dial with an unchecked destination.
 func (o *Object) dialEgress(ctx context.Context, network, addr string) (net.Conn, error) {
-	ap, e := o.resolveEgress(ctx, addr, "")
+	ap, inet, e := o.resolveEgress(ctx, addr, "")
 	if e != nil {
 		return nil, e
+	}
+	if inet != nil {
+		return o.dialInternet(ctx, inet)
 	}
 	o.mu.Lock()
 	srv, state := o.srv, o.state
 	o.mu.Unlock()
 	if state != StateReady || srv == nil {
 		return nil, &Error{Code: CodeKilled, Detail: "object " + o.id + " is " + string(state), Object: o.id}
+	}
+	if dst, svc, ok := o.hopTarget(ctx, ap); ok { // samehost.go
+		return o.dialHop(dst, ap, svc)
 	}
 	o.awaitPeerPath(ctx, ap.Addr())
 	c, err := srv.Dial(ctx, "tcp", ap.String())
@@ -173,12 +189,17 @@ func (o *Object) dialEgress(ctx context.Context, network, addr string) (net.Conn
 }
 
 // resolveEgress applies the ADR-019 egress policy to hostport and returns the
-// tailnet address to dial. scheme supplies the default port.
-func (o *Object) resolveEgress(ctx context.Context, hostport, scheme string) (netip.AddrPort, *Error) {
-	refuse := func(code, detail string) (netip.AddrPort, *Error) {
+// tailnet address to dial, or an internet destination for dialInternet
+// (resolved and checked only when dialled). scheme supplies the default port.
+func (o *Object) resolveEgress(ctx context.Context, hostport, scheme string) (netip.AddrPort, *internetDst, *Error) {
+	refuse := func(code, detail string) (netip.AddrPort, *internetDst, *Error) {
 		e := newErr(code, detail)
 		e.Object, e.Destination = o.id, hostport
-		return netip.AddrPort{}, e
+		return netip.AddrPort{}, nil, e
+	}
+	internet := func(host string, port uint64, literal bool) (netip.AddrPort, *internetDst, *Error) {
+		d, e := o.internetRoute(host, uint16(port), literal)
+		return netip.AddrPort{}, d, e
 	}
 	host, portStr, err := net.SplitHostPort(hostport)
 	if err != nil {
@@ -213,13 +234,16 @@ func (o *Object) resolveEgress(ctx context.Context, hostport, scheme string) (ne
 	ip, err := netip.ParseAddr(host)
 	if err == nil {
 		ip = ip.Unmap()
+		if !tsaddr.IsTailscaleIP(ip) && o.reg.cfg.Internet != nil {
+			return internet(ip.String(), port, true)
+		}
 		if code, detail := o.reg.classify(o, ip); code != "" {
 			return refuse(code, detail)
 		}
 		for _, p := range st.Peer {
 			for _, a := range p.TailscaleIPs {
 				if a == ip {
-					return netip.AddrPortFrom(ip, uint16(port)), nil
+					return netip.AddrPortFrom(ip, uint16(port)), nil, nil
 				}
 			}
 		}
@@ -227,7 +251,7 @@ func (o *Object) resolveEgress(ctx context.Context, hostport, scheme string) (ne
 			if code != "" {
 				return refuse(code, detail)
 			}
-			return netip.AddrPortFrom(ip, uint16(port)), nil
+			return netip.AddrPortFrom(ip, uint16(port)), nil, nil
 		}
 		return refuse(CodePeerNotVisible, "no peer with address "+ip.String()+" in this object's netmap (a grant is missing, or the peer is offline or deleted)")
 	}
@@ -264,17 +288,17 @@ func (o *Object) resolveEgress(ctx context.Context, hostport, scheme string) (ne
 			if code, detail := o.reg.classify(o, vip); code != "" {
 				return refuse(code, detail)
 			}
-			return netip.AddrPortFrom(vip, uint16(port)), nil
+			return netip.AddrPortFrom(vip, uint16(port)), nil, nil
 		}
 		if !tailnetShaped(want, st) {
-			return refuse(CodeInternetEgressUnavailable, internetEgressDetail(host))
+			return internet(want, port, false)
 		}
 		return refuse(CodePeerNotVisible, "no peer named "+host+" in this object's netmap (names are never resolved via host DNS; a grant may be missing)")
 	}
 	if code, detail := o.reg.classify(o, found); code != "" {
 		return refuse(code, detail)
 	}
-	return netip.AddrPortFrom(found, uint16(port)), nil
+	return netip.AddrPortFrom(found, uint16(port)), nil, nil
 }
 
 // classify returns a refusal for ip, or "" if it is an allowed tailnet peer
@@ -295,11 +319,13 @@ func (r *Registry) classify(o *Object, ip netip.Addr) (code, detail string) {
 		return CodeForbiddenDestination, "destination is this object's own node"
 	}
 	r.mu.Lock()
-	sib, isSib := r.localIPs[ip]
+	_, isSib := r.localIPs[ip]
 	host := r.hostIPs[ip]
 	r.mu.Unlock()
-	if isSib && !r.cfg.AllowSiblings {
-		return CodeForbiddenDestination, "destination is a sibling object on this host (" + sib + "); same-host calls go through the platform"
+	if isSib {
+		// A sibling object on this host: delivered in process after the
+		// peer checks (samehost.go), or over WireGuard with AllowSiblings.
+		return "", ""
 	}
 	if host {
 		return CodeForbiddenDestination, "destination is an address of this host"
@@ -310,7 +336,7 @@ func (r *Registry) classify(o *Object, ip netip.Addr) (code, detail string) {
 		}
 	}
 	if !tsaddr.IsTailscaleIP(ip) {
-		return CodeForbiddenDestination, "non-tailnet destination (internet egress needs an exit node or gateway; none configured)"
+		return CodeForbiddenDestination, "non-tailnet destination (this host has no internet egress path)"
 	}
 	return "", ""
 }
@@ -348,39 +374,21 @@ func serviceVIP(ctx context.Context, lc interface {
 
 // servicePeer reports whether ip is a Service VIP routed by a peer in st
 // (the VIP is in the peer's AllowedIPs; control only routes it to approved
-// hosts the caller has a grant to). code is set when every such host is a
-// sibling object on this host (same-host calls go through the platform).
+// hosts the caller has a grant to). A Service whose only reachable hosts
+// are siblings on this host is delivered in process (samehost.go). code is
+// never set; it stays for callers that refuse on it.
 func (r *Registry) servicePeer(o *Object, st *ipnstate.Status, ip netip.Addr) (code, detail string, ok bool) {
-	var hosts []netip.Addr
 	for _, p := range st.Peer {
 		if p.AllowedIPs == nil {
 			continue
 		}
-		routes := false
 		for _, pfx := range p.AllowedIPs.All() {
 			if pfx.Contains(ip) && pfx.Bits() == ip.BitLen() {
-				routes = true
-				break
+				return "", "", true
 			}
 		}
-		if routes {
-			hosts = append(hosts, p.TailscaleIPs...)
-		}
 	}
-	if len(hosts) == 0 {
-		return "", "", false
-	}
-	if r.cfg.AllowSiblings {
-		return "", "", true
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, h := range hosts {
-		if _, sib := r.localIPs[h]; !sib {
-			return "", "", true
-		}
-	}
-	return CodeForbiddenDestination, "the service's only reachable host is a sibling object on this host; same-host calls go through the platform", true
+	return "", "", false
 }
 
 // PeerPathWait bounds how long an egress dial waits for a just-registered

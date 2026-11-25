@@ -55,7 +55,7 @@ func startCollector(t *testing.T, s *suite) *collector {
 			return
 		}
 		from := ""
-		if who, err := n.LC.WhoIs(r.Context(), r.RemoteAddr); err == nil {
+		if who, err := n.LC.WhoIs(r.Context(), r.RemoteAddr); err == nil && who.Node != nil {
 			from = who.Node.Name
 		}
 		c.mu.Lock()
@@ -137,6 +137,7 @@ func hasLog(r obs.Record, msg string) bool {
 // traceparent across a DO call and an egress fetch, /metrics, the logs
 // API, and OTLP export from the workload's own node.
 func TestTelemetry(t *testing.T) {
+	t.Parallel()
 	s := startSuiteCapsOpts(t, fakemgmt.Config{}, tailcfg.PeerCapMap{nettest.TestCap: []tailcfg.RawMessage{nettest.TestCapValue}}, func(o *hostdtest.Options) {
 		o.Telemetry = hostd.TelemetryOptions{JoinWait: time.Second, ExportEvery: 200 * time.Millisecond, MetricsEvery: 300 * time.Millisecond, RefreshEvery: 500 * time.Millisecond}
 	})
@@ -402,6 +403,9 @@ func TestTelemetry(t *testing.T) {
 			}
 		}
 	})
+
+	// After PrometheusScrape, which counts the Obj objects.
+	t.Run("EntryTraces", func(t *testing.T) { testEntryTraces(t, s, coll, logPath, base, in, t0) }) // telemetry_entries_test.go
 
 	t.Run("ExportStopsWhenUnset", func(t *testing.T) {
 		e.FM.SetTelemetry(e.TenantID, nil)

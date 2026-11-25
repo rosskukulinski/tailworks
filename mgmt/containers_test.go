@@ -14,6 +14,7 @@ import (
 // even when the parent is process-tier; otherwise 503 no_host, or 409
 // tier_unavailable for a pinned host or a sticky lease holder.
 func TestContainerPlacement(t *testing.T) {
+	t.Parallel()
 	const tags = `"tailnet": { "tags": ["tag:tw-web"] }`
 	wrangler := func(arch string) string {
 		a := ""
@@ -88,6 +89,7 @@ func TestContainerPlacement(t *testing.T) {
 // A workload on a host without containers that now declares them is
 // refused (stickiness never keeps it where its containers can't run).
 func TestContainerPlacementStickyHolder(t *testing.T) {
+	t.Parallel()
 	m, tn := tierTestMgmt(t)
 	ctx := context.Background()
 	m.RegisterHost(ctx, RegisterRequest{HostID: "hp", CapacityNodes: 1000, Tiers: []string{"process"}, Arch: "amd64"}, "", "")
@@ -113,6 +115,7 @@ func TestContainerPlacementStickyHolder(t *testing.T) {
 // release and adopt on the store clock; every step is audited; sandboxes
 // don't use the object quota.
 func TestV1ContainerReservations(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	clk := &stepClock{now: time.Now()}
 	e.store.SetClock(clk)

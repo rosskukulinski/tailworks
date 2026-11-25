@@ -3,15 +3,23 @@
 #
 #   suite    one matrix job per Makefile target, so they run in parallel and
 #            report separately. Each needs only `make deps` (npm ci, workerd,
-#            the JS builds), Go and Node; e2e-headscale also uses the
-#            runner's Docker, templates-typecheck and test-vitest the npm
-#            registry.
+#            the JS builds), Go and Node; e2e-headscale,
+#            e2e-multimgmt and e2e-dataplane-r2 also use the runner's Docker. (e2e-local, templates-typecheck and
+#            test-vitest moved to ci.yml, so every PR runs them: #163.)
 #   test-pg  `make test-pg` against a Postgres 17 service container
 #            (scripts/test-pg.sh uses TW_TEST_POSTGRES_DSN instead of
 #            starting its own). Also runs on PRs that touch the store.
+#            e2e-compat-dev (issue #325) runs the upstream examples of
+#            cloudflare/agents, vercel/mcp-handler, the Vercel AI SDK and
+#            cloudflare/python-workers-examples (needs uv) under `tw dev` and writes the tables it gets to the job summary.
 #   report   on a scheduled run with a failure, comments on (or opens) the
 #            "nightly suites failing" issue so a red night is not missed;
 #            a green scheduled run closes that issue ("passing again").
+#   v8-check `make v8-check` (issue #338): the pinned workerd's V8 against
+#            the V8 in Chrome's stable channel. Behind: opens or updates the
+#            `security` issue "workerd pin is behind Chrome stable's V8",
+#            which starts the clock in docs/RELEASING.md ("Upstream
+#            advisories"); caught up: closes it. The job itself stays green.
 #
 # A suite that fails on master for a real reason gets an issue and
 # `allow_failure: <issue URL>` on its matrix entry (continue-on-error) until
@@ -57,14 +65,42 @@ jobs:
           - target: e2e-coldid
             timeout: 30
             allow_failure: ""
+          # node 24: one upstream example asks for it, and npm 10 (Node 22)
+          # can't install that example's dependencies.
+          - target: e2e-compat-dev
+            timeout: 45
+            allow_failure: ""
+            node: "24"
+          - target: e2e-dataplane
+            timeout: 30
+            allow_failure: ""
+          # The data-plane loop's cron and alarms scenarios, one after the
+          # other (#419).
+          - target: e2e-dataplane-cron
+            timeout: 40
+            allow_failure: ""
+          # Deploys, rollbacks, previews and secrets through 3 tw-mgmt
+          # replicas on the runner's Docker Postgres (#421).
+          - target: e2e-dataplane-deploys
+            timeout: 30
+            allow_failure: ""
+          # R2 under faults; r2-s3 and r2-replicas run Garage in the runner's Docker.
+          - target: e2e-dataplane-r2
+            timeout: 45
+            allow_failure: ""
+          # Public ingress, service bindings and WebSockets across moves (#422).
+          - target: e2e-dataplane-routing
+            timeout: 30
+            allow_failure: ""
           - target: e2e-headscale
             timeout: 45
             allow_failure: ""
-          - target: e2e-local
-            timeout: 30
-            allow_failure: ""
           - target: e2e-locks
             timeout: 30
+            allow_failure: ""
+          # 3 tw-mgmt replicas on one Postgres under faults (e2e/multimgmt/LOOP.md).
+          - target: e2e-multimgmt
+            timeout: 60
             allow_failure: ""
           - target: e2e-observability
             timeout: 30
@@ -81,16 +117,10 @@ jobs:
           - target: e2e-wrangler
             timeout: 30
             allow_failure: ""
-          - target: templates-typecheck
-            timeout: 30
-            allow_failure: ""
           - target: test-node
             timeout: 30
             allow_failure: ""
           - target: test-sdk
-            timeout: 30
-            allow_failure: ""
-          - target: test-vitest
             timeout: 30
             allow_failure: ""
     steps:
@@ -100,8 +130,12 @@ jobs:
           go-version-file: go.mod
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version: ${{ matrix.node || '22' }}
           cache: npm
+      # e2e-compat-dev's Python examples vendor their packages with
+      # `uv run pywrangler sync` (e2e/compat/python.go).
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        if: matrix.target == 'e2e-compat-dev'
       - name: make deps
         run: make deps
       - name: known failure
@@ -112,7 +146,42 @@ jobs:
         run: |
           echo "::warning::$TARGET is a known failure (continue-on-error): $ISSUE"
       - name: make ${{ matrix.target }}
+        env:
+          # e2e-multimgmt: the runner's Docker, and a new fault schedule
+          # each night (the log prints the seed to rerun it with).
+          PG_CTX: default
+          TW_MM_SEED: ${{ github.run_number }}
         run: make ${{ matrix.target }}
+      # The upstream-examples tables of docs/COMPAT.md (issue #325), as
+      # tonight's run renders them: the dated evidence for those tables.
+      - name: tonight's upstream-examples tables
+        if: always() && matrix.target == 'e2e-compat-dev'
+        run: |
+          f=$(ls e2e/real/results/compat-dev-*.json 2>/dev/null | tail -1)
+          [ -n "$f" ] || { echo "no results file"; exit 0; }
+          go run ./e2e/compat/compatreport -print -dev "$f" >>"$GITHUB_STEP_SUMMARY"
+      - name: upload tonight's results
+        if: always() && matrix.target == 'e2e-compat-dev'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: compat-dev-results
+          path: e2e/real/results/compat-dev-*.json
+          if-no-files-found: ignore
+      # Op histories, replica logs and invariant reports of a failed run.
+      - name: upload multimgmt results
+        if: failure() && matrix.target == 'e2e-multimgmt'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: multimgmt-results
+          path: e2e/multimgmt/results/
+          if-no-files-found: ignore
+      - name: upload dataplane results
+        if: failure() && startsWith(matrix.target, 'e2e-dataplane')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ matrix.target }}-results
+          path: e2e/dataplane/results/
+          if-no-files-found: ignore
 
   test-pg:
     runs-on: ubuntu-24.04
@@ -142,6 +211,33 @@ jobs:
       - name: full test-pg log
         if: failure()
         run: cat "$RUNNER_TEMP/tw-test-pg.log"
+
+  v8-check:
+    # The pinned workerd's V8 against Chrome stable's (scripts/v8-check.sh).
+    # Not in report's needs: the security issue it files is the signal, and
+    # a pin that is behind is not a failing suite.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+      - name: make v8-check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          V8_CHECK_ISSUE: "1"
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: make v8-check
 
   report:
     if: always() && github.event_name == 'schedule'

@@ -176,7 +176,7 @@ func (m *Mgmt) PlanUpgrade(ctx context.Context, req UpgradeRequest) (UpgradePlan
 	es := entries(cat)
 	target, ok := catalog.Find(es, p.To)
 	if !ok {
-		return p, errf(400, "bad_request", "release %s is not in the catalog: import it first (tw release import tailworks-%s-<os>-<arch>.tar.gz)", p.To, p.To)
+		return p, errf(400, "bad_request", "release %s is not in the catalog: import it first (tw upgrade import %s)", p.To, p.To)
 	}
 
 	// From: every live replica and every host in scope.
@@ -307,7 +307,7 @@ func (m *Mgmt) PlanUpgrade(ctx context.Context, req UpgradeRequest) (UpgradePlan
 		if st.SelfUpgrade {
 			st.Artifact = fmt.Sprintf("tailworks-%s-%s-%s.tar.gz", p.To, h.OS, h.Arch)
 			if !slices.Contains(m.artifactNames(p.To), st.Artifact) {
-				p.Blockers = append(p.Blockers, fmt.Sprintf("host %s upgrades itself but this tw-mgmt has no %s: tw release import %s", h.ID, st.Artifact, st.Artifact))
+				p.Blockers = append(p.Blockers, fmt.Sprintf("host %s upgrades itself but this tw-mgmt has no %s: tw upgrade import %s", h.ID, st.Artifact, p.To))
 			}
 			st.Detail = "the host installs " + st.Artifact + " and restarts"
 		} else {
@@ -407,7 +407,7 @@ func (m *Mgmt) StartUpgrade(ctx context.Context, req UpgradeRequest, by string) 
 	b, _ := json.Marshal(run)
 	if err := us.CreateUpgradeRun(ctx, run.ID, run.To, run.State, string(b), now); err != nil {
 		if errors.Is(err, ErrExists) {
-			return UpgradeRun{}, errf(409, "exists", "an upgrade run is already active: tw upgrade status")
+			return UpgradeRun{}, errf(409, "exists", "an upgrade run is already active: tw upgrade fleet status")
 		}
 		return UpgradeRun{}, err
 	}

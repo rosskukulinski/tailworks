@@ -115,6 +115,10 @@ func fmtAny(v any) string {
 
 func (f *fakeHost) egressObj() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodConnect {
+			f.connect(w, r, true) // connect_test.go
+			return
+		}
 		cls, name, ok := gen.VerifyEgress(f.key, r.Header, r.Method, r.RequestURI, time.Now())
 		if !ok {
 			w.Header().Set("tw-error", "unknown_object")
@@ -131,6 +135,10 @@ func (f *fakeHost) egressObj() http.Handler {
 
 func (f *fakeHost) egressWL() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodConnect {
+			f.connect(w, r, false) // connect_test.go
+			return
+		}
 		if egressRedirect(w, r) { // egress_sink_test.go
 			return
 		}
@@ -143,6 +151,9 @@ type inst struct {
 	hc  *http.Client
 	cmd *exec.Cmd
 	f   *fakeHost
+
+	cfg string // config.capnp
+	log string // workerd's stdout and stderr
 }
 
 func start(t *testing.T, appDir string, vars map[string]string) *inst {
@@ -160,6 +171,12 @@ func start(t *testing.T, appDir string, vars map[string]string) *inst {
 // startFiles runs an already-built bundle (path -> contents).
 func startFiles(t *testing.T, files map[string][]byte) *inst {
 	t.Helper()
+	return startFilesOpts(t, files, nil)
+}
+
+// startFilesOpts is startFiles with mod applied to the generator options.
+func startFilesOpts(t *testing.T, files map[string][]byte, mod func(*gen.Options)) *inst {
+	t.Helper()
 	wdBin, err := nettest.WorkerdBinary()
 	if err != nil {
 		t.Skip(err)
@@ -173,7 +190,11 @@ func startFiles(t *testing.T, files map[string][]byte) *inst {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
-	res, err := gen.Generate(app, gen.Options{Dir: filepath.Join(dir, "i1"), DOStorage: filepath.Join(dir, "do"), DeploymentID: "d1", Workload: app.Name})
+	opts := gen.Options{Dir: filepath.Join(dir, "i1"), DOStorage: filepath.Join(dir, "do"), DeploymentID: "d1", Workload: app.Name}
+	if mod != nil {
+		mod(&opts)
+	}
+	res, err := gen.Generate(app, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +203,7 @@ func startFiles(t *testing.T, files map[string][]byte) *inst {
 	f.serve(t, res.Sockets.EgressObj, f.egressObj())
 	f.serve(t, res.Sockets.EgressWL, f.egressWL())
 	logf, _ := os.Create(filepath.Join(dir, "workerd.log"))
-	cmd := exec.Command(wdBin, "serve", res.Config, "--experimental")
+	cmd := exec.Command(wdBin, append([]string{"serve", res.Config, "--experimental"}, pythonArgs(t, app)...)...) // python_test.go
 	cmd.Stdout, cmd.Stderr = logf, logf
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -199,14 +220,22 @@ func startFiles(t *testing.T, files map[string][]byte) *inst {
 		return (&net.Dialer{}).DialContext(ctx, "unix", res.Sockets.Ingress)
 	}}}
 	in := &inst{t: t, hc: hc, cmd: cmd, f: f}
-	deadline := time.Now().Add(20 * time.Second)
+	in.cfg, in.log = res.Config, filepath.Join(dir, "workerd.log")
+	// A Python Worker loads Pyodide before workerd listens: seconds on an
+	// idle machine, past 20 s on a loaded CI runner (#428).
+	wait := 20 * time.Second
+	if app.Python {
+		wait = 90 * time.Second
+	}
+	t0 := time.Now()
 	for {
 		code, _, _ := in.get("/", map[string]any{"kind": "admin", "op": "health"})
 		if code == 200 {
+			t.Logf("workerd up in %v", time.Since(t0).Round(time.Millisecond))
 			break
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("workerd did not come up")
+		if time.Since(t0) > wait {
+			t.Fatalf("workerd did not come up within %v", wait)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -225,6 +254,13 @@ func (in *inst) ticketed(tw map[string]any) map[string]any {
 	return out
 }
 
+// sealed is cf.tailscale as hostd sends it for a tailnet request: netd's
+// caller plus hostd's seal (RT3-08; without it the platform drops the caller).
+func (in *inst) sealed() map[string]any {
+	cb, _ := json.Marshal(testCaller)
+	return map[string]any{"caller": testCaller, "seal": gen.SealCaller(in.f.key, cb, time.Now())}
+}
+
 func (in *inst) get(path string, tw map[string]any, hdr ...string) (int, http.Header, map[string]any) {
 	if tw["kind"] == "object" {
 		// Delivered on the object's own node: in hostd the object exists, so
@@ -237,7 +273,7 @@ func (in *inst) get(path string, tw map[string]any, hdr ...string) (int, http.He
 		in.f.mu.Unlock()
 	}
 	req, _ := http.NewRequest("GET", "http://app.local"+path, nil)
-	blob := map[string]any{"tailscale": map[string]any{"caller": testCaller}, "objectId": "o1", "tw": in.ticketed(tw)}
+	blob := map[string]any{"tailscale": in.sealed(), "objectId": "o1", "tw": in.ticketed(tw)}
 	b, _ := json.Marshal(blob)
 	req.Header.Set("x-tw-cf", string(b))
 	for i := 0; i+1 < len(hdr); i += 2 {
@@ -281,6 +317,11 @@ func TestGeneratedWrapperProbe(t *testing.T) {
 		if code != 200 || r["as"] != "workload" || r["url"] != "http://echo/x" {
 			t.Fatalf("%d %v", code, r)
 		}
+		// #347: the Worker can't hand hostd a service binding's wire header.
+		code, _, r = in.get("/egress?wire=1&url=http://echo/x", wl)
+		if h, _ := r["headers"].(map[string]any); code != 200 || r["as"] != "workload" || h == nil || h["Tailworks-Binding"] != nil {
+			t.Fatalf("a tenant-set Tailworks-Binding reached hostd's workload egress: %d %v", code, r)
+		}
 	})
 	t.Run("ObjectRoute", func(t *testing.T) {
 		code, _, r := in.get("/", obj("Probe", "a"))
@@ -311,7 +352,7 @@ func TestGeneratedWrapperProbe(t *testing.T) {
 			t.Fatalf("%d %v", code, r)
 		}
 		h := r["headers"].(map[string]any)
-		if h["X-Tw-Object"] != nil || h["Proxy-Authorization"] != nil || h["X-Tw-Cf"] != nil {
+		if h["X-Tw-Object"] != nil || h["Proxy-Authorization"] != nil || h["X-Tw-Cf"] != nil || h["Tailworks-Binding"] != nil {
 			t.Fatalf("forged headers reached hostd: %v", h)
 		}
 	})

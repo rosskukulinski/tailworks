@@ -24,7 +24,7 @@ tw deploy
 ```
 
 On a tailnet, `tw ls` lists every agent with its node, `tw audit <object>`
-shows who created and called it, and `tw kill <object> --cascade` stops it
+shows who created and called it, and `tw kill <object>` stops it
 and its sub-agents.
 
 ## What to change
@@ -36,8 +36,9 @@ and its sub-agents.
   mode) if the class needs native alarms and doesn't need its own egress
   identity ([egress-modes.md](https://github.com/rosskukulinski/tailworks/blob/master/docs/egress-modes.md));
   `"ttl"` to end sub-agents.
-- `tailworks.jsonc` `tailnet.spawn`: how many sub-agents may live at once, and how
-  deep they may nest.
+- `tailworks.jsonc` `tailnet.spawn`: add `{ "maxLive": N, "maxDepth": N }` to
+  lower the sub-agent budget below the defaults (64 live sub-agents under one
+  root, depth 3). A deployment can only lower them.
 - The `example.com/cap/mcp` capability in `/spawn` and `/delegate`: what a
   sub-agent may do, narrowed from your grants. Pair it with the `mcp`
   template.

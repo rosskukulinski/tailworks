@@ -10,7 +10,6 @@
 // compiled by the SDK's StandaloneBuilder (the same builder as `workflow
 // build`), and the app bundle gets the SDK's "step" mode SWC transform (as
 // the Nitro/Vite/rollup integrations do) so `start(fn)` sees fn.workflowId.
-import * as esbuild from "esbuild";
 import { builtinModules, createRequire } from "node:module";
 import { existsSync, realpathSync, mkdirSync, readFileSync, rmSync, writeFileSync, cpSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -39,6 +38,21 @@ function resolver(dir) {
       return undefined;
     },
   };
+}
+
+// esbuild: the app's own (the node-workflow template depends on it), then
+// create-tailworks' (a checkout). An installed release vendors only pure-JS
+// modules, and esbuild is native, so from a release it must come from the app.
+async function loadEsbuild(r) {
+  try {
+    return await r.load("esbuild");
+  } catch (err) {
+    try {
+      return await import("esbuild");
+    } catch {
+      throw err; // "cannot resolve esbuild (install it in the app: npm install esbuild)"
+    }
+  }
 }
 
 export async function buildNodeApp(dir, outdir, { vars = {}, minify = false } = {}) {
@@ -83,6 +97,7 @@ export async function buildNodeApp(dir, outdir, { vars = {}, minify = false } = 
   }
   const st = Date.now();
   const builtins = new Set(builtinModules);
+  const esbuild = await loadEsbuild(r);
   const res = await esbuild.build({
     entryPoints: [path.join(dir, t.main)],
     outfile: path.join(outdir, "dist", "server.mjs"),

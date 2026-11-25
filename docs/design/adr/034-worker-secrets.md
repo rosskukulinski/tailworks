@@ -107,9 +107,11 @@
    - Values are not in logs, errors or audit records. `secret_put`,
      `secret_delete` and `secret_release` record names, the workload and
      the actor.
-   - The CLI reads values from stdin (a hidden prompt on a TTY). It refuses
-     a value given in argv and doesn't echo it, and it never prints a
-     value.
+   - The CLI reads values from stdin (a hidden prompt on a TTY) or, for
+     `tw secret bulk`, from a file or piped stdin, never from argv. It
+     refuses a value given in argv and doesn't echo it, and it never prints
+     a value. `tw secret bulk` names a bad line or name but doesn't echo a
+     value or a JSON decoder message.
    - mgmt's PUT handler doesn't echo JSON decoder errors, because they can
      quote the value.
    - The Go grant types redact themselves when printed.

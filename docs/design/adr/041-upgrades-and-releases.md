@@ -4,6 +4,11 @@
 **Status:** Accepted (2026-11-16). Built, except where "Not built" says
 otherwise (first shipped in tailworks 0.2.0); results in
 `status/design-component-upgrade-release-process.md`.
+**Updated 2026-11-25 (issue #486):** the CLI spellings moved under
+`tw upgrade`: `tw upgrade fleet` (was `--fleet`), `tw upgrade fleet
+status|pause|resume|abort`, `tw upgrade import` and `tw upgrade releases`
+(were `release import|ls`), and the new `tw upgrade rollback`. The old
+spellings stay hidden for one release.
 
 ## Context
 
@@ -32,7 +37,7 @@ today (2026-11-15, 46ff0c3):
   nodes rejoin and nothing re-registers.
 - **Missing verbs.** There is no `tw upgrade`. There is no graceful drain:
   `host rm --drain` kills the host's objects and deletes the host. There is
-  no `tw mgmt migrate` either (still not built).
+  no `tw-mgmt migrate` either (now built: `--check` and `--apply`, §3).
 - **`install.sh`** swaps `bin/` and `share/` but doesn't restart anything,
   and it deletes the previous copy. The root-owned vmhelper changes only when
   `sudo tw host setup --microvm` is re-run.
@@ -67,7 +72,7 @@ The per-branch list is in the status file.
 ### 1. One release train, one version
 
 - **Every artifact in a tarball shares one SemVer version.** That includes
-  `tw`, `tw-mgmt`, `tw-hostd`, `tw-netd`, `tw-vmhelper`, `tw-vz`, the
+  `tw`, `tw-mgmt`, `tw-hostd`, `tw-vmhelper`, `tw-vz`, the
   guest image (rootfs with `tw-guestd` and workerd, plus the kernel), the
   embedded platform JS, the admin UI, the create-tailworks templates and the
   `@tailworks/*` npm packages.
@@ -197,8 +202,8 @@ per contract:
       `fs` blobs, `approvals.json`, request logs) are refused unless
       `--allow-local-state-loss` is given. On a single-host MVP namespace
       there is nowhere to move them, so the answer is a bounce, not a drain.
-  - **Bounce** (the default for `tw host upgrade` on a host that can't
-    drain):
+  - **Bounce** (the default when an upgrade run (`tw upgrade fleet`)
+    reaches a host that can't drain):
     1. Install the new tarball side by side.
     2. Upgrade vmhelper first. It speaks old and new (§2), and the VMs restart
        with hostd anyway.
@@ -311,19 +316,24 @@ per contract:
     `release.json` plus the assembled release notes (§9) for itself and
     every earlier release. Entries carry `upgrade` kinds, contract
     migrations, protocol and format versions, and the workerd pin.
-  - A newer target is added with `tw release import <tarball>…`, which
+  - A newer target is added with `tw upgrade import <tarball>…`, which
     verifies the tarball against `SHA256SUMS`, posts its
     `share/tailworks/catalog.json` (the `releases` table), and uploads
     `SHA256SUMS` and the tarball to mgmt's release directory (`-release-dir`,
     default `<state-dir>/releases`; an upload must match `SHA256SUMS`).
-    Replicas that don't share that directory each need the import. Not
-    built: opt-in `--release-source github`, which would have mgmt fetch
-    new entries itself.
-  - `GET /v1/releases` lists the catalog; `tw release ls` shows it.
+    Replicas that don't share that directory each need the import.
+    `tw upgrade import <version>` downloads the release's `SHA256SUMS` and
+    `SHA256SUMS.sig` instead, checks the signature against the pinned keys
+    (there is no way past it), and imports the tarball of each platform
+    the self-upgrading hosts run. Nothing fetches implicitly: `--plan` and
+    a bare `tw upgrade fleet` plan from what the catalog has. Not built:
+    opt-in `--release-source github`, which would have mgmt fetch new
+    entries itself.
+  - `GET /v1/releases` lists the catalog; `tw upgrade releases` shows it.
 - **Production: a mgmt-side upgrade orchestrator.** The fleet upgrade runs
   in mgmt, not in the CLI, so it survives a laptop disconnecting and is
   visible to every operator.
-  - `tw upgrade --plan --to vX.Y.Z` asks mgmt for a plan
+  - `tw upgrade fleet vX.Y.Z --plan` asks mgmt for a plan
     (`POST /v1/upgrades?dryRun=true`). mgmt computes it from the catalog
     and the fleet's reported versions and features:
     1. Check the store backup (point-in-time recovery is on).
@@ -334,7 +344,7 @@ per contract:
 
     The plan flags hosts that lack a feature some deployment needs, and
     every intermediate minor that has a contract migration.
-  - `tw upgrade --to vX.Y.Z` creates an **upgrade run**
+  - `tw upgrade fleet vX.Y.Z` creates an **upgrade run**
     (`POST /v1/upgrades`), a durable record in the store: the plan, the
     current step, and per-host state. Its steps are driven by the existing
     stateless-replica model (ADR-011): whichever replica holds the run's
@@ -355,14 +365,14 @@ per contract:
   - **Gates between steps:** each host must settle (`syncAssignments` done,
     objects rejoined, no new device registrations) before the next host
     starts. The canary waits a configurable soak time. A failed gate pauses
-    the run (`paused: <reason>`). `tw upgrade status|pause|resume|abort`
+    the run (`paused: <reason>`). `tw upgrade fleet status|pause|resume|abort`
     controls the run, and every transition is audited (AuditKinds
     `upgrade_start`, `upgrade_step`, `upgrade_pause`, `upgrade_abort`).
   - The homelab `tw upgrade` uses the same plan code, through the catalog
     of its embedded mgmt.
 - **Restore must not reuse lease epochs.** Lock fencing tokens (#26) and the
   ADR-028 fences are built from epochs. Every restore, including the
-  automatic rollback and a future SQLite→Postgres `tw mgmt migrate` (not built),
+  automatic rollback and a future SQLite→Postgres store copy (not built),
   raises each lease's epoch past anything handed out before the backup by
   writing a restore generation into `schema_meta`.
 
@@ -469,9 +479,10 @@ Built on this branch, with tests:
   - Skew enforcement and feature-gated placement.
   - Homelab `tw upgrade`: plan, backup, install, restart, health check,
     automatic rollback with a restore fence.
-  - `install.sh --rollback`, with `.prev` kept.
+  - `install.sh --rollback`, with `.prev` kept, and `tw upgrade rollback`
+    on top of it (the store goes back too when a contract migration ran).
   - `tw-mgmt migrate --check|--apply` and `restore-fence`.
-  - The embedded catalog, `GET /v1/releases`, and `tw release ls|import`.
+  - The embedded catalog, `GET /v1/releases`, and `tw upgrade releases|import`.
   - `make e2e-upgrade`: the newest published release, built in a temporary
     worktree, upgraded to the candidate (also the downgrade check), wired
     into `release.yml`'s `gates` job.
@@ -482,7 +493,7 @@ Built on this branch, with tests:
   - The fleet plan from mgmt.
 - **Phase 3:**
   - Upgrade runs, `POST /v1/push/upgrade` and `tw-hostd -self-upgrade`.
-  - `tw upgrade status|pause|resume|abort`.
+  - `tw upgrade fleet status|pause|resume|abort`.
   - Restore-generation epochs (`RestoreFence`).
 
 Not built:

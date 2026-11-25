@@ -25,6 +25,7 @@ func (s *syncBuf) String() string              { s.mu.Lock(); defer s.mu.Unlock(
 // TestFollowDevRecords: tw dev prints each request record (console lines,
 // exception stack) as hostd appends it, and a "request" event with --json.
 func TestFollowDevRecords(t *testing.T) {
+	t.Parallel()
 	for _, jsonMode := range []bool{false, true} {
 		path := filepath.Join(t.TempDir(), "logs", "app.requests.jsonl") // created later, like hostd's
 		var out syncBuf

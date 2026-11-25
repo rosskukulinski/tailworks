@@ -39,19 +39,23 @@ func TestMatchesBuildMJS(t *testing.T) {
 					t.Skip("runtime \"node\" template: bundled by build-node.mjs, not esbundle")
 				}
 			}
+			if _, err := os.Stat(filepath.Join(dir, "src", "entry.py")); err == nil {
+				t.Skip("Python template: packed as it is, not bundled (cmd/tw/python.go)")
+			}
 			wb, err := os.ReadFile(filepath.Join(dir, "wrangler.jsonc"))
 			if err != nil {
 				t.Fatal(err)
 			}
 			var w struct {
-				Main string `json:"main"`
+				Main  string   `json:"main"`
+				Flags []string `json:"compatibility_flags"`
 			}
 			if err := bundle.UnmarshalJSONC(wb, &w); err != nil {
 				t.Fatal(err)
 			}
 			out := t.TempDir()
 			goOut := filepath.Join(out, "go.js")
-			n, err := Build(Options{Dir: dir, Main: w.Main, Outfile: goOut})
+			n, err := Build(Options{Dir: dir, Main: w.Main, Outfile: goOut, NodeCompat: NodeCompat(w.Flags)})
 			if err != nil {
 				t.Fatal(err)
 			}

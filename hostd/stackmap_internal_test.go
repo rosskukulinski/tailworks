@@ -11,6 +11,7 @@ import (
 // TestInstanceMapStack: an instance maps exception stacks with its bundle's
 // source map (parsed once); a broken map leaves the frames alone.
 func TestInstanceMapStack(t *testing.T) {
+	t.Parallel()
 	h := &Host{log: slog.New(slog.DiscardHandler)}
 	// dist/index.js line 1 col 0 -> src/index.ts 1:1; col 10 -> 3:5.
 	app := &bundle.App{SourceMaps: map[string][]byte{

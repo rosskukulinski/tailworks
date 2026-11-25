@@ -76,6 +76,7 @@ func d1Host(t *testing.T, e *testEnv, id string) *fakeD1Host {
 // are 400 d1_error; a write is audited without its SQL; a read only
 // logged; the host's typed refusals come through.
 func TestD1Routes(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	ctx := context.Background()
 	h := d1Host(t, e, "h1")

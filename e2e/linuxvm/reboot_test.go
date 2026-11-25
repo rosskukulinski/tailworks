@@ -149,7 +149,7 @@ func TestE2ELinuxReboot(t *testing.T) {
 	}
 	res.Numbers["up_first_ms"] = msOf(up())
 	agentDir := rWork + "/agent"
-	e.MustJSON(nil, "init", agentDir, "--template", "agent", "--keep-tags")
+	e.MustJSON(nil, cliflow.InitArgs(agentDir, "agent")...)
 	r.must(`sed -i '0,/{/s//{\n  "tier": "microvm",/' ` + shq(agentDir+"/tailworks.jsonc"))
 	var dep struct {
 		Endpoint struct{ MagicDNS string } `json:"endpoint"`

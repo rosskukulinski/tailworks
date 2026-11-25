@@ -99,8 +99,8 @@ type Request struct {
 	// VolumeSlot and swaps it in behind the guest's /dev/vdc (Firecracker
 	// PATCH /drives, post-boot). At most once per VM.
 	Attach *Volume `json:"attach,omitempty"`
-	// Snapshot (op snapshot-base) turns another of this uid's VMs — a
-	// pooled one, warm and holding no tenant code — into a base snapshot:
+	// Snapshot (op snapshot-base) turns another of this uid's VMs — one
+	// started with StartRequest.Base, warm and holding no tenant code — into a base snapshot:
 	// the helper pauses it, writes a full snapshot (VM state + guest
 	// memory) into its own root-only directory, and kills it (the original
 	// never runs again). The base lives as long as the connection that
@@ -147,6 +147,15 @@ type StartRequest struct {
 	// placeholder as the DO drive, so that the workload's volume can be
 	// attached later (the attach op) without a reboot.
 	VolumeSlot bool `json:"volumeSlot,omitempty"`
+	// Base (with VolumeSlot; not with Image or Restore): this VM is booted
+	// to become a base snapshot. The helper remembers it: snapshot-base is
+	// refused on any VM started without Base, and attach on one started
+	// with it, so a VM that has had a workload's volume (or was claimed)
+	// is never snapshotted. A helper from before this field ignores it and
+	// keeps its older check; an older hostd never sets it, so this helper
+	// refuses its snapshot-base and that hostd boots cold instead of
+	// restoring until it is upgraded too.
+	Base bool `json:"base,omitempty"`
 	// Restore (a base ID from snapshot-base, same uid): restore that base
 	// instead of booting — a fresh jail, netns and VMM, snapshot load with
 	// the guest memory served lazily by the helper (userfaultfd). The VM

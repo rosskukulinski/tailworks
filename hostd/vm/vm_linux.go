@@ -206,6 +206,7 @@ func New(cfg Config) (*Backend, error) {
 func (b *Backend) startInProcessHelper() error {
 	inst := fmt.Sprintf("p%d", os.Getpid())
 	b.srvBase = filepath.Join("/var/lib", "tw-vm-"+inst)
+	helper.SweepDeadInProcess(os.Getpid(), b.cfg.Log.With("component", "vmhelper")) // a crashed predecessor's VMs (#587)
 	srv, err := helper.New(helper.Config{Firecracker: b.cfg.Firecracker, Jailer: b.cfg.Jailer,
 		JailBase: filepath.Join(b.srvBase, "jail"), StateDir: b.srvBase, UIDBase: 3910000000 + (os.Getpid()%1000)*1000,
 		MaxVMs: 1000, Instance: inst, Log: b.cfg.Log.With("component", "vmhelper")})
@@ -235,6 +236,7 @@ func (b *Backend) Close() error {
 	if b.srv != nil {
 		b.srvLn.Close()
 		b.srv.Close()
+		b.srv.Sweep() // what the stopped VMs left (netns, jails)
 		os.RemoveAll(b.srvBase)
 	}
 	if b.ownDir {
@@ -321,6 +323,10 @@ type bootOpts struct {
 	log     *slog.Logger
 	pool    bool
 	restore string // restore this base snapshot (a pooled VM) instead of booting
+
+	// base: a pool boot that becomes the base snapshot (StartRequest.Base:
+	// the helper refuses snapshot-base on any other VM).
+	base bool
 }
 
 // boot turns bootOpts into a launch (the boot path shared with container
@@ -346,6 +352,7 @@ func (b *Backend) boot(ctx context.Context, o bootOpts) (*Machine, error) {
 		l.drive = func(p, _ string) error { return writePoolDrive(p, b.cfg.MTU, "") }
 	case o.pool:
 		req.VolumeSlot = true
+		req.Base = o.base
 		l.pool = true
 		l.drive = func(p, token string) error { return writePoolDrive(p, b.cfg.MTU, token) }
 	default:

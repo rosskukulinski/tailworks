@@ -104,6 +104,7 @@ func (u *uiEnv) seed(t *testing.T) (dep, root, kid string) {
 }
 
 func TestUIAdmission(t *testing.T) {
+	t.Parallel()
 	u := newUIEnv(t)
 	dep, root, kid := u.seed(t)
 	// An admin user gets HTML with everything it may see.
@@ -165,6 +166,7 @@ func TestUIAdmission(t *testing.T) {
 }
 
 func TestUIRootRedirect(t *testing.T) {
+	t.Parallel()
 	u := newUIEnv(t)
 	st, w := u.call(fromAdmin, "GET", "/", "", map[string]string{"Accept": "text/html,application/xhtml+xml"})
 	if st != 302 || w.Header().Get("Location") != "/ui/" {
@@ -184,6 +186,7 @@ func TestUIRootRedirect(t *testing.T) {
 }
 
 func TestUIBrowserGuard(t *testing.T) {
+	t.Parallel()
 	u := newUIEnv(t)
 	_, root, kid := u.seed(t)
 	kill := func(id string) string { return "/v1/objects/" + id + "?" + url.Values{"reason": {"ui test"}}.Encode() }
@@ -252,6 +255,7 @@ func TestUIBrowserGuard(t *testing.T) {
 // transport onto a validated API) with populated data, as the admin:
 // every page, then every form mutation.
 func TestUISpecConformance(t *testing.T) {
+	t.Parallel()
 	u := newUIEnv(t)
 	dep, root, kid := u.seed(t)
 	u.e.c.ok("DELETE", "/v1/objects/"+kid+killQuery(false, "spec"), nil, nil)
@@ -262,7 +266,7 @@ func TestUISpecConformance(t *testing.T) {
 	api := val.Middleware(specReporter(t))(u.srv.Handler())
 	uiH := ui.Handler(&http.Client{Transport: uiTransport{api}}, uiBaseURL)
 	admin := Principal{Kind: "user", Login: "alice@example.com", NodeID: "nADM", Caps: []string{AdminCap}}
-	for _, p := range []string{"/ui/", "/ui/objects/" + root, "/ui/objects/" + kid, "/ui/deployments/" + dep, "/ui/hosts/h1", "/ui/tenants/" + u.tn, "/ui/audit", "/ui/audit?object=" + root + "&limit=2", "/ui/audit?tenant=" + u.tn + "&kind=create&workload=w", "/ui/objects", "/ui/objects?status=ready&tag=x", "/ui/approvals"} {
+	for _, p := range []string{"/ui/", "/ui/objects/" + root, "/ui/objects/" + kid, "/ui/deployments/" + dep, "/ui/hosts/h1", "/ui/tenants/" + u.tn, "/ui/tenants/" + u.tn + "/workloads/w/logs", "/ui/tenants/" + u.tn + "/workloads/w/logs?source=console", "/ui/objects/" + root + "/logs?errors=1&status=5xx", "/ui/audit", "/ui/audit?object=" + root + "&limit=2", "/ui/audit?tenant=" + u.tn + "&kind=create&workload=w", "/ui/objects", "/ui/objects?status=ready&tag=x", "/ui/approvals"} {
 		r := httptest.NewRequest("GET", "http://tw-mgmt.t.ts.net"+p, nil)
 		r = r.WithContext(WithPrincipal(r.Context(), admin))
 		w := httptest.NewRecorder()

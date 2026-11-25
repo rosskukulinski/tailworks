@@ -53,6 +53,27 @@ func TestHeadscaleProfileSnippet(t *testing.T) {
 	}
 }
 
+// TestHeadscaleProfileKeepsMemberGrant (#552): the caller grant's
+// autogroup:member source survives the profile; autogroup:admin doesn't.
+func TestHeadscaleProfileKeepsMemberGrant(t *testing.T) {
+	member := map[string]any{"src": []string{"autogroup:member"}, "dst": []string{"tag:tw-wl-x"}, "ip": []string{"tcp:80"}}
+	admin := map[string]any{"src": []string{"autogroup:admin"}, "dst": []string{"tag:tw-wl-x"}, "ip": []string{"tcp:80"}}
+	mixed := map[string]any{"src": []string{"autogroup:member", "autogroup:admin"}, "dst": []string{"tag:tw-wl-x"}, "ip": []string{"tcp:80"}}
+	s := Snippet{TagOwners: map[string][]string{"tag:tw-wl-x": {"autogroup:admin", "tag:tw"}}, Grants: []map[string]any{member, admin, mixed}}
+	hs := Headscale(s)
+	if len(hs.Grants) != 1 || strs(hs.Grants[0]["src"])[0] != "autogroup:member" {
+		t.Fatalf("grants = %v, want only the autogroup:member one", hs.Grants)
+	}
+	opts := Options{Headscale: true, AllowSrcs: []string{"autogroup:member"}}
+	if err := Check(hs, opts); err != nil {
+		t.Fatalf("Check(Headscale) with autogroup:member allowed: %v", err)
+	}
+	// RT-06 still holds: without AllowSrcs the source is refused.
+	if err := Check(hs, Options{Headscale: true}); err == nil {
+		t.Fatal("Check(Headscale) accepted autogroup:member without AllowSrcs")
+	}
+}
+
 func TestHeadscaleProfileCheckRejects(t *testing.T) {
 	cases := map[string]Snippet{
 		"autogroup owner": {TagOwners: map[string][]string{"tag:tw-x": {"autogroup:admin"}}},
@@ -65,6 +86,14 @@ func TestHeadscaleProfileCheckRejects(t *testing.T) {
 		err := Check(s, Options{Headscale: true, AllowSrcs: []string{"autogroup:admin"}})
 		if err == nil {
 			t.Errorf("%s: Check accepted %+v", name, s)
+		}
+	}
+	// autogroup:member is a grant source Headscale accepts; other
+	// autogroups are refused even when allowed.
+	for _, src := range []string{"autogroup:tagged", "autogroup:self"} {
+		g := Snippet{Grants: []map[string]any{{"src": []string{src}, "dst": []string{"tag:tw-wl-x"}, "ip": []string{"tcp:80"}}}}
+		if err := Check(g, Options{Headscale: true, AllowSrcs: []string{src}}); err == nil {
+			t.Errorf("Check(Headscale) accepted a %s source", src)
 		}
 	}
 	// Without the profile, tag:tw still needs an owner.

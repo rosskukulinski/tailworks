@@ -12,6 +12,7 @@ import (
 // file custody is never shared (H11). A crashed replica restarting with its
 // stable ID is not a second replica; a clean shutdown frees the store.
 func TestMM_F6_ReplicaRegistry(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	st, err := OpenStore(ctx, filepath.Join(dir, "m.db"))

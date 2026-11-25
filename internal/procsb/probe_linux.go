@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"strconv"
@@ -72,6 +73,38 @@ func probe(op string, args []string) error {
 			return err
 		}
 		return l.Close()
+	case ProbeListenTCP:
+		fd, err := unix.Socket(unix.AF_INET, unix.SOCK_STREAM, 0)
+		if err != nil {
+			return err
+		}
+		defer unix.Close(fd)
+		if a := arg(0); a != "" {
+			ap, err := netip.ParseAddrPort(a)
+			if err != nil {
+				return err
+			}
+			if err := unix.Bind(fd, &unix.SockaddrInet4{Port: int(ap.Port()), Addr: ap.Addr().As4()}); err != nil {
+				return err
+			}
+		}
+		if err := unix.Listen(fd, 16); err != nil {
+			return err
+		}
+		// NoListen fakes listen()'s success: ask the kernel.
+		if v, err := unix.GetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_ACCEPTCONN); err != nil || v == 0 {
+			return fmt.Errorf("listen returned 0 but the socket doesn't listen: %w", syscall.EOPNOTSUPP)
+		}
+		return nil
+	case ProbeAcceptFD:
+		if err := unix.Listen(3, 16); err != nil { // as node does on an inherited fd
+			return err
+		}
+		nfd, _, err := unix.Accept(3)
+		if err != nil {
+			return err
+		}
+		return unix.Close(nfd)
 	case ProbeUDP:
 		c, err := net.Dial("udp", arg(0))
 		if err != nil {

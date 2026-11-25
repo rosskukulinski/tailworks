@@ -15,6 +15,7 @@ import (
 // and its R2 blobs on this host; another tenant keeps its own; the purge
 // is reported until mgmt stops listing it; an unsafe ID is refused.
 func TestPurgeDeletedTenant(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

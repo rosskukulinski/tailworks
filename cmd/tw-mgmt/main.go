@@ -66,8 +66,9 @@ func run() error {
 		noLoopback  = flag.Bool("no-loopback", false, "don't publish the node's loopback proxy for the local tw CLI (<state-dir>/loopback.json)")
 		versionFlag = flag.String("version", "", "deprecated: the version is built in (internal/version); a non-empty value overrides it for GET /v1/status")
 		tsControl   = flag.String("tsnet-control-url", "", "operator tailnet control URL (required with -tsnet-hostname)")
-		tsAuthFile  = flag.String("tsnet-authkey-file", "", "file with the operator-tailnet auth key for the first join (TS_AUTHKEY=…); without it the node state must already be logged in (tw up joins it first)")
+		tsAuthFile  = flag.String("tsnet-authkey-file", "", "file with the operator-tailnet auth key for the first join (TS_AUTHKEY=…); without it the node state must already be logged in (tw up hands it over: -tsnet-authkey-once)")
 		tsTags      = flag.String("tsnet-tags", mgmt.MgmtTag, "comma-separated tags the mgmt node advertises")
+		tsAuthOnce  = flag.Bool("tsnet-authkey-once", false, "-tsnet-authkey-file is a single-use handoff (tw up): read and deleted before the join, a missing file is no key, and a failed start deletes it and records why in <state-dir>/start.err")
 		tsService   = flag.String("tsnet-service", "", "also host this Tailscale Service (e.g. svc:tw-mgmt) on :80, advertised only while this replica's store answers: point every host at http://<label>.<tailnet> and run each replica with its own -tsnet-hostname (e.g. tw-mgmt-1). Policy needs autoApprovers.services for the mgmt tag and grants to the svc: name")
 		tsTLS       = flag.Bool("tsnet-tls", true, "also serve the API on :443 with the node's HTTPS certificate when the tailnet has HTTPS enabled (plain :80 is always served)")
 		admins      = flag.String("admins", "", "comma-separated tailnet logins admitted as admins even without the "+mgmt.AdminCap+" capability (override; the normal path is the cap, granted to "+mgmt.MgmtTag+")")
@@ -77,14 +78,21 @@ func run() error {
 		delDelay    = flag.Duration("device-delete-delay", 0, "defer kill tier 2 (device delete) this long after the tier-1 push, so the host's tombstone answers new connections with object_killed (keep < hostd -kill-tombstone)")
 		warmKeys    = flag.Int("warm-keys", mgmtd.DefaultWarmKeys, "warm-key pool: pre-minted single-use keys per (tenant, tag set), so a create skips the CreateKey call (sized from the recent create rate, capped here; 0 = off)")
 		warmKeyTTL  = flag.Duration("warm-key-ttl", mgmt.DefaultWarmKeyTTL, "-warm-keys: a pooled key's expiry; unused keys are revoked shortly before it")
+		warmRevoke  = flag.Bool("revoke-warm-keys-on-exit", false, "-warm-keys: on shutdown, revoke every unused pooled key at the API and delete it from custody (tw up sets it; leave it off for replicas that share a store, or each restart revokes the others' pool)")
 		metricsPort = flag.Int("metrics-port", obs.DefaultMetricsPort, "port on mgmt's own tailnet node serving GET /metrics (Prometheus; who may scrape is a tailnet policy grant); 0 = off")
 		verbose     = flag.Bool("v", false, "debug logging")
 		registryDir = flag.String("registry-dir", "", "OCI registry blob store (ADR-032 D3; default <state-dir>/registry; \"off\" disables the registry). Replicas serving the registry must share it")
 		regInsecure = flag.String("registry-insecure", "", "comma-separated upstream registry hosts mirrored over plain HTTP (tests: a local upstream)")
 		noMirror    = flag.Bool("no-mirror", false, "refuse external image refs at deploy (only tw deploy builds and public bases); mgmt then makes no registry egress")
 		bundleKeep  = flag.Int("bundle-retention", mgmt.DefaultBundleRetention, "bundles kept per workload for tw rollback (older deployments keep their record and hash, not the bundle); 0 = the default, -1 = keep every bundle")
-		aliasFile   = flag.String("image-aliases", "", "JSON file [{from, to, arch}] replacing the default image alias map (cloudflare/sandbox → tw.local arm64 rebuilds)")
+		auditMaxAge = flag.Duration("audit-max-age", 0, "audit retention: delete audit records older than this (e.g. 2160h), keeping a checkpoint so the rest still verify; 0 = keep every record (the default)")
+		auditMaxRec = flag.Int64("audit-max-records", 0, "audit retention: keep only the newest N records of each chain (with a checkpoint, as -audit-max-age); 0 = keep every record (the default)")
+		aliasFile   = flag.String("image-aliases", "", "JSON file [{from, to, arch, source}] replacing the default image alias map (cloudflare/sandbox → tw.local arm64 rebuilds; source: a digest-pinned image that fills a missing target)")
 	)
+	// Management API limits for tailnet callers (mgmt/ratelimit.go).
+	apiRPS := flag.Float64("api-rps", mgmt.DefaultAPIRPS, "per tailnet caller (WhoIs node; not hosts): sustained mgmt API requests per second, burst twice that; over it is 429 rate_limited (-1 = off)")
+	apiHostRPS := flag.Float64("api-host-rps", mgmt.DefaultAPIHostRPS, "per host: sustained mgmt API requests per second, burst twice that (-1 = off)")
+	apiInFlight := flag.Int("api-inflight", mgmt.DefaultAPIInFlight, "concurrent mgmt API requests from non-host tailnet callers, all together; over it is 429 rate_limited (-1 = off)")
 	flag.Parse()
 	lvl := slog.LevelInfo
 	if *verbose {
@@ -111,6 +119,10 @@ func run() error {
 		RegistryDir: *registryDir, NoMirror: *noMirror, ImageAliasesFile: *aliasFile, Log: log,
 		MetricsPort: *metricsPort}
 	o.BundleRetention = *bundleKeep
+	o.AuditMaxAge, o.AuditMaxRecords = *auditMaxAge, *auditMaxRec // mgmt/retention.go
+	o.APILimits = mgmt.APILimits{RPS: *apiRPS, HostRPS: *apiHostRPS, InFlight: *apiInFlight}
+	o.RevokeWarmKeysOnClose = *warmRevoke
+	o.TSNetAuthKeyOnce = *tsAuthOnce
 	// Like the flags: "" means no tags at all (Options nil means the default).
 	o.TSNetTags = []string{}
 	if *tsTags != "" {

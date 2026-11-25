@@ -7,12 +7,14 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -175,12 +177,20 @@ func TestUpgradePreviousToCandidate(t *testing.T) {
 	os.MkdirAll(filepath.Join(app, "src"), 0o755)
 	os.WriteFile(filepath.Join(app, "tailworks.jsonc"), []byte(`{"name": "counter", "tailnet": {"tags": ["tag:ttest"], "objects": {"Counter": {"tags": ["tag:ttest"]}}}}`), 0o644)
 	os.WriteFile(filepath.Join(app, "wrangler.jsonc"), []byte(`{"name": "counter", "main": "src/index.js", "compatibility_date": "2026-04-01",
-  "durable_objects": {"bindings": [{"name": "COUNTER", "class_name": "Counter"}]}}`), 0o644)
+  "durable_objects": {"bindings": [{"name": "COUNTER", "class_name": "Counter"}, {"name": "TALLY", "class_name": "Tally"}]}}`), 0o644)
 	os.WriteFile(filepath.Join(app, "src", "index.js"), []byte(`import { DurableObject } from "cloudflare:workers";
 export class Counter extends DurableObject {
   async fetch() { const n = ((await this.ctx.storage.get("n")) ?? 0) + 1; await this.ctx.storage.put("n", n); return Response.json({ count: n }); }
 }
-export default { async fetch(req, env) { return env.COUNTER.getByName("c").fetch(new Request("http://counter/")); } };`), 0o644)
+export class Tally extends Counter {}
+export default { async fetch(req, env) {
+  const ns = new URL(req.url).pathname === "/tally" ? env.TALLY : env.COUNTER;
+  return ns.getByName("c").fetch(new Request("http://counter/"));
+} };`), 0o644)
+	// Tally is not in tailnet.objects. Packed by hostdtest.Build, as by a
+	// tw before #492, it has no "node": false, so hostd runs it as a
+	// nodeless facet (storage under Host_Tally); a hostd upgrade must keep
+	// that storage (only a redeploy with a newer tw makes it a plain DO).
 	files, err := hostdtest.Build(app, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -194,12 +204,12 @@ export default { async fetch(req, env) { return env.COUNTER.getByName("c").fetch
 	d = e.waitActive(d.DeploymentID, 90*time.Second)
 	node := d.Endpoint.Node
 	host := d.Endpoint.MagicDNS
-	bump := func(want int) {
+	bumpAt := func(path string, want int) {
 		t.Helper()
 		var got struct{ Count int }
 		last := ""
 		for i := 0; ; i++ {
-			resp, err := hc.Get("http://" + host + "/")
+			resp, err := hc.Get("http://" + host + path)
 			if err == nil {
 				b, _ := io.ReadAll(resp.Body)
 				resp.Body.Close()
@@ -212,13 +222,18 @@ export default { async fetch(req, env) { return env.COUNTER.getByName("c").fetch
 			}
 			if i > 100 {
 				e.dumpLogs()
-				t.Fatalf("GET %s: %s", host, last)
+				t.Fatalf("GET %s%s: %s", host, path, last)
 			}
 			time.Sleep(200 * time.Millisecond)
 		}
 		if got.Count != want {
-			t.Fatalf("count %d, want %d (Durable Object storage lost?)", got.Count, want)
+			t.Fatalf("GET %s: count %d, want %d (Durable Object storage lost?)", path, got.Count, want)
 		}
+	}
+	bump := func(want int) {
+		t.Helper()
+		bumpAt("/", want)
+		bumpAt("/tally", want) // the unlisted class
 	}
 	bump(1)
 	bump(2)
@@ -239,6 +254,26 @@ export default { async fetch(req, env) { return env.COUNTER.getByName("c").fetch
 	waitLive("h1") // the previous release's host keeps working with the new mgmt
 	bump(3)
 
+	// ---- an app with wrangler "assets" (ADR-050) needs the
+	// "assets" host feature: the new mgmt doesn't place it on a host that
+	// lacks it (an older hostd would load assets/*.js as modules).
+	siteFiles := map[string][]byte{
+		"tailworks.jsonc":   []byte(`{"name": "site", "tailnet": {"tags": ["tag:ttest"]}}`),
+		"wrangler.jsonc":    []byte(`{"name": "site", "main": "index.js", "compatibility_date": "2026-04-01", "assets": {"directory": "public"}}`),
+		"index.js":          []byte(`export default { fetch() { return new Response("worker"); } };`),
+		"assets/hello.txt":  []byte("hello from an asset"),
+		"assets/index.html": []byte("<h1>site</h1>"),
+	}
+	siteBundle := base64.StdEncoding.EncodeToString(hostdtest.MustTar(siteFiles))
+	var h1old struct{ Features []string }
+	e.must("GET", "/v1/hosts/h1", nil, &h1old)
+	if !slices.Contains(h1old.Features, "assets") {
+		code, b := e.do("POST", "/v1/deployments", map[string]any{"tenantID": tn.TenantID, "workload": "site", "bundle": siteBundle, "host": "h1"}, nil)
+		if code == 202 || !strings.Contains(string(b), "assets") {
+			t.Fatalf("an assets deploy to a host without the feature: %d %s, want a refusal naming it", code, b)
+		}
+	}
+
 	// ---- then the host.
 	e.stop("h1")
 	e.binOf["h1"] = newBin
@@ -256,6 +291,29 @@ export default { async fetch(req, env) { return env.COUNTER.getByName("c").fetch
 	e.must("GET", "/v1/hosts/h1", nil, &h1)
 	if h1.Version != newV || len(h1.Features) == 0 {
 		t.Fatalf("upgraded host reports %+v", h1)
+	}
+	// The upgraded host serves the assets app.
+	var sd deployment
+	if code, b := e.do("POST", "/v1/deployments", map[string]any{"tenantID": tn.TenantID, "workload": "site", "bundle": siteBundle, "host": "h1"}, &sd); code != 202 {
+		e.dumpLogs()
+		t.Fatalf("assets deploy after the host upgrade: %d %s", code, b)
+	}
+	sd = e.waitActive(sd.DeploymentID, 90*time.Second)
+	for i := 0; ; i++ {
+		resp, err := hc.Get("http://" + sd.Endpoint.MagicDNS + "/hello.txt")
+		if err == nil {
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode == 200 && string(b) == "hello from an asset" && strings.HasPrefix(resp.Header.Get("content-type"), "text/plain") {
+				break
+			}
+			err = fmt.Errorf("%s %q", resp.Status, b)
+		}
+		if i > 100 {
+			e.dumpLogs()
+			t.Fatalf("GET /hello.txt on the assets app: %v", err)
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 
 	// ---- the previous mgmt still opens the expanded store (a rollback

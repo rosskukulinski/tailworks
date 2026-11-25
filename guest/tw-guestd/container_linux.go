@@ -623,18 +623,7 @@ func (g *guest) pumpExec(c *container, ep *execProc, stream *os.File, inW, outR,
 	var wg sync.WaitGroup
 	pump := func(r *os.File, kind byte) {
 		defer wg.Done()
-		buf := make([]byte, 32<<10)
-		for {
-			n, err := r.Read(buf)
-			if n > 0 {
-				if send(kind, buf[:n]) != nil {
-					return
-				}
-			}
-			if err != nil {
-				return
-			}
-		}
+		execPumpOutput(r, kind, send)
 	}
 	for _, p := range []struct {
 		f    *os.File
@@ -679,7 +668,8 @@ func (g *guest) pumpExec(c *container, ep *execProc, stream *os.File, inW, outR,
 	}()
 	code := <-ep.done
 	// Whatever the process wrote is in the pipes now; a daemon it left
-	// behind may hold them open, so drain with a deadline, not to EOF.
+	// behind may hold them open, so drain with a deadline, not to EOF
+	// (execPumpOutput still sends what is buffered when it hits).
 	for _, f := range []*os.File{outR, errR} {
 		if f != nil {
 			f.SetReadDeadline(time.Now().Add(200 * time.Millisecond))

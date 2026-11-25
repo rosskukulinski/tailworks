@@ -26,6 +26,7 @@ func (c *stepClock) advance(d time.Duration)                { c.mu.Lock(); c.now
 // lease frees up (with Retry-After), not just "lease held by another
 // holder"; once the lease expires the redeploy goes to a live host.
 func TestMM_F5_LeaseHeldExplains(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	st, err := OpenStore(ctx, filepath.Join(dir, "m.db"))

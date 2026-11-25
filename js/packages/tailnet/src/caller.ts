@@ -1,5 +1,10 @@
 import { TailnetError } from "./errors.js";
 
+/**
+ * Caller is the tailnet node that connected, verified over WireGuard.
+ * On-behalf-of assertions (which human an agent acts for, RFC §4.6) are not
+ * built: a caller is always the node itself, never a human behind it.
+ */
 export interface Caller {
   /** Stable node ID; the primary key to authorize on. */
   nodeId: string;
@@ -11,9 +16,6 @@ export interface Caller {
   addrs: readonly string[];
   /** Untagged (human) callers only. */
   user?: { login: string };
-  actingFor?: { sub: string; login?: string; groups: string[]; verified: "tw-assertion" | "control" };
-  /** Nearest hop first. */
-  chain: ReadonlyArray<{ nodeId: string; tags: readonly string[] }>;
   /** The object (node) the request was delivered to. */
   objectId: string;
   traceId: string;
@@ -49,7 +51,11 @@ interface WireCaller {
  * getCaller returns the verified tailnet caller of a request delivered by
  * netd (request.cf.tailscale). Throws TailnetError("no_identity") otherwise.
  * request.cf survives entry Worker → DO stub → facet, so pass the original
- * request along (or its cf) when you forward it in-process.
+ * request along (or a Request with its cf) when you forward it in-process.
+ * On tailworks the caller is sealed by hostd and checked before your code
+ * sees a request: a caller attached in-process without that seal is
+ * dropped (RT3-08). A cf passed as plain data (not on a Request) is not
+ * checked; don't authorize on it.
  */
 export function getCaller(req: Request | { cf?: any } | null | undefined): Caller {
   const cf = (req as any)?.cf;
@@ -69,9 +75,7 @@ export function getCaller(req: Request | { cf?: any } | null | undefined): Calle
     node: c.node ?? "",
     addrs: Object.freeze([...(c.addrs ?? [])]),
     user: c.user ? Object.freeze({ login: c.user }) : undefined,
-    actingFor: undefined,
     objectId: cf.objectId ?? "",
-    chain: Object.freeze([Object.freeze({ nodeId: c.nodeId, tags })]),
     traceId: cf.traceId ?? "",
     tw: c.tw ? Object.freeze({ objectId: c.tw.objectId, lim: c.tw.lim ? structuredClone(c.tw.lim) : undefined, parent: c.tw.parent, root: c.tw.root }) : undefined,
     capsWithheld: !!c.capsWithheld,
@@ -88,7 +92,7 @@ export function principalKey(who: Caller): string {
   if ((who as any)?.kind === "public" || !who?.nodeId) {
     throw new TailnetError("public_request", "principalKey needs a tailnet caller; a public requester has no identity");
   }
-  return who.actingFor?.login ?? who.user?.login ?? who.nodeId;
+  return who.user?.login ?? who.nodeId;
 }
 
 /**

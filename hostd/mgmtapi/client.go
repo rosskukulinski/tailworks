@@ -248,6 +248,19 @@ func jsonBody(v any) (io.Reader, error) {
 
 // Register is PUT /v1/hosts/{id} (idempotent: 201 the first time, 200 after).
 func (c *Client) Register(ctx context.Context, r RegisterRequest) error {
+	_, err := c.RegisterHost(ctx, r)
+	return err
+}
+
+// Registered is the part of RegisterHost's answer hostd uses.
+type Registered struct {
+	// AuditHead is the hash of the last record mgmt stores on this host's
+	// audit chain ("" when it is empty, or from a mgmt that predates it).
+	AuditHead string `json:"auditHead,omitempty"`
+}
+
+// RegisterHost is Register, returning what mgmt answered.
+func (c *Client) RegisterHost(ctx context.Context, r RegisterRequest) (Registered, error) {
 	// The spec's HostRegistration: push is {url} (local-dev unix socket)
 	// or {port} (the host's own tsnet node); nothing else is accepted.
 	reg := map[string]any{"capacityNodes": r.CapacityNodes, "tiers": r.Tiers}
@@ -284,15 +297,17 @@ func (c *Client) Register(ctx context.Context, r RegisterRequest) error {
 	case r.PushURL != "":
 		reg["push"] = map[string]any{"url": r.PushURL}
 	}
+	var out Registered
 	body, err := jsonBody(reg)
 	if err != nil {
-		return err
+		return out, err
 	}
 	resp, err := c.V1().RegisterHostWithBodyWithResponse(ctx, r.HostID, "application/json", body)
 	if err != nil {
-		return err
+		return out, err
 	}
-	return result(resp.HTTPResponse, resp.Body, nil)
+	err = result(resp.HTTPResponse, resp.Body, &out)
+	return out, err
 }
 
 // Heartbeat is PUT /v1/hosts/{id}/status.

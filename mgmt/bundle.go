@@ -57,7 +57,6 @@ type TwConfig struct {
 		Connects []string `json:"connects"`
 		Objects  map[string]struct {
 			Tags   []string `json:"tags"`
-			Agent  bool     `json:"agent"`
 			TTL    string   `json:"ttl"`
 			Node   *bool    `json:"node"`   // false: internal class, no tailnet node
 			Egress string   `json:"egress"` // "workload": plain-DO mode
@@ -72,6 +71,10 @@ type TwConfig struct {
 			MaxLive  int `json:"maxLive"`
 			MaxDepth int `json:"maxDepth"`
 		} `json:"spawn"`
+
+		// HTTPS is tailnet.https: the workload node also serves :443, so
+		// the caller grant opens tcp:443 too (callergrant_https.go).
+		HTTPS bool `json:"https"`
 	} `json:"tailnet"`
 }
 
@@ -88,7 +91,7 @@ func (c *TwConfig) Classes() []ClassConfig {
 		if o.Node != nil && !*o.Node {
 			continue
 		}
-		out = append(out, ClassConfig{Class: name, Tags: o.Tags, Agent: o.Agent, TTL: o.TTL})
+		out = append(out, ClassConfig{Class: name, Tags: o.Tags, TTL: o.TTL})
 	}
 	if len(c.Tailnet.Tags) > 0 {
 		out = append(out, ClassConfig{Class: WorkloadNamespace, Tags: c.Tailnet.Tags})

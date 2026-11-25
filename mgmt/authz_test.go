@@ -133,6 +133,7 @@ func (a *authzEnv) addHost(id, from string) string {
 // that does not hold the lease cannot mark another host's object ready,
 // pick its node IDs, or make mgmt delete a device.
 func TestAuthzH2ReadyIsFenced(t *testing.T) {
+	t.Parallel()
 	a := newAuthzEnv(t)
 	ready := func(epoch any, node string) map[string]any {
 		b := map[string]any{"status": "ready", "nodeID": "1", "stableNodeID": node, "magicDNS": a.objA + ".t.ts.net"}
@@ -182,6 +183,7 @@ func TestAuthzH2ReadyIsFenced(t *testing.T) {
 // TestAuthzH3ReservedTags: a bundle or namespace may not ask for tailworks' own
 // tags, and every tag must be well-formed; deploy and preflight agree.
 func TestAuthzH3ReservedTags(t *testing.T) {
+	t.Parallel()
 	a := newAuthzEnv(t)
 	deploy := func(tag string, dryRun bool) (int, map[string]any) {
 		path := "/v1/deployments"
@@ -228,6 +230,7 @@ func TestAuthzH3ReservedTags(t *testing.T) {
 // one-time secret proves the host ID; it rotates with each host add and
 // never appears in the API or the audit log.
 func TestAuthzM1RegistrationSecret(t *testing.T) {
+	t.Parallel()
 	a := newAuthzEnv(t)
 	var hj1, hj2 struct {
 		RegistrationSecret string
@@ -300,6 +303,7 @@ func TestAuthzM1RegistrationSecret(t *testing.T) {
 // TestAuthzM2HostObjectScope: host-role object mutations are limited to
 // workloads whose lease the host holds.
 func TestAuthzM2HostObjectScope(t *testing.T) {
+	t.Parallel()
 	a := newAuthzEnv(t)
 	// Create in another host's workload (explicit, by class, by parent).
 	a.fail(nodeH2, "POST", "/v1/objects", map[string]any{"tenantID": a.tn, "workload": "w", "namespace": "A", "objectName": "x"}, 409, "lease_lost")
@@ -331,6 +335,7 @@ func TestAuthzM2HostObjectScope(t *testing.T) {
 // TestAuthzM3HostReadScope: hosts list only the tenants and objects of
 // their own assignments; admins see everything.
 func TestAuthzM3HostReadScope(t *testing.T) {
+	t.Parallel()
 	a := newAuthzEnv(t)
 	var tenants struct{ Items []Tenant }
 	if st, _ := a.call(nodeH1, "GET", "/v1/tenants", nil, &tenants); st != 200 || len(tenants.Items) != 1 || tenants.Items[0].ID != a.tn {
@@ -403,6 +408,7 @@ func TestAuthzM3HostReadScope(t *testing.T) {
 // registration; later ones may repeat or omit it, never change it, and
 // records not signed by it are refused at ingest.
 func TestAuthzM4AuditKeyPinned(t *testing.T) {
+	t.Parallel()
 	a := newAuthzEnv(t)
 	pub1, priv1, _ := ed25519.GenerateKey(rand.Reader)
 	pub2, priv2, _ := ed25519.GenerateKey(rand.Reader)

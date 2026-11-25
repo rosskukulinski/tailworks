@@ -1,6 +1,7 @@
 import http from "node:http";
 import fs from "node:fs";
 import net from "node:net";
+import util from "node:util";
 import { getCaller, requireCaller, CallerError, fetch as twFetch, dispatcher, installGlobalDispatcher, enforceEgress } from "@tailworks/node";
 // The /net sandbox probe must use the UNPATCHED connect (enforceEgress
 // tunnels raw connects through the proxy; the probe measures the OS
@@ -75,6 +76,24 @@ http.createServer(async (req, res) => {
         });
         return json(res, 200, r);
       }
+      case "/listen": {
+        // Sandbox probe: a raw TCP listener (libuv's TCP handle, below any
+        // JS patching, as hostile code would), on host:port, or with no
+        // bind at all (unbound: the kernel picks *:<ephemeral>). It stays
+        // open for 20 s; the test dials it from outside.
+        const { TCP, constants } = process.binding("tcp_wrap");
+        const h = new TCP(constants.SERVER);
+        const host = u.searchParams.get("host");
+        let err = 0;
+        if (host) err = host.includes(":") ? h.bind6(host, Number(u.searchParams.get("port")), 0) : h.bind(host, Number(u.searchParams.get("port")));
+        if (!err) err = h.listen(16);
+        if (err) { h.close(); return json(res, 200, { ok: false, code: util.getSystemErrorName(err) }); }
+        h.onconnection = (_e, c) => c?.close();
+        setTimeout(() => h.close(), 20000);
+        const a = {};
+        h.getsockname(a);
+        return json(res, 200, { ok: true, address: a.address, port: a.port });
+      }
       case "/signal": {
         // Sandbox probe: kill(pid, 0). Only the outcome is returned.
         try { process.kill(Number(u.searchParams.get("pid")), 0); return json(res, 200, { ok: true }); }
@@ -94,4 +113,6 @@ http.createServer(async (req, res) => {
     if (e instanceof CallerError) return json(res, 401, { code: e.code, message: e.message });
     json(res, 500, { error: String(e?.cause?.message ?? e?.message ?? e) });
   }
-}).listen(...(process.env.TW_SOCKET ? [process.env.TW_SOCKET] : [port, "127.0.0.1"]));
+// PROBE_LISTEN_ALL: listen as many apps do, ignoring HOST (Node then binds
+// every interface).
+}).listen(...(process.env.TW_SOCKET ? [process.env.TW_SOCKET] : process.env.PROBE_LISTEN_ALL ? [port] : [port, "127.0.0.1"]));

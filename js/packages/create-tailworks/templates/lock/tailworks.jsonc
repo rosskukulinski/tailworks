@@ -1,6 +1,5 @@
 {
   "$schema": "https://raw.githubusercontent.com/rosskukulinski/tailworks/master/schema/tailworks.schema.json",
-  "name": "locks",
   "tailnet": {
     // the lock service's node: clients call http://locks/locks/<name>/acquire
     "tags": ["tag:tw-wl-locks"],

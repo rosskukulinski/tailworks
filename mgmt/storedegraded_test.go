@@ -14,6 +14,7 @@ import (
 // exactly the recorded entry (store_not_degraded otherwise), so a replay
 // goes on to the next one, and is audited.
 func TestStoresDegraded(t *testing.T) {
+	t.Parallel()
 	s := newStoreEnv(t)
 	ctx := context.Background()
 	c, h1 := s.e.c, s.e.asHost("h1")
@@ -90,6 +91,7 @@ func TestStoresDegraded(t *testing.T) {
 // report clears the old host's record once it has applied the entry; a
 // healthy report that hasn't doesn't.
 func TestStoresDegradedMove(t *testing.T) {
+	t.Parallel()
 	s := newStoreEnv(t)
 	ctx := context.Background()
 	c, h1, h2 := s.e.c, s.e.asHost("h1"), s.e.asHost("h2")

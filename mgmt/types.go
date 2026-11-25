@@ -68,6 +68,14 @@ type Tenant struct {
 	MaxContainers      int     `json:"maxContainers"`
 	MaxContainerMemMiB int     `json:"maxContainerMemMiB"`
 	MaxContainerVCPU   float64 `json:"maxContainerVCPU"`
+
+	// Storage quotas (quota.go; 0 = unlimited, the default): the bytes
+	// kept by all the tenant's platform stores (KV, D1, R2 index), by all
+	// its queues, and how many platform stores it may have.
+	MaxStoreBytes int64 `json:"maxStoreBytes,omitempty"`
+	MaxQueueBytes int64 `json:"maxQueueBytes,omitempty"`
+	MaxStores     int   `json:"maxStores,omitempty"`
+
 	// Pool places the tenant's deployments on hosts with the same pool
 	// ("" = any host). Tier is the default isolation tier.
 	Pool string `json:"pool,omitempty"`
@@ -199,7 +207,6 @@ func (h Host) Live(now time.Time) bool {
 type ClassConfig struct {
 	Class string   `json:"class"`
 	Tags  []string `json:"tags"`
-	Agent bool     `json:"agent,omitempty"`
 	TTL   string   `json:"ttl,omitempty"`
 	// Service (the _workload namespace only) is the Tailscale Service the
 	// workload entry node hosts (tailworks.jsonc tailnet.service).
@@ -364,6 +371,10 @@ type Error struct {
 	TraceID string         `json:"trace_id"`
 	// RetryAfter (seconds), when set, is sent as the Retry-After header.
 	RetryAfter int `json:"-"`
+
+	// hostNames (misdirected_request only) are mgmt's own names, for the
+	// browser error page's fix (errors_html.go). Never serialized.
+	hostNames []string
 }
 
 func (e *Error) Error() string { return e.Code + ": " + e.Message }

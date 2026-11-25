@@ -285,6 +285,9 @@ func (m *Mgmt) createStore(ctx context.Context, sj storeJournal, tenantID, scope
 	} else if !errors.Is(err, ErrNotFound) {
 		return StoreInfo{}, false, err
 	}
+	if err := m.checkStoreCount(ctx, tenantID, "store "+kind+"/"+name); err != nil { // quota.go
+		return StoreInfo{}, false, err
+	}
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
 		return StoreInfo{}, false, err
@@ -430,7 +433,14 @@ func (m *Mgmt) AppendStore(ctx context.Context, tenantID, workload, kind, name, 
 		in[i] = storeEntryIn{CKey: storeCKey(key, e.CKey), Data: e.Data}
 	}
 	seal := func(seq int64, data []byte) ([]byte, error) { return sealStoreEntry(key, st.Incarnation, seq, data) }
-	st, err = sj.AppendStore(ctx, tenantID, scope, kind, name, inc, after, in, seal, StoreMaxBytes, m.now().UnixMilli())
+	quota, err := m.tenantQuotas(ctx, tenantID) // quota.go
+	if err != nil {
+		return StoreAppendResult{}, err
+	}
+	st, err = sj.AppendStore(ctx, tenantID, scope, kind, name, inc, after, in, seal, StoreMaxBytes, quota.MaxStoreBytes, m.now().UnixMilli())
+	if qe, ok := asQuotaError(err, tenantID, "store "+what); ok {
+		return StoreAppendResult{}, qe
+	}
 	switch {
 	case errors.Is(err, errStoreConflict), errors.Is(err, ErrNotFound):
 		return StoreAppendResult{}, errf(409, "store_conflict", "store %s moved past %d: catch up and retry", what, after)

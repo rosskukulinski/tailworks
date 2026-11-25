@@ -181,3 +181,15 @@ Preview deploys (issue #45 item 3) are not part of this decision.
 - An MCP `rollback` tool.
 - Per-tenant or per-workload retention. Retention is one mgmt-wide
   setting.
+
+**Tests.** Besides `mgmt:TestV1DeployHistoryRollback` and
+`TestStoreDeploymentHistory`, the data-plane chaos loop's deploys
+scenarios (`make e2e-dataplane-deploys`, nightly; `e2e/dataplane/LOOP.md`
+"Deploys", issue #421) race deploys, rollbacks naming a target, previews
+and promotions through three mgmt replicas under host, replica and
+Postgres faults, and check that each deploy or rollback takes its own
+epoch and fences the previous holder (V1, V2), that records are never
+deleted or changed and a rollback redeploys the bundle the client named,
+as its audit record says (V5: `TestStoreSetDeploymentMetaKeepsRollbackOf`,
+#563), and that the newest deploy or rollback is what serves once faults
+stop (V6).

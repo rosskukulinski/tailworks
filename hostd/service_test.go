@@ -22,6 +22,7 @@ import (
 // "stalled backend" case) and comes back when it recovers; a redeploy
 // without a Service withdraws it.
 func TestWorkloadService(t *testing.T) {
+	t.Parallel()
 	s := startSuite(t, fakemgmt.Config{})
 	e := s.e
 	ctx := context.Background()

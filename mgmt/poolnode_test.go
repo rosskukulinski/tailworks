@@ -18,6 +18,7 @@ import (
 // back to a normal mint; concurrent offers of one node give it to one
 // object; a kill deletes the device; transferred rows purge.
 func TestPoolNodeAssignment(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	c, h1 := e.c, e.asHost("h1")
 	var tn struct{ TenantID string }

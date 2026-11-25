@@ -21,7 +21,7 @@ import (
 func confirmD1Repair(f *flags, yes bool, name string, skip int64) error {
 	if skip < 1 {
 		return fail("bad_request", "tw d1 repair needs --skip <seq>: the journal entry the database is degraded at").
-			withFix("tw d1 list   (shows a degraded database and the entry it stopped at)")
+			withFix("tw d1 ls   (shows a degraded database and the entry it stopped at)")
 	}
 	return confirmDestroy(f, yes, fmt.Sprintf("repairing database %s deletes journal entry %d from it: the write it held is lost on every host", name, skip),
 		name, fmt.Sprintf("tw d1 repair %s --skip %d", name, skip),
@@ -33,7 +33,7 @@ func d1Repair(ctx context.Context, c *mgmtapi.Client, f *flags, res *d1Result, s
 	var st mgmt.StoreInfo
 	if err := c.DoHeaders(ctx, "POST", storePath+"/repair", map[string]any{"skip": skip}, &st, hdr); err != nil {
 		if e, ok := mgmtapi.AsError(err); ok && e.Code == "store_not_degraded" {
-			return fail(e.Code, e.Message).withFix("tw d1 list   (shows the entry a degraded database stopped at)")
+			return fail(e.Code, e.Message).withFix("tw d1 ls   (shows the entry a degraded database stopped at)")
 		}
 		return err
 	}

@@ -47,6 +47,7 @@ func isAdminKill(r *http.Request) bool {
 // it returned at once, so `tw kill` could return while the workload's
 // in-process path still reached the live object.
 func TestKillWaitsForRunningKill(t *testing.T) {
+	t.Parallel()
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	var kills atomic.Int32

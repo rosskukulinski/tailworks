@@ -250,7 +250,7 @@ All compile and `go vet` clean; skip-marked so CI stays green until the fixes la
 | RT-03 | **Fixed**: per-host bearer token on the unix socket, rotated on `tw up`; peercred kept as an extra check | `rt03_mgmt_socket_test.go` un-skipped |
 | RT-04 | **Partial**: per-object derived MAC keys; the root still lives in the guest, so `isolation: "object"` remains the real fix | STATUS.md |
 | RT-05 | **Fixed** for what exists: nonce caches on egress MACs and the Node caller header; OBO assertions are still unimplemented | STATUS.md |
-| RT-06 | **Fixed**: `--policy-apply` only adds `tag:tw*` tagOwners and tw-sourced grants, refuses any non-additive diff | `internal/policy` hostile table + fuzz tests |
+| RT-06 | **Fixed**: `--policy-apply` only adds `tag:tw*` tagOwners and tw-sourced grants, refuses any non-additive diff. (Later, #320: the flag is `--apply-policy`, and two tw-built grants have a non-tag source; LEDGER C12.) | `internal/policy` hostile table + fuzz tests |
 | RT-07 | **Documented**: kill tier 1 (RST + tombstone) is the fast path; netmap retraction stays a control-plane property | STATUS.md |
 | RT-08 | **Fixed/partial**: `@tailworks/node` `enforceEgress()` (cooperative); hostd reports `egress unenforced`, refuses Node-tier on multi-tenant hosts; docs say only Landlock/microVM is a boundary | `docs/node-tier.md` |
 
@@ -761,7 +761,9 @@ still `t.Skip`s.
   (`placement_service.go:71`); public gate defaults to deny
   (`public.go:67, 209`); Service takeover refused on exact comment match,
   validated names, case-insensitive MagicDNS collision check
-  (`services.go:113, 133`); tailworks never writes `autoApprovers.services`;
+  (`services.go:113, 133`); tailworks writes `autoApprovers.services` only via
+  `tw policy --apply`, for the workload's own `svc:` name and deployed
+  `tag:tw*` tags (`policy.Check`, `mgmt/policyapply.go` serviceApprover; issue #295);
   `funnel` nodeAttr refused for anything but `tag:tw-public`/
   `tag:tw-issuer` (`internal/policy/policy.go:219-249`); warm/host keys
   single-use, preauthorized, bounded expiry, secrets only in custody
@@ -839,7 +841,8 @@ still `t.Skip`s.
 - **CLI and supply chain.** `tw dev` binds 127.0.0.1 only
   (`cmd/tw/dev.go:169`); `tw link` is client-only, 0600 state,
   WhoIs-authenticated; no sudo in `tw up --yes`/`doctor`; policy written
-  only with `--policy-apply` through the RT-06 checks; OAuth file
+  only with `--policy-apply` through the RT-06 checks (since #481: only
+  after an interactive y/N, or `--apply-policy --yes`); OAuth file
   0600-checked (`up.go:233-243`); lockfile present, workerd pinned and
   integrity-checked at release (`release.sh:29, 69-80`); `@tailworks/*` have no
   third-party deps; no postinstall, no `curl | sh`, no submodules; bundle
@@ -857,7 +860,7 @@ still `t.Skip`s.
 | RT3-05 | **Fixed** (F1/F3): audit ingest needs the host's registered key, verifies every `hostSig`, refuses objects of workloads the host never served | `mgmt/service.go` `IngestAudit` |
 | RT3-06 | **Fixed** (F4): the Host DO asks hostd before any tenant code runs, for fetch and RPC; hostd creates only admitted names | `hostd/gen/js/platform.js`, `hostd/objects.go` `ensure`; `hostd.TestPublicIngress` §3b, `gen.TestGeneratedWrapperPublic` |
 | RT3-07 | **Fixed** (F4): `__TW` stripped from every tenant env; Worker-level spawn needs the ticket; `ready` never creates | `js/packages/tailnet/src/runtime.ts`, `hostd/http.go` |
-| RT3-08 | **Partial** (F4): `principal` on spawn is `inherit`/`none` only; `actingFor`/`public` stripped from tenant op args. In-process `request.cf` forgery toward siblings (`getCaller`, Host DO `principalOf`) remains: F5 | `hostd/http.go` spawn, `platform.js` `TailnetApi` |
+| RT3-08 | **Fixed** (F4, then F5 in #148): `principal` on spawn is `inherit`/`none` only; `actingFor`/`public` stripped from tenant op args (F4). hostd seals the caller under the instance `MAC_KEY`, and the platform and runtime honour only a verified seal, so an in-process forgery toward a sibling (`getCaller`, Host DO `principalOf`) yields no caller (F5). Residual replay of the same real caller is in `security/LEDGER.md` H08 | `hostd/http.go` spawn, `hostd/sealcf.go`, `platform.js` `sealedRequest`/`TailnetApi`, `js/packages/tailnet/src/seal.ts`; `hostd.TestRT3_H08_ForgedPrincipal` |
 | RT3-12 | **Fixed** (F1): deployment status updates are scoped to the deployment's host | `mgmt/sqlstore.go` `SetDeploymentStatus` |
 | others | open; see `security/LEDGER.md` | — |
 
@@ -934,3 +937,136 @@ fail only their own session (I8).
 | ID | Verdict | Evidence |
 |----|------|------|
 | RT3-11 | **Fixed** (F8) | `helper.TestRT3_H11_UffdBadTableFailsSession` (Linux, no root): a fake VMM connects to `listenUffd`'s socket, sends a crafted table with a pipe as the userfaultfd and queues a page fault; each table fails its session and a good table after them is served up to `UFFDIO_COPY`. With the old check, the wrapped-offset, offset-wraps and unaligned-base tables pass the handshake. `helper.TestRT3_H11_UffdRegionValidation` (any OS, table-driven) and `helper.FuzzRegionTable`: every accepted table keeps every fault and prefetch page inside the memory file. |
+
+---
+
+# Note 2026-11-21: RT3-16 fixed (#151)
+
+This note updates RT3-16. The earlier passes are left as written.
+
+hostd marks the VM it boots for the base snapshot with `StartRequest.Base`
+(`hostd/vm/snapshot_linux.go` → `bootOpts.base`), and the helper keeps the
+flag on the session (`hostd/vm/helper/baseguard_linux.go`). `snapshot-base`
+now needs a session started with `Base` that has a volume slot, no volume
+and is not a restored copy; any other target is refused before the helper
+pauses it, and is left running (before, a refused target was killed).
+`attach` is refused on a `Base` session, so the base never holds a DO
+volume, and the old race between an attach on the VM's own connection and
+a `snapshot-base` from another is gone. `start` refuses `Base` without a
+volume slot, with a container image or with a restore.
+
+The helper still can't see what hostd sends the guest over vsock (a bundle,
+a MAC key): hostd's fresh-boot and `fsscan` checks stay the main guard.
+
+| ID | Verdict | Evidence |
+|----|------|------|
+| RT3-16 | **Fixed** (F8) | `helper.TestRT3_H16_BaseGuard` (Linux, no KVM or root): a claimed pool VM without a volume, a VM with a volume, a restored copy and cold boots are refused `snapshot-base` with `bad_request`, with no call to the VMM's API and without being stopped; a `Base` session is refused `attach`; `start` refuses the three bad `Base` combinations. With the old check, the claimed pool VM and the restored copy reach the VMM's pause call. |
+
+---
+
+# Note 2026-11-21: H22 confirmed and fixed (#155)
+
+This note records the CapMap half of H22. The earlier passes are left as
+written.
+
+Run on test tailnet 2 (production control) with `tssvc.TestRealServiceCaps`
+(`make e2e-svc-caps`). The caller was `tag:ttest` and the Service host
+`tag:ttest-rt-svch`. One app cap was granted with `dst: ["svc:ttest-rt-caps"]`,
+another with `dst: ["tag:ttest-rt-svch"]`, and no other grant between the two
+tags carried a cap.
+
+| Flow | plain `WhoIs` (what netd and mgmt used) | `WhoIsForIP(local addr)` / `WhoIsForService` |
+|----|----|----|
+| through the VIP (IPv6 and IPv4) | the tag grant's cap only | the `svc:` cap only |
+| to the node's own address | the tag grant's cap only | the tag grant's cap only |
+| through the VIP, tag grant removed | no caps | the `svc:` cap only |
+
+Plain WhoIs (`LocalBackend.PeerCaps`) evaluates the packet filter's cap
+grants against the node's own address, whatever the flow's destination. On a
+Service flow a workload therefore saw caps narrower than the policy reads
+(the `svc:` grant's caps were missing, so an app that authorizes on `caps()`
+denied) and wider (a grant to the node's tags appeared although the caller
+dialed the Service). Severity stays Medium: both caps come from the same
+tailnet's policy, and the wider case needs the admin to grant the node tag
+something the Service grant withholds.
+
+| ID | Verdict | Evidence |
+|----|------|------|
+| H22 (CapMap) | **Fixed** | netd's attributed ingress (`netd/ingress.go`) and mgmt's WhoIs (`internal/mgmtd`) call `tssvc.WhoIs`, which uses `WhoIsForIP` with the connection's local address from the request context. `netd.TestServiceCapsScopedToVIP` drives `serveIngress` on testcontrol with a packet filter granting one cap to the VIP and one to the node's addresses; it failed before the change (Service flow: svc cap missing, node cap present) and passes after. `tssvc.TestRealServiceCaps` checks `tssvc.WhoIs` against production control. |
+
+---
+
+# Note 2026-11-24: H-binding-wire fixed for HTTP egress (#347)
+
+This note records a finding of the fresh-eyes pass of 2026-11-23 (master
+`27fd3de4`, v0.5.0) on service bindings (ADR-053). The earlier passes are
+left as written.
+
+**Finding (Low; hostile tenant code; workload ↔ workload in one tenant).**
+A service binding call to a named entrypoint or an RPC method carries
+`Tailworks-Binding` between hosts. The code said only hostd writes it
+(`routeBinding`, for a call the platform marked with `x-tw-binding`), but
+nothing removed a copy tenant code set on an ordinary `fetch()`: the
+platform's egress entrypoints stripped `x-tw-*`, `tw-*` and
+`proxy-authorization`, hostd deleted it only inside `routeBinding`, and
+netd forwards it by design. The callee's `bindingIngress` then admitted it
+from any caller with a node certificate of the tenant. So a Worker or
+object with a tailnet grant to a sibling workload reached the sibling's
+named entrypoints and RPC methods without declaring a `services` binding.
+The cross-tenant gate (no certificate, `binding_forbidden`) and the
+public-request refusal held.
+
+**Fix.** The header is removed from tenant requests in the platform worker
+(`objectEgress`, `WorkloadEgress.fetch`, `bindingEgress`) and again in
+hostd, in every HTTP egress handler: `takeBinding` (the workload and facet
+egress) and `nodeEgress` (the Node tier's proxy).
+
+**What the fix does not cover.** Checked while fixing: tenant code that
+speaks HTTP itself on a raw socket to the target's ingress port
+(`connect()`, ADR-052; a Node app's CONNECT tunnel) writes bytes hostd
+never parses, and its header still counts. The callee authorizes the
+calling node (WhoIs, the tenant's certificate, the grant); it cannot tell
+which code on that node wrote the header. That is the model ADR-053 §8
+states, and the docs now say it plainly: within a tenant, a named
+entrypoint is not a boundary between workloads the policy lets reach each
+other. Closing it needs a header the callee can authenticate (signed by
+the calling hostd, or a token mgmt issues when it resolves the binding),
+which is a new protocol field and a design decision.
+
+| ID | Verdict | Evidence |
+|----|------|------|
+| H-binding-wire | **Fixed** for HTTP egress; the raw-socket path is a documented limit | `hostd.TestServiceBindings/*/TenantWireHeaderStripped` and `…/TenantWireHeaderStrippedFromFacetObject` (real workerd, hostd and netd, on fakemgmt and the real mgmt, with the target on the same host and on another): a plain `fetch()` with the header, in four spellings, is an ordinary request to the default `fetch()`. Before, the `Admin` entrypoint answered and `add(2, 3)` returned 5. `hostd.TestEgressDropsTenantBindingWire` drives hostd's handlers without the platform worker, and `gen.TestGeneratedWrapperProbe` (`ForgedEgressHeadersIgnored`, `WorkloadEgressIsWorkload`) the platform worker without hostd; each fails without its half. `hostd.TestServiceBindings/*/RawSocketStillCarriesWireHeader` pins the limit: it passes before and after. |
+
+---
+
+# Note 2026-11-24: H-r2group fixed (#348)
+
+This note records a finding of the fresh-eyes pass of 2026-11-23 (master
+`27fd3de4`, v0.5.0) on R2 (ADR-036) and workload replicas. The earlier
+passes are left as written.
+
+**Finding (Low/Info, latent; hostile tenant code; workload ↔ workload in
+one tenant).** A replica of `web` is the workload `web--r<n>`, and it
+shares `web`'s stores, secrets and R2 objects. Two resolvers decided
+whether a workload is a replica, and they disagreed for one kind of name.
+hostd filed R2 blob bytes under `r2Group(name)`, which stripped a trailing
+`--r<n>` (n ≥ 2) from the name. mgmt scopes the bucket's index, every
+other store and the secrets by the deployment record (`replicaGroupOf`,
+set only for real replicas). A workload of its own could be deployed as
+`web--r2`: its index was its own, and its bytes went under `web`'s prefix,
+against the R2 claim that no request a workload can cause names another
+workload's data. Not exploitable: a blob is reached only by a random
+128-bit ID from the workload's own index, and nothing lists or sweeps a
+prefix.
+
+**Fix.** A name of that shape belongs to replicas. mgmt refuses it to a
+workload that is not one (`409 replica_conflict`), in `Deploy` and in the
+deploy's dry run, and to a preview whose alias would make one. mgmt and
+hostd read names with one function (`internal/replicaname`), so they
+can't drift apart again. Existing names are not backfilled: a workload
+deployed under such a name before the rule keeps deploying while it is
+live, and shares the blob prefix until it is renamed.
+
+| ID | Verdict | Evidence |
+|----|------|------|
+| H-r2group | **Fixed** | `mgmt.TestRT_Hr2group_ReplicaNameReserved` (through the `/v1` API): new names of the shape are refused at the deploy and its dry run, and nothing is written; near-miss names and real replicas deploy; a preview alias that makes such a name is refused; a workload seeded as an older mgmt accepted it keeps deploying until it is undeployed. For every accepted name, mgmt's store scope equals hostd's blob group. Before: `POST /v1/deployments` for `web--r2` answered 202. `hostd.TestR2BlobPrefixIsTheReplicaGroup` drives the `r2API` handler with a directory backend. `replicaname.TestGroupMatchesHostdBlobPrefix` and `replicaname.FuzzGroup` show the shared parser strips exactly what hostd's expression stripped, so no replica's blobs move. |

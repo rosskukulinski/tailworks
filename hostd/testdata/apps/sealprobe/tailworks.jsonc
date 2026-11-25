@@ -1,0 +1,12 @@
+{
+  "name": "sealprobe",
+  "tailnet": {
+    "tags": ["tag:ttest"],
+    "objects": {
+      // a facet object (the default): its own isolate behind Host_Room
+      "Room": { "tags": ["tag:ttest"] },
+      // a plain DO: runs in the tenant service's isolate
+      "Desk": { "tags": ["tag:ttest"], "egress": "workload" },
+    },
+  },
+}

@@ -24,6 +24,7 @@ func meas(host, target, path string, rttMs float64, age time.Duration) PathMeasu
 }
 
 func TestScoreHosts(t *testing.T) {
+	t.Parallel()
 	db := []string{"tag:db"}
 	dead := cand("h9", 500)
 	dead.Live = false
@@ -183,6 +184,7 @@ func TestScoreHosts(t *testing.T) {
 
 // Replicas must agree: the answer doesn't depend on input order.
 func TestScoreHostsDeterministic(t *testing.T) {
+	t.Parallel()
 	cands := []Candidate{cand("h1", 10), cand("h2", 10), cand("h3", 10), cand("h4", 7)}
 	ms := []PathMeasurement{meas("h1", "tag:db", PathDirect, 2, 0), meas("h2", "tag:db", PathDirect, 2, 0),
 		meas("h3", "tag:db", PathDERP, 1, 0), meas("h4", "tag:db", PathDirect, 2, 0)}
@@ -203,6 +205,7 @@ func TestScoreHostsDeterministic(t *testing.T) {
 }
 
 func TestResolvePlacement(t *testing.T) {
+	t.Parallel()
 	parse := func(s string) *TwConfig {
 		c, err := ParseTwConfig([]byte(s))
 		if err != nil {

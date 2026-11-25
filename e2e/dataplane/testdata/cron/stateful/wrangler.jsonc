@@ -1,0 +1,25 @@
+{
+  // e2e/dataplane cron loop (#419): the stateful cron workload (cron
+  // triggers plus alarms). The "reschedule" fault swaps "* * * * *" for
+  // "*/2 * * * *" and back (cron_test.go cronSwap).
+  "name": "cronobj",
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "triggers": {
+    "crons": [
+      "* * * * *",
+      "*/1 * * * *",
+      "0-59 * * * *",
+    ],
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "ALM", "class_name": "Alm" },
+      { "name": "FALM", "class_name": "FAlm" },
+      { "name": "SCH", "class_name": "Sch" },
+    ],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Alm", "FAlm", "Sch"] }],
+  "vars": { "REC": "http://rec.invalid" },
+}

@@ -17,6 +17,7 @@ import (
 // a server) is reported, via the server end's path and our peer inode
 // (ss -x). With no such connection, nothing is reported.
 func TestTailscaledHoldersDetects(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("ss"); err != nil {
 		t.Skip("no ss (iproute2)")
 	}
@@ -57,6 +58,7 @@ func TestTailscaledHoldersDetects(t *testing.T) {
 }
 
 func TestHelperUnixServer(t *testing.T) {
+	t.Parallel()
 	p := os.Getenv("TW_TEST_UNIX_SERVER")
 	if p == "" {
 		t.Skip("helper")
@@ -75,6 +77,7 @@ func TestHelperUnixServer(t *testing.T) {
 }
 
 func TestLandlockABIAndGlibc(t *testing.T) {
+	t.Parallel()
 	if abi, err := landlockABI(); err == nil && abi < 1 {
 		t.Fatalf("landlock ABI %d with no error", abi)
 	}

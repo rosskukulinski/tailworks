@@ -16,7 +16,8 @@
 // proxy (TW_EGRESS_PROXY; also exported as HTTP_PROXY/HTTPS_PROXY with
 // NODE_USE_ENV_PROXY=1), so the destination sees this deployment's own
 // tailnet node and ADR-019 applies (netmap-only names, no loopback, no host,
-// no metadata, no internet). enforceEgress() (called by
+// no metadata; internet only as tailnet.egress.internet allows, from the
+// host network). enforceEgress() (called by
 // installGlobalDispatcher) additionally routes raw `net`/`tls` connects
 // through the proxy as CONNECT tunnels and refuses direct DNS/UDP, so code
 // that ignores the env proxies is still attributed or fails. All of this is
@@ -280,7 +281,8 @@ function isLoopbackHost(h: string): boolean {
  * bypasses the env proxies is still attributed: a TCP connect to anything
  * but the egress proxy or this app's own listener becomes a CONNECT tunnel
  * through the proxy (netd then applies ADR-019 from the deployment's node
- * and refuses loopback/LAN/metadata/internet), direct DNS resolution fails
+ * and refuses loopback/LAN/metadata, and internet that tailnet.egress.internet
+ * does not allow), direct DNS resolution fails
  * with forbidden_destination (names resolve at the proxy, from the
  * netmap), and UDP sockets fail. Idempotent.
  *

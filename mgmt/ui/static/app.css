@@ -183,6 +183,22 @@ tr:target td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 tr:target td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 
+/* ---- logs ---- */
+nav.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: 0 0 4px; }
+nav.tabs a { padding: 8px 12px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+nav.tabs a:hover { color: var(--fg); text-decoration: none; }
+nav.tabs a.cur { color: var(--fg); font-weight: 600; border-bottom-color: var(--accent); }
+pre.console { white-space: pre-wrap; overflow-wrap: anywhere; max-height: none; margin: 0; }
+section > pre.console { max-height: 70vh; background: var(--card); }
+table.records td { vertical-align: top; }
+table.records tr.rec:has(+ tr.rec-detail) td { border-bottom: 0; padding-bottom: 4px; }
+table.records tr.rec-detail td { padding-top: 0; }
+table.records tr.rec.err td:first-child { box-shadow: inset 3px 0 0 var(--bad-dot); }
+table.records .exc { margin-top: 6px; }
+.lvl { display: inline-block; min-width: 5ch; color: var(--muted); }
+.lvl-warn { color: var(--warn-fg); }
+.lvl-error { color: var(--bad-fg); font-weight: 600; }
+
 @media (max-width: 700px) {
   header.top { height: auto; padding: 10px 16px; gap: 12px; }
   main { padding: 16px; }

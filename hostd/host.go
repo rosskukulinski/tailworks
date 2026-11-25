@@ -40,6 +40,7 @@ import (
 	"github.com/rosskukulinski/tailworks/hostd/r2"
 	"github.com/rosskukulinski/tailworks/hostd/sandbox"
 	"github.com/rosskukulinski/tailworks/internal/procsb"
+	"github.com/rosskukulinski/tailworks/netd"
 	"tailscale.com/tsnet"
 )
 
@@ -98,6 +99,15 @@ type Config struct {
 	// (netd.Config.PublicListen). Tests only: testcontrol issues no
 	// certificates, so they inject a listener of *ipn.FunnelConn.
 	PublicListen func(srv *tsnet.Server) (net.Listener, error)
+
+	// TailnetHTTPSCert overrides the certificate of a workload node's
+	// tailnet HTTPS listener (netd.Config.HTTPSCert). Tests only.
+	TailnetHTTPSCert netd.HTTPSCertFunc
+	// TailnetHTTPSOff ignores tailworks.jsonc tailnet.https: the workload
+	// is served on http:// only (tw dev, whose local control issues no
+	// certificates). Never set it on a host that serves tenants.
+	TailnetHTTPSOff bool
+
 	// VM boots microVM sandboxes (hostd/vm: Firecracker on Linux + KVM).
 	// Nil means this host offers the process tier only: a microvm
 	// deployment is refused (tier_unavailable), never downgraded.
@@ -114,10 +124,23 @@ type Config struct {
 	// never on a host serving tenants.
 	WorkerdInspector bool
 
+	// PyodideDir holds the pinned Pyodide bundles Python Workers run on
+	// (pyodide.go; default <DataDir>/pyodide). Missing ones are fetched
+	// from PyodideURL ("" = workerd's own source) on the first Python
+	// deployment; workerd only reads them.
+	PyodideDir string
+	PyodideURL string
+
 	// Capacity sets the capacity vector's VM dimensions (nil: measured; see
 	// capacity.go). Its nodes are always CapacityNodes; without a microVM
 	// backend every VM dimension is 0.
 	Capacity *mgmtapi.HostCapacity
+	// WorkerdHeapMiB caps each V8 isolate's heap in a workerd, and
+	// NodeHeapMiB a Node-tier app's (limits.go; 0 = the default, negative
+	// = no cap).
+	WorkerdHeapMiB int
+	NodeHeapMiB    int
+
 	// VMMemMiB and VMVCPUs are a microVM DO instance's guest size, for usage
 	// accounting (defaults 512 and 2, tw-hostd's -vm-mem-mib / -vm-vcpus).
 	VMMemMiB, VMVCPUs int
@@ -125,9 +148,6 @@ type Config struct {
 	// (default: mgmt's /v1/container-reservations through Mgmt; tests: a
 	// fake).
 	ContainerQuota ContainerQuota
-	// DefaultTier applies when neither the deployment (tailworks.jsonc "tier")
-	// nor the tenant names one. Default "process".
-	DefaultTier string
 	// VMDebug enables guest diagnostics (connectivity probes; tests).
 	VMDebug bool
 	// VMVolumeMiB sizes new DO volumes (microVM tier; sparse; default 1024).
@@ -144,6 +164,12 @@ type Config struct {
 	// a Node-tier deployment there with egress_unenforced (RT-08: a hostile
 	// Node app can open raw sockets past the egress proxy).
 	InsecureSharedHost bool
+	// AllowExperimentalFlags lets deployments set compatibility flags
+	// workerd marks experimental (unsafe_module, rtti_api, precise_timers,
+	// …; gen/compatflags.go, #337). Off, such a deployment is refused
+	// (experimental_flag). The host advertises it as the
+	// experimental-flags feature, so mgmt places such deployments here.
+	AllowExperimentalFlags bool
 	// HostSockets overrides the Linux risky-host-socket scan
 	// (procsb.ScanHostSockets; tests).
 	HostSockets func() procsb.HostSockets
@@ -187,6 +213,11 @@ type Config struct {
 	Containers sandbox.ContainerBackend
 	// Images converts and caches container images (hostd/image).
 	Images *image.Store
+
+	// ContainersOff is why tw-hostd offers no containers when it doesn't
+	// (found once at startup; tw doctor and tw up show it, containersoff.go).
+	ContainersOff string
+
 	// ContainerCapacity optionally bounds this host's running containers
 	// further, on top of the capacity vector (Capacity) they share with
 	// microVM DO instances (0 = no extra bound).
@@ -204,6 +235,15 @@ type Config struct {
 	// workload's egress.internet allowlist. Nil: none; such flows are
 	// refused. tw-hostd sets DirectInternet unless -container-internet=off.
 	ContainerInternet *ContainerInternet
+
+	// WorkerInternet is the Worker internet egress path
+	// (ADR-049, internet.go): how fetch() from Worker
+	// and Node app code reaches destinations that are not on the tailnet,
+	// subject to each workload's tailnet.egress.internet and the SSRF
+	// guard. Nil: none; such fetches are refused. tw-hostd and tw up set
+	// DirectInternet unless -worker-internet=off.
+	WorkerInternet *ContainerInternet
+
 	// PathEvery is how often hostd measures and reports the tailnet paths
 	// to its assignments' placement targets (smart placement, ADR-033).
 	// 0 = DefaultPathEvery (60 s); negative disables measuring.
@@ -242,14 +282,23 @@ type Config struct {
 	Restart       func()
 }
 
-// ContainerInternet dials allowlisted internet hosts for containers. The
-// sandbox egress proxy (netd/sbxnet) applies the allowlist and the ADR-019
-// blocks to every resolved address before Dial is called.
+// ContainerInternet dials allowlisted internet hosts for containers (and,
+// as Config.WorkerInternet, for Workers). The sandbox egress proxy
+// (netd/sbxnet) and netd's internet path apply the allowlist and the
+// ADR-019 blocks (netd/publicip) to every resolved address before Dial is
+// called.
 type ContainerInternet struct {
 	Dial    func(ctx context.Context, network, addr string) (net.Conn, error)
 	Resolve func(ctx context.Context, host string) ([]netip.Addr, error)
 	// HostAddrs are never dialled (nil: the host's interface addresses).
 	HostAddrs []netip.Addr
+	// Mode names the path for status ("": "direct"); Via names it in
+	// audit notes ("": "this host's network"); Problem, when set, says why
+	// the path is unusable right now ("" when it is). An exit-node path
+	// (exitnode.go) sets all three.
+	Mode    string
+	Via     string
+	Problem func() string
 }
 
 // DirectInternet is the host network and resolver (tailworks has no tenant
@@ -287,6 +336,13 @@ type Host struct {
 	sandbox    string // resolved Config.Sandbox
 	lastHB     time.Time
 	fenced     bool
+
+	// children: workerd/Node process groups this hostd started, so the
+	// next run can reap any a crash left behind (childreap.go, #432).
+	children *childLedger
+
+	// cronLasts: each workload's last cron minute, kept across restarts (cronlast.go, #594).
+	cronLasts *cronLastStore
 
 	// consume: queue consumers' context, cancelled on self-fence (queuefence.go).
 	consume consumeGate
@@ -384,7 +440,8 @@ func New(cfg Config) (*Host, error) {
 		cfg.SandboxDeny = append(cfg.SandboxDeny, f.Root)
 	}
 	if cfg.CapacityNodes == 0 {
-		cfg.CapacityNodes = 1000
+		total, _ := memInfo()
+		cfg.CapacityNodes = DefaultCapacityNodes(total) // capacitynodes.go
 	}
 	if cfg.VMMemMiB == 0 {
 		cfg.VMMemMiB = 512
@@ -401,11 +458,11 @@ func New(cfg Config) (*Host, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.New(slog.DiscardHandler)
 	}
-	if cfg.DefaultTier == "microvm" && cfg.VM == nil && !cfg.ForceProcessTier {
-		return nil, errors.New("hostd: default tier microvm needs a microVM backend (Linux + KVM + tw-vmhelper: `sudo tw host setup --microvm`); without one, use -default-tier process")
-	}
 	sb, err := ResolveSandbox(cfg.Sandbox)
 	if err != nil {
+		return nil, err
+	}
+	if err := checkSandboxLayout(sb, cfg); err != nil { // sandboxlayout.go (#342)
 		return nil, err
 	}
 	// One field per line: features that add a map here should not collide.
@@ -433,6 +490,8 @@ func New(cfg Config) (*Host, error) {
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		return nil, err
 	}
+	h.children = openChildLedger(cfg.DataDir, h.log) // childreap.go: before anything is spawned
+	h.cronLasts = openCronLast(cfg.DataDir, h.log)
 	h.pubCreates = newPublicCreates(h.publicCreatesPath())
 	h.admits = map[string]time.Time{}
 	os.Chmod(cfg.DataDir, 0o700)
@@ -456,6 +515,7 @@ func New(cfg Config) (*Host, error) {
 	if err := h.audit.openSpill(filepath.Join(cfg.DataDir, "audit-spill.jsonl"), h.log); err != nil {
 		return nil, err
 	}
+	h.audit.loadResume(filepath.Join(cfg.DataDir, auditHeadFile), h.log)
 	if err := h.loadObjects(); err != nil {
 		return nil, err
 	}
@@ -548,7 +608,11 @@ func (h *Host) register(ctx context.Context) error {
 		// local-dev: the unix push socket.
 		req.PushURL = "unix://" + h.pushSock
 	}
-	return h.mgmt.Register(ctx, req)
+	reg, err := h.mgmt.RegisterHost(ctx, req)
+	if err == nil && h.audit.resume(reg.AuditHead, h.log) { // auditresume.go
+		h.log.Info("audit chain continued from mgmt's head", "head", reg.AuditHead)
+	}
+	return err
 }
 
 // tiers lists what this host offers: the process tier always, the microVM
@@ -567,11 +631,15 @@ func (h *Host) tiers() []string {
 
 // Close stops every workload and node (node state is kept for rejoin).
 func (h *Host) Close() error {
+	cl := newCloseLog(h.log) // closelog.go
+	defer cl.done()
 	if h.cancel != nil {
 		h.cancel()
 	}
 	h.wg.Wait()
+	cl.lap("loops")
 	h.closePushServers()
+	cl.lap("push")
 	h.mu.Lock()
 	wls := make([]*workload, 0, len(h.workloads))
 	for _, w := range h.workloads {
@@ -586,14 +654,19 @@ func (h *Host) Close() error {
 	for _, w := range wls {
 		w.stopAll()
 	}
+	cl.lap("workloads")
 	var wg sync.WaitGroup
 	for _, t := range ts {
 		wg.Add(1)
 		go func() { defer wg.Done(); t.reg.Close() }()
 	}
 	wg.Wait()
+	cl.lap("nodes")
 	h.tel.close()
 	h.flushAudit(context.Background())
+	if err := h.audit.saveHead(filepath.Join(h.cfg.DataDir, auditHeadFile)); err != nil { // auditresume.go
+		h.log.Warn("audit: saving the chain head failed; the next start begins a new chain segment", "err", err)
+	}
 	h.saveObjects()
 	if h.runDirOwned {
 		os.RemoveAll(h.cfg.RunDir)
@@ -629,6 +702,9 @@ func (h *Host) tick() {
 	defer h.maintainPools()
 	ctx, cancel := context.WithTimeout(h.ctx, 10*time.Second)
 	defer cancel()
+	// Freshness counts from when the heartbeat left, not when its answer came
+	// back: an answer that waited out a stall says nothing about now (#501).
+	sent := time.Now()
 	if err := h.heartbeat(ctx); err != nil {
 		if h.ctx.Err() != nil {
 			return
@@ -651,7 +727,7 @@ func (h *Host) tick() {
 		return
 	}
 	h.mu.Lock()
-	h.lastHB, h.fenced = time.Now(), false
+	h.lastHB, h.fenced = sent, false
 	h.mu.Unlock()
 	if err := h.syncAssignments(ctx); err != nil && h.ctx.Err() == nil {
 		h.log.Warn("assignment sync failed", "err", err)
@@ -661,6 +737,23 @@ func (h *Host) tick() {
 }
 
 func (h *Host) heartbeat(ctx context.Context) error {
+	resp, err := h.mgmt.Heartbeat(ctx, h.cfg.HostID, h.heartbeatRequest())
+	if err != nil {
+		return err
+	}
+	for _, id := range resp.RevokeObjects {
+		go h.killLocal(id, "revoked by mgmt")
+	}
+	h.purgeTenants(resp.PurgeTenants) // tenantpurge.go
+	if len(resp.Revoke) > 0 {
+		h.revoke(resp.Revoke)
+	}
+	return nil
+}
+
+// heartbeatRequest is the heartbeat body: usage, live nodes, deployment
+// statuses and the leases of the live deployments.
+func (h *Host) heartbeatRequest() mgmtapi.HeartbeatRequest {
 	usage := h.usage()
 	req := mgmtapi.HeartbeatRequest{Leases: []mgmtapi.Lease{}, Usage: &usage, Containers: h.containers.running()}
 	req.PurgedTenants = h.tenantPurge.done() // tenantpurge.go
@@ -690,18 +783,7 @@ func (h *Host) heartbeat(ctx context.Context) error {
 			req.Leases = append(req.Leases, mgmtapi.Lease{Namespace: w.lease(), Epoch: w.epochNow()})
 		}
 	}
-	resp, err := h.mgmt.Heartbeat(ctx, h.cfg.HostID, req)
-	if err != nil {
-		return err
-	}
-	for _, id := range resp.RevokeObjects {
-		go h.killLocal(id, "revoked by mgmt")
-	}
-	h.purgeTenants(resp.PurgeTenants) // tenantpurge.go
-	if len(resp.Revoke) > 0 {
-		h.revoke(resp.Revoke)
-	}
-	return nil
+	return req
 }
 
 // revoke stops serving namespaces whose lease this host lost — unless mgmt
@@ -818,6 +900,7 @@ func (h *Host) syncAssignments(ctx context.Context) error {
 			h.undeploy(w, "no longer assigned")
 		}
 	}
+	h.forgetUnassignedTombstones(want) // unassignedtombstones.go (#364)
 	return nil
 }
 

@@ -40,6 +40,7 @@ var cliSurface = []struct {
 	{"tenant set", []string{"tenant", "set", "other.example.ts.net", "--max-objects", "5"}},
 	{"tenant rm", []string{"tenant", "rm", "other.example.ts.net", "--yes"}},
 	{"init", []string{"init", "{work}/app", "--template", "hello"}},
+	{"init list", []string{"init", "--list"}},
 	{"dev", []string{"dev", "{work}/empty", "--once"}},
 	{"types", []string{"types", "{work}/app"}},
 	{"deploy", []string{"deploy", "{work}/app"}},
@@ -51,16 +52,19 @@ var cliSurface = []struct {
 	{"ls", []string{"ls"}},
 	{"undeploy", []string{"undeploy", "app"}},
 	{"expose", []string{"expose", "off", "app"}},
+	{"expose names", []string{"expose", "names"}},
+	{"expose release", []string{"expose", "release", "app"}},
 	{"secret put", []string{"secret", "put", "API_TOKEN", "--workload", "app"}},
+	{"secret bulk", []string{"secret", "bulk", "/nonexistent/secrets.env", "--workload", "app"}},
 	{"secret ls", []string{"secret", "ls", "--workload", "app"}},
 	{"secret rm", []string{"secret", "rm", "API_TOKEN", "--workload", "app"}},
 	{"kv namespace create", []string{"kv", "namespace", "create", "sessions", "--workload", "app"}},
-	{"kv namespace list", []string{"kv", "namespace", "list", "--workload", "app"}},
-	{"kv namespace delete", []string{"kv", "namespace", "delete", "sessions", "--workload", "app", "--yes"}},
+	{"kv namespace list", []string{"kv", "namespace", "ls", "--workload", "app"}},
+	{"kv namespace delete", []string{"kv", "namespace", "rm", "sessions", "--workload", "app", "--yes"}},
 	{"kv key put", []string{"kv", "key", "put", "k", "v", "--namespace", "sessions", "--workload", "app"}},
 	{"kv key get", []string{"kv", "key", "get", "k", "--namespace", "sessions", "--workload", "app"}},
-	{"kv key delete", []string{"kv", "key", "delete", "k", "--namespace", "sessions", "--workload", "app"}},
-	{"kv key list", []string{"kv", "key", "list", "--namespace", "sessions", "--workload", "app"}},
+	{"kv key delete", []string{"kv", "key", "rm", "k", "--namespace", "sessions", "--workload", "app"}},
+	{"kv key list", []string{"kv", "key", "ls", "--namespace", "sessions", "--workload", "app"}},
 	{"queues create", []string{"queues", "create", "jobs"}},
 	{"queues ls", []string{"queues", "ls"}},
 	{"queues info", []string{"queues", "info", "jobs"}},
@@ -96,9 +100,16 @@ var cliSurface = []struct {
 	{"host cordon", []string{"host", "cordon", "h1"}},
 	{"host uncordon", []string{"host", "uncordon", "h1"}},
 	{"host drain", []string{"host", "drain", "h1", "--dry-run"}},
-	{"release ls", []string{"release", "ls"}},
-	{"release import", []string{"release", "import", "/nonexistent/tailworks-0.0.0-linux-amd64.tar.gz"}},
+	{"uninstall", []string{"uninstall", "--dry-run"}},
+	{"backup", []string{"backup"}},
+	{"restore", []string{"restore", "/nonexistent/backup", "--yes"}},
+	{"custody migrate", []string{"custody", "migrate", "--setec-url", "https://secrets.example.ts.net"}},
 	{"upgrade", []string{"upgrade", "--plan", "--from", "/nonexistent"}},
+	{"upgrade", []string{"upgrade", "fleet", "--plan"}},
+	{"upgrade", []string{"upgrade", "fleet", "status"}},
+	{"upgrade import", []string{"upgrade", "import", "/nonexistent/tailworks-0.0.0-linux-amd64.tar.gz"}},
+	{"upgrade releases", []string{"upgrade", "releases"}},
+	{"upgrade rollback", []string{"upgrade", "rollback", "--yes"}},
 	{"host setup", []string{"host", "setup"}},
 	{"host vmcheck", []string{"host", "vmcheck", "app"}},
 	{"image public add", []string{"image", "public", "add", "docker.io/library/alpine:3"}},
@@ -114,6 +125,7 @@ var cliSurface = []struct {
 // docs/errors.md, and nothing on stdout. It also fails when a command or
 // subcommand has no schema, or the schema describes one that's gone.
 func TestCLIJSONContract(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("short")
 	}
@@ -236,7 +248,7 @@ func subDepth(args []string) int {
 			return 3
 		}
 		return 2
-	case "tenant", "host", "secret", "docs", "agent", "queues", "release":
+	case "tenant", "host", "secret", "docs", "agent", "queues":
 		return 2
 	case "kv":
 		return 3 // kv namespace create, kv key put, …
@@ -245,37 +257,40 @@ func subDepth(args []string) int {
 }
 
 // helpCommands parses `tw help`: every command, and each subcommand of the
-// commands whose usage lists them ("tenant add … | tenant ls | …").
+// commands whose usage lists them (one "tw tenant add …" line per
+// subcommand, or "tenant add … | tenant ls | …").
 func helpCommands(help string) []string {
-	var out []string
 	sc := bufio.NewScanner(strings.NewReader(help))
 	cmdLine := regexp.MustCompile(`^  ([a-z]+) `)
+	subs := map[string]map[string]bool{} // command → its subcommands
 	var cur string
 	for sc.Scan() {
 		l := sc.Text()
 		if m := cmdLine.FindStringSubmatch(l); m != nil {
 			cur = m[1]
+			subs[cur] = map[string]bool{}
 			continue
 		}
 		u, ok := strings.CutPrefix(strings.TrimSpace(l), "tw ")
 		if !ok || cur == "" {
 			continue
 		}
-		subs := map[string]bool{}
 		for _, seg := range strings.Split(u, "|") {
 			w := strings.Fields(seg)
 			if len(w) < 2 || w[0] != cur || subDepth(w) == 1 {
 				continue
 			}
-			subs[strings.Join(w[:subDepth(w)], " ")] = true
+			subs[cur][strings.Join(w[:subDepth(w)], " ")] = true
 		}
-		if len(subs) == 0 {
-			out = append(out, cur)
+	}
+	var out []string
+	for c, s := range subs {
+		if len(s) == 0 {
+			out = append(out, c)
 		}
-		for s := range subs {
-			out = append(out, s)
+		for sub := range s {
+			out = append(out, sub)
 		}
-		cur = ""
 	}
 	sort.Strings(out)
 	return out
@@ -285,19 +300,19 @@ func helpCommands(help string) []string {
 // stdout: ready, reload after an edit, stopping on SIGINT; every line
 // matches $defs/dev.event.
 func TestDevJSONEvents(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("short")
 	}
-	wd, err := nettest.WorkerdBinary()
+	_, err := nettest.WorkerdBinary()
 	if err != nil || !hostdtest.HasNode() {
 		t.Skip("needs workerd and node (make deps)")
 	}
-	t.Setenv("TW_WORKERD", wd)
 	bin := cliflow.BuildBinaries(t)
 	work := t.TempDir()
 	app := filepath.Join(work, "hello")
 	e := &cliflow.Env{T: t, BinDir: bin, StateDir: filepath.Join(work, "state"), WorkDir: work}
-	e.MustJSON(nil, "init", app, "--template", "hello", "--keep-tags")
+	e.MustJSON(nil, "init", app, "--template", "hello")
 	cmd := exec.Command(filepath.Join(bin, "tw"), "dev", app, "--port", "0", "--json")
 	cmd.Env = os.Environ()
 	out, _ := cmd.StdoutPipe()

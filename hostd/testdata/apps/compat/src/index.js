@@ -27,18 +27,50 @@ async function nodeCompat() {
   };
 }
 
-// connect() (cloudflare:sockets): open a TCP socket and report the outcome.
-async function tcp(host, port) {
+// connect() (cloudflare:sockets), or ctx.tailnet.connect() with
+// via=tailnet: open a TCP socket, send "ping\n", and read until the reply
+// holds "ping" (the fake host's server greets first, then echoes) or the
+// socket ends.
+async function tcp(ctx, host, port, via, tls) {
   try {
-    const s = connect({ hostname: host, port: Number(port) });
+    const opts = tls ? { tls: "netd" } : undefined;
+    const s = via === "tailnet" ? ctx.tailnet.connect({ hostname: host, port: Number(port) }, opts) : connect({ hostname: host, port: Number(port) });
     await s.opened;
     const w = s.writable.getWriter();
-    await w.write(new TextEncoder().encode("GET / HTTP/1.0\r\nHost: " + host + "\r\n\r\n"));
-    const { value } = await s.readable.getReader().read();
+    await w.write(new TextEncoder().encode("ping\n"));
+    const r = s.readable.getReader();
+    let read = "";
+    while (!read.includes("ping")) {
+      const { value, done } = await r.read();
+      if (done) break;
+      read += new TextDecoder().decode(value);
+    }
     await s.close();
-    return { ok: true, read: new TextDecoder().decode(value ?? new Uint8Array()).slice(0, 40) };
+    return { ok: read.includes("ping"), read: read.slice(0, 200) };
   } catch (e) {
-    return { ok: false, error: String(e?.message ?? e) };
+    return { ok: false, error: String(e?.message ?? e), code: e?.code };
+  }
+}
+
+// hold opens a socket like tcp(), then reads until the socket ends, and
+// reports how (a kill resets it: "error"), for at most 30 s.
+async function hold(ctx, host, port, via) {
+  const st = Date.now();
+  const s = via === "tailnet" ? ctx.tailnet.connect({ hostname: host, port: Number(port) }) : connect({ hostname: host, port: Number(port) });
+  const r = s.readable.getReader();
+  try {
+    await s.opened;
+    const w = s.writable.getWriter();
+    await w.write(new TextEncoder().encode("ping\n"));
+    const t = setTimeout(() => r.cancel("timeout"), 30000);
+    for (;;) {
+      const { done } = await r.read();
+      if (done) break;
+    }
+    clearTimeout(t);
+    return { ended: "done", ms: Date.now() - st };
+  } catch (e) {
+    return { ended: "error", error: String(e?.message ?? e), ms: Date.now() - st };
   }
 }
 
@@ -65,7 +97,9 @@ async function route(url, ctx) {
     case "/node":
       return Response.json(await nodeCompat());
     case "/connect":
-      return Response.json(await tcp(url.searchParams.get("host"), url.searchParams.get("port")));
+      return Response.json(await tcp(ctx, url.searchParams.get("host"), url.searchParams.get("port"), url.searchParams.get("via"), url.searchParams.has("tls")));
+    case "/hold":
+      return Response.json(await hold(ctx, url.searchParams.get("host"), url.searchParams.get("port"), url.searchParams.get("via")));
     case "/storage":
       return Response.json(await storage(ctx));
   }

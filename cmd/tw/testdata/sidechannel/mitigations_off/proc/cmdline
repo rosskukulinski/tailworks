@@ -1,0 +1,1 @@
+BOOT_IMAGE=/vmlinuz root=UUID=x ro mitigations=off nosmt

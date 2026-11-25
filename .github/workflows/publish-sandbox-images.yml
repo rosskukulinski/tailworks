@@ -1,0 +1,90 @@
+# publish-sandbox-images: build tailworks' arm64 rebuilds of
+# cloudflare/sandbox (ADR-032 D3; guest/images/README.md) and publish them
+# as ghcr.io/<owner>/cloudflare-sandbox:<version>-arm64, so arm64 hosts get
+# them without the operator building and pushing (issue #494).
+#
+# Run by hand only (a maintainer, from the ref to build):
+#
+#   gh workflow run publish-sandbox-images.yml --ref master
+#
+# then copy the digests from the run's summary into
+# internal/registry/aliassource.go (sandboxSourceDigests) in a normal PR;
+# `make test-images` checks each pinned digest resolves.
+#
+# - Builds natively on the hosted ubuntu-24.04-arm runner, never on the
+#   self-hosted release runners; packages: write is granted to this one job.
+# - --provenance=false (guest/images/build-sandbox-images.sh): a plain
+#   linux/arm64 image, with no attestation manifests for mgmt to skip.
+# - Tags are immutable: a <version>-arm64 tag that already exists is never
+#   overwritten (the run reports its digest and moves on). A new rebuild is
+#   a new version tag.
+# - The Apache-2.0 notice travels as OCI labels (licenses, source, and the
+#   documentation link to guest/images/README.md at this commit).
+name: publish-sandbox-images
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: publish-sandbox-images
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the arm64 rebuilds
+        env:
+          NOTICE_REV: ${{ github.sha }}
+        run: |
+          PLATFORM=linux/arm64 guest/images/build-sandbox-images.sh "$RUNNER_TEMP/images"
+      - name: Log in to ghcr.io
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      - name: Push (immutable tags) and report the digests
+        run: |
+          set -euo pipefail
+          owner=${GITHUB_REPOSITORY_OWNER,,}
+          {
+            echo "## arm64 sandbox rebuilds"
+            echo
+            echo "Copy these into \`sandboxSourceDigests\` (internal/registry/aliassource.go) in a PR."
+            echo
+            echo "| version | image | digest |"
+            echo "| --- | --- | --- |"
+          } >>"$GITHUB_STEP_SUMMARY"
+          for v in 0.12.14 1.0.0 1.0.1; do
+            src="tw.local/cloudflare-sandbox:$v-arm64"
+            dst="ghcr.io/$owner/cloudflare-sandbox:$v-arm64"
+            arch=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$src")
+            [ "$arch" = linux/arm64 ] || { echo "$src is $arch, want linux/arm64" >&2; exit 1; }
+            # Push only when the registry says the tag doesn't exist; any
+            # other lookup failure stops the run rather than risk a re-tag.
+            if out=$(docker buildx imagetools inspect "$dst" --format '{{json .Manifest}}' 2>&1); then
+              echo "::notice::$dst already exists; tags are immutable, not overwriting it"
+              digest=$(jq -r .digest <<<"$out")
+              note=" (already published)"
+            elif grep -qiE 'not found|manifest unknown' <<<"$out"; then
+              docker tag "$src" "$dst"
+              digest=$(docker push "$dst" | tee /dev/stderr | sed -n 's/.*digest: \(sha256:[0-9a-f]\{64\}\).*/\1/p' | tail -1)
+              note=""
+            else
+              echo "$out" >&2
+              exit 1
+            fi
+            case "$digest" in sha256:*) ;; *) echo "no digest for $dst" >&2; exit 1 ;; esac
+            echo "| $v | \`$dst\` | \`$digest\`$note |" >>"$GITHUB_STEP_SUMMARY"
+          done
+      - name: Log out
+        if: always()
+        run: docker logout ghcr.io

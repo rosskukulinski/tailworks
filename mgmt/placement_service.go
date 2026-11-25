@@ -94,6 +94,7 @@ func (m *Mgmt) storePaths(ctx context.Context, hostID string, rp PathReport) err
 			continue
 		}
 		seen[s.Target] = true
+		s = boundSample(s) // placement_bounds.go
 		ms = append(ms, PathMeasurement{HostID: hostID, TenantID: rp.TenantID, Target: s.Target, Peer: s.Peer, Path: s.Path,
 			RTTMicros: int64(s.RTTMs * 1000), DERPRegion: s.DERPRegion, MeasuredAt: now.Add(-time.Duration(s.AgeMs) * time.Millisecond).UnixMilli()})
 	}
@@ -211,7 +212,7 @@ const probeTimeout = 2 * time.Second
 func (m *Mgmt) probeMissing(ctx context.Context, t Tenant, cands []Candidate, ms []PathMeasurement, req Requirements) bool {
 	fresh := map[string]int{}
 	for _, x := range ms {
-		if req.Now.Sub(time.UnixMilli(x.MeasuredAt)) <= PathTTL/2 {
+		if req.Now.Sub(time.UnixMilli(x.MeasuredAt)) <= PathTTL/2 && unusableMeasurement(x, req.Now) == "" {
 			fresh[x.HostID]++
 		}
 	}

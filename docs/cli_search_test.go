@@ -20,3 +20,20 @@ func TestSearchFindsFlags(t *testing.T) {
 		}
 	}
 }
+
+// TestSearchCLIOnce: a flag several subcommands share (tw queues' --delay)
+// is one cli.md hit, not one per subcommand: a subcommand with the same
+// flags as an earlier section links there instead (issue #437).
+func TestSearchCLIOnce(t *testing.T) {
+	n := 0
+	var got []string
+	for _, h := range Search("delay", 10) {
+		if h.Doc == "cli.md" {
+			n++
+		}
+		got = append(got, h.Ref())
+	}
+	if n > 1 {
+		t.Errorf("search delay: %d cli.md hits in the top 10, want at most 1: %v", n, got)
+	}
+}

@@ -141,7 +141,7 @@ func TestGeneratedNoCronsRefusesScheduled(t *testing.T) {
 
 func (in *inst) getRaw(path string, tw map[string]any) (int, http.Header, []byte) {
 	req, _ := http.NewRequest("GET", "http://app.local"+path, nil)
-	b, _ := json.Marshal(map[string]any{"tailscale": map[string]any{"caller": testCaller}, "objectId": "o1", "tw": in.ticketed(tw)})
+	b, _ := json.Marshal(map[string]any{"tailscale": in.sealed(), "objectId": "o1", "tw": in.ticketed(tw)})
 	req.Header.Set("x-tw-cf", string(b))
 	resp, err := in.hc.Do(req)
 	if err != nil {

@@ -99,9 +99,10 @@ func (h *Host) syncService(w *workload, probe bool) {
 		h.mu.Lock()
 		ready := wl.live && wl.Status == statusReady
 		netdID = wl.NetdID
+		wlStatus := wl.Status // awaitNode writes it under h.mu (#586)
 		h.mu.Unlock()
 		if !ready {
-			want, reason = false, "workload node "+wl.Status
+			want, reason = false, "workload node "+wlStatus
 		}
 	}
 	if want && probe {

@@ -64,11 +64,10 @@ func TestCLIImages(t *testing.T) {
 	if err := exec.Command("docker", "buildx", "version").Run(); err != nil {
 		t.Skip("docker buildx unavailable:", err)
 	}
-	wd, err := nettest.WorkerdBinary()
+	_, err := nettest.WorkerdBinary()
 	if err != nil || !hostdtest.HasNode() {
 		t.Skip("needs workerd and node (make deps)")
 	}
-	t.Setenv("TW_WORKERD", wd)
 	ctl, err := nettest.StartControl()
 	if err != nil {
 		t.Fatal(err)
@@ -104,7 +103,7 @@ func TestCLIImages(t *testing.T) {
 	var up struct{ MgmtNode, MgmtIP string }
 	host.MustJSON(&up, "up", "--oauth-client-file", keyFile, "--tailnet", "ttest.ts.net", "--yes", "--ephemeral", "--control-url", ctl.URL,
 		"--tsapi-url", api.URL, "--hostname-prefix", "tw-i-", "--mgmt-hostname", "tw-mgmt", "--mgmt-authkey-file", authFile)
-	t.Setenv("TW_LINK_DISCOVER_NAME", "tw-mgmt-hermetic.invalid")
+	t.Setenv("TW_TEST_LINK_NAME", "tw-mgmt-hermetic.invalid")
 	var lk struct {
 		Actor   string
 		Tenants []struct{ TenantID string }
@@ -136,7 +135,7 @@ func TestCLIImages(t *testing.T) {
 	// An app with a Dockerfile container class (FROM the alias source,
 	// through an ARG default as Sandbox SDK 1.0's example writes it).
 	app := filepath.Join(work, "box")
-	dev.MustJSON(nil, "init", app, "--template", "hello", "--keep-tags")
+	dev.MustJSON(nil, "init", app, "--template", "hello")
 	os.WriteFile(filepath.Join(app, "Dockerfile"), []byte("ARG TOOLS=docker.io/cloudflare/sandbox:1.0.0\nFROM ${TOOLS}\nCOPY hello.txt /hello.txt\n"), 0o644)
 	os.WriteFile(filepath.Join(app, "hello.txt"), []byte("hello\n"), 0o644)
 	wr, _ := os.ReadFile(filepath.Join(app, "wrangler.jsonc"))

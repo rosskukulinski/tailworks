@@ -3,8 +3,9 @@
 tailworks runs Cloudflare's container surface: `ctx.container` in a Durable
 Object, the `Container` class from `@cloudflare/containers`, and the Sandbox
 SDK (0.x and 1.0) on top of it. Each container is its own microVM attached to
-one object. ADR-032 (design repo) is the decision. This page explains how to
-use it first, then how it works.
+one object. The decision is
+[ADR-032](design/adr/032-containers-code-sandboxes.md). This page explains
+how to use it first, then how it works.
 
 ## Using containers
 
@@ -28,13 +29,22 @@ and the class bound as a Durable Object.
   `docker buildx`, pushes them to tailworks' registry, and pins every image by
   digest (see [Images](#images-build-registry-pinning-host-pull-adr-032-d3)).
   The host never builds and never runs a container engine.
+  `image_build_context` sets the build context (default: the Dockerfile's
+  directory) and `image_vars` the build args (`--build-arg`), as on
+  Cloudflare; a named image takes `build_context` and `build_vars`. Build
+  vars are not secrets: they end up in the image and in the bundle's
+  wrangler config.
+- Other keys of a `containers` entry (`rollout_*`, `constraints`, …) are
+  ignored, with one warning line each. `name` and `scheduling_policy`
+  `"default"` or `"durable_object"` (one container per Durable Object, what
+  tailworks does) get none.
 - `instance_type` is one of Cloudflare's types or custom resources (below).
   `max_instances` caps the running containers of that class for the tenant.
 - tailworks.jsonc can add `"containers"` too: the same array form, or
   `{"<Class>": {"image": ref, "images": {name: ref}}}` to pin refs (Sandbox SDK
   1.0 named images). A pin may only name that class's wrangler images.
-- A bundle with containers is placed only on a host that offers the
-  `containers` tier, for the image's arch, with a free VM in its capacity
+- A bundle with containers is placed only on a host that offers
+  `containers`, for the image's arch, with a free VM in its capacity
   vector (`503 no_host`; with `--host` or a sticky lease holder that lacks
   `containers`, `409 tier_unavailable`, and `tw deploy --replace` moves it
   instead). This applies even when the parent object itself is process-tier.
@@ -122,19 +132,30 @@ a per-container proxy on the host:
   `/etc/cloudflare/certs/cloudflare-containers-ca.crt` and in its trust
   bundles. Up to 128 interceptors per container.
 - **`enableInternet: true`** reaches only the hosts on the workload's
-  `tailnet.egress.internet` allowlist in tailworks.jsonc, never a private, tailnet,
+  `tailnet.egress.internet` allowlist in tailworks.jsonc (or any public
+  host when it is `true`; none when it is absent or `false`,
+  [tailworks-jsonc.md](tailworks-jsonc.md#tailnetegressinternet)), never a private, tailnet,
   metadata or host address (even through a DNS name that resolves to one).
   Each new destination is audited as `egress` with `actingFor: "sandbox-of
-  <object>"`, and refusals as `deny`. There is no tenant exit node yet, so
-  the traffic leaves from the host's own network
-  (`tw-hostd -container-internet=direct`, the default; `off` refuses it).
+  <object>"`, and refusals as `deny`. The traffic leaves from the host's
+  own network (`tw-hostd -container-internet=direct`, the default), or
+  through the host's tailnet exit node (`exit-node`, with
+  `-worker-internet=exit-node=<node>`;
+  [tailworks-jsonc.md](tailworks-jsonc.md#tailnetegressvia)); `off`
+  refuses it.
 - **Inbound** is only the parent's `getTcpPort(p).fetch()`.
 
 ### Lifetime
 
 - `start()` boots the VM; the container runs until its entrypoint exits,
-  `destroy()` (SIGTERM, then SIGKILL after at most 10 s), its inactivity
-  timeout, or the host's hard max lifetime (24 h by default).
+  `destroy()` (SIGTERM, then SIGKILL after at most 10 s, hostd's
+  `ContainerGrace`), its inactivity timeout, or the host's hard max
+  lifetime (24 h by default, hostd's `ContainerMaxLife`).
+- When the entrypoint exits the VM is killed, and `monitor()` resolves on
+  exit code 0 and rejects with `Container exited with unexpected exit
+  code: N` otherwise.
+- The inactivity timeout counts from the last container API call with no
+  exec, port or stdin stream open. A parked `monitor()` is not activity.
 - It belongs to the object, not to the isolate: it survives the object's
   eviction and a blue/green redeploy of the parent (the new code sees
   `running`). It dies with its host; nothing migrates.
@@ -146,8 +167,8 @@ a per-container proxy on the host:
 
 | Host | Containers | Notes |
 |---|---|---|
-| Linux arm64, KVM (Firecracker) | ✅ verified (Lima, nested KVM) | the stock `cloudflare/sandbox` images are amd64 only, so tailworks swaps in its arm64 rebuilds through the alias map; app code is unchanged |
-| Linux amd64, KVM (Firecracker) | ⚠ built, not verified | stock images run as published (no alias). The only x86 test host so far is a nested guest whose L2 VMs lose interrupts, so no amd64 VM has booted to ready there |
+| Linux arm64, KVM (Firecracker) | ✅ verified (Lima, nested KVM) | the stock `cloudflare/sandbox` images are amd64 only, so tailworks swaps in its arm64 rebuilds through the alias map; app code is unchanged. **Prerequisite:** the rebuilds are not published yet, so the operator builds them once (`guest/images/build-sandbox-images.sh`, Docker) and pushes each with `tw image push` (see "Public bases" below); until then an arm64 deploy of `cloudflare/sandbox` fails with `image_unavailable`. Once an alias has a published `source`, mgmt fetches it on first use instead |
+| Linux amd64, KVM (Firecracker) | ⚠ built, not verified | stock images run as published (no alias). The amd64 microVM tier passed `make e2e-vm` on a nested KVM test host (2026-11-22), but `make e2e-container` has not run on amd64 yet |
 | macOS, Apple silicon (vz) | ✅ verified | needs `mkfs.erofs` (`brew install erofs-utils`). With `tw-hostd -vm-rosetta` the stock amd64 images run under Rosetta; without it, the arm64 rebuilds |
 | no KVM / NAS / process-only hosts | ❌ | they don't offer `containers`; a container bundle is not placed there and `start()` throws `tier_unavailable` (no fallback) |
 
@@ -166,8 +187,8 @@ a per-container proxy on the host:
 - A container with its own tailnet node (`sandbox.tailnet.tags`), and
   standalone containers not attached to an object.
 - Image signing (cosign) and registry garbage collection.
-- A tenant exit node or gateway for `enableInternet` (the host's network is
-  used).
+- A tenant-owned gateway for `enableInternet` (the host's network, or the
+  host's exit node, is used).
 - Nested virtualization and GPUs (non-goals).
 - Workers bindings the Sandbox SDK templates may also use (KV, R2, Workers AI)
   remain unsupported on tailworks as before (docs/COMPAT.md).
@@ -312,17 +333,19 @@ gateway; that is the only DNS server it has.
   the interception. `interceptAllOutboundHttp` is HTTP only; TLS to a host
   with no HTTPS intercept is never terminated.
 - **`enableInternet: true`** reaches only hosts on the workload's
-  `tailnet.egress.internet` allowlist (names, `*.suffix`, IPs or CIDRs),
-  spliced as raw TCP (TLS stays end to end). The name is resolved on the
+  `tailnet.egress.internet` allowlist (names, `*.suffix`, IPs or CIDRs,
+  each with an optional `:port`; `true` allows any public host), spliced
+  as raw TCP (TLS stays end to end). TCP port 25 is refused unless an
+  entry names it (`"smtp.example.com:25"`), and an entry that names a port
+  covers that port only ([tailworks-jsonc.md](tailworks-jsonc.md#tailnetegressinternet)). The name is resolved on the
   host and refused if **any** address is forbidden (ADR-019: loopback,
   private and link-local/metadata ranges, `100.64/10` and the tailnet IPv6
   range, NAT64/6to4/Teredo, the synthetic pool, the host's own addresses).
   Every first flow per destination is audited `egress` with `actingFor:
   "sandbox-of <object>"`; refusals are audited `deny` (the first 32 per run)
-  and listed in `tw-hostd`'s `ContainerStatus.Refused`. Tailworks has no tenant
-  exit-node or gateway path yet (RFC §4.8), so the path is the host's own
-  network (`tw-hostd -container-internet=direct`, the default) or none
-  (`off`).
+  and listed in `tw-hostd`'s `ContainerStatus.Refused`. The path is the
+  host's own network (`tw-hostd -container-internet=direct`, the default),
+  the host's tailnet exit node (`exit-node`) or none (`off`).
 - **Preview URLs** (`exposePort`, `proxyToSandbox`) need public ingress
   (ADR-029): on a container class `exposePort()` throws `not_supported`,
   and a Sandbox SDK preview-proxy request (`x-sandbox-preview-proxy`) gets
@@ -368,9 +391,11 @@ tw deploy                    /v2/  OCI registry                            no co
   → tailworks' arm64 rebuilds on arm64) becomes BuildKit named contexts
   (`--build-context docker.io/cloudflare/sandbox:0.12.14=oci-layout://…`) for
   every form the Dockerfile writes the ref in (FROM, `COPY --from=`, an ARG
-  default), fetched from tailworks' registry (`public/`) or else from the local
-  Docker store. (A `docker-image://` context naming a `tw.local` ref makes
-  BuildKit try the network first: 100 s of timeouts, measured.)
+  default), fetched from tailworks' registry (`public/`), else the alias's
+  digest-pinned `source` (`docker-image://ghcr.io/…@sha256:…`, which BuildKit
+  pulls itself), else from the local Docker store. (A `docker-image://`
+  context naming a `tw.local` ref makes BuildKit try the network first: 100 s
+  of timeouts, measured.)
 - **Registry (`internal/registry`, served by tw-mgmt at `/v2/`).** The OCI
   distribution push/pull subset on mgmt's own listeners (tsnet `:80`/`:443`,
   and the local-dev socket), behind the `/v1` WhoIs gate: admins push and pull
@@ -400,13 +425,29 @@ tw deploy                    /v2/  OCI registry                            no co
   upstreams for tests), unless it is a public base. The alias map applies per
   arch. Retagging the upstream after the deploy changes nothing that runs; the
   next deploy picks the new digest. Audited (`image_pin`, with every pin).
+  `tw deploy` prints a `✓ image` line per pin of a ref it did not build
+  (`<Class> <ref> linux/<arch> → <repository>@<digest> (<from>)`) once the
+  deployment is ready, and lists every pin in `--json`'s `images`.
 - **Public bases.** `tw image public add <ref> [--arch …]` mirrors an
   upstream image into `public/<registry>/<repo>` (or names a `tw.local` ref
   already in `public/`) and marks its per-arch digests public; deploys of every
-  tenant then pin those, so hosts cache it once. `tw image push <layout|tar>
-  tw.local/<name>:<tag>` is how the operator puts tailworks' arm64 rebuilds (the
-  alias targets) into `public/`. Unmarking (`rm`) leaves pinned deployments as
-  they are.
+  tenant then pin those, so hosts cache it once. Unmarking (`rm`) leaves
+  pinned deployments as they are. The **alias targets** (tailworks' arm64
+  rebuilds, `tw.local/cloudflare-sandbox:<v>-arm64`) live in `public/` too. An
+  alias may carry a `source`: the rebuild as published
+  (`ghcr.io/rosskukulinski/cloudflare-sandbox:<v>-arm64@sha256:…`, by
+  `.github/workflows/publish-sandbox-images.yml`). When a deploy pins an alias
+  target that isn't in `public/` yet, mgmt copies the `source` there through
+  its own egress, verified against the digest, tagged as the target, once for
+  every tenant; the pin's `from` still reads `alias <target>`, so `image_pin`
+  audits show the substitution. **Until the rebuilds are published, the default
+  aliases have no `source`** and the operator fills the targets by hand: build
+  them with `guest/images/build-sandbox-images.sh OUT_DIR` (Docker), then
+  `tw image push OUT_DIR/cloudflare-sandbox-<v>-arm64.tar
+  tw.local/cloudflare-sandbox:<v>-arm64`. With `-no-mirror` mgmt never fetches
+  a `source`, so the push is always how the targets get there; the
+  `image_unavailable` message says so. `tw-mgmt -image-aliases <file>` replaces
+  the map (`[{from, to, arch, source}]`; a `source` must be pinned by digest).
 - **Host pull (`hostd/image`).** hostd starts a container only from the pin
   for its own arch, pulled as a host from tailworks' registry over the API's own
   connection (`mgmtapi.Client.OCI`: never Docker Hub, no container engine),
@@ -415,8 +456,10 @@ tw deploy                    /v2/  OCI registry                            no co
   shared, the tenant's own namespace is its alone, any other namespace is
   refused before anything is fetched; so a cache hit never tells one tenant
   which images another runs. Pinned entries are keyed by manifest digest.
-  `-container-image-cache-max-mib` caps the converted cache (least recently
-  used first; images of running containers are held). Converting one image
+  `-container-image-cache-max-mib` caps the converted cache (default 20480,
+  `tw up` too; 0 = no cap): least recently used first; images of running
+  containers, and the one a start just converted, are held, so the cache can
+  sit above the cap while they run. Converting one image
   is capped too (`image.Limits`): `-container-image-max-mib` uncompressed
   layer bytes (default 40960, twice Cloudflare's 20 GB disk; counted while
   decompressing and from the entries' sizes, so a decompression bomb stops
@@ -425,17 +468,7 @@ tw deploy                    /v2/  OCI registry                            no co
   (a directory of tarballs) remains for tests and hosts without a registry.
 - **Signing** (cosign) is deferred (ADR-032).
 
-## Lifecycle
-
-| event | effect |
-|---|---|
-| `start()` | returns at once (`running` is true); hostd admits it (`AcquireContainer`: the host's capacity vector, shared with microVM DO instances, else `503 capacity_exhausted`; then mgmt's synchronous tenant reservation, `POST /v1/container-reservations`, else `429 container_quota_exceeded`, or `503 quota_unavailable` when mgmt is unreachable: fail closed), resolves the image (class's pinned refs only), boots |
-| entrypoint exits | the VM is killed; `monitor()` resolves on 0, rejects `Container exited with unexpected exit code: N` |
-| `destroy()` | SIGTERM to the entrypoint, grace capped (`ContainerGrace`, 10 s), VMM SIGKILL |
-| inactivity | no container API call and no open exec/port/stdin stream for the timeout (default 10 min, the `@cloudflare/containers` default; `setInactivityTimeout` ≤ 6 h); a parked `monitor()` is not activity |
-| hard max lifetime | `ContainerMaxLife`, default 24 h |
-| object evicted / blue-green redeploy | nothing: the next instance reconciles `running` from hostd before any event |
-| `tw kill` of the object, workload stopped or fenced (ADR-028) | VMM SIGKILL, no grace |
+## How `running` is kept
 
 `running` is synchronous in Cloudflare's API: the polyfill keeps it in the
 object's SQLite kv, reconciles it with hostd in `blockConcurrencyWhile` at
@@ -481,9 +514,18 @@ timestamps are recorded the same way, and the uffd helper and the
 no pool or snapshots (every VM there cold-boots). Whether containers should
 get a pool is an open decision in STATUS.md.
 
-## Host tiers
+<a id="host-tiers"></a>
+## Hosts that offer containers
 
-A host advertises the `containers` tier (and mgmt places container bundles
+A host offers `containers` (and mgmt places container bundles
 on it) only when containers can actually run there: a microVM backend whose
 helper (Firecracker) or kernel (vz) supports container guests, a guest
 kernel with erofs, and `mkfs.erofs`.
+
+`tw doctor`'s `containers` row says whether this host offers them, and
+if not, why (the reason tw-hostd found when it started; never a failure).
+`tw up`'s tier line ends `, containers` when it does, and `; containers
+off: see tw doctor` when the microVM tier is on but containers are not.
+When `tw deploy` finds no live host offering containers to build for, its
+`no_host` fix lists the live hosts and their tiers; `--platform` builds
+anyway. `tw deploy` checks `docker buildx version` before it builds.

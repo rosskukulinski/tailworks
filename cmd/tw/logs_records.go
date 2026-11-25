@@ -28,10 +28,10 @@ type logsOpts struct {
 }
 
 func logsFlags(f *flags) func() (logsOpts, error) {
-	console := f.Bool("console", false, "the app's raw output (workerd.log, the node tier's app.log, the microVM console) instead of request records")
+	console := f.Bool("console", false, "the app's raw output (workerd.log, the Node runtime's app.log, the microVM console) instead of request records")
 	object := f.String("object", "", "only this object (object ID, Class/name, Class or name)")
 	status := f.String("status", "", "only this status (404) or class (5xx)")
-	outcome := f.String("outcome", "", "only this outcome (ok, exception, canceled, …)")
+	outcome := f.String("outcome", "", "only this outcome: ok, exception, canceled, … (wrangler tail's --status)")
 	caller := f.String("caller", "", "only callers whose login or node name contains this (public: Funnel requests)")
 	trace := f.String("trace", "", "only this trace ID (or a prefix), or audit trace ID")
 	errs := f.Bool("errors", false, "only errors (status ≥ 400, an outcome other than ok, or an exception)")

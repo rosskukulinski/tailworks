@@ -23,7 +23,12 @@ echo "e2e-linux-vm: release $VERSION, built in $DEV:$REL"
 #    build linux-arm64 + assets inside tw-dev as before.
 TGZ=tailworks-$VERSION-linux-arm64.tar.gz
 mkdir -p dist
-if [ -f "dist/$TGZ" ] && tar tzf "dist/$TGZ" | grep -q 'share/tailworks/vm/manifest.json$'; then
+# TW_E2E_TARBALL=<path>: test that tarball (release.yml passes the one it built).
+if [ -n "${TW_E2E_TARBALL:-}" ]; then
+	TGZ=$(basename "$TW_E2E_TARBALL")
+	[ "$TW_E2E_TARBALL" -ef "dist/$TGZ" ] || cp -f "$TW_E2E_TARBALL" "dist/$TGZ"
+	echo "e2e-linux-vm: using $TW_E2E_TARBALL (TW_E2E_TARBALL)"
+elif [ -f "dist/$TGZ" ] && tar tzf "dist/$TGZ" | grep -q 'share/tailworks/vm/manifest.json$'; then
 	echo "e2e-linux-vm: using dist/$TGZ (has share/tailworks/vm; built by make release)"
 else
 	echo "e2e-linux-vm: dist/$TGZ missing or without share/tailworks/vm: building it in $DEV:$REL"

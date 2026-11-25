@@ -4,9 +4,9 @@
     "tags": ["tag:ttest"],
     "objects": {
       // facet mode (default): per-object egress from the agent's own node
-      "StateAgent": { "tags": ["tag:ttest"], "agent": true },
+      "StateAgent": { "tags": ["tag:ttest"] },
       // plain-DO mode: alarms (schedule/scheduleEvery) work; egress = workload node
-      "PlainAgent": { "tags": ["tag:ttest"], "agent": true, "egress": "workload" }
+      "PlainAgent": { "tags": ["tag:ttest"], "egress": "workload" }
     }
   }
 }

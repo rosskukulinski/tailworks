@@ -16,6 +16,7 @@ import (
 // registration, so a replica that didn't serve the registration can push to
 // it, and a replica with a stale cached target follows a re-registration.
 func TestMM_F8_PushTargetShared(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	st, err := OpenStore(ctx, filepath.Join(dir, "m.db"))

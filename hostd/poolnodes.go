@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rosskukulinski/tailworks/hostd/bundle"
 	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
 )
 
@@ -48,6 +49,26 @@ func (o *object) isPool() bool { return o.Class == PoolClass }
 
 // poolClassOf is the class a pool node is for ("<Class>/<suffix>").
 func (o *object) poolClassOf() string { c, _, _ := strings.Cut(o.Name, "/"); return c }
+
+// rejoinsWith reports whether a saved object of a workload rejoins from
+// saved state when app starts: the workload's entry node, an object of a
+// class that has its own node, and a pool node warmed for such a class. A
+// pool node's Class is PoolClass, never one of app's, so without the last
+// case an idle pool node stayed offline after a host restart while mgmt
+// still listed it as ready (ADR-031: a restart re-uses pool nodes).
+func rejoinsWith(o *object, app *bundle.App) bool {
+	class := o.Class
+	if o.isPool() {
+		if class = o.poolClassOf(); class == "" {
+			return false
+		}
+	}
+	if class == "" {
+		return true
+	}
+	c := app.Classes[class]
+	return c != nil && c.Node
+}
 
 // takePoolLocked reserves a ready, idle pool node for (tenant, workload,
 // class), or returns nil. h.mu must be held.
@@ -206,17 +227,24 @@ func (h *Host) assignNode(o *object, from string) {
 	if len(info.IPs) > 0 {
 		o.IP = info.IPs[0]
 	}
+	gen := o.nodeGen
 	h.mu.Unlock()
 	var epoch int64
 	if w := h.workloadOf(o); w != nil {
 		epoch = w.epochNow()
 	}
-	if err := h.mgmt.Ready(ctx, o.ID, mgmtapi.ReadyRequest{NodeID: info.NodeID, StableNodeID: info.NodeID, MagicDNS: o.MagicDNS, Epoch: epoch}); err != nil {
+	req := mgmtapi.ReadyRequest{NodeID: info.NodeID, StableNodeID: info.NodeID, MagicDNS: o.MagicDNS, Epoch: epoch}
+	err = h.mgmt.Ready(ctx, o.ID, req)
+	h.noteReport(o, info.NodeID, err) // egressgate.go (#331)
+	if err != nil {
 		h.log.Warn("mgmt ready failed", "object", o.ID, "err", err)
 		if e, ok := mgmtapi.AsError(err); ok && e.Code == mgmtapi.CodeKilled {
 			closeOnce(ch)
 			go h.killLocal(o.ID, "killed during assignment")
 			return
+		}
+		if retryableReady(err) {
+			go h.retryReady(o, req, gen) // readyretry.go (#604)
 		}
 	}
 	closeOnce(ch)

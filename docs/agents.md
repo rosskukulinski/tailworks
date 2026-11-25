@@ -81,15 +81,19 @@ upgrading tailworks to update the skills; when nothing changed it does nothing.
   agent asks you to run them.
 - **Policy stays with you.** When a deploy needs a `tagOwners` line or a
   grant, tailworks prints it; the agent shows it to you and you add it in the
-  Tailscale admin console. Tailworks never edits the policy during a deploy.
+  Tailscale admin console. Tailworks writes the policy only after you
+  answer y to the lines it shows on a terminal, or with `--apply-policy
+  --yes`. An agent runs tw with `--json`, which never asks or writes the
+  policy; the skills tell it to pass `--apply-policy --yes` only after you
+  agreed to the lines it showed you.
 - **The MCP server enforces it.** Over MCP, `kill`, `undeploy` and
   `deploy` exist for an agent only if a `github.com/rosskukulinski/tailworks/cap/mcp` grant (or the
   operator's `tw mcp --allow`) names them. See
   [tailworks' MCP server](#tws-mcp-server).
 - **Destructive commands need your go-ahead.** `tw kill`, `tw undeploy`,
   `tw down` and `tw secret rm` act immediately and have no undo. The
-  commands that delete data or a tenant's resources (`tw d1 delete`,
-  `tw kv namespace delete`, `tw queues rm`, `tw queues purge`,
+  commands that delete data or a tenant's resources (`tw d1 rm`,
+  `tw kv namespace rm`, `tw queues rm`, `tw queues purge`,
   `tw r2 bucket rm`, `tw tenant rm`, `tw host rm`) ask first, and refuse
   with `confirmation_required` when there is no terminal. The skills tell
   agents to run any of them, or add `--yes`, only after you've agreed to that
@@ -135,17 +139,29 @@ identity check. The design is in
 | Tool | What it does | Who gets it |
 |---|---|---|
 | `whoami` | who tailworks thinks you are, your tools, the grant for the rest | everyone admitted |
-| `status`, `ls`, `logs`, `audit` | like the CLI commands (`logs` gives request records, `console: true` the raw output) | tailworks admins and any `github.com/rosskukulinski/tailworks/cap/mcp` holder |
+| `status`, `ls`, `logs`, `audit` | like the CLI commands (`logs` gives request records with `tw logs`' filters, `console: true` the raw output; `audit` takes `human`) | tailworks admins and any `github.com/rosskukulinski/tailworks/cap/mcp` holder |
 | `deploy` | deploy a bundle, or redeploy (`replace: true`: re-place) the current one | a `github.com/rosskukulinski/tailworks/cap/mcp` grant naming it |
-| `kill`, `undeploy` | no undo; a `reason` is required and audited | a `github.com/rosskukulinski/tailworks/cap/mcp` grant naming it |
+| `kill`, `undeploy` | no undo; a `reason` is required and audited; `kill` takes the object's sub-agents too, like `tw kill` (`cascade: false`: only the object) | a `github.com/rosskukulinski/tailworks/cap/mcp` grant naming it |
 
 Register it with your agent through the CLI's stdio bridge. It works on
 the tailworks host and on any `tw link`ed machine, and needs no credentials:
 
 ```sh
-tw mcp --config                       # the commands for your agents, and your tools
-claude mcp add tw -- tw mcp          # Claude Code; other agents: command "tw", args ["mcp"]
+tw mcp --config                         # the command or config for each agent, and your tools
+claude mcp add -s user tw -- tw mcp     # Claude Code
+codex mcp add tw -- tw mcp              # Codex
+gemini mcp add -s user tw tw mcp        # Gemini CLI
 ```
+
+Cursor and OpenCode take JSON in their config files (`~/.cursor/mcp.json`,
+`~/.config/opencode/opencode.json`); `tw mcp --config` prints it, and for
+any other agent the server is command `"tw"`, args `["mcp"]`. Agents
+installed on this machine are listed first.
+
+Run on a terminal, `tw mcp` prints the same help as `tw mcp --config`
+rather than wait for JSON-RPC: your agent runs it with stdin a pipe. To
+talk to the bridge by hand, pipe into it:
+`printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | tw mcp`.
 
 An agent on a tailnet machine without the tailworks CLI can use the URL
 `tw mcp --config` prints (`http://tw-mgmt.<tailnet>.ts.net/mcp`).
@@ -165,7 +181,7 @@ Destructive tools need the grant to name them, even for admins:
 A tool you don't have answers `cap_missing`, with the grant to add as its
 `snippet`. On the tailworks host itself the bridge runs as the operator: it is
 read-only unless you enable more when you register it, for example
-`claude mcp add tw -- tw mcp --allow kill,undeploy`.
+`claude mcp add -s user tw -- tw mcp --allow kill,undeploy`.
 
 `deploy` over MCP needs a bundle, which only `tw deploy` builds, so in
 practice an MCP agent redeploys or re-places what's running; new code

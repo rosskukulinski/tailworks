@@ -2,6 +2,7 @@ package hostd
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -17,6 +18,36 @@ var seatbeltExecDirs = []string{
 	"/usr",
 }
 
+// seatbeltReadDirs are the system dirs a sandboxed workload may read,
+// besides its runtime binary, a Node install prefix and its own dirs
+// (issue #175): the OS and its dyld shared cache (/System, /usr, /bin,
+// /sbin), /etc (CA bundle, hosts, localtime), the time zone database
+// /etc/localtime points into, /bin/sh's /var/select link, devices, and /opt
+// (Homebrew: node's dylibs). The Linux sandbox allows the same (procsb's
+// systemRO). Not /Library, /Applications, /Users, /tmp, /var/folders or
+// the rest of /var.
+var seatbeltReadDirs = []string{
+	"/System",
+	"/bin",
+	"/dev",
+	"/opt",
+	"/private/etc",
+	"/private/var/db/timezone",
+	"/private/var/select",
+	"/sbin",
+	"/usr",
+}
+
+// seatbeltRootLinks are stat-able (not readable) under the strict profile:
+// the root symlinks into /private, which a process resolves before it
+// opens /etc/hosts or a /var/folders path. "/" itself is readable (every
+// process opens it at startup; it lists the same names on every Mac).
+var seatbeltRootLinks = []string{
+	"/etc",
+	"/tmp",
+	"/var",
+}
+
 // seatbeltDevWrite are the device files a workload may open for writing
 // (dyld registers with /dev/dtracehelper at startup).
 var seatbeltDevWrite = []string{
@@ -26,19 +57,24 @@ var seatbeltDevWrite = []string{
 }
 
 // seatbeltProfile is the Seatbelt profile of a process-tier workload
-// (issue #121). On top of (allow default), which keeps the Mach services
-// and sysctls workerd and node need:
+// (issues #121, #175). On top of (allow default), which keeps the Mach
+// services and sysctls workerd and node need:
 //
-//   - reads and writes are denied under each of deny (home dir, hostd's
-//     data and run dirs, credential files), then allowed again under each
-//     of own; each of readOnly (the runtime binary) and everything below
-//     readOnlyTrees (a Node install prefix) is readable;
-//   - writes are denied everywhere else too (/tmp and the rest of the disk),
-//     except a few devices;
+//   - reads are an allow list: the OS dirs (seatbeltReadDirs), each of
+//     readOnly (the runtime binary), everything below readOnlyTrees (a Node
+//     install prefix) and own. Each of deny (home dir, hostd's data and run
+//     dirs, credential files) is denied even inside an allowed OS dir (a
+//     data dir under /opt) and allowed again only under own. Outside the
+//     allow list only the metadata (stat) of "/" and of the allowed paths'
+//     parent dirs is readable, so that dyld and node can resolve paths;
+//   - writes are denied everywhere except own and a few devices;
 //   - all network is denied (no DNS: netd resolves names), except unix
-//     sockets in own, TCP connects to localhost:<connectTCP> (a Node app's
-//     egress proxy and its own port) and TCP binds on localhost:<bindTCP>
-//     (its own port, workerd's inspector);
+//     sockets in own, IPv4 TCP connects to localhost:<connectTCP> (a Node
+//     app's egress proxy and its own port) and IPv4 TCP binds on
+//     localhost:<bindTCP> (its own port, workerd's inspector). Seatbelt
+//     takes no literal address ("host must be * or localhost"); tcp4 pins
+//     the family, so [::1]:<port> is refused, and 127.0.0.1, where hostd
+//     listens, is the only IPv4 loopback address macOS configures;
 //   - signals reach only processes in the same sandbox instance (the
 //     workload itself and its children): not tw-hostd, tw-mgmt or another
 //     workload, even of the same tenant;
@@ -49,16 +85,20 @@ var seatbeltDevWrite = []string{
 func seatbeltProfile(own, readOnly, readOnlyTrees, deny []string, bindTCP, connectTCP []uint16) string {
 	var b strings.Builder
 	b.WriteString("(version 1)\n(allow default)\n")
+	b.WriteString("(deny file-read*)\n(allow file-read* (literal \"/\"))\n")
+	for _, d := range seatbeltReadDirs {
+		fmt.Fprintf(&b, "(allow file-read* (subpath %s))\n", sbQuote(d))
+	}
 	b.WriteString("(deny file-write*)\n")
 	for _, d := range seatbeltDevWrite {
 		fmt.Fprintf(&b, "(allow file-write* (literal %s))\n", sbQuote(d))
 	}
 	b.WriteString("(deny network*)\n")
 	for _, p := range connectTCP {
-		fmt.Fprintf(&b, "(allow network-outbound (remote tcp \"localhost:%d\"))\n", p)
+		fmt.Fprintf(&b, "(allow network-outbound (remote tcp4 \"localhost:%d\"))\n", p)
 	}
 	for _, p := range bindTCP {
-		fmt.Fprintf(&b, "(allow network-bind network-inbound (local tcp \"localhost:%d\"))\n", p)
+		fmt.Fprintf(&b, "(allow network-bind network-inbound (local tcp4 \"localhost:%d\"))\n", p)
 	}
 	b.WriteString("(deny signal)\n(allow signal (target same-sandbox))\n")
 	b.WriteString("(deny process-exec*)\n")
@@ -76,7 +116,10 @@ func seatbeltProfile(own, readOnly, readOnlyTrees, deny []string, bindTCP, conne
 	for _, r := range realPaths(deny) {
 		fmt.Fprintf(&b, "(deny file-read* file-write* (subpath %s))\n", sbQuote(r))
 	}
-	for _, m := range ancestors(append(append([]string{}, own...), readOnlyTrees...)) {
+	for _, m := range seatbeltRootLinks {
+		fmt.Fprintf(&b, "(allow file-read-metadata (literal %s))\n", sbQuote(m))
+	}
+	for _, m := range ancestors(slices.Concat(seatbeltReadDirs, own, readOnlyTrees, readOnly)) {
 		fmt.Fprintf(&b, "(allow file-read-metadata (literal %s))\n", sbQuote(m))
 	}
 	for _, o := range readOnly {

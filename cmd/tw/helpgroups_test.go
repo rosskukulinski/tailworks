@@ -51,7 +51,7 @@ func TestHelpGroups(t *testing.T) {
 			t.Errorf("tw help has a %d-character line: %q", len([]rune(l)), l)
 		}
 	}
-	for _, g := range []string{"Set up:", "Develop:", "Deploy:", "Data:", "Observe:", "Operate:"} {
+	for _, g := range []string{"Set up:", "Develop:", "Coding agents:", "Deploy:", "Data:", "Observe:", "Operate:", "Scale out:", "Advanced:"} {
 		if !strings.Contains(so.String(), g) {
 			t.Errorf("tw help lacks the %q group", g)
 		}
@@ -61,7 +61,7 @@ func TestHelpGroups(t *testing.T) {
 		t.Fatalf("tw help --all: exit %d", code)
 	}
 	for _, c := range commands {
-		if !c.hidden && !strings.Contains(so.String(), "tw "+c.usage) {
+		if !c.hidden && !hasUsage(so.String(), c) {
 			t.Errorf("tw help --all lacks %s's usage", c.name)
 		}
 	}

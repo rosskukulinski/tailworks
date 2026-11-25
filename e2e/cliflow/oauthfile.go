@@ -42,6 +42,14 @@ func WriteFakeOAuthFile(t testing.TB, path string) string {
 // policy setup, test nodes and leftover cleanup.
 func RealOAuthClient(t testing.TB, apiKeyFile, tailnet, dir, description string, ownedTags ...string) string {
 	t.Helper()
+	return RealOAuthClientScopes(t, apiKeyFile, tailnet, dir, description, nil, ownedTags...)
+}
+
+// RealOAuthClientScopes is RealOAuthClient with scopes beyond tailworks'
+// minimum (auth_keys, devices:core, policy_file:read), e.g. "services"
+// for a workload with a Tailscale Service (docs/services.md).
+func RealOAuthClientScopes(t testing.TB, apiKeyFile, tailnet, dir, description string, extraScopes []string, ownedTags ...string) string {
+	t.Helper()
 	key, err := tsapi.LoadEnvFile(apiKeyFile, "TS_API_KEY")
 	if err != nil {
 		t.Fatal(err)
@@ -58,7 +66,8 @@ func RealOAuthClient(t testing.TB, apiKeyFile, tailnet, dir, description string,
 			t.Fatalf("policy: let tag:tw own %v: %v", ownedTags, netd.RedactError(err))
 		}
 	}
-	oc, err := api.CreateOAuthClient(ctx, []string{"auth_keys", "devices:core", "policy_file:read"}, []string{"tag:tw"}, description)
+	scopes := append([]string{"auth_keys", "devices:core", "policy_file:read"}, extraScopes...)
+	oc, err := api.CreateOAuthClient(ctx, scopes, []string{"tag:tw"}, description)
 	if err != nil {
 		t.Fatalf("create the run's OAuth client: %v", netd.RedactError(err))
 	}

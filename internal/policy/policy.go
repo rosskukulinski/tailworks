@@ -25,52 +25,22 @@ type Snippet struct {
 	// NodeAttrs are nodeAttrs entries ({"target": [...], "attr": [...]}),
 	// e.g. the funnel attribute for tag:tw-public.
 	NodeAttrs []map[string]any `json:"nodeAttrs,omitempty"`
+
+	// AutoApprovers: autoApprovers.services entries (autoapprovers.go).
+	AutoApprovers AutoApprovers `json:"autoApprovers,omitzero"`
 }
 
 // Empty reports whether the snippet adds nothing.
 func (s Snippet) Empty() bool {
-	return len(s.TagOwners) == 0 && len(s.Grants) == 0 && len(s.NodeAttrs) == 0
-}
-
-// HuJSON renders the snippet for humans ("add to your policy").
-func (s Snippet) HuJSON() string {
-	var b strings.Builder
-	if len(s.TagOwners) > 0 {
-		b.WriteString("\"tagOwners\": {\n")
-		tags := make([]string, 0, len(s.TagOwners))
-		for t := range s.TagOwners {
-			tags = append(tags, t)
-		}
-		sort.Strings(tags)
-		for _, t := range tags {
-			ob, _ := json.Marshal(s.TagOwners[t])
-			fmt.Fprintf(&b, "  %q: %s,\n", t, ob)
-		}
-		b.WriteString("},\n")
-	}
-	if len(s.Grants) > 0 {
-		b.WriteString("\"grants\": [\n")
-		for _, g := range s.Grants {
-			gb, _ := json.Marshal(g)
-			fmt.Fprintf(&b, "  %s,\n", gb)
-		}
-		b.WriteString("],\n")
-	}
-	if len(s.NodeAttrs) > 0 {
-		b.WriteString("\"nodeAttrs\": [\n")
-		for _, n := range s.NodeAttrs {
-			nb, _ := json.Marshal(n)
-			fmt.Fprintf(&b, "  %s,\n", nb)
-		}
-		b.WriteString("],\n")
-	}
-	return b.String()
+	return len(s.TagOwners) == 0 && len(s.Grants) == 0 && len(s.NodeAttrs) == 0 && len(s.AutoApprovers.Services) == 0
 }
 
 type doc struct {
 	TagOwners map[string][]string `json:"tagOwners"`
 	Grants    []any               `json:"grants"`
 	NodeAttrs []any               `json:"nodeAttrs"`
+
+	AutoApprovers AutoApprovers `json:"autoApprovers"`
 }
 
 // missingEntries returns the entries of want not present (by normalized
@@ -118,28 +88,11 @@ func Missing(policy []byte, s Snippet) (Snippet, error) {
 	if err := json.Unmarshal(std, &d); err != nil {
 		return Snippet{}, fmt.Errorf("policy: %w", err)
 	}
-	out := Snippet{TagOwners: map[string][]string{}}
-	for t, owners := range s.TagOwners {
-		have, ok := d.TagOwners[t]
-		if !ok {
-			out.TagOwners[t] = owners
-			continue
-		}
-		var add []string
-		for _, o := range owners {
-			if !slices.Contains(have, o) && !slices.Contains(add, o) {
-				add = append(add, o)
-			}
-		}
-		if len(add) > 0 {
-			out.TagOwners[t] = add
-		}
-	}
+	var out Snippet
+	out.TagOwners = missingOwners(d.TagOwners, s.TagOwners)
 	out.Grants = missingEntries(d.Grants, s.Grants)
 	out.NodeAttrs = missingEntries(d.NodeAttrs, s.NodeAttrs)
-	if len(out.TagOwners) == 0 {
-		out.TagOwners = nil
-	}
+	out.AutoApprovers.Services = missingOwners(d.AutoApprovers.Services, s.AutoApprovers.Services)
 	return out, nil
 }
 
@@ -191,7 +144,9 @@ func IsTwTag(t string) bool {
 //   - every grant must have a non-empty src of tailworks tags (never "*",
 //     autogroup:*, groups, users or arbitrary tags) and a non-empty dst of
 //     tags or svc: names (never "*" or autogroup:*);
-//   - grants may only carry src, dst, ip and app.
+//   - grants may only carry src, dst, ip and app;
+//   - autoApprovers.services keys must be svc: names, approved only for
+//     tailworks tags (autoapprovers.go).
 func Check(s Snippet, o Options) error {
 	if o.Headscale {
 		if err := checkHeadscale(s); err != nil {
@@ -269,7 +224,7 @@ func Check(s Snippet, o Options) error {
 			}
 		}
 	}
-	return nil
+	return checkAutoApprovers(s.AutoApprovers, okTag)
 }
 
 // FunnelTargets are the only tags tailworks gives the funnel nodeAttr (ADR-029
@@ -335,28 +290,8 @@ func MergeWith(policy []byte, s Snippet, o Options) ([]byte, error) {
 	if miss.Empty() {
 		return policy, nil
 	}
-	var ops []map[string]any
-	if len(miss.TagOwners) > 0 {
-		if v.Find("/tagOwners") == nil {
-			ops = append(ops, map[string]any{"op": "add", "path": "/tagOwners", "value": miss.TagOwners})
-		} else {
-			tags := make([]string, 0, len(miss.TagOwners))
-			for t := range miss.TagOwners {
-				tags = append(tags, t)
-			}
-			sort.Strings(tags)
-			for _, t := range tags {
-				if v.Find("/tagOwners/"+ptrEscape(t)) == nil {
-					ops = append(ops, map[string]any{"op": "add", "path": "/tagOwners/" + ptrEscape(t), "value": miss.TagOwners[t]})
-					continue
-				}
-				// An existing tag: append the missing owners, one by one.
-				for _, o := range miss.TagOwners[t] {
-					ops = append(ops, map[string]any{"op": "add", "path": "/tagOwners/" + ptrEscape(t) + "/-", "value": o})
-				}
-			}
-		}
-	}
+	find := func(ptr string) bool { return v.Find(ptr) != nil }
+	ops := ownersOps(find, "/tagOwners", miss.TagOwners)
 	if len(miss.Grants) > 0 {
 		if v.Find("/grants") == nil {
 			ops = append(ops, map[string]any{"op": "add", "path": "/grants", "value": miss.Grants})
@@ -375,6 +310,7 @@ func MergeWith(policy []byte, s Snippet, o Options) ([]byte, error) {
 			}
 		}
 	}
+	ops = append(ops, autoApproversOps(find, miss.AutoApprovers.Services)...)
 	pb, _ := json.Marshal(ops)
 	if err := v.Patch(pb); err != nil {
 		return nil, fmt.Errorf("policy patch: %w", err)
@@ -400,8 +336,11 @@ func VerifyAdditive(before, after []byte, added Snippet) error {
 		return err
 	}
 	var diff []string
+	merged := func(k string) bool {
+		return k == "tagOwners" || k == "grants" || k == "nodeAttrs" || k == "autoApprovers"
+	}
 	for k, bv := range b {
-		if k == "tagOwners" || k == "grants" || k == "nodeAttrs" {
+		if merged(k) {
 			continue
 		}
 		if av, ok := a[k]; !ok {
@@ -411,42 +350,16 @@ func VerifyAdditive(before, after []byte, added Snippet) error {
 		}
 	}
 	for k := range a {
-		if _, ok := b[k]; !ok && k != "tagOwners" && k != "grants" && k != "nodeAttrs" {
+		if _, ok := b[k]; !ok && !merged(k) {
 			diff = append(diff, "+ "+k+" (added)")
 		}
 	}
 	bt, _ := b["tagOwners"].(map[string]any)
 	at, _ := a["tagOwners"].(map[string]any)
-	for t, bo := range bt {
-		ao, ok := at[t]
-		if !ok {
-			diff = append(diff, "- tagOwners."+t+" (removed)")
-			continue
-		}
-		if reflect.DeepEqual(normalize(bo), normalize(ao)) {
-			continue
-		}
-		// Allowed change: the snippet's owners appended after the existing ones.
-		bl, _ := bo.([]any)
-		al, _ := ao.([]any)
-		want := make([]any, 0, len(bl)+len(added.TagOwners[t]))
-		want = append(want, bl...)
-		for _, o := range added.TagOwners[t] {
-			want = append(want, o)
-		}
-		if !reflect.DeepEqual(normalize(want), normalize(al)) {
-			diff = append(diff, "~ tagOwners."+t+" (modified: "+compactJSON(bo)+" → "+compactJSON(ao)+")")
-		}
-	}
-	for t, ao := range at {
-		if _, ok := bt[t]; ok {
-			continue
-		}
-		want, ok := added.TagOwners[t]
-		if !ok || !reflect.DeepEqual(normalize(want), normalize(ao)) {
-			diff = append(diff, "+ tagOwners."+t+" = "+compactJSON(ao)+" (not in the snippet)")
-		}
-	}
+	diff = append(diff, diffOwners("tagOwners", bt, at, added.TagOwners)...)
+	ba, _ := b["autoApprovers"].(map[string]any)
+	aa, _ := a["autoApprovers"].(map[string]any)
+	diff = append(diff, diffAutoApprovers(ba, aa, added.AutoApprovers)...)
 	bg, _ := b["grants"].([]any)
 	ag, _ := a["grants"].([]any)
 	diff = append(diff, diffList("grants", bg, ag, added.Grants)...)

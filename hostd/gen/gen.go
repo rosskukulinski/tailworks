@@ -12,6 +12,7 @@
 //	__tw_main.js    tenant service main module: wraps default export + plain DO classes
 //	__tw_rt.js      ctx.tailnet runtime (built from @tailworks/tailnet src/runtime.ts)
 //	deny.js          globalOutbound of the platform worker (refuses everything)
+//	tw-email.js      cloudflare-internal:email stub extension (email.go)
 //	t/<path>         the tenant bundle's modules
 //	ingress.sock     workerd listens (cfBlobHeader x-tw-cf); only hostd connects
 //	egress-obj.sock  hostd listens: facet egress (platform Egress, MAC'd)
@@ -32,6 +33,7 @@ import (
 	"strings"
 
 	"github.com/rosskukulinski/tailworks/hostd/bundle"
+	"github.com/rosskukulinski/tailworks/internal/emailstub"
 )
 
 //go:embed js/platform.js
@@ -70,6 +72,20 @@ type Options struct {
 	// LocalTokenHeader (hostd checks and strips it). The sandbox then needs
 	// no AF_UNIX socket() at all: its ingress listener is an inherited fd.
 	Loopback *LoopbackNet
+
+	// HeapMiB, if > 0, caps each V8 isolate's heap in this workerd
+	// (limits.go).
+	HeapMiB int
+
+	// AllowExperimentalFlags lets the app set compatibility flags workerd
+	// marks experimental (compatflags.go; tw-hostd
+	// -allow-experimental-flags). Off, such an app is refused with
+	// ExperimentalFlagError.
+	AllowExperimentalFlags bool
+	// WorkerdBin, if set, is the workerd that is asked which of the app's
+	// flags are experimental (internal/compatflags.Probe), in addition to
+	// the known list.
+	WorkerdBin string
 }
 
 // LoopbackNet are hostd's per-instance loopback listeners (127.0.0.1:port).
@@ -110,6 +126,9 @@ func Generate(app *bundle.App, o Options) (*Result, error) {
 			return nil, fmt.Errorf("gen: bad compatibility flag %q", f)
 		}
 	}
+	if err := checkCompatFlags(app.CompatFlags, o); err != nil { // compatflags.go (#337)
+		return nil, err
+	}
 	if err := checkSecrets(app); err != nil {
 		return nil, err
 	}
@@ -147,6 +166,10 @@ func Generate(app *bundle.App, o Options) (*Result, error) {
 		return os.WriteFile(p, b, 0o600)
 	}
 
+	py := app // python.go: a Python Worker runs in tenant-py; app becomes its JavaScript front
+	if app.Python {
+		app = pythonFront(app)
+	}
 	classes := app.ClassNames()
 	var facets, plains []string
 	for _, c := range classes {
@@ -206,7 +229,9 @@ func Generate(app *bundle.App, o Options) (*Result, error) {
 	}
 	// Tenant service main module.
 	var ms strings.Builder
-	fmt.Fprintf(&ms, "import * as T from %s;\nimport { wrapHandler, wrapPlainClass, wrapWorkflowClass } from \"./__tw_rt.js\";\nconst B = %s;\nexport * from %s;\nexport default wrapHandler(T.default, B);\n", jsq(mainImport), bjs, jsq(mainImport))
+	fmt.Fprintf(&ms, "import * as T from %s;\nimport { wrapHandler, wrapPlainClass, wrapWorkflowClass, bindingDispatcher } from \"./__tw_rt.js\";\nconst B = %s;\nexport * from %s;\n", jsq(mainImport), bjs, jsq(mainImport))
+	ms.WriteString(serviceMainExports())                         // services.go
+	ms.WriteString(assetsMain(app, "wrapHandler(T.default, B)")) // assets.go
 	ms.WriteString(workflowsMainExports(app))
 	for _, c := range plains {
 		if o := ctrOpt(c); o != "" {
@@ -252,6 +277,7 @@ func Generate(app *bundle.App, o Options) (*Result, error) {
 	for i, n := range shimNames {
 		fmt.Fprintf(&tm, "  %s: { js: shim%d },\n", jsq(n), i)
 	}
+	tm.WriteString(emailFacetModule()) // email.go
 	tm.WriteString("  \"__tw_facet.js\": { js: facetMain },\n  \"__tw_rt.js\": { js: rt },\n};\n")
 
 	// tw-config.json
@@ -281,7 +307,10 @@ func Generate(app *bundle.App, o Options) (*Result, error) {
 		Queues queueCfg `json:"queues"`
 
 		Workflows []workflowCfg `json:"workflows"`
-	}{o.DeploymentID, o.Workload, app.CompatDate, tenantFlags(app.CompatFlags), []bindCfg{}, map[string]classCfg{}, app.Vars, nonNil(app.Crons), storeConfig(app), queueConfig(app), workflowsConfig(app)}
+
+		// Services are the service bindings a facet's env gets (services.go).
+		Services []serviceCfg `json:"services"`
+	}{o.DeploymentID, o.Workload, app.CompatDate, tenantFlags(app.CompatFlags), []bindCfg{}, map[string]classCfg{}, app.Vars, nonNil(app.Crons), storeConfig(app), queueConfig(app), workflowsConfig(app), serviceConfig(app)}
 	cfg.Vars = varsWithSecrets(cfg.Vars, app.Secrets)
 	if cfg.Vars == nil {
 		cfg.Vars = map[string]json.RawMessage{}
@@ -321,10 +350,22 @@ func Generate(app *bundle.App, o Options) (*Result, error) {
 		"platform.js": pjs, "tw-config.json": string(cfgb), "tw-modules.js": tm.String(),
 		"__tw_facet.js": fs.String(), "__tw_main.js": ms.String(), "__tw_rt.js": runtimeJS, "deny.js": denyJS,
 		"tw-queue.js": queueJS,
+		"tw-svc.js":   svcJS, // services.go
 	} {
 		if err := write(name, []byte(b)); err != nil {
 			return nil, err
 		}
+	}
+	if err := write(emailFile, []byte(emailstub.InternalModuleJS)); err != nil { // email.go
+		return nil, err
+	}
+
+	if err := writeAssets(app, write); err != nil { // assets.go
+		return nil, err
+	}
+	pyWorker, err := writePython(py, o.Workload, write) // python.go
+	if err != nil {
+		return nil, err
 	}
 
 	// config.capnp
@@ -333,6 +374,8 @@ func Generate(app *bundle.App, o Options) (*Result, error) {
 	c.WriteString("using Workerd = import \"/workerd/workerd.capnp\";\n\nconst config :Workerd.Config = (\n  services = [\n")
 	c.WriteString("    (name = \"platform\", worker = .platform),\n    (name = \"tenant\", worker = .tenant),\n    (name = \"deny\", worker = .deny),\n")
 	c.WriteString(workflowsService(app))
+	c.WriteString(assetsServices(app, o))
+	c.WriteString(pythonService(py)) // python.go
 	addrIngress, addrObj, addrWL, addrAPI, doPath := "unix:"+res.Sockets.Ingress, "unix:"+res.Sockets.EgressObj, "unix:"+res.Sockets.EgressWL, "unix:"+res.Sockets.HostAPI, o.DOStorage
 	if g := o.Guest; g != nil {
 		addrIngress, addrObj, addrWL, addrAPI, doPath = g.Ingress, g.EgressObj, g.EgressWL, g.HostAPI, g.DOStorage
@@ -352,7 +395,7 @@ func Generate(app *bundle.App, o Options) (*Result, error) {
 	fmt.Fprintf(&c, "    (name = \"egress-wl\", external = (address = %s, http = (%s))),\n", cq(addrWL), sep("style = proxy"))
 	fmt.Fprintf(&c, "    (name = \"hostd\", external = (address = %s, http = (%s))),\n", cq(addrAPI), sep(""))
 	fmt.Fprintf(&c, "    (name = \"do-storage\", disk = (path = %s, writable = true)),\n  ],\n", cq(doPath))
-	fmt.Fprintf(&c, "  sockets = [ (name = \"ingress\", address = %s, service = \"platform\", http = (cfBlobHeader = \"x-tw-cf\")) ],\n);\n\n", cq(addrIngress))
+	fmt.Fprintf(&c, "  sockets = [ (name = \"ingress\", address = %s, service = \"platform\", http = (cfBlobHeader = \"x-tw-cf\")) ],\n%s%s);\n\n", cq(addrIngress), emailExtension(), v8Flags(o))
 
 	uk := func(cls string) string { return cq("tw-" + o.Workload + "-" + cls) }
 
@@ -371,6 +414,7 @@ func Generate(app *bundle.App, o Options) (*Result, error) {
 	c.WriteString("    (name = \"__tw_facet.js.txt\", text = embed \"__tw_facet.js\"),\n")
 	c.WriteString("    (name = \"__tw_rt.js.txt\", text = embed \"__tw_rt.js\"),\n")
 	c.WriteString("    (name = \"tw-queue.js\", esModule = embed \"tw-queue.js\"),\n")
+	c.WriteString("    (name = \"tw-svc.js\", esModule = embed \"tw-svc.js\"),\n")
 	c.WriteString(storeModules(app))
 	for _, n := range shimNames {
 		fmt.Fprintf(&c, "    (name = %s, text = embed %s),\n", cq(n+".txt"), cq(n))
@@ -390,8 +434,13 @@ func Generate(app *bundle.App, o Options) (*Result, error) {
 	c.WriteString("  ],\n  durableObjectStorage = (localDisk = \"do-storage\"),\n  bindings = [\n")
 	c.WriteString("    (name = \"LOADER\", workerLoader = ()),\n    (name = \"NETD_EGRESS\", service = \"netd-egress\"),\n    (name = \"HOSTD\", service = \"hostd\"),\n    (name = \"EGRESS_WL\", service = \"egress-wl\"),\n    (name = \"TENANT\", service = \"tenant\"),\n")
 	fmt.Fprintf(&c, "    (name = \"MAC_KEY\", text = %s),\n", cq(res.MACKey))
+	if l := o.Loopback; l != nil && o.Guest == nil {
+		// connect() tunnels carry the token in band (connect.go).
+		fmt.Fprintf(&c, "    (name = \"LOCAL_TOKEN\", text = %s),\n", cq(l.Token))
+	}
 	c.WriteString(storePlatformBindings(app))
 	c.WriteString(queuePlatformBindings(app))
+	c.WriteString(servicePlatformBindings()) // services.go
 	for _, cl := range plains {
 		fmt.Fprintf(&c, "    (name = %s, durableObjectNamespace = (className = %s, serviceName = \"tenant\")),\n", cq("NS_"+cl), cq(cl))
 	}
@@ -407,6 +456,7 @@ func Generate(app *bundle.App, o Options) (*Result, error) {
 		c.WriteString(cq(f))
 	}
 	c.WriteString("],\n  modules = [\n    (name = \"__tw_main.js\", esModule = embed \"__tw_main.js\"),\n    (name = \"__tw_rt.js\", esModule = embed \"__tw_rt.js\"),\n")
+	c.WriteString(assetsTenantModules(app))
 	for _, p := range mods {
 		var kind string
 		switch app.ModuleKind(p) {
@@ -456,8 +506,13 @@ func Generate(app *bundle.App, o Options) (*Result, error) {
 	c.WriteString(secretBindings(app))
 	c.WriteString(storeTenantBindings(app))
 	c.WriteString(queueTenantBindings(app))
+	c.WriteString(serviceTenantBindings(app)) // services.go
+	c.WriteString(assetsTenantBindings(app))
+	c.WriteString(pythonFrontBinding(py)) // python.go
 	c.WriteString("  ],\n  globalOutbound = (name = \"platform\", entrypoint = \"WorkloadEgress\"),\n" + tailsLine + ");\n\n")
 	c.WriteString(workflowsWorker(app))
+	c.WriteString(assetsWorker(app))
+	c.WriteString(pyWorker) // python.go
 	c.WriteString("const deny :Workerd.Worker = (\n  compatibilityDate = \"2026-04-01\",\n  modules = [ (name = \"deny.js\", esModule = embed \"deny.js\") ],\n);\n")
 	if err := write("config.capnp", []byte(c.String())); err != nil {
 		return nil, err

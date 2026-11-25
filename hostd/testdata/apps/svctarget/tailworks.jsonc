@@ -1,0 +1,7 @@
+{
+  // Test fixture: the target of svccaller's service bindings
+  // (ADR-service-bindings): fetch, a streaming body, a WebSocket, RPC
+  // methods on the default WorkerEntrypoint, and a named entrypoint.
+  "name": "svctarget",
+  "tailnet": { "tags": ["tag:ttest"] },
+}

@@ -43,9 +43,24 @@ js-build: $(WORKERD)
 templates-typecheck: js-build
 	sh scripts/templates-typecheck.sh
 
+## bench: per-node memory and request load of a netd registry at N = 10/100/500 (BenchmarkRegistryNodes;
+## hermetic testcontrol, full peer visibility; results in docs/limits.md "Hosts"). BENCH_NODES picks
+## sizes, e.g. BENCH_NODES='10|100'.
+BENCH_NODES ?= 10|100|500
+.PHONY: bench
+bench:
+	$(GO) test -run '^$$' -bench 'RegistryNodes/N=($(BENCH_NODES))$$' -benchtime=1x -timeout 60m ./netd/
+
 ## test: hermetic unit + integration tests (testcontrol + local DERP/STUN + stock workerd).
 .PHONY: test
 test: deps test-go test-js
+
+## test-docs: the Go tests that read Markdown (embedded docs, doc references, the CLI
+## reference, ADR index, agent skills, CHANGELOG, policy snippets). CI runs it instead of test for a docs-only PR.
+.PHONY: test-docs
+test-docs:
+	$(GO) test -count=1 . ./docs/... ./agent/... ./internal/catalog/... ./internal/compatdoc/...
+	$(GO) test -count=1 -run 'CLIReference|DesignDocs|DocsNameRealCommands|DocRefCheck|DocPolicySnippets|Skill' ./cmd/tw/
 
 .PHONY: test-go
 # GO_TEST_SKIP: a go test -skip regexp (CI quarantines known failures with it; see ci.yml).
@@ -59,6 +74,7 @@ test-go:
 .PHONY: test-js
 test-js:
 	npm test --silent
+	node --test js/cli/tailworks/test/*.test.js
 
 ## test-sdk: M5 SDK conformance (hermetic): real Cloudflare Agents SDK and Vercel AI SDK
 ## apps on tw-hostd + stock workerd over testcontrol + local DERP; mock LLM, no keys.
@@ -68,17 +84,62 @@ test-sdk: deps
 
 ## test-images: ADR-032 D3 on the developer machine: tw deploy's image builder for real (docker
 ## buildx, both arches, alias contexts from tailworks' registry) and the registry conformance run with
-## crane (CRANE=<path>, default: crane on PATH; go install github.com/google/go-containerregistry/cmd/crane@v0.20.6).
+## crane (CRANE=<path>, default: crane on PATH; go install github.com/google/go-containerregistry/cmd/crane@v0.20.6), and
+## that each published arm64 sandbox rebuild's pinned digest resolves (skipped while the digests are placeholders).
 CRANE ?= $(shell command -v crane)
 .PHONY: test-images
 test-images:
-	TW_TEST_DOCKER=1 TW_CRANE="$(CRANE)" $(GO) test -count=1 -v -run 'TestBuildAndPush|TestCraneConformance|TestCLIImages' ./internal/imagebuild/ ./internal/registry/ ./cmd/tw/
+	TW_TEST_DOCKER=1 TW_TEST_IMAGE_SOURCES=1 TW_CRANE="$(CRANE)" $(GO) test -count=1 -v -run 'TestBuildAndPush|TestCraneConformance|TestCLIImages|TestDefaultAliasSourcesResolve' ./internal/imagebuild/ ./internal/registry/ ./cmd/tw/
 
 ## e2e-placement: smart placement (ADR-033) and D1 across a restart and a move (ADR-038), hermetic: real tw-mgmt + two tw-hostd processes on
 ## testcontrol + local DERP, a tag:db peer, one host forced onto DERP; placement, stickiness, --replace.
 .PHONY: e2e-placement
 e2e-placement: deps
 	$(GO) test -tags e2eplacement -count=1 -v -timeout 10m ./e2e/placement/...
+
+## e2e-dataplane: the data-plane chaos loop (issue #415, e2e/dataplane/LOOP.md), hermetic: real tw-mgmt + three
+## tw-hostd processes on testcontrol + local DERP, a seeded nemesis (SIGKILL/SIGSTOP of hosts and workerd, cut-offs,
+## takeovers, mgmt restarts) and checkers over the op history (Queues, DO/lock fencing, D1). TW_DP_SEED defaults to
+## today's date; TW_DP_SCENARIO=queues|fencing|d1|mixed; TW_DP_DURATION (default 4m).
+## With TW_DP_SCENARIO unset it also runs the Workflows slice (#418, TestDataplaneWorkflows, 3m): scenario
+## workflows on an even seed, workflows-move on an odd one (TW_DP_SCENARIO=workflows|workflows-move runs only it).
+.PHONY: e2e-dataplane
+e2e-dataplane: deps
+	$(GO) test -tags e2edataplane -count=1 -v -timeout 25m -run TestDataplane ./e2e/dataplane/...
+
+## e2e-dataplane-cron: the same loop's cron-trigger and DO-alarm scenarios (issue #419, e2e/dataplane/LOOP.md
+## "Cron triggers and alarms"): a stateless and a stateful cron workload, alarm chains on a plain DO, a facet and an
+## Agents SDK agent, under the nemesis plus minute-boundary pauses and schedule changes. Runs the `cron` then the
+## `alarms` scenario (TW_DP_SCENARIO picks one), TW_DP_DURATION (default 4m) each, seed as for e2e-dataplane.
+.PHONY: e2e-dataplane-cron
+e2e-dataplane-cron: deps
+	for s in $${TW_DP_SCENARIO:-cron alarms}; do \
+		TW_DP_SCENARIO=$$s $(GO) test -tags e2edataplane -count=1 -v -timeout 25m -run 'TestCronCheckers|TestDataplane$$' ./e2e/dataplane/... || exit 1; \
+	done
+
+## e2e-dataplane-deploys: the data-plane loop's deploys scenario (issue #421, e2e/dataplane/LOOP.md "Deploys"):
+## concurrent deploys, rollbacks, previews, promotions and secret puts/deletes through 3 tw-mgmt replicas on
+## Postgres (docker context PG_CTX), under host, mgmt-replica and Postgres faults; checks V1-V6.
+## TW_DP_SEED defaults to today's date; TW_DP_SCENARIO=deploys-hosts|deploys-mgmt|deploys-mixed.
+.PHONY: e2e-dataplane-deploys
+e2e-dataplane-deploys: deps
+	PG_CTX="$(PG_CTX)" TW_DP_SCENARIO="$${TW_DP_SCENARIO:-deploys-mixed}" \
+		$(GO) test -tags e2edataplane -count=1 -v -timeout 25m -run 'TestDataplane$$' ./e2e/dataplane/...
+
+## e2e-dataplane-r2: the data-plane chaos loop for R2 buckets (issue #420, e2e/dataplane/ledger/r2.md): the same
+## cluster running testdata/r2 under the r2-fs, r2-s3 and r2-replicas scenarios (3 min each; s3 is a Garage
+## container, so it needs Docker), checked for R1-R6. TW_DP_SCENARIO=r2-fs|r2-s3|r2-replicas runs one.
+.PHONY: e2e-dataplane-r2
+e2e-dataplane-r2: deps
+	$(GO) test -tags e2edataplane -count=1 -v -timeout 40m -run 'TestR2' ./e2e/dataplane/...
+
+## e2e-dataplane-routing: the data-plane loop for routing (issue #422, e2e/dataplane/LOOP.md "Routing"): public
+## ingress through netd's public listener, service bindings (fetch and RPC) and WebSockets to a Durable Object,
+## across moves, takeovers, binding revocations, route changes and hibernation. TW_DP_SCENARIO=public|bindings|
+## websockets|routing (default routing); TW_DP_SEED defaults to today's date; TW_DP_DURATION (default 4m).
+.PHONY: e2e-dataplane-routing
+e2e-dataplane-routing: deps
+	$(GO) test -tags e2edataplane -count=1 -v -timeout 25m -run 'TestRouting$$' ./e2e/dataplane/...
 
 ## e2e-locks: locks and leader election on DO leases (docs/locks.md), hermetic: real tw-mgmt + two
 ## tw-hostd processes, default timings; one host cut off from mgmt while still on the tailnet.
@@ -106,6 +167,24 @@ PG_PORT ?=
 .PHONY: test-pg
 test-pg:
 	sh scripts/test-pg.sh "$(PG_CTX)" "$(PG_PORT)"
+
+## e2e-pg-socket: postgres.js from a Worker and a facet object over connect() (raw TCP egress,
+## ADR-052) to Postgres 17 on the hermetic tailnet (docker context PG_CTX, as test-pg).
+.PHONY: e2e-pg-socket
+e2e-pg-socket: deps
+	sh scripts/e2e-pg-socket.sh "$(PG_CTX)"
+
+## e2e-multimgmt: the multi-replica tw-mgmt chaos suite (e2e/multimgmt/LOOP.md), hermetic: 3 real
+## tw-mgmt processes on one Postgres 17 container (docker context PG_CTX), a fake Tailscale API and
+## setec; S1-S12 scenarios plus the H-regressions, checked against invariants I1-I11. TW_MM_SEED
+## picks the fault schedule (default 1; nightly uses the run number), TW_MM_DURATION the length
+## of each scenario (default 60s). Artifacts go to e2e/multimgmt/results/.
+TW_MM_SEED ?= 1
+.PHONY: e2e-multimgmt
+e2e-multimgmt:
+	@echo "e2e-multimgmt: TW_MM_SEED=$(TW_MM_SEED); rerun one scenario with make e2e-multimgmt TW_MM_SEED=$(TW_MM_SEED) MM_RUN=TestMM_<id>"
+	PG_CTX="$(PG_CTX)" TW_MM_SEED="$(TW_MM_SEED)" \
+		$(GO) test -tags e2emultimgmt -count=1 -v -timeout 45m $(if $(MM_RUN),-run '$(MM_RUN)') ./e2e/multimgmt/
 
 ## e2e-upgrade: the upgrade release gate (ADR-041 §9), hermetic: the previous
 ## release's tw-mgmt + tw-hostd (TW_UPGRADE_FROM: a git ref, default the newest published
@@ -168,6 +247,16 @@ e2e-coldid-real:
 		echo "e2e-coldid-real: SKIPPED ($(TS_CREDS)/tailnet1_api.env not found)"; exit 0; fi; \
 	TW_E2E_API_KEY_FILE="$(TS_CREDS)/tailnet1_api.env" TW_E2E_TAILNET="$(TAILNET1)" \
 		$(GO) test -tags e2ereal -count=1 -v -timeout 15m -run TestColdIdentityReal ./e2e/coldid/
+
+## e2e-regrate-real: registration rate on tailnet 1 (production control): up to 50 fresh ephemeral
+## ttest-bench-* nodes from one registry, registrations/min (issue #114, RFC §13 Q1). TW_REGRATE_N,
+## TW_REGRATE_PAR (JoinParallel, default 16). Deletes its devices and key by ID afterwards.
+.PHONY: e2e-regrate-real
+e2e-regrate-real:
+	@if [ ! -f "$(TS_CREDS)/tailnet1_api.env" ]; then \
+		echo "e2e-regrate-real: SKIPPED ($(TS_CREDS)/tailnet1_api.env not found)"; exit 0; fi; \
+	TW_E2E_API_KEY_FILE="$(TS_CREDS)/tailnet1_api.env" TW_E2E_TAILNET="$(TAILNET1)" \
+		$(GO) test -tags e2ereal -count=1 -v -timeout 15m -run TestRegistrationRateReal ./e2e/regrate/
 
 ## guest-image / guest-kernel / vm-assets: the microVM guest (Linux only; reproducible; inputs
 ## pinned in guest/inputs.sh) for GUEST_ARCH (Go's name, amd64 or arm64; default: this machine).
@@ -307,6 +396,25 @@ e2e-vz-container: deps build vz-assets
 	$(VZ_CTR_ENV) $(GO) test -count=1 -v -run 'TestContainerSmoke|TestVZContainer' ./hostd/vm
 	cd e2e/container && $(VZ_CTR_ENV) $(GO) test -tags e2econtainer -count=1 -v -timeout 20m .
 
+## e2e-dataplane-vm: the data-plane chaos loop for containers, pooled nodes and snapshot
+## restore (issue #423, e2e/dataplane/LOOP.md): needs a microVM backend, so it is not in the
+## nightly. macOS: vz (no sudo). Linux: Firecracker + jailer on KVM, the test binary as root.
+## CTR_IMAGES: an images.json dir holding TW_DPK_IMAGE (default tw.local/debian-trixie-python:1).
+## TW_DPK_SCENARIO=containers|pool|restore|mixed (default mixed), TW_DPK_SEED (default today),
+## TW_DPK_DURATION (default 4m); every TW_DPK_* variable passes through to the test.
+DPK_ENV = $(foreach v,$(filter TW_DPK_%,$(.VARIABLES)),$(v)="$($(v))") TW_CTR_IMAGES="$(CTR_IMAGES)"
+.PHONY: e2e-dataplane-vm
+e2e-dataplane-vm: deps $(if $(filter Darwin,$(shell uname -s)),build vz-assets,guest-image $(VM_KERNEL_DEP))
+	@[ -f "$(CTR_IMAGES)/images.json" ] || { echo "e2e-dataplane-vm: no $(CTR_IMAGES)/images.json (guest/images/build-sandbox-images.sh)"; exit 1; }
+	$(GO) test -c -tags 'e2edataplane e2edataplanevm' -o bin/e2edataplanevm.test ./e2e/dataplane
+	cd e2e/dataplane && if [ "$$(uname -s)" = Darwin ]; then \
+		env $(VZ_ENV) $(DPK_ENV) ../../bin/e2edataplanevm.test -test.v -test.count=1 -test.timeout 40m -test.run TestContainers; \
+	else \
+		[ "$$(cat /proc/sys/vm/nr_hugepages)" -ge $(VM_HUGEPAGES) ] || sudo sysctl -qw vm.nr_hugepages=$(VM_HUGEPAGES); \
+		sudo env $(CTR_ENV) $(DPK_ENV) GOMODCACHE="$$($(GO) env GOMODCACHE)" GOCACHE=/tmp/tw-dpk-gocache \
+			../../bin/e2edataplanevm.test -test.v -test.count=1 -test.timeout 40m -test.run TestContainers; \
+	fi
+
 ## e2e-linux-vm: L3 E2E from the installed release on a FRESH nested-virt Lima VM
 ## (twl-kvm-u24; created if missing, stopped at the end): the linux-arm64 release with the
 ## microVM assets is built in Lima tw-dev, copied in with limactl copy, then install.sh ->
@@ -335,9 +443,19 @@ e2e-svc: deps
 	@if [ ! -f "$(TS_CREDS)/tailnet1_api.env" ]; then \
 		echo "e2e-svc: SKIPPED ($(TS_CREDS)/tailnet1_api.env not found)"; exit 0; fi; \
 	TW_E2E_API_KEY_FILE="$(TS_CREDS)/tailnet1_api.env" TW_E2E_TAILNET="$(TAILNET1)" \
-		$(GO) test -tags e2ereal -count=1 -v -run TestRealService ./internal/tssvc/ && \
+		$(GO) test -tags e2ereal -count=1 -v -run 'TestRealService$$' ./internal/tssvc/ && \
 	TW_E2E_API_KEY_FILE="$(TS_CREDS)/tailnet1_api.env" TW_E2E_TAILNET="$(TAILNET1)" \
 		$(GO) test -tags e2esvc -count=1 -v -timeout 20m ./e2e/svc/...
+
+## e2e-svc-caps: H22 on tailnet 2: which app caps a Service host sees through the VIP vs the node's
+## own address (svc: grant vs tag grant). Needs the policy entries in internal/tssvc/real_caps_test.go;
+## TW_E2E_SVC_ONLY=1 when the tag grant is left out.
+.PHONY: e2e-svc-caps
+e2e-svc-caps:
+	@if [ ! -f "$(TS_CREDS)/tailnet2_api.env" ]; then \
+		echo "e2e-svc-caps: SKIPPED ($(TS_CREDS)/tailnet2_api.env not found)"; exit 0; fi; \
+	TW_E2E_API_KEY_FILE="$(TS_CREDS)/tailnet2_api.env" \
+		$(GO) test -tags e2ereal -count=1 -v -timeout 10m -run TestRealServiceCaps ./internal/tssvc/
 
 ## e2e-mm-svc: H12 on tailnet 1: two tw-mgmt replicas hosting svc:ttest-mgmt. Needs TW_MM_PG_DSN: a
 ## Postgres of its own (never the multimgmt suite's tw-mm-pg container, which other runs may be using).
@@ -389,6 +507,49 @@ e2e-public: deps
 		echo "e2e-public: SKIPPED ($(TS_CREDS)/tailnet1_api.env not found)"; exit 0; fi; \
 	TW_E2E_API_KEY_FILE="$(TS_CREDS)/tailnet1_api.env" TW_E2E_TAILNET="$(TAILNET1)" \
 		$(GO) test -tags e2epublic -count=1 -v -timeout 30m ./e2e/public/...
+
+## e2e-compat: the Cloudflare compatibility suite on tailnet 1 (e2e/compat/README.md): 30 of Cloudflare's own
+## example projects (cloudflare/templates, create-cloudflare, cloudflare/agents, cloudflare/ai), pinned by
+## commit and unmodified, deployed with tw deploy to a real tw-hostd host (`tw up --oauth-client-file`) and
+## called from a tailnet client as their READMEs call them; known gaps must fail as COMPAT.md says.
+## Also the upstream examples of issue #325 (see e2e-compat-dev), deployed the same way.
+## Needs npm; sources are cached in ~/.cache/tailworks-compat. TW_COMPAT_ONLY=<regexp> runs some.
+## The only policy write it may make is the tag:tw-wl-compat tagOwner + its grant.
+.PHONY: e2e-compat
+e2e-compat: deps
+	@if [ ! -f "$(TS_CREDS)/tailnet1_api.env" ]; then \
+		echo "e2e-compat: SKIPPED ($(TS_CREDS)/tailnet1_api.env not found)"; exit 0; fi; \
+	TW_E2E_API_KEY_FILE="$(TS_CREDS)/tailnet1_api.env" TW_E2E_TAILNET="$(TAILNET1)" \
+		$(GO) test -tags e2ecompat -count=1 -v -timeout 60m -run TestE2ECompat ./e2e/compat/...
+
+## e2e-compat-dev: the upstream examples of issue #325 (cloudflare/agents, vercel/mcp-handler and the Vercel AI
+## SDK: the projects with a Section in e2e/compat/upstream.go) under `tw dev`, probed on 127.0.0.1 with the
+## probes e2e-compat uses. No tailnet and no credentials; needs npm and the network (pinned sources are fetched
+## into ~/.cache/tailworks-compat). TW_COMPAT_ONLY=<regexp> runs any e2e-compat project this way.
+.PHONY: e2e-compat-dev
+e2e-compat-dev: deps
+	$(GO) test -tags e2ecompat -count=1 -v -timeout 40m -run TestCompatDev ./e2e/compat/...
+
+## compat-upstream: rewrite the upstream-examples tables of docs/COMPAT.md and e2e/compat/upstream-results.json
+## from run results: DEV=<file> and DEPLOYED=<file>, default the newest e2e/real/results/compat-dev-*.json
+## (make e2e-compat-dev) and compat-2*.json (make e2e-compat). Commit both files.
+.PHONY: compat-upstream
+compat-upstream:
+	$(GO) run ./e2e/compat/compatreport $(if $(DEV),-dev $(DEV)) $(if $(DEPLOYED),-deployed $(DEPLOYED))
+
+## compat-upstream-check: those tables are what the recorded results and e2e/compat's project list render
+## (so no row is edited by hand, and an example isn't added or re-pinned without running it). Part of make lint.
+.PHONY: compat-upstream-check
+compat-upstream-check:
+	$(GO) run ./e2e/compat/compatreport -check
+	$(GO) test -count=1 ./e2e/compat/
+lint: compat-upstream-check
+lint-docs: compat-upstream-check
+
+## e2e-compat-prepare: only fetch, npm install and build the e2e-compat projects (no tailnet).
+.PHONY: e2e-compat-prepare
+e2e-compat-prepare:
+	$(GO) test -tags e2ecompat -count=1 -v -timeout 40m -run TestCompatPrepare ./e2e/compat/...
 
 ## release: self-contained tarballs in dist/ (darwin-arm64, linux-arm64, linux-amd64): Go binaries
 ## (CGO_ENABLED=0, esbuild built in), pinned workerd, templates + vendored node_modules,
@@ -448,12 +609,19 @@ e2e-mbp: release
 ## tailworks runs in the VM; the test client + echo run here. ≤2 VMs at a time; each is
 ## stopped (kept) when its row is done. LINUX_DISTROS picks rows (see
 ## scripts/e2e-linux-one.sh; debian11-arm64 / alpine-arm64 check doctor's refusal).
-LINUX_DISTROS ?= ubuntu24-amd64 ubuntu24-arm64 debian12-arm64 ubuntu22-arm64
+## LINUX_RELEASE=vX.Y.Z tests that GitHub release's tarballs (no `make release`).
+## The API key stays on this Mac (it creates the run's OAuth client and cleans up);
+## tailworks in the VM gets only that OAuth client. LINUX_APPLY_POLICY=1 first adds the
+## scenario's tagOwners and grants to tailnet 1's policy (as e2e-mac); else it is only read.
+LINUX_DISTROS ?= ubuntu24-amd64 ubuntu24-arm64 debian12-arm64 fedora-arm64 ubuntu22-arm64
+LINUX_RELEASE ?=
+LINUX_APPLY_POLICY ?= 0
 .PHONY: e2e-linux
-e2e-linux: release
+e2e-linux: $(if $(LINUX_RELEASE),,release)
 	@if [ ! -f "$(TS_CREDS)/tailnet1_api.env" ]; then \
 		echo "e2e-linux: SKIPPED ($(TS_CREDS)/tailnet1_api.env not found)"; exit 0; fi; \
 	if ! command -v limactl >/dev/null; then echo "e2e-linux: SKIPPED (no limactl)"; exit 0; fi; \
+	TW_E2E_RELEASE="$(LINUX_RELEASE)" TW_E2E_APPLY_POLICY="$(LINUX_APPLY_POLICY)" \
 	TW_E2E_API_KEY_FILE="$(TS_CREDS)/tailnet1_api.env" TW_E2E_TAILNET="$(TAILNET1)" \
 		TW_E2E_TARBALL_arm64="$(CURDIR)/dist/tailworks-$(RELEASE_VERSION)-linux-arm64.tar.gz" \
 		TW_E2E_TARBALL_amd64="$(CURDIR)/dist/tailworks-$(RELEASE_VERSION)-linux-amd64.tar.gz" \
@@ -501,10 +669,29 @@ compat-check:
 changes-check:
 	sh scripts/check-changes.sh
 
+## demo-test: scripts/demo.sh (the launch demo, docs/demo.md) for real against a throwaway Headscale
+## tailnet in Docker: refusals, a run, a rerun, an interrupted run, --cleanup. Skips without docker.
+.PHONY: demo-test
+demo-test: deps build
+	sh scripts/demo_test.sh
+
 ## install-test: install.sh upgrade keeps .prev, --rollback swaps it back (hermetic, fake releases).
 .PHONY: install-test
 install-test:
 	sh scripts/install_test.sh
+
+## npm-cli-test: the tw CLI's npm packages: built from signed tarballs, npm install -g, the
+## tailworks shim runs tw (hermetic, fake releases, offline npm; issue #240).
+.PHONY: npm-cli-test
+npm-cli-test:
+	sh scripts/npm_cli_test.sh
+
+## lint-docs: the lint gates that can fail on a Markdown-only change (generated docs current,
+## README/COMPAT rows, release-note fragments, secrets). CI runs it instead of lint when
+## scripts/docs-only.sh says the PR is prose only.
+.PHONY: lint-docs
+lint-docs: api-check compat-check changes-check
+	@sh scripts/check-secrets.sh
 
 .PHONY: lint
 lint: api-check compat-check changes-check
@@ -528,9 +715,11 @@ lint: api-check compat-check changes-check
 	$(GO) vet -tags e2esvc ./e2e/svc/...
 	$(GO) vet -tags 'e2emultimgmt e2ereal' ./e2e/multimgmt/...
 	$(GO) vet -tags e2ereal ./internal/tssvc/...
+	$(GO) vet -tags twtestclock ./internal/wallclock/... ./cmd/tw-hostd/...
 	$(GO) vet -tags e2emulti ./e2e/multi/...
 	$(GO) vet -tags e2eoauth ./e2e/oauth/...
 	$(GO) vet -tags e2eheadscale ./e2e/headscale/...
+	$(GO) vet -tags e2ecompat ./e2e/compat/...
 	$(GO) vet -tags e2epublic ./e2e/public/...
 	$(GO) vet -tags e2embp ./e2e/mbp/...
 	$(GO) vet -tags e2elinux ./e2e/linux/...
@@ -538,6 +727,9 @@ lint: api-check compat-check changes-check
 	$(GO) vet -tags nodetier ./e2e/node/...
 	$(GO) vet -tags e2eplacement ./e2e/placement/...
 	$(GO) vet -tags e2elocks ./e2e/locks/...
+	$(GO) vet -tags e2edataplane ./e2e/dataplane/...
+	$(GO) vet -tags 'e2edataplane e2edataplanevm' ./e2e/dataplane/...
+	GOOS=linux $(GO) vet -tags 'e2edataplane e2edataplanevm' ./e2e/dataplane/...
 	$(GO) vet -tags e2equeues ./e2e/queues/...
 	$(GO) vet -tags e2eobs ./e2e/observability/...
 	$(GO) vet -tags e2emultimgmt ./e2e/multimgmt/...
@@ -563,6 +755,13 @@ staticcheck: lint-tools
 .PHONY: vulncheck
 vulncheck: lint-tools
 	bin/lint/govulncheck ./...
+
+## v8-check: is the pinned workerd's V8 behind the V8 in Chrome's stable channel (issue #338)? Prints
+## both versions; exit 10 when behind. nightly.yml runs it with V8_CHECK_ISSUE=1, which opens, updates
+## or closes the "workerd pin is behind Chrome stable's V8" issue (docs/RELEASING.md "Upstream advisories").
+.PHONY: v8-check
+v8-check: $(WORKERD)
+	sh scripts/v8-check.sh
 
 .PHONY: hooks
 hooks:

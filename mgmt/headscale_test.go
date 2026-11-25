@@ -78,6 +78,7 @@ func (f *fakeHeadscale) snapshot() (keys int, deleted []string) {
 // controlURL, kill Tier 2 deletes the Headscale node, and what the profile
 // can't serve (Services, Funnel) is refused with profile_unsupported.
 func TestHeadscaleProfileTenant(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	e.m.cfg.DeviceDeleteDelay = 0
 	hs := newFakeHeadscale(t)

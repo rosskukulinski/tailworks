@@ -1,43 +1,75 @@
-# Release: on a v* tag (or by hand for an existing tag), build every part
-# of the three tarballs and attach them, with SHA256SUMS, to a DRAFT GitHub
-# release. A maintainer reviews the draft and publishes it; scripts/get.sh
-# installs the latest published release.
+# Release: on a v* tag (or by hand), build the three tarballs, test every
+# runtime and every suite against them, and attach them, with SHA256SUMS,
+# to a DRAFT GitHub release. A maintainer reviews the draft and publishes
+# it; scripts/get.sh installs the latest published release. No draft unless
+# every job below passes, and no suite may pass by skipping
+# (scripts/ci-suite.sh): a release is tested on every runtime it ships.
 #
-#   vm-assets (amd64, arm64)  Linux runners, native arch: `make vm-assets`,
-#                             the Firecracker guest for linux-<arch>: rootfs,
-#                             kernel, firecracker + jailer (pinned, checked).
-#   vz-assets                 arm64 Linux: `make vz-assets`, the macOS
-#                             (Virtualization.framework) guest kernel + image.
-#   gates                     Linux: scripts/release-check.sh (tag = VERSION,
-#                             notes finalized, a signing key pinned), `make
-#                             lint test`, a dry run of the npm
-#                             publish (scripts/npm-publish.sh; the packages
-#                             and templates at the tag's version), the
-#                             install.sh rollback
-#                             test, and `make e2e-upgrade` (upgrade from the
-#                             newest published release to this tag: data,
-#                             rejoin, old bundles; ADR-041 §9; from this tree
-#                             while none is published: scripts/upgrade-from.sh),
-#                             and `make e2e-tw-upgrade` (tw upgrade on a tw up
-#                             machine: signature refusal, rollback, upgrade).
-#                             No draft
-#                             unless every gate passes.
-#   release                   macOS (the darwin binaries are ad-hoc signed,
-#                             tw-vz with the virtualization entitlement):
-#                             `make release` with the three asset dirs, and
-#                             RELEASE_VM_ASSETS=1, so a tarball without its
-#                             microVM guest fails the build instead of
-#                             shipping without the tier. Every SHA256SUMS
-#                             is signed (SHA256SUMS.sig; docs/RELEASING.md,
-#                             "Signing").
+# Rehearsal: `gh workflow run release.yml -f tag=master -f rehearsal=true`
+# runs everything on any ref (version <VERSION>-rc.<sha>, no tag/VERSION
+# check, no draft). Run one before cutting a tag. To rerun just the jobs a
+# fix touched, add `-f only=tailnet,mac-cli` (test job names, comma-
+# separated; setup and the builds they need always run). `only` needs
+# rehearsal: a release draft always comes from every job.
+#
+# Hosted runners (GitHub):
+#   setup          the version; on a tag, that it matches VERSION.
+#   gates          one job each, in parallel: ready (scripts/release-check.sh:
+#                  tag = VERSION, notes finalized, a signing key pinned; the
+#                  npm publish dry run; install-test; npm-cli-test), lint, test,
+#                  e2e-upgrade (newest published release → this tree;
+#                  ADR-041 §9), e2e-tw-upgrade.
+#   suites         every hermetic suite, one job each: e2e-local,
+#                  templates-typecheck, test-vitest, e2e-coldid, e2e-locks,
+#                  e2e-observability, e2e-placement, e2e-queues,
+#                  e2e-wrangler, test-node, test-sdk (SQLite storage, alarms
+#                  and WebSockets on the pinned workerd), test-images.
+#   test-pg        the mgmt store on Postgres 17.
+#   headscale      the Headscale profile, per supported minor.
+#   vm-assets      the Firecracker guest per arch; vz-assets the macOS one.
+#   build          macOS: `make release` with the guests, signed.
+#   tarballs       each tarball on its own platform, as a user gets it
+#                  (scripts/ci-tarball-check.sh: signature, install.sh,
+#                  doctor, every template under tw dev), then the npm
+#                  package made from it (scripts/ci-npm-cli-check.sh).
+#   microvm-amd64  the Firecracker tier on KVM with the SHIPPED amd64 guest:
+#                  e2e-vm (storage, bindings, isolation, egress, kill,
+#                  redeploy) and e2e-container (Sandbox SDK).
+#   tailnet        the real-tailnet suites, one at a time on the test
+#                  tailnets: e2e-real, e2e-oauth, e2e-public (Funnel),
+#                  e2e-svc, e2e-svc-caps, e2e-mm-svc, e2e-coldid-real.
+#   linux-amd64    e2e-linux's ubuntu24-amd64 row from the linux-amd64
+#                  tarball, natively (Lima + qemu on the runner's KVM).
+#
+# Self-hosted Mac runner (labels self-hosted, macOS, ARM64, tw-release;
+# docs/RELEASING.md "Release runner"): Virtualization.framework and nested
+# KVM (Lima) need real Apple silicon, which hosted macOS runners don't offer.
+#   mac-vz        the vz microVM tier with the SHIPPED vz guest: e2e-vz and
+#                  e2e-vz-container (Rosetta or arm64 images).
+#   mac-firecracker  the linux-arm64 Firecracker tier with the SHIPPED
+#                  arm64 guest, in Lima: e2e-vm, e2e-container,
+#                  e2e-container-build → e2e-container-registry.
+#   mac-linux      real tailnet: e2e-linux's arm64 distro rows from the
+#                  linux-arm64 tarball, three Lima VMs at a time.
+#   mac-linuxvm    real tailnet: e2e-linux-vm and e2e-linux-reboot (the
+#                  microVM tier from the arm64 tarball, host reboots).
+#   mac-cli        real tailnet: e2e-mac, e2e-multi. After `tailnet`: both
+#                  write policy.
+# The Linux jobs run alongside `tailnet` on tailnet 1 (they only read the
+# policy, and use their own OAuth clients and node prefixes). Several runner
+# instances on one Mac share ~/tw-ci-cache (scripts/ci-sandbox-images.sh
+# locks it) and use different Lima VMs.
+#   release        drafts the GitHub release (not on a rehearsal).
+#
+# Secrets (environment "release", deployable from v* tags and master only):
+# TW_RELEASE_SIGNING_KEY (docs/RELEASING.md "Signing"), TW_E2E_TAILNET1 (the
+# tailnet name), TW_E2E_TAILNET1_API_KEY and TW_E2E_TAILNET2_API_KEY.
 #
 # The guest builds need no root and no VM (mkfs.ext4 -d, debugfs; plain gcc
 # kernel builds), and are meant to be reproducible: Ubuntu 24.04's gcc 13.3
 # is the same compiler as Lima tw-dev's, so CI and a local `make release`
 # should produce the same vmlinux and rootfs hashes (manifest.json,
 # kernel.json). Kernels are cached by their inputs.
-#
-# Run it by hand for an existing tag: gh workflow run release.yml -f tag=v0.1.0
 name: release
 
 on:
@@ -46,21 +78,77 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "existing tag to (re)build, e.g. v0.1.0"
+        description: "existing tag to (re)build, e.g. v0.1.0 (a branch, with rehearsal)"
         required: true
+      rehearsal:
+        description: "rehearsal: run every gate and suite, draft nothing"
+        type: boolean
+        default: false
+      only:
+        description: "rehearsal only: comma-separated test jobs to run (e.g. tailnet,mac-cli); empty = all. The builds they need always run."
+        required: false
+        default: ""
 
 # Read-only by default; only the release job (which drafts the release and
 # uploads the tarballs) gets contents: write.
 permissions:
   contents: read
 
+# One release run per ref at a time (a re-run waits; never two on the
+# self-hosted runner and the test tailnets at once).
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 env:
   TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  REHEARSAL: ${{ github.event.inputs.rehearsal == 'true' && '1' || '' }}
 
 jobs:
-  gates:
+  setup:
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+      - id: v
+        name: Version (a tag must match VERSION)
+        env:
+          ONLY: ${{ github.event.inputs.only }}
+        run: |
+          if [ -n "$ONLY" ] && [ -z "$REHEARSAL" ]; then
+            echo "::error::only=$ONLY needs rehearsal=true: a release draft always comes from every job"; exit 1
+          fi
+          if [ -n "$REHEARSAL" ]; then
+            v="$(cat VERSION)-rc.$(git rev-parse --short=8 HEAD)"
+          else
+            v="${TAG#v}"
+            if [ "$v" != "$(cat VERSION)" ]; then
+              echo "::error::tag $TAG does not match VERSION $(cat VERSION)"; exit 1
+            fi
+          fi
+          echo "version: $v"
+          echo "version=$v" >>"$GITHUB_OUTPUT"
+
+  # One job per gate, in parallel (they were one ~22 min job).
+  gates:
+    needs: setup
+    if: github.event.inputs.only == '' || contains(format(',{0},', github.event.inputs.only), ',gates,')
+    name: gate ${{ matrix.gate }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        gate:
+          - e2e-tw-upgrade
+          - e2e-upgrade
+          - lint
+          - ready
+          - test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -72,25 +160,147 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
-      # First, and cheap: the tag matches VERSION and the npm versions, its
-      # notes are finalized with nothing pending, and a signing key is pinned.
+      # ready: the tag matches VERSION and the npm versions, its notes are
+      # finalized with nothing pending, and a signing key is pinned; the
+      # npm publish dry run; the install.sh upgrade/rollback test.
       - name: Ready to release (scripts/release-check.sh)
+        if: matrix.gate == 'ready' && env.REHEARSAL == ''
         run: sh scripts/release-check.sh "$TAG"
-      - name: make lint test
-        run: make lint test
-      - name: npm packages at the tag's version (dry run; npm-publish.yml publishes)
-        run: sh scripts/npm-publish.sh "${TAG#v}" --dry-run
+      # npm ci first: the dry run packs @tailworks/tailnet, whose prepack
+      # runs tsc and needs @types/node. (The lint and test gates get it from
+      # `make deps`; this gate runs no make target before the dry run.)
+      - name: npm packages at the release's version (dry run; npm-publish.yml publishes)
+        if: matrix.gate == 'ready'
+        run: |
+          npm ci --no-audit --no-fund --loglevel=error
+          sh scripts/npm-publish.sh "$(cat VERSION)" --dry-run
       - name: install.sh upgrade and rollback
-        run: make install-test
-      - name: make e2e-upgrade (newest published release → this tag)
-        run: make e2e-upgrade
+        if: matrix.gate == 'ready'
+        run: scripts/ci-suite.sh make install-test
+      - name: the tw CLI's npm packages (hermetic)
+        if: matrix.gate == 'ready'
+        run: scripts/ci-suite.sh make npm-cli-test
+      - name: make lint
+        if: matrix.gate == 'lint'
+        run: make lint
+      - name: make test
+        if: matrix.gate == 'test'
+        run: make test
+      - name: make e2e-upgrade (newest published release → this tree)
+        if: matrix.gate == 'e2e-upgrade'
+        run: scripts/ci-suite.sh make e2e-upgrade
       - name: make e2e-tw-upgrade (tw upgrade on a tw up machine, signed releases, rollback)
-        run: make e2e-tw-upgrade
+        if: matrix.gate == 'e2e-tw-upgrade'
+        run: scripts/ci-suite.sh make e2e-tw-upgrade
+
+  # Every hermetic suite (ci.yml runs some per PR, nightly.yml the rest),
+  # again on exactly what ships. One job each, so they run in parallel and
+  # report separately.
+  suites:
+    needs: setup
+    if: github.event.inputs.only == '' || contains(format(',{0},', github.event.inputs.only), ',suites,')
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - e2e-coldid
+          - e2e-local
+          - e2e-locks
+          - e2e-observability
+          - e2e-placement
+          - e2e-queues
+          - e2e-wrangler
+          - templates-typecheck
+          - test-node
+          - test-sdk
+          - test-vitest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      # e2e-wrangler's third leg runs the wrangler CLI; it skips without it.
+      - name: wrangler CLI
+        if: matrix.target == 'e2e-wrangler'
+        run: npm install -g wrangler@4
+      - name: make deps
+        run: make deps
+      - name: make ${{ matrix.target }}
+        run: scripts/ci-suite.sh make ${{ matrix.target }}
+
+  # ADR-032 D3: tw deploy's image builder (docker buildx, both arches) and
+  # the registry conformance run with crane.
+  test-images:
+    needs: setup
+    if: github.event.inputs.only == '' || contains(format(',{0},', github.event.inputs.only), ',test-images,')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: crane
+        run: go install github.com/google/go-containerregistry/cmd/crane@v0.20.6
+      - name: make deps (TestCLIImages needs workerd and node)
+        run: make deps
+      - name: make test-images
+        run: scripts/ci-suite.sh make test-images CRANE="$(go env GOPATH)/bin/crane"
+
+  test-pg:
+    needs: setup
+    if: github.event.inputs.only == '' || contains(format(',{0},', github.event.inputs.only), ',test-pg,')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: twtest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - name: make test-pg
+        env:
+          TW_TEST_POSTGRES_DSN: postgres://postgres:twtest@127.0.0.1:5432/postgres?sslmode=disable
+          TW_TEST_PG_LOG: ${{ runner.temp }}/tw-test-pg.log
+        run: scripts/ci-suite.sh make test-pg
+      - name: full test-pg log
+        if: failure()
+        run: cat "$RUNNER_TEMP/tw-test-pg.log"
 
   # The Headscale profile against every supported Headscale minor, in Docker
   # (ADR-041 §9 gate 6). One minor until Headscale v0.30
   # (docs/headscale.md); then add the newest two, one line each.
   headscale:
+    needs: setup
+    if: github.event.inputs.only == '' || contains(format(',{0},', github.event.inputs.only), ',headscale,')
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
@@ -109,9 +319,10 @@ jobs:
         with:
           node-version: "22"
       - name: make e2e-headscale (${{ matrix.image }})
-        run: make e2e-headscale HEADSCALE_IMAGE=${{ matrix.image }}
+        run: scripts/ci-suite.sh make e2e-headscale HEADSCALE_IMAGE=${{ matrix.image }}
 
   vm-assets:
+    needs: setup
     strategy:
       fail-fast: true
       matrix:
@@ -122,6 +333,8 @@ jobs:
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
+    env:
+      VERSION: ${{ needs.setup.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -149,7 +362,7 @@ jobs:
       - name: make vm-assets
         run: |
           make deps
-          TW_VERSION="${TAG#v}" make vm-assets GUEST_ARCH=${{ matrix.arch }} VM_ASSETS=dist/vm-assets-${{ matrix.arch }}
+          TW_VERSION="$VERSION" make vm-assets GUEST_ARCH=${{ matrix.arch }} VM_ASSETS=dist/vm-assets-${{ matrix.arch }}
           cat dist/vm-assets-${{ matrix.arch }}/manifest.json
           sha256sum dist/vm-assets-${{ matrix.arch }}/*
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -160,8 +373,11 @@ jobs:
           retention-days: 7
 
   vz-assets:
+    needs: setup
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 90
+    env:
+      VERSION: ${{ needs.setup.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -183,7 +399,7 @@ jobs:
           key: vz-assets-${{ hashFiles('guest/**', 'go.mod', 'go.sum', 'package-lock.json') }}
       - name: make vz-assets
         run: |
-          TW_VERSION="${TAG#v}" make vz-assets VZ_ASSETS=dist/vz-assets-arm64
+          TW_VERSION="$VERSION" make vz-assets VZ_ASSETS=dist/vz-assets-arm64
           sha256sum dist/vz-assets-arm64/*
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -192,31 +408,29 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  release:
-    needs: [vm-assets, vz-assets, gates, headscale]
+  # macOS (the darwin binaries are ad-hoc signed, tw-vz with the
+  # virtualization entitlement): `make release` with the three asset dirs,
+  # and RELEASE_VM_ASSETS=1, so a tarball without its microVM guest fails
+  # the build instead of shipping without the tier. Every SHA256SUMS is
+  # signed (SHA256SUMS.sig; docs/RELEASING.md, "Signing").
+  build:
+    needs: [setup, vm-assets, vz-assets]
     runs-on: macos-15
-    # The signing key is this environment's secret: only this job sees it.
+    # The signing key is this environment's secret: only these jobs see it.
     environment: release
-    permissions:
-      contents: write
     timeout-minutes: 60
+    env:
+      VERSION: ${{ needs.setup.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.TAG }}
-          fetch-depth: 0 # the previous tag, for the release notes
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
-      - name: Check the tag matches VERSION
-        run: |
-          v="${TAG#v}"
-          if [ "$v" != "$(cat VERSION)" ]; then
-            echo "tag $TAG does not match VERSION $(cat VERSION)"; exit 1
-          fi
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: vm-assets-amd64
@@ -246,31 +460,509 @@ jobs:
           export TW_VM_ASSETS_amd64="$PWD/dist/vm-assets-amd64"
           export TW_VM_ASSETS_arm64="$PWD/dist/vm-assets-arm64"
           export TW_VZ_ASSETS="$PWD/dist/vz-assets-arm64"
-          TW_RELEASE_SIGNING_KEY="$key" TW_RELEASE_SIGN=1 make release RELEASE_VERSION="${TAG#v}" RELEASE_VM_ASSETS=1
+          TW_RELEASE_SIGNING_KEY="$key" TW_RELEASE_SIGN=1 make release RELEASE_VERSION="$VERSION" RELEASE_VM_ASSETS=1
           cat dist/SHA256SUMS dist/SHA256SUMS.sig
-      - name: Smoke test the darwin tarball
+      - name: Every tarball has its microVM tier and is signed
         run: |
-          mkdir -p "$RUNNER_TEMP/t" && tar -xzf dist/tailworks-*-darwin-arm64.tar.gz -C "$RUNNER_TEMP/t"
-          "$RUNNER_TEMP"/t/tailworks-*/bin/tw version
           for a in darwin-arm64 linux-arm64 linux-amd64; do
             tar -xzOf dist/tailworks-*-$a.tar.gz '*/share/tailworks/release.json' | grep -Eq '"microvm": ?true' ||
               { echo "$a: release.json has no microVM tier"; exit 1; }
           done
-          # Signed, as get.sh and install.sh check it (the pinned keys only).
           ssh-keygen -Y verify -f internal/releasesig/allowed_signers -I tw-release -n tw-release -s dist/SHA256SUMS.sig <dist/SHA256SUMS
-          t=$(ls -d "$RUNNER_TEMP"/t/tailworks-*)
-          ssh-keygen -Y verify -f internal/releasesig/allowed_signers -I tw-release -n tw-release -s "$t/SHA256SUMS.sig" <"$t/SHA256SUMS"
       # Issue #102: LICENSE + THIRD_PARTY_NOTICES in every tarball, and the
       # kernel's and rootfs's source offers next to a microVM guest.
       - name: License files in every tarball
         run: sh scripts/check-release-notices.sh dist/*.tar.gz
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-dist
+          path: |
+            dist/tailworks-*.tar.gz
+            dist/SHA256SUMS
+            dist/SHA256SUMS.sig
+          if-no-files-found: error
+          retention-days: 7
+
+  # Each tarball on a clean machine of its own platform, as a user gets it.
+  tarballs:
+    needs: [setup, build]
+    if: github.event.inputs.only == '' || contains(format(',{0},', github.event.inputs.only), ',tarballs,')
+    name: tarball ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: darwin-arm64
+            runner: macos-15
+          - platform: linux-amd64
+            runner: ubuntu-24.04
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+      # Node for the node-workflow template (it needs Node on the deploying
+      # machine), npm pack, and tw dev's JSON; no Go: tw comes from the
+      # tarball.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-dist
+          path: dist
+      # node-workflow is the one template that needs `npm install`; its
+      # @tailworks/* at this release's version aren't on npm yet.
+      - name: "@tailworks/* from this checkout (npm pack)"
+        run: |
+          npm ci --no-audit --no-fund --loglevel=error
+          mkdir -p "$RUNNER_TEMP/pkgs"
+          npm pack --silent -w @tailworks/node -w @tailworks/tailnet -w @tailworks/mcp --pack-destination "$RUNNER_TEMP/pkgs"
+          echo "TW_CI_PKGS=$RUNNER_TEMP/pkgs" >>"$GITHUB_ENV"
+      - name: Validate the ${{ matrix.platform }} tarball
+        run: scripts/ci-tarball-check.sh dist ${{ matrix.platform }} "${{ needs.setup.outputs.version }}"
+      # The npm package npm-publish.yml makes from this tarball: npm install
+      # -g, then tw doctor, tw init and tw dev --once through it (issue #240).
+      - name: The ${{ matrix.platform }} npm package (@tailworks/cli-${{ matrix.platform }})
+        run: scripts/ci-npm-cli-check.sh dist ${{ matrix.platform }} "${{ needs.setup.outputs.version }}"
+
+  # The Firecracker tier on the SHIPPED amd64 guest (kernel, rootfs,
+  # firecracker, jailer from vm-assets), on the hosted runner's KVM.
+  microvm-amd64:
+    needs: [setup, vm-assets]
+    if: github.event.inputs.only == '' || contains(format(',{0},', github.event.inputs.only), ',microvm-amd64,')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      ASSETS: ${{ github.workspace }}/dist/vm-assets-amd64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: vm-assets-amd64
+          path: dist/vm-assets-amd64
+      - name: KVM and the shipped firecracker + jailer
+        run: |
+          [ -e /dev/kvm ] || { echo "::error::no /dev/kvm on this runner"; exit 1; }
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+          sudo install -m 0755 "$ASSETS/firecracker" "$ASSETS/jailer" /usr/local/bin/
+          firecracker --version | head -1
+          sudo apt-get update -qq && sudo apt-get install -y -qq e2fsprogs erofs-utils
+      - name: Sandbox images (stock linux/amd64) and the container apps
+        run: |
+          PLATFORM=linux/amd64 guest/images/build-sandbox-images.sh "$RUNNER_TEMP/ctr-images"
+          scripts/e2e-container-prep.sh "$RUNNER_TEMP/ctr-apps"
+      - name: make deps
+        run: make deps
+      # -o guest-image: test the shipped rootfs, don't build another.
+      # Allowed skips: TestBootBench is an opt-in benchmark; TestContainerSmoke
+      # runs in the e2e-container step below, with the images.
+      - name: make e2e-vm (shipped amd64 guest)
+        env:
+          TW_CI_ALLOW_SKIP: "TestBootBench|TestContainerSmoke"
+        run: scripts/ci-suite.sh make -o guest-image e2e-vm GUEST_ARCH=amd64 GUEST_OUT=dist/vm-assets-amd64 TW_VM_KERNEL="$ASSETS/vmlinux"
+      # TestE2EContainerRegistry needs the D3 build (e2e-container-build);
+      # it runs in mac-firecracker's e2e-container-registry.
+      - name: make e2e-container (shipped amd64 guest)
+        env:
+          TW_CI_ALLOW_SKIP: "TestBootBench|TestE2EContainerRegistry"
+        run: scripts/ci-suite.sh make -o guest-image e2e-container GUEST_ARCH=amd64 GUEST_OUT=dist/vm-assets-amd64 TW_VM_KERNEL="$ASSETS/vmlinux" CTR_IMAGES="$RUNNER_TEMP/ctr-images" CTR_APPS="$RUNNER_TEMP/ctr-apps"
+
+  # Real tailnet, one suite at a time (they share the test tailnets). Starts
+# right away, not after gates: the draft needs both anyway, and waiting cost
+# ~20 min of every run.
+  tailnet:
+    needs: setup
+    if: github.event.inputs.only == '' || contains(format(',{0},', github.event.inputs.only), ',tailnet,')
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 180
+    services:
+      postgres: # e2e-mm-svc's mgmt store
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: twtest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      TAILNET1: ${{ secrets.TW_E2E_TAILNET1 }}
+      TW_MM_PG_DSN: postgres://postgres:twtest@127.0.0.1:5432/postgres?sslmode=disable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Tailnet credentials (files, as the suites read them)
+        env:
+          K1: ${{ secrets.TW_E2E_TAILNET1_API_KEY }}
+          K2: ${{ secrets.TW_E2E_TAILNET2_API_KEY }}
+        run: scripts/ci-ts-creds.sh
+      - name: make deps
+        run: make deps
+      - name: make e2e-real (identity, egress, kill)
+        run: scripts/ci-suite.sh make e2e-real
+      - name: make e2e-oauth (tw up with an OAuth client, remote deploy)
+        run: scripts/ci-suite.sh make e2e-oauth
+      - name: make e2e-public (Funnel ingress)
+        run: scripts/ci-suite.sh make e2e-public
+      - name: make e2e-svc (Tailscale Services)
+        run: scripts/ci-suite.sh make e2e-svc
+      - name: make e2e-svc-caps (tailnet 2)
+        run: scripts/ci-suite.sh make e2e-svc-caps
+      - name: make e2e-mm-svc (two mgmt replicas on Postgres)
+        run: scripts/ci-suite.sh make e2e-mm-svc
+      - name: make e2e-coldid-real
+        run: scripts/ci-suite.sh make e2e-coldid-real
+      - name: Remove the credential files
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/ts-creds"
+
+  # Self-hosted: the vz microVM tier on the SHIPPED vz guest.
+  # -o vz-assets: test the artifact, don't rebuild it.
+  mac-vz:
+    needs: [setup, vz-assets]
+    if: github.event.inputs.only == '' || contains(format(',{0},', github.event.inputs.only), ',mac-vz,')
+    runs-on: [self-hosted, macOS, ARM64, tw-release]
+    timeout-minutes: 120
+    env:
+      VZ: dist/vz-assets-arm64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          # Self-hosted: no cache restore into the machine user's own Go module cache.
+          cache: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: vz-assets-arm64
+          path: dist/vz-assets-arm64
+      - name: Sandbox images (cached on the runner by their pinned inputs)
+        run: |
+          scripts/ci-sandbox-images.sh arm64 amd64 >>"$GITHUB_ENV"
+          scripts/e2e-container-prep.sh "$RUNNER_TEMP/ctr-apps"
+      - name: make deps
+        run: make deps
+      # Allowed skips: TestE2EVMSnapshot is Firecracker-only (no warm pool or
+      # snapshots on vz); TestBootBench is an opt-in benchmark; the container
+      # tests run in the e2e-vz-container step below, with the images.
+      - name: make e2e-vz (shipped vz guest)
+        env:
+          TW_CI_ALLOW_SKIP: "TestE2EVMSnapshot|TestBootBench|TestContainerSmoke|TestVZContainer"
+        run: scripts/ci-suite.sh make -o vz-assets e2e-vz VZ_ASSETS="$VZ"
+      - name: make e2e-vz-container (shipped vz guest)
+        env:
+          TW_CI_ALLOW_SKIP: "TestBootBench"
+        run: scripts/ci-suite.sh make -o vz-assets e2e-vz-container VZ_ASSETS="$VZ" CTR_IMAGES="$CTR_IMAGES_arm64" CTR_IMAGES_AMD64="$CTR_IMAGES_amd64" CTR_APPS="$RUNNER_TEMP/ctr-apps"
+
+  # Self-hosted: the linux-arm64 Firecracker tier on the SHIPPED arm64
+  # guest, inside the runner's nested-virt Lima dev VM ($TW_DEV_VM).
+  mac-firecracker:
+    needs: [setup, vm-assets]
+    if: github.event.inputs.only == '' || contains(format(',{0},', github.event.inputs.only), ',mac-firecracker,')
+    runs-on: [self-hosted, macOS, ARM64, tw-release]
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          # Self-hosted: no cache restore into the machine user's own Go module cache.
+          cache: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: vm-assets-arm64
+          path: dist/vm-assets-arm64
+      - name: Sandbox images and apps, and the D3 build (docker buildx here)
+        run: |
+          scripts/ci-sandbox-images.sh arm64 >>"$GITHUB_ENV"
+          scripts/e2e-container-prep.sh "$RUNNER_TEMP/ctr-apps"
+          scripts/ci-suite.sh make e2e-container-build CTR_APPS="$RUNNER_TEMP/ctr-apps" CTR_BUILT="$RUNNER_TEMP/ctr-built"
+      # Allowed skips: TestBootBench is an opt-in benchmark; e2e-vm's
+      # TestContainerSmoke is run by e2e-container, and e2e-container's
+      # TestE2EContainerRegistry by e2e-container-registry, in this step.
+      - name: e2e-vm, e2e-container, e2e-container-registry in Lima (shipped arm64 guest)
+        env:
+          TW_CI_ALLOW_SKIP: "TestBootBench|TestContainerSmoke|TestE2EContainerRegistry"
+        run: |
+          scripts/ci-suite.sh scripts/ci-lima-make.sh \
+            -c "dist/vm-assets-arm64:vm-assets" \
+            -c "$CTR_IMAGES_arm64:/tmp/tw-ci-images" \
+            -c "$RUNNER_TEMP/ctr-built:/tmp/tw-ci-ctr-built" \
+            -p 'chmod +x vm-assets/firecracker vm-assets/jailer && sudo install -m 0755 vm-assets/firecracker vm-assets/jailer /usr/local/bin/' \
+            -o guest-image deps e2e-vm e2e-container e2e-container-registry \
+            GUEST_ARCH=arm64 GUEST_OUT=vm-assets 'TW_VM_KERNEL=$(CURDIR)/vm-assets/vmlinux' \
+            CTR_IMAGES=/tmp/tw-ci-images CTR_BUILT=/tmp/tw-ci-ctr-built
+
+  # Real tailnet, from the release tarballs. These run alongside `tailnet`
+  # on tailnet 1: the Linux harness was built to run rows in parallel (its
+  # own OAuth client and node prefix per row) and only reads the policy.
+  # mac-cli's suites write policy, so it still waits for `tailnet`.
+
+  # The ubuntu24-amd64 row natively (Lima + qemu on KVM, x86 on x86) on a
+  # hosted runner, instead of emulated on Apple silicon.
+  linux-amd64:
+    needs: [setup, build]
+    if: github.event.inputs.only == '' || contains(format(',{0},', github.event.inputs.only), ',linux-amd64,')
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 90
+    env:
+      TAILNET1: ${{ secrets.TW_E2E_TAILNET1 }}
+      VERSION: ${{ needs.setup.outputs.version }}
+      LIMA_VERSION: "2.3.0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-dist
+          path: dist
+      - name: KVM, qemu and Lima (pinned, checksum-verified)
+        run: |
+          [ -e /dev/kvm ] || { echo "::error::no /dev/kvm on this runner"; exit 1; }
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+          sudo apt-get update -qq && sudo apt-get install -y -qq qemu-system-x86 qemu-utils ovmf
+          f="lima-$LIMA_VERSION-Linux-x86_64.tar.gz"
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "https://github.com/lima-vm/lima/releases/download/v$LIMA_VERSION/$f"
+          curl -fsSLO "https://github.com/lima-vm/lima/releases/download/v$LIMA_VERSION/SHA256SUMS"
+          grep " $f\$" SHA256SUMS | sha256sum -c -
+          sudo tar -C /usr/local -xzf "$f"
+          limactl --version
+      - name: Tailnet credentials (files, as the suites read them)
+        env:
+          K1: ${{ secrets.TW_E2E_TAILNET1_API_KEY }}
+          K2: ${{ secrets.TW_E2E_TAILNET2_API_KEY }}
+        run: scripts/ci-ts-creds.sh
+      - name: make deps
+        run: make deps
+      - name: e2e-linux ubuntu24-amd64 (native)
+        run: |
+          TW_E2E_SLOW_AMD64=1 TW_E2E_TARBALL_amd64="$PWD/dist/tailworks-$VERSION-linux-amd64.tar.gz" \
+          TW_E2E_API_KEY_FILE="$TS_CREDS/tailnet1_api.env" TW_E2E_TAILNET="$TAILNET1" \
+            scripts/ci-suite.sh sh scripts/e2e-linux.sh ubuntu24-amd64
+      - name: e2e-linux row logs
+        if: failure()
+        run: for f in e2e/real/results/linux-*/*.log; do echo "== $f"; tail -n 120 "$f"; done
+      - name: Remove the credential files
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/ts-creds"
+
+  # Self-hosted: the arm64 distro rows (Lima vz VMs, fresh per run), three
+  # at a time.
+  mac-linux:
+    needs: [setup, build]
+    if: github.event.inputs.only == '' || contains(format(',{0},', github.event.inputs.only), ',mac-linux,')
+    runs-on: [self-hosted, macOS, ARM64, tw-release]
+    environment: release
+    timeout-minutes: 120
+    env:
+      TAILNET1: ${{ secrets.TW_E2E_TAILNET1 }}
+      VERSION: ${{ needs.setup.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          # Self-hosted: no cache restore into the machine user's own Go module cache.
+          cache: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-dist
+          path: dist
+      - name: Tailnet credentials (files, as the suites read them)
+        env:
+          K1: ${{ secrets.TW_E2E_TAILNET1_API_KEY }}
+          K2: ${{ secrets.TW_E2E_TAILNET2_API_KEY }}
+        run: scripts/ci-ts-creds.sh
+      - name: make deps
+        run: make deps
+      - name: e2e-linux, the arm64 rows, from the linux-arm64 tarball
+        run: |
+          TW_E2E_PARALLEL=3 TW_E2E_TARBALL_arm64="$PWD/dist/tailworks-$VERSION-linux-arm64.tar.gz" \
+          TW_E2E_API_KEY_FILE="$TS_CREDS/tailnet1_api.env" TW_E2E_TAILNET="$TAILNET1" \
+            scripts/ci-suite.sh sh scripts/e2e-linux.sh ubuntu24-arm64 debian12-arm64 fedora-arm64 ubuntu22-arm64 debian11-arm64 alpine-arm64
+      - name: e2e-linux row logs
+        if: failure()
+        run: for f in e2e/real/results/linux-*/*.log; do echo "== $f"; tail -n 120 "$f"; done
+      - name: Remove the credential files
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/ts-creds"
+
+  # Self-hosted: the microVM tier from the arm64 tarball (install.sh → tw
+  # host setup --microvm → tw up) in a nested-virt Lima VM, incl. host
+  # reboots.
+  mac-linuxvm:
+    needs: [setup, build]
+    if: github.event.inputs.only == '' || contains(format(',{0},', github.event.inputs.only), ',mac-linuxvm,')
+    runs-on: [self-hosted, macOS, ARM64, tw-release]
+    environment: release
+    timeout-minutes: 120
+    env:
+      TAILNET1: ${{ secrets.TW_E2E_TAILNET1 }}
+      VERSION: ${{ needs.setup.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          # Self-hosted: no cache restore into the machine user's own Go module cache.
+          cache: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-dist
+          path: dist
+      - name: Tailnet credentials (files, as the suites read them)
+        env:
+          K1: ${{ secrets.TW_E2E_TAILNET1_API_KEY }}
+          K2: ${{ secrets.TW_E2E_TAILNET2_API_KEY }}
+        run: scripts/ci-ts-creds.sh
+      - name: make deps
+        run: make deps
+      - name: e2e-linux-vm (microVM tier from the arm64 tarball)
+        run: TW_E2E_TARBALL="$PWD/dist/tailworks-$VERSION-linux-arm64.tar.gz" scripts/ci-suite.sh sh scripts/e2e-linux-vm.sh "${LINUX_VM:-twl-kvm-u24}"
+      - name: e2e-linux-reboot (DO storage across host reboots)
+        run: TW_E2E_RUN=TestE2ELinuxReboot TW_E2E_TARBALL="$PWD/dist/tailworks-$VERSION-linux-arm64.tar.gz" scripts/ci-suite.sh sh scripts/e2e-linux-vm.sh "${LINUX_VM:-twl-kvm-u24}"
+      - name: Remove the credential files
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/ts-creds"
+
+  # Self-hosted: the macOS CLI flows. They write policy (additive), so they
+  # wait for `tailnet`'s suites, which do too.
+  mac-cli:
+    needs: [setup, tailnet]
+    if: >-
+      !cancelled() && needs.setup.result == 'success' &&
+      (needs.tailnet.result == 'success' || needs.tailnet.result == 'skipped') &&
+      (github.event.inputs.only == '' || contains(format(',{0},', github.event.inputs.only), ',mac-cli,'))
+    runs-on: [self-hosted, macOS, ARM64, tw-release]
+    environment: release
+    timeout-minutes: 90
+    env:
+      TAILNET1: ${{ secrets.TW_E2E_TAILNET1 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          # Self-hosted: no cache restore into the machine user's own Go module cache.
+          cache: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Tailnet credentials (files, as the suites read them)
+        env:
+          K1: ${{ secrets.TW_E2E_TAILNET1_API_KEY }}
+          K2: ${{ secrets.TW_E2E_TAILNET2_API_KEY }}
+        run: scripts/ci-ts-creds.sh
+      - name: make deps
+        run: make deps
+      - name: make e2e-mac (tw up → deploy → checks → tw down)
+        run: scripts/ci-suite.sh make e2e-mac
+      - name: make e2e-multi (two tenants, two tailnets, one host)
+        run: scripts/ci-suite.sh make e2e-multi
+      - name: Remove the credential files
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/ts-creds"
+
+  release:
+    if: github.event.inputs.rehearsal != 'true' && github.event.inputs.only == ''
+    needs:
+      - build
+      - gates
+      - headscale
+      - microvm-amd64
+      - linux-amd64
+      - mac-cli
+      - mac-firecracker
+      - mac-linux
+      - mac-linuxvm
+      - mac-vz
+      - setup
+      - suites
+      - tailnet
+      - tarballs
+      - test-images
+      - test-pg
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: write
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0 # the previous tag, for the release notes
+      # release-notes.sh runs `go run`, and the runner's own Go is older
+      # than go.mod's (the v0.5.0 run failed here, after every test passed).
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-dist
+          path: dist
       - name: Draft the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           prev=$(git describe --tags --abbrev=0 --match 'v*' "$TAG^" 2>/dev/null || echo -)
           scripts/release-notes.sh "$prev" "$TAG" >"$RUNNER_TEMP/notes.md"
-          printf '\nInstall: see docs/INSTALL.md (or scripts/get.sh). Upgrade: `tw upgrade %s`. Built by .github/workflows/release.yml.\n' "$TAG" >>"$RUNNER_TEMP/notes.md"
+          printf '\nInstall: see docs/INSTALL.md (or scripts/get.sh). Upgrade: `tw upgrade %s`. Built and tested by .github/workflows/release.yml.\n' "$TAG" >>"$RUNNER_TEMP/notes.md"
           gh release view "$TAG" >/dev/null 2>&1 ||
             gh release create "$TAG" --draft --verify-tag --title "tw $TAG" --notes-file "$RUNNER_TEMP/notes.md"
           gh release upload "$TAG" dist/tailworks-*.tar.gz dist/SHA256SUMS dist/SHA256SUMS.sig --clobber

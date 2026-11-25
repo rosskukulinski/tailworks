@@ -111,6 +111,7 @@ FIX_MODE: fix
 | H22 | P1 | **FIXED and verified (F22, option b chosen by Ross)**: durable audit outbox; 2 soaks with AuditComplete clean; see F22 note. Was CONFIRMED (soak 101), design: audit appends are separate from the state change; during a store blip the kill committed but its audit record was dropped (`audit append failed`). Needs a decision: audit in the same transaction as the change, or a durable audit outbox | r1.log |
 | H18 | P3 | **FIXED** (iter30): store unavailable, lock timeout or idle-transaction timeout → `503 store_unavailable` with Retry-After | `TestStoreUnavailableMapping` |
 | H16 | P2 | **CONFIRMED and FIXED** (F17): 2/10 runs ended with 12 live objects against maxObjects 10; after 0/20 | `TestMM_H16_TenantQuotaRace`, `TestStoreTenantQuota` |
+| H24 | P1 | **CONFIRMED and FIXED** (#578, found by e2e/dataplane's deploys loop): a workload's secrets are one custody entry changed by read-modify-write under a per-process mutex; two writes through two replicas lost one (a deleted secret came back). with a slow setec, every round of 2 concurrent puts lost one (10 missing-secret checks in 4 rounds); now none, under a Postgres advisory lock per workload | `TestMM_H24_SecretWritesAcrossReplicas`, `TestStoreLockName` |
 | S2 | — | **3/3 clean seeds** (1, 2, 3) after F18 | `TestMM_S2_RandomKills` |
 | S3 | — | **3/3 clean seeds** (SIGSTOP 50 s > 45 s lease) | `TestMM_S3_StallLongerThanLease` |
 | S4 | — | **3/3 clean seeds** (PG blackhole 30 s, one replica) | `TestMM_S4_PostgresPartitionOneReplica` |

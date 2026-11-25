@@ -12,6 +12,7 @@ import (
 // The records and the head used to be read in two separate queries, so an
 // append that committed between them left the head one record ahead.
 func TestAuditVerifyConcurrentAppend(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		const n = 300

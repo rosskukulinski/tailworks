@@ -16,6 +16,7 @@ func snap(ds ...upgradeDeployment) deploymentsSnapshot {
 // The issue #63 case: support was failed before the upgrade and fails
 // again after it (lease_lost); that must not roll back the upgrade.
 func TestGateIgnoresDeploymentsFailedBefore(t *testing.T) {
+	t.Parallel()
 	before := snap(
 		upgradeDeployment{DeploymentID: "dp_app", Workload: "app", Status: "active"},
 		upgradeDeployment{DeploymentID: "dp_support", Workload: "support", Status: "failed", Error: "EADDRINUSE"},
@@ -43,6 +44,7 @@ func TestGateIgnoresDeploymentsFailedBefore(t *testing.T) {
 }
 
 func TestGateWithoutSnapshotChecksEverything(t *testing.T) {
+	t.Parallel()
 	after := []upgradeDeployment{{DeploymentID: "dp_support", Workload: "support", Status: "failed", Error: "lease_lost"}}
 	if why := gateDeployments(nil, after); !strings.Contains(why, "workload support is failed lease_lost") {
 		t.Fatalf("gate = %q", why)
@@ -54,6 +56,7 @@ func TestGateWithoutSnapshotChecksEverything(t *testing.T) {
 }
 
 func TestNotActiveReporting(t *testing.T) {
+	t.Parallel()
 	before := snap(
 		upgradeDeployment{DeploymentID: "dp_b", Workload: "b", Status: "failed", Error: "boom"},
 		upgradeDeployment{DeploymentID: "dp_a", Workload: "a", Status: "pending"},

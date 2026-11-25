@@ -12,6 +12,7 @@ import (
 // locally (m.changed is per replica), so it must notice the mint through the
 // store promptly, not after the host's whole wait (hostd asks wait=10 s).
 func TestMM_H05_CredentialWaitSeesOtherReplicasMint(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	st, _ := OpenStore(ctx, filepath.Join(dir, "m.db"))

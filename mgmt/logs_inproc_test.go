@@ -13,6 +13,7 @@ import (
 // still writing (tw logs -f through an embedded host), and status codes
 // pass through.
 func TestHandlerTransportStreams(t *testing.T) {
+	t.Parallel()
 	release := make(chan struct{})
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/logs" {

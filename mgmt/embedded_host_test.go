@@ -40,6 +40,7 @@ func newEmbeddedTestMgmt(t *testing.T) *Mgmt {
 // inproc:// only when the context carries the marker; its pushes are then
 // served through the handler SetInProcessPush registered, nothing dialled.
 func TestEmbeddedHostRegistrationAndPush(t *testing.T) {
+	t.Parallel()
 	m := newEmbeddedTestMgmt(t)
 	ctx := context.Background()
 	req := RegisterRequest{HostID: "h1", CapacityNodes: 5, Tiers: []string{"process"}, PushURL: EmbeddedPushURL}

@@ -103,6 +103,7 @@ type Server struct {
 	reservations         map[string]*mgmtapi.ContainerReservation // container reservations by ID
 	reservationsDown     bool
 	heartbeatsDown       bool
+	heartbeatDelay       time.Duration // the next heartbeat's delay (DelayHeartbeat)
 	reg                  *registry.Registry
 	resolver             *registry.Resolver
 	services             map[string]string // workload -> Tailscale Service (SetService)
@@ -118,10 +119,20 @@ type Server struct {
 	// storesDown: the store journal answers 503 (storesdown.go).
 	storesDown bool
 
+	// loseAppendAnswers: appends that commit and then answer 503, as if
+	// the answer were lost (storelose.go).
+	loseAppendAnswers int
+
+	// storeReadHold: hosts' journal reads hang (storeshold.go).
+	storeReadHold storeReadHold
+
 	// readyCalls: object ID -> ready PATCHes (readycalls.go).
 	readyCalls map[string]int
 	// leaseLostReady: the next N ready PATCHes fail with lease_lost (readycalls.go).
 	leaseLostReady int
+
+	// readyFault: every ready PATCH is answered late, or 503 (SetReadyFault).
+	readyFault ReadyFault
 
 	// Queues (queues.go): tenant|queue -> queue.
 	queues map[string]*fakeQueue
@@ -135,6 +146,14 @@ func (s *Server) SetHeartbeatsDown(down bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.heartbeatsDown = down
+}
+
+// DelayHeartbeat answers the next host heartbeat only after d (tests: a
+// slow mgmt or a loaded host; the heartbeat succeeds, late).
+func (s *Server) DelayHeartbeat(d time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.heartbeatDelay = d
 }
 
 // SetLeaseLostCredentials makes the next n credential calls fail with
@@ -255,9 +274,11 @@ func New(cfg Config) *Server {
 	m.HandleFunc("POST /v1/tenants/{id}/queues/{queue}/messages/pull", s.pullQueue)
 	m.HandleFunc("POST /v1/tenants/{id}/queues/{queue}/messages/ack", s.ackQueue)
 	m.HandleFunc("POST /v1/tenants/{id}/workloads/{workload}/telemetry-grants", s.telemetryGrant)
+	m.HandleFunc("GET /v1/tenants/{id}/workloads/{workload}/service-bindings/{binding}", s.serviceBinding) // servicebind.go
 	m.HandleFunc("PUT /v1/hosts/{id}", s.register)
 	m.HandleFunc("PUT /v1/hosts/{id}/status", s.heartbeat)
 	m.HandleFunc("GET /v1/hosts/{id}/assignments", s.assignments)
+	m.HandleFunc("GET /v1/hosts/{id}/sandbox-deny", s.sandboxDeny)
 	m.HandleFunc("POST /v1/deployments", s.deploy)
 	m.HandleFunc("GET /v1/deployments", s.listDeployments)
 	m.HandleFunc("GET /v1/deployments/{id}", s.getDeployment)
@@ -406,7 +427,11 @@ func (s *Server) hostView(h *host) map[string]any {
 	if time.Since(h.lastSeen) > 10*time.Second {
 		st = "stale"
 	}
-	v := map[string]any{"hostID": h.HostID, "status": st, "capacityNodes": h.CapacityNodes, "tiers": h.Tiers,
+	tiers := h.Tiers
+	if tiers == nil {
+		tiers = []string{} // the spec's Host.tiers is an array, never null (TestRouteDrift)
+	}
+	v := map[string]any{"hostID": h.HostID, "status": st, "capacityNodes": h.CapacityNodes, "tiers": tiers,
 		"liveNodes": h.liveNodes, "lastSeen": ms(h.lastSeen), "createdAt": ms(h.created), "updatedAt": ms(h.lastSeen)}
 	if h.AuditPubKey != "" {
 		v["auditPubKey"] = h.AuditPubKey
@@ -449,6 +474,9 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	h.RegisterRequest, h.lastSeen = req.RegisterRequest, time.Now()
 	v := s.hostView(h)
+	if recs := s.audit["host:"+req.HostID]; len(recs) > 0 {
+		v["auditHead"] = recs[len(recs)-1].Hash // like mgmt (#377)
+	}
 	s.mu.Unlock()
 	writeJSON(w, status, v)
 }
@@ -459,6 +487,13 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 	if err := decode(r, &req); err != nil {
 		writeErr(w, 400, "bad_request", err.Error())
 		return
+	}
+	s.mu.Lock()
+	delay := s.heartbeatDelay
+	s.heartbeatDelay = 0
+	s.mu.Unlock()
+	if delay > 0 {
+		time.Sleep(delay)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -629,7 +664,7 @@ func (s *Server) deploy(w http.ResponseWriter, r *http.Request) {
 		if tags == nil {
 			tags = []string{}
 		}
-		nss = append(nss, mgmtapi.NamespaceSpec{Class: c, Tags: tags, Agent: cl.Agent})
+		nss = append(nss, mgmtapi.NamespaceSpec{Class: c, Tags: tags})
 	}
 	if app.Public != nil {
 		nss = append(nss, mgmtapi.NamespaceSpec{Class: publicspec.Namespace, Tags: []string{publicspec.Tag}})
@@ -1245,6 +1280,9 @@ func (s *Server) credential(w http.ResponseWriter, r *http.Request) {
 // ready is PATCH /v1/objects/{id} {"status":"ready", …} (the host's
 // merge patch; the admin's {ttl} is not modelled by the fake).
 func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
+	if s.readyFaulted(w) { // readycalls.go
+		return
+	}
 	var req struct {
 		Status string `json:"status"`
 		mgmtapi.ReadyRequest

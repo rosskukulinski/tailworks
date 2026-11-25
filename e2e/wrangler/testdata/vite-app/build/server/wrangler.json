@@ -1,0 +1,1 @@
+{"name":"vite-app","main":"index.js","compatibility_date":"2025-04-01","no_bundle":true,"rules":[{"type":"ESModule","globs":["**/*.js","**/*.mjs"]}],"assets":{"directory":"../client","binding":"ASSETS"}}

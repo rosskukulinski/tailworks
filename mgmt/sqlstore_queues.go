@@ -106,8 +106,10 @@ type queueStore interface {
 	PurgeQueue(ctx context.Context, tenantID, name string, now int64) (int64, error)
 	// SendQueue inserts msgs (sealed, with ID, size, times) into the queue
 	// of incarnation inc, giving them the next seqs. errQueueGone if the
-	// queue's incarnation is no longer inc, errQueueFull past maxBytes.
-	SendQueue(ctx context.Context, tenantID, name, inc string, msgs []queueMsgRow, maxBytes, now int64) (QueueInfo, error)
+	// queue's incarnation is no longer inc, errQueueFull past maxBytes, a
+	// *quotaError past the tenant's tenantMax for all its queues (0 = no
+	// tenant quota; quota.go).
+	SendQueue(ctx context.Context, tenantID, name, inc string, msgs []queueMsgRow, maxBytes, tenantMax, now int64) (QueueInfo, error)
 	// ClaimQueue leases up to c.Max visible messages (oldest first).
 	// Visible messages whose attempts already exceed c.MaxRetries are
 	// dead-lettered instead (counted in the second result).
@@ -268,9 +270,12 @@ func (s *SQLStore) insertQueueMsgs(ctx context.Context, tx *sql.Tx, tenantID, na
 	return q, err
 }
 
-func (s *SQLStore) SendQueue(ctx context.Context, tenantID, name, inc string, msgs []queueMsgRow, maxBytes, now int64) (QueueInfo, error) {
+func (s *SQLStore) SendQueue(ctx context.Context, tenantID, name, inc string, msgs []queueMsgRow, maxBytes, tenantMax, now int64) (QueueInfo, error) {
 	var q QueueInfo
 	err := s.tx(ctx, func(tx *sql.Tx) error {
+		if err := s.checkTenantQueueBytes(ctx, tx, tenantID, msgs, tenantMax); err != nil { // sqlstore_quota.go
+			return err
+		}
 		var err error
 		q, err = s.insertQueueMsgs(ctx, tx, tenantID, name, inc, msgs, maxBytes, now)
 		return err

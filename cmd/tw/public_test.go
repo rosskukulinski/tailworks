@@ -28,6 +28,13 @@ type pubEnv struct {
 	st            *mgmt.SQLStore
 	mu            sync.Mutex
 	policy        string
+
+	// policyWrites counts POST /acl (policyapply_test.go).
+	policyWrites int
+
+	// writeDenied: the OAuth client has Policy File › Read only (POST /acl
+	// and /acl/validate answer 403; deploy_policy_test.go).
+	writeDenied bool
 }
 
 func newPubEnv(t *testing.T) *pubEnv {
@@ -41,6 +48,18 @@ func newPubEnv(t *testing.T) *pubEnv {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v2/oauth/token" {
 			w.Write([]byte(`{"access_token":"oauth-access-1","token_type":"Bearer","expires_in":3600}`))
+			return
+		}
+		if r.Method == "POST" && strings.Contains(r.URL.Path, "/acl") && e.denied() {
+			w.WriteHeader(403)
+			w.Write([]byte(`{"message":"calling actor does not have enough permissions to perform this function"}`))
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/acl/validate") {
+			return // valid
+		}
+		if strings.HasSuffix(r.URL.Path, "/acl") && r.Method == "POST" {
+			e.writePolicy(w, r) // policyapply_test.go
 			return
 		}
 		if strings.HasSuffix(r.URL.Path, "/acl") {
@@ -246,6 +265,7 @@ func TestCLIExpose(t *testing.T) {
 }
 
 func TestDescribePublicKinds(t *testing.T) {
+	t.Parallel()
 	mk := func(kind, detail string) mgmt.AuditRecord {
 		return mgmt.AuditRecord{Kind: kind, Detail: []byte(detail)}
 	}

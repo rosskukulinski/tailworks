@@ -45,6 +45,8 @@ type publicState struct {
 
 	// prefetched: the node's certificate was requested once (real Funnel).
 	prefetched bool
+	// stopPrefetch cancels that request (stopCertPrefetch, at teardown).
+	stopPrefetch context.CancelFunc
 
 	node *bucket
 	ips  map[netip.Addr]*bucket
@@ -316,16 +318,20 @@ func (o *Object) openPublic() error {
 	}
 	go hs.Serve(ln)
 	p.mu.Lock()
-	first := !p.prefetched
+	first := !p.prefetched && o.reg.cfg.PublicListen == nil
 	p.prefetched = true
+	pctx := context.Background()
+	if first {
+		pctx, p.stopPrefetch = context.WithCancel(pctx)
+	}
 	p.mu.Unlock()
-	if o.reg.cfg.PublicListen == nil && first {
+	if first {
 		// Real Funnel: warm the node's certificate now (ADR-029), so the
 		// first public client doesn't time out waiting for issuance.
 		o.mu.Lock()
 		lc, name := o.lc, o.dnsName
 		o.mu.Unlock()
-		PrefetchCert(lc, name, o.reg.log.With("object", o.id))
+		PrefetchCert(pctx, lc, name, o.reg.log.With("object", o.id))
 	}
 	o.reg.log.Info("public listener open", "object", o.id, "addr", raw.Addr().String(), "routes", strings.Join(p.opts.Routes, ","))
 	return nil
@@ -381,6 +387,21 @@ func (o *Object) startPublicFlusher() {
 func (o *Object) flushRejects() {
 	if s := o.pub.takeSummary(o.id, time.Now()); s != nil && o.reg.cfg.OnPublicRejected != nil {
 		o.reg.cfg.OnPublicRejected(*s)
+	}
+}
+
+// stopCertPrefetch cancels the node's certificate prefetch (before its
+// tsnet.Server.Close, which would wait out an in-flight request).
+func (o *Object) stopCertPrefetch() {
+	p := o.pub
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	stop := p.stopPrefetch
+	p.mu.Unlock()
+	if stop != nil {
+		stop()
 	}
 }
 

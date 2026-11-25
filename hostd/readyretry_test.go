@@ -15,6 +15,7 @@ import (
 // the node was ready on the host while mgmt's row stayed "minted", and
 // `tw deploy` ended in identity_pending after 3 minutes.
 func TestReadyRetriesAfterLeaseLost(t *testing.T) {
+	t.Parallel()
 	s := startSuite(t, fakemgmt.Config{NoPush: true})
 	e := s.e
 	e.FM.SetLeaseLostReady(1)

@@ -1,0 +1,8 @@
+{
+  "name": "vmflow",
+  "tailnet": {
+    "tags": ["tag:ttest"],
+    // facet mode (the default): drives the Workflow through its own env.FLOW
+    "objects": { "Facet": { "tags": ["tag:ttest"] } },
+  },
+}

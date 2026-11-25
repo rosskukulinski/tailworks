@@ -47,11 +47,10 @@ func TestEgressWaitsForNewPeerPath(t *testing.T) {
 	if err := a.Ready(ctx); err != nil {
 		t.Fatal(err)
 	}
-	lcA, err := a.Server().LocalClient()
+	lcA, err := a.Server().LocalClient() // netd set OmitAuth (don't write it again: races its watchers)
 	if err != nil {
 		t.Fatal(err)
 	}
-	lcA.OmitAuth = true
 
 	// call creates a fresh node on another registry (not a sibling) and
 	// GETs it through a's egress the moment it appears in a's netmap.
@@ -152,8 +151,7 @@ func TestSetHostname(t *testing.T) {
 	if !strings.HasPrefix(dns, "support-abcdef.") || after.Hostname != "support-abcdef" || after.NodeID != before.NodeID || after.IPs[0] != before.IPs[0] {
 		t.Fatalf("before %+v\nafter %+v (dns %s)", before, after, dns)
 	}
-	lc, _ := q.Server().LocalClient()
-	lc.OmitAuth = true
+	lc, _ := q.Server().LocalClient() // netd set OmitAuth
 	for dl := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
 		st, _ := lc.Status(ctx)
 		seen := false

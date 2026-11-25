@@ -35,8 +35,7 @@ func TestUpKeepsSavedSettings(t *testing.T) {
 		Workerd: "/old/release/bin/workerd"}
 	want := map[string]string{"control-url": "http://control.test", "tsapi-url": "http://api.test", "host-id": "h-saved",
 		"hostname-prefix": "tw-x-", "ephemeral": "true", "insecure-shared-host": "true", "allow-sibling-egress": "true",
-		"local-dev": "true", "port-mapping": "true", "heartbeat": "2s", "kill-tombstone": "20s", "device-delete-delay": "9s",
-		"push-port": "7575", "warm-keys": "0", "pool-nodes": "3",
+		"local-dev": "true", "port-mapping": "true", "warm-keys": "0", "pool-nodes": "3",
 		"workerd": ""} // not kept: the install's workerd
 	fs := upFlagSet(t)
 	keepSavedUpFlags(fs, c)
@@ -64,7 +63,7 @@ func TestUpKeepsSavedSettings(t *testing.T) {
 	// State from before a setting existed keeps the default.
 	fs = upFlagSet(t)
 	keepSavedUpFlags(fs, Config{HostID: "h-old"})
-	for name, v := range map[string]string{"warm-keys": "5", "pool-nodes": "1", "push-port": fs.Lookup("push-port").DefValue, "heartbeat": "1s"} {
+	for name, v := range map[string]string{"warm-keys": "5", "pool-nodes": "1", "port-mapping": "false"} {
 		if got := fs.Lookup(name).Value.String(); got != v {
 			t.Errorf("old state: --%s = %q, want the default %q", name, got, v)
 		}

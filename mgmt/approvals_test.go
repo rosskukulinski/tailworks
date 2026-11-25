@@ -80,6 +80,7 @@ func approvalHost(t *testing.T, e *testEnv, id, tenant string) *fakeApprovalHost
 }
 
 func TestApprovals(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	tn := v1Tenant(t, e, "a.ts.net", nil)
 	h1 := approvalHost(t, e, "h1", tn)

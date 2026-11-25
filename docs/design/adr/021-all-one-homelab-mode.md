@@ -12,5 +12,5 @@
 **Trade-offs:**
 - The Funnel issuer on a `ts.net` name relaxes SEC-19. That's acceptable when operator = tenant, and it was documented in the design-phase DX.md (not published). `--issuer <custom domain>` restores it.
 - With local-only durability, backup is opt-in.
-- `tw mgmt migrate --store postgres://…` is the path to multi-host (not built: multi-mgmt runs `tw-mgmt -db postgres://…` directly, see [docs/services.md](../../services.md)).
+- Moving the store to Postgres is the path to multi-host (a SQLite→Postgres copy is not built: multi-mgmt runs `tw-mgmt -db postgres://…` directly, see [docs/services.md](../../services.md)).
 **Success metric:** on a fresh Linux box already on a tailnet, the time from `curl … | sh` to the first private fetch from a deployed Worker is **≤10 minutes**, including both consents.

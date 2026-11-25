@@ -46,6 +46,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rosskukulinski/tailworks/netd/publicip"
 )
 
 // MaxIntercepts is the per-container limit on intercept registrations
@@ -121,8 +123,7 @@ type Proxy struct {
 	audited    map[string]bool
 	closed     bool
 	hostAddrs  map[netip.Addr]bool
-	allowHosts []string
-	allowNets  []netip.Prefix
+	allow      publicip.Allowlist
 }
 
 // New makes a container's proxy and its ephemeral CA.
@@ -153,19 +154,7 @@ func New(cfg Config) (*Proxy, error) {
 	for _, a := range hosts {
 		p.hostAddrs[a.Unmap()] = true
 	}
-	for _, a := range cfg.Allow {
-		a = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(a)), ".")
-		if a == "" {
-			continue
-		}
-		if pf, err := netip.ParsePrefix(a); err == nil {
-			p.allowNets = append(p.allowNets, pf.Masked())
-		} else if ip, err := netip.ParseAddr(a); err == nil {
-			p.allowNets = append(p.allowNets, netip.PrefixFrom(ip.Unmap(), ip.Unmap().BitLen()))
-		} else {
-			p.allowHosts = append(p.allowHosts, a)
-		}
-	}
+	p.allow = publicip.ParseAllowlist(cfg.Allow)
 	return p, nil
 }
 
@@ -250,15 +239,7 @@ func parseAddr(addr string) (string, int, error) {
 	return host, port, nil
 }
 
-func hostMatch(pattern, name string) bool {
-	switch {
-	case pattern == "*":
-		return true
-	case strings.HasPrefix(pattern, "*."):
-		return strings.HasSuffix(name, pattern[1:]) && len(name) > len(pattern)-1
-	}
-	return pattern == name
-}
+func hostMatch(pattern, name string) bool { return publicip.HostMatch(pattern, name) }
 
 // interceptKey picks the registration for a flow: a host-specific one of
 // kind first, then (http only) the catch-all. port 0 matches any.
@@ -298,22 +279,7 @@ func (p *Proxy) anyIntercept(name string, port int) bool {
 	return p.interceptKey("http", name, port) != "" || p.interceptKey("https", name, port) != ""
 }
 
-func (p *Proxy) allowlisted(name string) bool {
-	if ip, err := netip.ParseAddr(name); err == nil {
-		for _, n := range p.allowNets {
-			if n.Contains(ip.Unmap()) {
-				return true
-			}
-		}
-		return false
-	}
-	for _, h := range p.allowHosts {
-		if hostMatch(h, name) {
-			return true
-		}
-	}
-	return false
-}
+func (p *Proxy) allowlisted(name string) bool { return p.allow.Allows(name) }
 
 // internetName: may the container reach name on the internet at all?
 func (p *Proxy) internetName(name string) bool {
@@ -387,6 +353,12 @@ func (p *Proxy) Accept(dst netip.AddrPort) bool {
 			code = "internet_disabled"
 		}
 		p.deny(net.JoinHostPort(name, strconv.Itoa(port)), code, "")
+		return false
+	case !p.allow.AllowsPort(name, dst.Port()):
+		p.deny(net.JoinHostPort(name, strconv.Itoa(port)), "not_allowlisted", "the allowlist entry names another port")
+		return false
+	case publicip.RefusedPort(dst.Port()) != "" && !p.allow.NamesPort(name, dst.Port()):
+		p.deny(net.JoinHostPort(name, strconv.Itoa(port)), "internet_port_refused", publicip.RefusedPort(dst.Port()))
 		return false
 	case !synthetic:
 		if why := p.blocked(dst.Addr()); why != "" {
@@ -709,41 +681,11 @@ func (p *Proxy) dialInternet(ctx context.Context, name string, port int) (net.Co
 	return nil, last
 }
 
-var blockedNets = []netip.Prefix{
-	netip.MustParsePrefix("0.0.0.0/8"),
-	netip.MustParsePrefix("100.64.0.0/10"), // CGNAT: the tailnet range (ADR-019)
-	netip.MustParsePrefix("192.0.0.0/24"),
-	netip.MustParsePrefix("198.18.0.0/15"), // the synthetic pool
-	netip.MustParsePrefix("240.0.0.0/4"),
-	netip.MustParsePrefix("fd7a:115c:a1e0::/48"), // the tailnet's IPv6 range
-	netip.MustParsePrefix("64:ff9b::/96"),        // NAT64 could reach any IPv4
-	netip.MustParsePrefix("64:ff9b:1::/48"),
-	netip.MustParsePrefix("2002::/16"), // 6to4 embeds IPv4
-	netip.MustParsePrefix("2001::/32"), // Teredo
-}
-
 // blocked returns why a may not be dialled ("" = a public address).
 func (p *Proxy) blocked(a netip.Addr) string {
 	a = a.Unmap()
-	switch {
-	case !a.IsValid():
-		return "invalid address"
-	case a.IsLoopback(), a.IsUnspecified():
-		return "loopback/unspecified"
-	case a.IsLinkLocalUnicast(), a.IsLinkLocalMulticast(), a.IsMulticast(), a.IsInterfaceLocalMulticast():
-		return "link-local/multicast (metadata services)"
-	case a.IsPrivate():
-		return "a private network"
-	case !a.IsGlobalUnicast():
-		return "not a global unicast address"
-	}
-	for _, n := range blockedNets {
-		if n.Contains(a) {
-			return "a reserved, tailnet or translated range (" + n.String() + ")"
-		}
-	}
-	if a == netip.AddrFrom4([4]byte{255, 255, 255, 255}) {
-		return "broadcast"
+	if why := publicip.Blocked(a); why != "" {
+		return why
 	}
 	p.mu.Lock()
 	host := p.hostAddrs[a]

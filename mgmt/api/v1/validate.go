@@ -96,7 +96,7 @@ func (v *Validator) ValidateRequest(r *http.Request) (*routers.Route, error) {
 		Request:    r,
 		PathParams: pathParams,
 		Route:      route,
-		Options:    &openapi3filter.Options{AuthenticationFunc: authOK, MultiError: true},
+		Options:    &openapi3filter.Options{AuthenticationFunc: authOK, MultiError: true, SchemaValidationOptions: schemaOpts},
 	}
 	if err := openapi3filter.ValidateRequest(r.Context(), in); err != nil {
 		return route, fmt.Errorf("%s %s: request: %w", r.Method, r.URL.Path, err)
@@ -112,13 +112,15 @@ func (v *Validator) ValidateResponse(r *http.Request, route *routers.Route, path
 			Request:    r,
 			PathParams: pathParams,
 			Route:      route,
-			Options:    &openapi3filter.Options{AuthenticationFunc: authOK, IncludeResponseStatus: true},
+			Options:    &openapi3filter.Options{AuthenticationFunc: authOK, IncludeResponseStatus: true, SchemaValidationOptions: schemaOpts},
 		},
 		Status: status,
 		Header: header,
 		Options: &openapi3filter.Options{
 			IncludeResponseStatus: true,
 			MultiError:            true,
+
+			SchemaValidationOptions: schemaOpts, // byteformat.go
 		},
 	}
 	in.SetBodyBytes(body)

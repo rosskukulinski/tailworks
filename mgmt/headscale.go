@@ -99,9 +99,9 @@ func headscalePreflight(t Tenant, r PreflightRequest) error {
 // Headscale's policy parser rejects autogroup:admin (owners are users,
 // groups or tags), so there tailworks' tags are owned by tag:tw alone: the
 // API key mints them, no person tags a device with them.
-func tagOwnersFor(t Tenant) string {
+func tagOwnersFor(t Tenant) []string {
 	if t.Headscale() {
-		return `["tag:tw"]`
+		return []string{"tag:tw"}
 	}
-	return `["autogroup:admin", "` + t.Owner() + `"]` // teams.go
+	return []string{"autogroup:admin", t.Owner()} // teams.go
 }

@@ -16,7 +16,7 @@ var probeOnce sync.Once
 
 // RegisterProbeStore registers the "probe" store kind (tests of the
 // platform-store substrate, ADR-044): a last-writer-wins map
-// behind a service binding with put/get/del/all, built on the same
+// behind a service binding with put/get/del/delIf/all, built on the same
 // Store object, journal and catch-up as the real kinds.
 func RegisterProbeStore() {
 	probeOnce.Do(func() {
@@ -58,6 +58,10 @@ registerStoreKind("probe", {
     del(s, k) {
       return s.commit([{ ckey: k, data: JSON.stringify({ k, del: true }) }]);
     },
+    // delIf writes only if the key is there, as R2 and KV deletes do.
+    delIf(s, k) {
+      return s.commit(() => (s.sql.exec("SELECT 1 FROM probe_items WHERE k = ?", k).toArray().length ? [{ ckey: k, data: JSON.stringify({ k, del: true }) }] : []));
+    },
     async get(s, k) {
       await s.fresh();
       const r = s.sql.exec("SELECT v FROM probe_items WHERE k = ?", k).toArray();
@@ -76,6 +80,7 @@ export class ProbeBackend extends WorkerEntrypoint {
   }
   put(k, v) { return this.#s().op("put", [k, v]); }
   del(k) { return this.#s().op("del", [k]); }
+  delIf(k) { return this.#s().op("delIf", [k]); }
   get(k) { return this.#s().op("get", [k]); }
   all() { return this.#s().op("all", []); }
 }

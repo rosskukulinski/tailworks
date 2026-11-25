@@ -9,8 +9,11 @@ the recipe says what you'll see instead.
 
 - [Call an internet API](#call-an-internet-api)
 - [Call an LLM through a gateway on your tailnet](#call-an-llm-through-a-gateway-on-your-tailnet)
+- [Connect to Postgres on your tailnet](#connect-to-postgres-on-your-tailnet)
 - [A Durable Object per user, authorized by `getCaller`](#a-durable-object-per-user-authorized-by-getcaller)
+- [Choose which classes get their own node](#choose-which-classes-get-their-own-node)
 - [A public webhook with signature verification](#a-public-webhook-with-signature-verification)
+- [Use your MCP server from claude.ai or ChatGPT](mcp-public.md): one public `/mcp` with OAuth from tsidp (its own page)
 - [A cron job that writes to KV](#a-cron-job-that-writes-to-kv)
 
 The templates (`tw init <dir> --template <name>`) are longer examples;
@@ -19,19 +22,38 @@ each has a README.md. Limits that apply to all of these are in
 
 ## Call an internet API
 
-A Worker's outbound `fetch()` reaches **tailnet peers only**, and there is
-no setting that gives Workers internet egress. A request to
-`https://api.example.com` is refused with 403
-[`internet_egress_unavailable`](errors.md#internet_egress_unavailable),
-whose detail links here ([COMPAT.md](COMPAT.md#fetch)). To call an
-internet API, put a gateway for it on your tailnet and grant the workload
-access to that gateway. The gateway is where internet egress happens, so
-it's also the place to log, cache or rate-limit it.
+**Directly.** Workers have internet egress by default, as on Cloudflare:
+`fetch("https://api.example.com/...")` just works. The request leaves from
+the host's own network, not from a tailnet node, so the API sees the
+host's source address (a different one on each host), never a tailnet
+identity. A host can instead send all of it through a tailnet exit node
+([tailworks-jsonc.md](tailworks-jsonc.md#tailnetegressvia)), which gives
+one fixed source address per exit node. Private, link-local (cloud metadata), loopback, tailnet and host
+addresses are always refused, including through a DNS name that resolves
+to one ([security-model.md](security-model.md#egress)).
 
-(Containers are the exception: on the microVM tier, a container started
-with `enableInternet: true` may reach the hosts in the workload's
-`tailnet.egress.internet` allowlist; see [containers.md](containers.md).
-`egress.internet` doesn't open the internet to Worker code.)
+To turn it off, or limit it to a few hosts, set `tailnet.egress.internet`
+([tailworks-jsonc.md](tailworks-jsonc.md#tailnetegressinternet)):
+
+```jsonc
+// tailworks.jsonc
+{
+  "tailnet": {
+    "tags": ["tag:tw-wl-weather"],
+    "egress": { "internet": ["api.open-meteo.com"] } // or false: no internet at all
+  }
+}
+```
+
+A destination that the setting refuses gets 403
+[`internet_egress_unavailable`](errors.md#internet_egress_unavailable),
+whose detail links here. The same setting caps a container's
+`enableInternet` ([containers.md](containers.md)).
+
+**Through a gateway.** When internet egress is off, or the API allowlists
+a fixed source address, or you want one place to log, cache or rate-limit
+calls, put a gateway for the API on your tailnet and grant the workload
+access to it.
 
 **The gateway.** Any HTTP reverse proxy on a tailnet machine works. Tag
 the machine `tag:api-gw`. With [Caddy](https://caddyserver.com/), for
@@ -183,6 +205,92 @@ mock model to `createOpenAICompatible({ baseURL: "http://llm-gw/v1", fetch: ctx.
 Inside a Durable Object in facet mode, the request then leaves from that
 object's own node, so the gateway (and its logs) sees which agent called.
 
+## Connect to Postgres on your tailnet
+
+Database drivers that run on Workers use `connect()` from
+`cloudflare:sockets`, and so does tailworks (ADR-052): the socket leaves
+from the workload's node (from the Worker) or the object's own node (from a
+facet-mode Durable Object), under the same grants as `fetch()`. Here
+[postgres.js](https://github.com/porsager/postgres) talks to a Postgres on
+a tailnet machine tagged `tag:db`. Put the port in `tailnet.connects`, so
+`tw deploy` checks and prints the grant for `tcp:5432` instead of `tcp:80`.
+
+```jsonc
+// tailworks.jsonc
+{
+  "name": "notes",
+  "tailnet": {
+    "tags": ["tag:tw-wl-notes"],
+    "connects": ["tag:db:5432"]
+  }
+}
+```
+
+```jsonc
+// wrangler.jsonc
+{
+  "name": "notes",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": { "PGHOST": "db", "PGDATABASE": "notes", "PGUSER": "notes" }
+}
+```
+
+```ts
+// src/index.ts
+import postgres from "postgres";
+
+interface Env {
+  PGHOST: string; // the database's tailnet name
+  PGDATABASE: string;
+  PGUSER: string;
+  PGPASSWORD: string; // a secret: `tw secret put PGPASSWORD`, or .dev.vars for tw dev
+}
+
+export default {
+  async fetch(req: Request, env: Env): Promise<Response> {
+    // ssl: false. WireGuard already encrypts the flow, and workerd can't
+    // hand a TLS socket to tailworks' egress (COMPAT.md#connect).
+    const sql = postgres({ host: env.PGHOST, port: 5432, database: env.PGDATABASE, username: env.PGUSER, password: env.PGPASSWORD, ssl: false, max: 1, fetch_types: false });
+    try {
+      const rows = await sql`SELECT now() AS at, current_user AS "user"`;
+      return Response.json(rows[0]);
+    } finally {
+      await sql.end();
+    }
+  },
+};
+```
+
+```sh
+npm install postgres
+tw secret put PGPASSWORD
+tw deploy
+```
+
+The grant is `{"src": ["tag:tw-wl-notes"], "dst": ["tag:db"], "ip": ["tcp:5432"]}`.
+On the database machine, allow the workload's tailnet addresses in
+`pg_hba.conf` (`100.64.0.0/10` and `fd7a:115c:a1e0::/48`, or tighter).
+The database sees each connection from the workload's node, so
+`tailscale whois <client address>` on it names the workload. From a
+Durable Object in facet mode it names that object.
+
+Things to know:
+
+- A refused socket (no grant, a name not in the netmap) reaches the driver
+  as "Network connection lost". `tw audit <object>` shows it as a `deny`
+  with the code. `ctx.tailnet.connect()` gives the code directly,
+  as a `TailnetError`.
+- A database on the internet needs TLS, which stock `connect()` can't do
+  here (`secureTransport` fails). `ctx.tailnet.connect({ hostname, port },
+  { tls: "netd" })` returns a socket whose TLS the host does. Use it with a
+  driver that lets you supply the socket.
+- Each flow is an audit record and a trace span. Keep connections few:
+  `max: 1` per request as above, or hold one in a Durable Object.
+- `make e2e-pg-socket` runs the same driver code against Postgres 17, from
+  a Worker and from a facet object (`hostd/testdata/apps/pgprobe`).
+
 ## A Durable Object per user, authorized by `getCaller`
 
 Route each caller to their own object by their tailnet identity, with no
@@ -285,6 +393,71 @@ curl http://127.0.0.1:8787/u/someone-else           # 403 {"error":"forbidden"}
 `tw dev` has no policy evaluator yet, so it can't show the `readAll`
 grant; on a tailnet, `tw ls` lists one object (and node) per person who
 has written a note.
+
+## Choose which classes get their own node
+
+This one is a decision, not an app. Each object of a class with `tags` in
+`tailnet.objects` is a node, which is a device on your tailnet: your
+Tailscale plan's device limit applies, and so does the tenant's
+`maxObjects` ([limits.md](limits.md#tailnet-node-budget)). So give a class
+its own identity when the tailnet has to tell its objects apart, and not
+otherwise.
+
+**Give the class tags** (a node per object) when:
+
+- it is an agent, or anything that acts on its own: you want grants,
+  `getCaller()` on the far side, flow logs and the audit trail to name
+  the object, not the app;
+- it calls out to other tailnet services, and what it may reach should be
+  a grant on its tag rather than on the whole workload's;
+- you want to kill or grant one object: `tw kill` takes that object's
+  node off the tailnet and leaves the rest of the app running;
+- it spawns sub-agents, which can hold at most their parent's grants.
+
+**Set `"node": false`** (no node; objects are reached through the
+workload) when:
+
+- there is one object per user, session or key, and they are only state:
+  counters, caches, rate limiters, per-user settings;
+- the number of objects grows with your users or your data rather than
+  with what you deploy: chat rooms, documents, game lobbies;
+- nothing outside the workload needs to call an object directly, and the
+  objects don't need different grants from the workload's.
+
+```jsonc
+// tailworks.jsonc
+{
+  "name": "support",
+  "tailnet": {
+    "tags": ["tag:tw-wl-support"],
+    "objects": {
+      // a few, long-lived, each acting for one customer: a node each
+      "SupportAgent": { "tags": ["tag:tw-agent-support"] },
+      // one per chat room and one per user: state only, no nodes
+      "Room": { "node": false },
+      "RateLimit": { "node": false }
+    }
+  }
+}
+```
+
+The Worker in front of a `"node": false` class is where you authorize:
+callers reach the workload node, so check `getCaller(req)` there before
+`env.ROOM.getByName(...)`, as the recipe above does.
+
+`"egress": "workload"` (plain-DO mode) is a different choice. The class
+still has a node per object for calls in; only its outbound `fetch()`
+leaves from the workload node. It doesn't save nodes
+([egress-modes.md](egress-modes.md)). `"node": false` implies plain-DO
+mode, and moving a class between facet mode and plain-DO mode starts its
+objects with empty storage, so decide before you store data.
+
+`tw policy` prints what an app will use before you deploy it, and `tw ls`
+what the tenant uses now:
+
+```
+  nodes      this app is 1 workload node + 1 node per SupportAgent object (RateLimit, Room objects share the workload node); tenant example.ts.net has 3 live nodes: 1 workload, 2 objects (maxObjects 1000)
+```
 
 ## A public webhook with signature verification
 
@@ -422,8 +595,8 @@ curl 'http://127.0.0.1:8787/__scheduled?cron=*/15+*+*+*+*'   # {"outcome":"ok","
 curl http://127.0.0.1:8787/                                  # {"last":{"cron":"*/15 * * * *","at":"…"},"runs":["run:…"]}
 ```
 
-Deployed, the host runs it every 15 minutes; `tw kv key list --binding RUNS`
-shows the keys. The namespace (named `RUNS`, after the binding) is created
-by the first write. The cron syntax, missed runs and retries are in
+Deployed, the host runs it every 15 minutes; `tw kv key ls` in the app's
+directory shows the keys (of its only namespace). The namespace (named
+`RUNS`, after the binding) is created by the first write. The cron syntax, missed runs and retries are in
 [cron-triggers.md](cron-triggers.md); KV's consistency and limits in
 [kv.md](kv.md).

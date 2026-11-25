@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
@@ -60,6 +61,10 @@ type object struct {
 	// nodeGen counts node starts (startNodeLocked); an awaitNode whose
 	// start was superseded leaves the object alone (nodestart.go).
 	nodeGen uint64
+
+	// report is mgmt's answer to the node's ready reports; egress waits
+	// for it (egressgate.go, #331).
+	report readyReport
 }
 
 // key is the local lookup key: tenant|workload|class|name.
@@ -164,6 +169,9 @@ func (h *Host) ensure(ctx context.Context, w *workload, class, name string, pare
 		// (it would hold the identity a later object is given).
 		return nil, &apiError{Code: "bad_request", Detail: "class " + class + " is reserved"}
 	}
+	if e := nodelessClass(w, class); e != nil { // nodeless.go
+		return nil, e
+	}
 	key := objKey(w.tenantID, w.name, class, name)
 	pubOK := false
 	for {
@@ -243,14 +251,14 @@ func (h *Host) create(ctx context.Context, w *workload, class, name string, pare
 	// A pre-joined node of this class, if one is idle (ADR-031): mgmt takes
 	// it only for a new, non-ephemeral object of exactly its tags.
 	var pool *object
-	if parent == nil && ttl == "" && poolable(class) {
+	pooled := parent == nil && ttl == "" && poolable(class)
+	if pooled {
 		h.mu.Lock()
 		pool = h.takePoolLocked(w.tenantID, w.name, class)
 		h.mu.Unlock()
 		if pool != nil {
 			req.PoolObjectID = pool.ID
 		}
-		defer h.noteDemand(w.tenantID, w.name, class)
 	}
 	release := func() {
 		if pool != nil {
@@ -265,6 +273,11 @@ func (h *Host) create(ctx context.Context, w *workload, class, name string, pare
 	if err != nil {
 		release()
 		return nil, err
+	}
+	if pooled {
+		// Only a create mgmt accepted is demand: a refused one (an
+		// undeclared class) must not start a pool refill mgmt refuses too.
+		defer h.noteDemand(w.tenantID, w.name, class)
 	}
 	if pool != nil && resp.Status != mgmtapi.StatusAssigned {
 		release() // mgmt minted instead (an existing object, or the node didn't qualify)
@@ -353,6 +366,7 @@ func (h *Host) startNodeLocked(o *object) {
 	}
 	eph := h.cfg.Ephemeral
 	opts := netd.ObjectOptions{Hostname: o.Hostname, Tags: o.Tags, Ephemeral: &eph}
+	opts.HTTPS = h.tailnetHTTPSLocked(o) // tailnethttps.go
 	if o.isPublicNode() {
 		// A public node never starts without its public options (it would
 		// otherwise come up as a tailnet listener): wait for applyPublic.
@@ -430,7 +444,9 @@ func (h *Host) awaitNode(t *tenant, o *object, no *netd.Object, gen uint64) {
 		epoch = w.epochNow()
 	}
 	req := mgmtapi.ReadyRequest{NodeID: info.NodeID, StableNodeID: info.NodeID, MagicDNS: magicDNS, Epoch: epoch}
-	if err := h.mgmt.Ready(rctx, o.ID, req); err != nil {
+	err = h.mgmt.Ready(rctx, o.ID, req)
+	h.noteReport(o, req.StableNodeID, err) // egressgate.go (#331)
+	if err != nil {
 		h.log.Warn("mgmt ready failed", "object", o.ID, "err", err)
 		if e, ok := mgmtapi.AsError(err); ok && e.Code == mgmtapi.CodeKilled {
 			rcancel()
@@ -438,8 +454,8 @@ func (h *Host) awaitNode(t *tenant, o *object, no *netd.Object, gen uint64) {
 			go h.killLocal(o.ID, "killed during join")
 			return
 		}
-		if e, ok := mgmtapi.AsError(err); ok && e.Code == mgmtapi.CodeLeaseLost {
-			go h.retryReady(o, req, gen) // readyretry.go (#210)
+		if retryableReady(err) {
+			go h.retryReady(o, req, gen) // readyretry.go (#210, #604)
 		}
 	}
 	rcancel()
@@ -477,10 +493,18 @@ func (h *Host) retryNode(o *object, fails int) {
 	})
 }
 
+// closeOnceMu makes closeOnce's check and close one step: a kill and the
+// node join that it races (awaitNode) each close the object's readyCh
+// outside h.mu, and two unguarded check-then-close calls panicked hostd
+// with "close of closed channel".
+var closeOnceMu sync.Mutex
+
 func closeOnce(ch chan struct{}) {
 	if ch == nil {
 		return
 	}
+	closeOnceMu.Lock()
+	defer closeOnceMu.Unlock()
 	select {
 	case <-ch:
 	default:

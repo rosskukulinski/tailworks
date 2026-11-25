@@ -16,6 +16,7 @@ import (
 // testcontrol. The scheduler's tick is driven with chosen wall-clock times
 // (CronTickAt); everything below it is the production path.
 func TestCronTriggers(t *testing.T) {
+	t.Parallel()
 	// The host's own cron loop runs on a frozen clock at a minute no
 	// trigger matches (2000-01-01 00:01), so only the ticks below run
 	// triggers: on the real clock it fired "*/5" whenever the suite crossed

@@ -10,7 +10,10 @@
 // Blob names are built by Name from the tenant, the workload and the
 // bucket of the calling instance (as hostd knows them, never from the
 // request) and a blob ID that hostd generated, so no request a workload
-// can cause names another workload's or tenant's data.
+// can cause names another workload's or tenant's data. A workload's
+// replicas ("<workload>--r<n>") are the one case of two workload names
+// with one prefix: they share its buckets. No other workload can be given
+// such a name (mgmt refuses it, internal/replicaname, #348).
 package r2
 
 import (

@@ -36,6 +36,7 @@ func footnoted(line string) bool {
 // unless the line says it was not built. The design docs drifted from the
 // CLI before (`tw connect`, `tw policy lint`, `tw restore`, issue #101).
 func TestDesignDocsNameRealCommands(t *testing.T) {
+	t.Parallel()
 	known := map[string]bool{"help": true}
 	for _, c := range commands {
 		if !c.hidden {

@@ -162,7 +162,7 @@ func (b *Backend) buildBase(ctx context.Context, bs *baseSnap) error {
 
 func (b *Backend) makeBase(ctx context.Context, bs *baseSnap) error {
 	st := time.Now()
-	m, err := b.boot(ctx, bootOpts{name: "base", pool: true})
+	m, err := b.boot(ctx, bootOpts{name: "base", pool: true, base: true})
 	if err != nil {
 		return err
 	}

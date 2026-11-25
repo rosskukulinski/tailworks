@@ -160,10 +160,11 @@ type Store interface {
 	CountObjects(ctx context.Context) (map[string]int, error)
 	AuditChains(ctx context.Context) ([]string, error)
 	AuditHead(ctx context.Context, chain string) (seq int64, hash string, err error)
-	// AuditChainSnapshot reads a chain's records (in seq order) and its
-	// head from one consistent snapshot, so a concurrent append is either
-	// in both or in neither (VerifyChain, #93).
-	AuditChainSnapshot(ctx context.Context, chain string) (recs []AuditRecord, headSeq int64, headHash string, err error)
+	// AuditChainSnapshot reads a chain's records (in seq order), its head
+	// and its retention checkpoint from one consistent snapshot, so a
+	// concurrent append or prune is either in all or in none (VerifyChain,
+	// #93).
+	AuditChainSnapshot(ctx context.Context, chain string) (AuditSnapshot, error)
 
 	AddRevocation(ctx context.Context, hostID, objectID string, now time.Time) error
 	Revocations(ctx context.Context, hostID string, since time.Time) ([]string, error)
@@ -191,6 +192,11 @@ type ObjectFilter struct {
 	Status       []string
 	HasParent    bool
 	Page         Page
+
+	// Tag selects objects carrying this tag (exact "tag:<name>"); ActingFor
+	// those whose actingFor is this principal (GET /v1/objects?tag=&human=).
+	Tag       string
+	ActingFor string
 }
 
 // DeploymentFilter selects deployments; empty fields match everything.
@@ -217,4 +223,8 @@ type AuditFilter struct {
 	// Desc lists newest first (GET /v1/audit?order=desc); Page.After is
 	// then an upper bound.
 	Desc bool
+
+	// Workload selects records about this workload (the audit_workloads
+	// table, sqlstore_auditworkload.go).
+	Workload string
 }

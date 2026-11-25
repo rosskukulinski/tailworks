@@ -9,12 +9,12 @@
     <dl class="kv">
       <dt>Tailnet</dt><dd class="mono">{{.Tenant.Tailnet}}</dd>
       {{if .Tenant.ControlURL}}<dt>Control URL</dt><dd class="mono">{{.Tenant.ControlURL}}</dd>{{end}}
-      <dt>Auth mode</dt><dd class="mono">{{.Tenant.MintMode}}</dd>
+      <dt title="How mgmt gets node keys from this tailnet's control plane">Mint mode</dt><dd class="mono">{{.Tenant.MintMode}}</dd>
       {{if .Tenant.APIKeyFile}}<dt>Headscale API key file</dt><dd class="mono">{{.Tenant.APIKeyFile}}</dd>{{end}}
       {{if .Tenant.OAuthClientID}}<dt>OAuth client</dt><dd class="mono">{{.Tenant.OAuthClientID}}{{if .Tenant.OAuthClientFile}} <span class="muted">{{.Tenant.OAuthClientFile}}</span>{{end}}</dd>{{end}}
       <dt>Max objects</dt><dd class="mono">{{.Tenant.MaxObjects}}</dd>
       <dt>Registrations / min</dt><dd class="mono">{{.Tenant.RegistrationsPerMinute}} <span class="muted">(effective {{printf "%.1f" .Tenant.EffectiveRegistrationsPerMinute}})</span></dd>
-      <dt>Waiting to join</dt><dd class="mono">{{.Tenant.MintQueue}}</dd>
+      <dt title="Objects waiting for a node key (registration throttle)">Mint queue</dt><dd class="mono">{{.Tenant.MintQueue}}</dd>
       <dt>Pool / tier</dt><dd class="mono">{{or .Tenant.Pool "—"}} / {{or .Tenant.Tier "—"}}</dd>
       <dt>OBO public key</dt><dd class="mono">{{or .Tenant.OBOPublicKey "—"}}</dd>
       <dt>Created</dt><dd class="mono">{{stamp .Tenant.CreatedAt}}</dd>
@@ -35,7 +35,7 @@
   <table>
     <thead><tr><th>Workload</th><th>Status</th><th>Address</th><th>Host</th><th>Deployed by</th><th>Deployed</th><th>Deployment ID</th></tr></thead>
     <tbody>{{range .Deployments}}<tr>
-      <td><a href="/ui/deployments/{{.DeploymentID}}"><b>{{.Workload}}</b></a></td>
+      <td><a href="/ui/deployments/{{.DeploymentID}}"><b>{{.Workload}}</b></a> <a class="small" href="/ui/tenants/{{.TenantID}}/workloads/{{.Workload}}/logs">logs</a></td>
       <td>{{template "status" .Status}}</td>
       <td class="mono">{{if .Endpoint.MagicDNS}}<a href="http://{{.Endpoint.MagicDNS}}/" rel="noreferrer">{{.Endpoint.MagicDNS}}</a>{{else}}<span class="muted">—</span>{{end}}</td>
       <td class="mono"><a href="/ui/hosts/{{.Host}}">{{.Host}}</a></td>

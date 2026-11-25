@@ -8,7 +8,7 @@ import (
 	"github.com/tailscale/hujson"
 )
 
-// RT-06: a bundle's tailworks.jsonc drives the snippet `tw deploy --policy-apply`
+// RT-06: a bundle's tailworks.jsonc drives the snippet `tw deploy --apply-policy`
 // merges into the live tenant policy. These are the snippets a hostile or
 // mistaken bundle could produce; every one must be refused before anything
 // is written, and the policy must be byte-for-byte unchanged.

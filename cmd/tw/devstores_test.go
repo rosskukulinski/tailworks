@@ -13,14 +13,14 @@ import (
 // TestDevKVPersists: `tw dev` keeps a KV namespace between runs (like
 // wrangler dev's local state), in <app>/.tailworks (git-ignored, owner-only).
 func TestDevKVPersists(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("short")
 	}
-	wd, err := nettest.WorkerdBinary()
+	_, err := nettest.WorkerdBinary()
 	if err != nil || !hostdtest.HasNode() {
 		t.Skip("needs workerd and node (make deps)")
 	}
-	t.Setenv("TW_WORKERD", wd)
 	bin := cliflow.BuildBinaries(t)
 	work := t.TempDir()
 	app := filepath.Join(work, "kvdev")

@@ -17,6 +17,7 @@ import (
 // the same class + name in two workloads, or in two tenants, are distinct
 // objects (M7; M5 found two workloads sharing one node).
 func TestStoreIdentityScope(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		for _, id := range []string{"tA", "tB"} {
@@ -67,6 +68,7 @@ func TestStoreIdentityScope(t *testing.T) {
 // workload of their deployment. SQLite always; Postgres with
 // TW_TEST_POSTGRES_DSN (make test-pg).
 func TestStoreMigratesLegacyObjects(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	type backend struct {
 		dsn, driver, open, blob string
@@ -150,6 +152,7 @@ func TestStoreMigratesLegacyObjects(t *testing.T) {
 // workload is refused as ambiguous instead of guessing; spawns inherit the
 // parent's workload; and the throttles are per tenant.
 func TestAPIIdentityScope(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	c, h1 := e.c, e.asHost("h1")
 	h1.ok("PUT", "/v1/hosts/h1", map[string]any{"capacityNodes": 100, "tiers": []string{"process"}}, nil)
@@ -255,6 +258,7 @@ func TestAPIIdentityScope(t *testing.T) {
 // row survives with its workload; nobody errors. Postgres only (make
 // test-pg); each OpenStore has its own pool, like separate processes.
 func TestStoreConcurrentLegacyMigration(t *testing.T) {
+	t.Parallel()
 	dsn := os.Getenv("TW_TEST_POSTGRES_DSN")
 	if dsn == "" {
 		t.Skip("TW_TEST_POSTGRES_DSN not set")

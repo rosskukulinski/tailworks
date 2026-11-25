@@ -17,8 +17,8 @@ before(async () => {
 after(() => app?.stop());
 
 test("the agent's MCP calls leave from its own node, and a missing server is a typed error", async () => {
-  // No MCP server runs next to this app in tw dev, so MCP_URL (http://mcp/mcp)
-  // is not in the agent node's netmap: tailworks refuses the call with a typed
+  // tw dev runs one app, so no MCP server runs next to this one: MCP_URL
+  // (http://tw-mcp/mcp) is not in the agent node's netmap: tailworks refuses the call with a typed
   // error, which the template returns as its catalog response.
   const r = await app.as("alice").fetch("/?prompt=where%20is%20o1");
   assert.equal(r.status, 403);

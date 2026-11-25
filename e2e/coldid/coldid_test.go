@@ -354,7 +354,7 @@ func runColdIdentity(t *testing.T, e env) []sample {
 	}
 	var dep mgmt.DeployResponse
 	if _, err := call(ctx, "POST", "/v1/deployments", map[string]any{"tenantID": tn.TenantID, "workload": e.prefix,
-		"namespaces": []mgmt.ClassConfig{{Class: e.prefix, Tags: e.tags, Agent: true}}}, &dep); err != nil {
+		"namespaces": []mgmt.ClassConfig{{Class: e.prefix, Tags: e.tags}}}, &dep); err != nil {
 		t.Fatal(err)
 	}
 

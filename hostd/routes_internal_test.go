@@ -12,6 +12,7 @@ import (
 // handler (single-process tw up) as well as the local socket. POST
 // /v1/teardown is the operator's (tw down) and stays on the local socket.
 func TestPushRoutes(t *testing.T) {
+	t.Parallel()
 	h := &Host{workloads: map[string]*workload{}, objects: map[string]*object{}, poolBusy: map[string]bool{}}
 	routed := func(hd http.Handler, method, path string) bool {
 		w := httptest.NewRecorder()

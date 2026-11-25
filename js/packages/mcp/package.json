@@ -1,6 +1,6 @@
 {
   "name": "@tailworks/mcp",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "description": "withTailnet, caller(), authorizeTool and budget() for stateless MCP servers on tw",
   "keywords": [
     "tw",
@@ -25,7 +25,7 @@
     "dist"
   ],
   "dependencies": {
-    "@tailworks/tailnet": "0.3.0"
+    "@tailworks/tailnet": "0.5.0"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

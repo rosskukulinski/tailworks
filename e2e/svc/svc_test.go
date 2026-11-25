@@ -10,7 +10,7 @@
 //	TW_E2E_API_KEY_FILE=~/.config/tailnet-agents-design/tailnet1_api.env TW_E2E_TAILNET=tail7906d5.ts.net \
 //	  go test -tags e2esvc -count=1 -v -timeout 20m ./e2e/svc/
 //
-// Policy (tailnet 1, added by hand; tailworks never writes autoApprovers):
+// Policy (tailnet 1, added by hand; this test never writes the policy):
 // tagOwners tag:tw-wl-svc; autoApprovers.services "svc:ttest-svc-hello":
 // ["tag:tw-wl-svc"]; grant tag:ttest → svc:ttest-svc-hello, tag:tw-wl-svc
 // tcp:80. Cleanup deletes exactly this run's IDs and the Service.
@@ -83,7 +83,7 @@ func TestE2EService(t *testing.T) {
 	api := &tsapi.Client{Tailnet: tailnet, APIKey: apiKey}
 	// tailworks mints with an OAuth client: this run's own, created with the
 	// harness's API key and deleted when the test ends.
-	oauthFile := cliflow.RealOAuthClient(t, keyFile, tailnet, t.TempDir(), "tw-e2e-svc-oauth")
+	oauthFile := cliflow.RealOAuthClientScopes(t, keyFile, tailnet, t.TempDir(), "tw-e2e-svc-oauth", []string{"services"}) // the workload has a Service
 	b := make([]byte, 3)
 	rand.Read(b)
 	run := hex.EncodeToString(b)
@@ -154,12 +154,13 @@ func TestE2EService(t *testing.T) {
 		MgmtNodeID string `json:"mgmtNodeID"`
 	}
 	e.MustJSON(&up, "up", "--oauth-client-file", oauthFile, "--tailnet", tailnet, "--yes", "--hostname-prefix", prefix,
-		"--control-url", prodControl, "--mgmt-hostname", prefix+"mgmt", "--host-id", strings.TrimSuffix(prefix, "-"), "--ephemeral")
+		"--control-url", prodControl, "--mgmt-hostname", prefix+"mgmt", "--host-id", strings.TrimSuffix(prefix, "-"), "--ephemeral",
+		"--separate-host") // the two-process layout this suite was written against (cliflow.Env.SingleProcess)
 	e.TrackInfra(up.MgmtNodeID)
 
 	// The app: hello with its own tag and a Service.
 	dir := filepath.Join(work, "svchello")
-	e.MustJSON(nil, "init", dir, "--template", "hello", "--keep-tags")
+	e.MustJSON(nil, "init", dir, "--template", "hello")
 	tj := filepath.Join(dir, "tailworks.jsonc")
 	cfg := []byte(`{
   "name": "svchello",

@@ -26,7 +26,7 @@ func TestUnsupportedHost(t *testing.T) {
 	if vmName == "" || tarball == "" {
 		t.Skip("TW_E2E_LIMA_VM / TW_E2E_TARBALL not set")
 	}
-	if !strings.HasPrefix(vmName, "twl-") {
+	if !matrixVM(vmName) {
 		t.Fatalf("refusing to use VM %q", vmName)
 	}
 	home, _ := os.UserHomeDir()

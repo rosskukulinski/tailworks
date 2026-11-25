@@ -31,6 +31,7 @@ const samplePolicy = `{
 }`
 
 func TestSpawnCapsSubset(t *testing.T) {
+	t.Parallel()
 	p, err := ParsePolicy([]byte(samplePolicy))
 	if err != nil {
 		t.Fatal(err)
@@ -85,6 +86,7 @@ func TestSpawnCapsSubset(t *testing.T) {
 }
 
 func TestPolicyCacheETag(t *testing.T) {
+	t.Parallel()
 	c := newFakeClock()
 	fetches, notMods := 0, 0
 	pc := &PolicyCache{Clock: c, MaxAge: 10 * time.Second, Fetch: func(ctx context.Context, tn Tenant, etag string) ([]byte, string, bool, error) {

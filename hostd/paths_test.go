@@ -10,6 +10,7 @@ import (
 )
 
 func TestMatchPeers(t *testing.T) {
+	t.Parallel()
 	tags := func(ts ...string) *views.Slice[string] { v := views.SliceOf(ts); return &v }
 	peer := func(host, dns, ip string, tg *views.Slice[string]) *ipnstate.PeerStatus {
 		return &ipnstate.PeerStatus{HostName: host, DNSName: dns, TailscaleIPs: []netip.Addr{netip.MustParseAddr(ip)}, Tags: tg}

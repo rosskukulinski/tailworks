@@ -1,0 +1,17 @@
+{
+  // e2e/dataplane containers loop (issue #423, LOOP.md "Containers, pooled
+  // nodes and snapshot restore"): one container per Box object. The image is
+  // what `tw deploy` would pin; the test rewrites it (TW_DPK_IMAGE).
+  "name": "ctrs",
+  "containers": {
+    "Box": { "image": "tw.local/debian-trixie-python:1" },
+  },
+  "tailnet": {
+    "tags": ["tag:ttest"],
+    "objects": {
+      // facet mode: each Box has its own node (pre-joined pool, ADR-031),
+      // and its report to the recorder leaves from it
+      "Box": { "tags": ["tag:ttest"] },
+    },
+  },
+}

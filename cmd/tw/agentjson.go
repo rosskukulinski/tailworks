@@ -162,9 +162,6 @@ func logsOut(on bool, pos []string, comp string, remote bool) (io.Writer, func()
 	case len(pos) == 1 && comp == "":
 		fields["workload"] = pos[0]
 	default:
-		if comp == "" {
-			comp = "hostd"
-		}
 		fields["component"] = comp
 	}
 	lw := &lineWriter{ev: newEvents(true, os.Stdout), fields: fields, splitHost: remote}

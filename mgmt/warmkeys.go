@@ -103,7 +103,7 @@ func (m *Mgmt) poolOnce(ctx context.Context) {
 		m.mu.Lock()
 		until := m.poolPause[t.ID]
 		m.mu.Unlock()
-		if time.Now().Before(until) || m.QueueDepth(t.ID) > 0 {
+		if time.Now().Before(until) || m.QueueDepth(t.ID) > 0 || m.isWarmGone(t.ID) {
 			continue // backing off, or real mints are queued: they go first
 		}
 		for _, p := range m.poolTargets(ctx, ws, t) {
@@ -219,14 +219,23 @@ func (m *Mgmt) mintWarm(ctx context.Context, ws warmKeyStore, t Tenant, p poolTa
 	}
 	ttl := m.cfg.WarmKeyTTL
 	t0 := time.Now()
-	k, err := api.CreateKey(ctx, tsapi.KeyOptions{Tags: p.tags, Ephemeral: p.ephemeral, Preauthorized: true,
+	// Not cancelled by a shutdown: a CreateKey cut off after the API made
+	// the key would leave it live there, unknown to mgmt (#158). Close
+	// waits for it.
+	cctx, ccancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer ccancel()
+	k, err := api.CreateKey(cctx, tsapi.KeyOptions{Tags: p.tags, Ephemeral: p.ephemeral, Preauthorized: true,
 		ExpirySeconds: int(ttl / time.Second), Description: "tw pool " + t.ID})
 	if err != nil {
 		return err
 	}
 	ck := time.Since(t0)
+	// Undo with a context of its own: a shutdown cancels ctx mid-mint, and
+	// the key must not be left live at the API (#158).
+	undo, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
 	if err := m.custody.Put(ctx, poolCustodyName(t.ID, k.ID), []byte(k.Secret)); err != nil {
-		api.DeleteKey(ctx, k.ID)
+		api.DeleteKey(undo, k.ID)
 		return fmt.Errorf("custody: %w", err)
 	}
 	now := m.now()
@@ -235,11 +244,14 @@ func (m *Mgmt) mintWarm(ctx context.Context, ws warmKeyStore, t Tenant, p poolTa
 	actx, ai := m.intend(ctx, AuditRecord{TenantID: t.ID, Kind: "mint"}, map[string]any{"keyID": k.ID, "tags": p.tags,
 		"mode": t.MintMode, "ephemeral": p.ephemeral, "pool": p.name})
 	if err := ws.PutWarmKey(actx, wk); err != nil {
-		api.DeleteKey(ctx, k.ID)
-		m.custody.Delete(ctx, poolCustodyName(t.ID, k.ID))
+		api.DeleteKey(undo, k.ID)
+		m.custody.Delete(undo, poolCustodyName(t.ID, k.ID))
 		return err
 	}
 	m.recordIntent(ctx, ai, nil)
+	if m.warmRefillLanded(undo, ws, api, wk) {
+		return nil
+	}
 	m.log.Info("warm key minted", "tenant", t.ID, "pool", p.name, "keyID", k.ID, "createkey_ms", msf(ck))
 	return nil
 }
@@ -389,7 +401,7 @@ func (m *Mgmt) drainWarm(ctx context.Context, tenantID string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	n := 0
+	var revoke []tenantKey
 	for _, k := range ks {
 		if tenantID != "" && k.TenantID != tenantID {
 			continue
@@ -401,11 +413,11 @@ func (m *Mgmt) drainWarm(ctx context.Context, tenantID string) (int, error) {
 			continue
 		}
 		if t, err := m.store.GetTenant(ctx, tk.TenantID); err == nil {
-			m.revokeWarm(ctx, t, tk) // the key the take returned, not necessarily k
-			n++
+			revoke = append(revoke, tenantKey{t, tk}) // the key the take returned, not necessarily k
 		}
 	}
-	return n, nil
+	m.revokeWarmAll(ctx, revoke) // warmrevoke.go: in parallel
+	return len(revoke), nil
 }
 
 // WarmKeyStats is the pool size per (tenant, pool), for status and tests.

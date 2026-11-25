@@ -32,6 +32,7 @@ import (
 	"github.com/rosskukulinski/tailworks/hostd/sandbox"
 	"github.com/rosskukulinski/tailworks/hostd/vm/helperapi"
 	"github.com/rosskukulinski/tailworks/internal/tsapi"
+	"github.com/rosskukulinski/tailworks/internal/tsnetlc"
 	"github.com/rosskukulinski/tailworks/netd"
 	"tailscale.com/tsnet"
 )
@@ -42,6 +43,10 @@ const HostTag = "tag:tw-host"
 // Flag defaults tw-hostd and the single-process tw up share (an Options
 // zero value means "off" for these, so callers pass the default explicitly).
 const (
+	// DefaultImageCacheMiB caps the converted container image cache
+	// (tw-hostd -container-image-cache-max-mib; 0 = no cap). Images in use
+	// stay even past it.
+	DefaultImageCacheMiB = 20480
 	// DefaultPoolNodes is the pre-joined node pool per hot class
 	// (tw-hostd -pool-nodes); hostd treats 0 as off.
 	DefaultPoolNodes = 1
@@ -108,10 +113,22 @@ type Options struct {
 	// PathEvery is hostd.Config.PathEvery (0 = hostd.DefaultPathEvery;
 	// negative disables).
 	PathEvery          time.Duration
-	DefaultTier        string
 	VM                 VMOptions
 	Sandbox            string
 	InsecureSharedHost bool
+
+	// AllowExperimentalFlags is hostd.Config.AllowExperimentalFlags
+	// (tw-hostd -allow-experimental-flags, #337).
+	AllowExperimentalFlags bool
+
+	// PyodideDir is hostd.Config.PyodideDir (Python Workers; "" =
+	// <data-dir>/pyodide).
+	PyodideDir string
+
+	// TestPublicListenDir (tests, LocalDev only) opens public nodes'
+	// listeners on loopback instead of Funnel (testfunnel.go).
+	TestPublicListenDir string
+
 	SandboxDeny        []string
 	NodeBin            string
 	AllowSiblingEgress bool
@@ -121,10 +138,12 @@ type Options struct {
 	// dir of image tarballs with an images.json index; ContainerPublicImages
 	// refs cached once for all tenants; ContainerImageMaxMiB caps one
 	// image's layers while converting (0 = image.DefaultMaxImageBytes);
-	// ContainerImageCacheMaxMiB caps the cache (0 = none); ContainerIdle,
+	// ContainerImageCacheMaxMiB caps the cache (0 = none; callers pass
+	// DefaultImageCacheMiB); ContainerIdle,
 	// ContainerMaxLife, ContainerGrace are hostd.Config's (0 = default);
 	// ContainerMax, ContainerMemMiB, ContainerVCPU the host's capacity (0 =
-	// unlimited); ContainerInternet "direct" (default) or "off".
+	// unlimited); ContainerInternet "direct" (default), "exit-node[=<node>]"
+	// or "off" (internetpath.go).
 	NoContainers              bool
 	ContainerImageCache       string
 	ContainerImageDir         string
@@ -140,12 +159,28 @@ type Options struct {
 	ContainerInternet         string
 	Log                       *slog.Logger
 
+	// WorkerInternet is "direct" (default: Workers' fetch() reaches public
+	// internet hosts from this host's network, subject to each workload's
+	// tailnet.egress.internet), "exit-node=<node>" (through that tailnet
+	// exit node via this host's own node; internetpath.go) or "off"
+	// (ADR-049, ADR-054).
+	WorkerInternet string
+
 	// R2 holds R2 bucket bytes (hostd.Config.R2; nil: files under
 	// <DataDir>/r2).
 	R2 r2.Backend
 
 	// QueueVisibility is hostd.Config.QueueVisibility (0 = default).
 	QueueVisibility time.Duration
+
+	// RequestLogMaxAge is hostd.TelemetryOptions.RecordMaxAge: drop request
+	// records older than this (0 = only the size rotation, the default).
+	RequestLogMaxAge time.Duration
+
+	// WorkerdHeapMiB and NodeHeapMiB are hostd.Config's (process-tier
+	// heap caps; 0 = default, negative = none).
+	WorkerdHeapMiB int
+	NodeHeapMiB    int
 
 	// SelfUpgrade, InstallPrefix and Restart are hostd.Config's (upgrade
 	// runs install a pushed release here and restart the host).
@@ -228,6 +263,11 @@ type Runtime struct {
 	Workerd   string
 	mgmtAddr  string
 	log       *slog.Logger
+	// exit is the host's exit-node internet path, when it has one.
+	exit *hostd.ExitNodeInternet
+
+	// joinSrc says where the tsnet settings came from (joinenv.go).
+	joinSrc string
 }
 
 // New resolves the transport (joins the host's node when needed, waits for
@@ -244,6 +284,12 @@ func New(ctx context.Context, o Options) (rt *Runtime, err error) {
 		log = slog.New(slog.DiscardHandler)
 	}
 	home, _ := os.UserHomeDir()
+	joinSrc := "" // tsnet: where the host ID, mgmt and control URLs came from
+	if o.Client == nil && !o.LocalDev {
+		if joinSrc, err = resolveJoinSettings(&o, home); err != nil { // joinenv.go
+			return nil, err
+		}
+	}
 	if o.HostID == "" {
 		o.HostID, _ = os.Hostname()
 	}
@@ -253,14 +299,10 @@ func New(ctx context.Context, o Options) (rt *Runtime, err error) {
 	if o.Heartbeat == 0 {
 		o.Heartbeat = 3 * time.Second
 	}
-	if o.CapacityNodes == 0 {
-		o.CapacityNodes = 1000
-	}
+	// CapacityNodes 0 stays 0: hostd derives it from RAM
+	// (hostd.DefaultCapacityNodes).
 	if o.KillTombstone == 0 {
 		o.KillTombstone = 10 * time.Second
-	}
-	if o.DefaultTier == "" {
-		o.DefaultTier = "process"
 	}
 	if o.Sandbox == "" {
 		o.Sandbox = "auto"
@@ -271,6 +313,9 @@ func New(ctx context.Context, o Options) (rt *Runtime, err error) {
 	if o.ContainerInternet == "" {
 		o.ContainerInternet = "direct"
 	}
+	if o.WorkerInternet == "" {
+		o.WorkerInternet = "direct"
+	}
 	o.VM = o.VM.withDefaults(home)
 	wd, err := FindWorkerd(o.Workerd, home)
 	if err != nil {
@@ -279,7 +324,7 @@ func New(ctx context.Context, o Options) (rt *Runtime, err error) {
 	if o.NodeBin == "" {
 		o.NodeBin = os.Getenv("TW_NODE")
 	}
-	rt = &Runtime{log: log, Workerd: wd}
+	rt = &Runtime{log: log, Workerd: wd, joinSrc: joinSrc}
 	defer func() {
 		if err != nil && rt.TS != nil {
 			rt.TS.Close()
@@ -305,12 +350,6 @@ func New(ctx context.Context, o Options) (rt *Runtime, err error) {
 		}
 	default:
 		rt.Transport = "tsnet"
-		if o.TSNetControlURL == "" {
-			return nil, errors.New("-tsnet-control-url is required (normal operation is tsnet only; -local-dev for the unix socket)")
-		}
-		if o.MgmtAddr == "" {
-			return nil, errors.New("-mgmt is required: http(s)://tw-mgmt.<tailnet>")
-		}
 		if o.TSNetDir == "" {
 			o.TSNetDir = filepath.Join(o.DataDir, "tsnet")
 		}
@@ -328,24 +367,21 @@ func New(ctx context.Context, o Options) (rt *Runtime, err error) {
 		}
 		// mgmt's node must be in our netmap before the first request.
 		wctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-		for {
-			err := mc.Do(wctx, "GET", "/v1/healthz", nil, nil)
-			if _, typed := mgmtapi.AsError(err); err == nil || typed {
-				break // any answer from mgmt means the path is open
-			} else if wctx.Err() != nil {
-				cancel()
-				return nil, fmt.Errorf("mgmt %s unreachable over the tailnet: %w (does the policy grant tag:tw-host → tag:tw-mgmt?)", o.MgmtAddr, err)
-			}
-			time.Sleep(500 * time.Millisecond)
-		}
+		err := waitMgmt(wctx, func(ctx context.Context) error { return mc.Do(ctx, "GET", "/v1/healthz", nil, nil) }, log) // mgmtwait.go
 		cancel()
+		if err != nil {
+			return nil, fmt.Errorf("mgmt %s unreachable over the tailnet: %w (does the policy grant tag:tw-host → tag:tw-mgmt?)", o.MgmtAddr, err)
+		}
+		if err := SaveJoinSettings(o.TSNetDir, JoinSettings{HostID: o.HostID, MgmtURL: o.MgmtAddr, ControlURL: o.TSNetControlURL, KeyTagsOnly: o.TSNetKeyTagsOnly}); err != nil {
+			log.Warn("could not save the join settings beside the node state (pass the flags on the next start)", "err", err)
+		}
 	}
 	rt.Client, rt.mgmtAddr = mc, o.MgmtAddr
 	hcfg := hostd.Config{HostID: o.HostID, Mgmt: mc, DataDir: o.DataDir, RunDir: o.RunDir, WorkerdBin: wd,
 		HeartbeatEvery: o.Heartbeat, FenceAfter: o.FenceAfter, Ephemeral: o.Ephemeral, HostnamePrefix: o.HostnamePrefix, ControlURL: o.ControlURL,
 		PathEvery: o.PathEvery, CapacityNodes: o.CapacityNodes, KillTombstone: o.KillTombstone, Logger: log, TSNetLogs: o.TSNetLogs,
 		Sandbox: o.Sandbox, SandboxDeny: o.SandboxDeny, InsecureSharedHost: o.InsecureSharedHost, AllowSiblingEgress: o.AllowSiblingEgress, PoolNodes: o.PoolNodes,
-		DefaultTier: o.DefaultTier, NodeBin: o.NodeBin, VMVolumeMiB: o.VM.VolumeMiB, VMMemMiB: o.VM.MemMiB, VMVCPUs: o.VM.VCPUs,
+		NodeBin: o.NodeBin, VMVolumeMiB: o.VM.VolumeMiB, VMMemMiB: o.VM.MemMiB, VMVCPUs: o.VM.VCPUs,
 		VM:            vmBackend(o.VM, log),
 		ContainerIdle: o.ContainerIdle, ContainerMaxLife: o.ContainerMaxLife, ContainerGrace: o.ContainerGrace,
 		ContainerCapacity: hostd.ContainerCapacity{Max: o.ContainerMax, MemMiB: o.ContainerMemMiB, VCPU: o.ContainerVCPU},
@@ -356,8 +392,22 @@ func New(ctx context.Context, o Options) (rt *Runtime, err error) {
 		Restart:       o.Restart,
 	}
 	hcfg.QueueVisibility = o.QueueVisibility
+	hcfg.Telemetry.RecordMaxAge = o.RequestLogMaxAge
+	hcfg.WorkerdHeapMiB = o.WorkerdHeapMiB
+	hcfg.NodeHeapMiB = o.NodeHeapMiB
+	hcfg.AllowExperimentalFlags = o.AllowExperimentalFlags // hostd/gen/compatflags.go (#337)
+	hcfg.PyodideDir = o.PyodideDir                         // hostd/pyodide.go
+	if o.TestPublicListenDir != "" {
+		if !o.LocalDev {
+			return nil, errors.New("-test-public-listen-dir needs -local-dev (hermetic tests only)")
+		}
+		hcfg.PublicListen = testPublicListen(o.TestPublicListenDir) // testfunnel.go
+	}
 	// Containers (ADR-032) run on the microVM backend; without it this host
 	// offers none (start() fails with tier_unavailable, no fallback).
+	if o.NoContainers {
+		hcfg.ContainersOff = "turned off (tw-hostd -no-containers)"
+	}
 	if cb, ok := hcfg.VM.(sandbox.ContainerBackend); ok && hcfg.VM != nil && !o.NoContainers {
 		// Images pinned at deploy are pulled from mgmt's registry over the
 		// same connection as the API (ADR-032 D3: never from Docker Hub).
@@ -383,17 +433,14 @@ func New(ctx context.Context, o Options) (rt *Runtime, err error) {
 		// advertises the "containers" tier from this; ADR-032 D5).
 		if err := containersUsable(cb, st); err != nil {
 			log.Info("containers unavailable on this host; not offered", "reason", err)
+			hcfg.ContainersOff = err.Error() // tw doctor, tw up (hostd/containersoff.go)
 		} else {
 			hcfg.Containers, hcfg.Images = cb, st
 			log.Info("containers available", "image_cache", st.Dir, "image_dir", o.ContainerImageDir, "idle", o.ContainerIdle, "max_life", o.ContainerMaxLife, "internet", o.ContainerInternet)
 		}
 	}
-	switch o.ContainerInternet {
-	case "direct":
-		hcfg.ContainerInternet = hostd.DirectInternet()
-	case "off":
-	default:
-		return nil, fmt.Errorf("-container-internet %q: want direct or off", o.ContainerInternet)
+	if hcfg.WorkerInternet, hcfg.ContainerInternet, rt.exit, err = internetPaths(ctx, o.WorkerInternet, o.ContainerInternet, rt.TS, log); err != nil {
+		return nil, err
 	}
 	if pushLn != nil {
 		lc, err := rt.TS.LocalClient()
@@ -421,7 +468,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	if err := rt.Host.Start(ctx); err != nil {
 		return err
 	}
-	rt.log.Info("hostd running", "host", rt.Host.Status().HostID, "mgmt", rt.mgmtAddr, "transport", rt.Transport, "push", rt.Host.PushSocket(), "workerd", rt.Workerd, "sandbox", rt.Host.SandboxInfo())
+	rt.log.Info("hostd running", "host", rt.Host.Status().HostID, "mgmt", rt.mgmtAddr, "transport", rt.Transport, "push", rt.Host.PushSocket(), "workerd", rt.Workerd, "sandbox", rt.Host.SandboxInfo(), "settings", rt.joinSrc)
 	return nil
 }
 
@@ -434,8 +481,11 @@ func (rt *Runtime) Close() error {
 	if rt.Host != nil {
 		err = rt.Host.Close()
 	}
+	if rt.exit != nil {
+		rt.exit.Close()
+	}
 	if rt.TS != nil {
-		rt.TS.Close()
+		tsnetlc.Close(rt.TS)
 	}
 	return err
 }
@@ -471,9 +521,14 @@ func JoinHostNode(ctx context.Context, dir, hostname, control, joinFile string, 
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
-			case <-time.After(500 * time.Millisecond):
+			case <-time.After(50 * time.Millisecond):
 			}
 		}
+	}
+	// Before anything uses the node's LocalAPI client: Close drains it
+	// (internal/tsnetlc).
+	if _, err := tsnetlc.Client(ts); err != nil {
+		return nil, fmt.Errorf("start the node %s: %w", hostname, err)
 	}
 	uctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()

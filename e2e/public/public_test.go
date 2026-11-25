@@ -25,11 +25,13 @@ package public
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -37,7 +39,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -91,12 +95,55 @@ func approvedOnly(m policy.Snippet) error {
 
 // publicClient fetches like an internet client: public DNS (1.1.1.1),
 // verified TLS, never this machine's tailscaled or MagicDNS.
+// publicDNSGood: host → the public addresses that have connected (publicClient).
+var publicDNSGood sync.Map
+
 func publicClient(timeout time.Duration) *http.Client {
 	r := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "udp", "1.1.1.1:53")
 	}}
 	d := &net.Dialer{Timeout: 10 * time.Second, Resolver: r}
-	tr := &http.Transport{DialContext: d.DialContext, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+	// Public DNS for a new Funnel name flaps for a while after it first
+	// resolves (an anycast resolver node can still hold the NXDOMAIN from
+	// before it existed), which is not what this suite tests. So the
+	// addresses that connected are kept, and used when a later lookup fails
+	// or leaves them out: the request still goes over the internet to the
+	// Funnel edge.
+	dial := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		ips, lerr := r.LookupHost(ctx, host)
+		// A lookup can also answer with only part of the name's addresses
+		// (only the AAAA, on a runner without IPv6). So addresses that
+		// connected before are tried after this lookup's.
+		if v, ok := publicDNSGood.Load(host); ok {
+			for _, ip := range v.([]string) {
+				if !slices.Contains(ips, ip) {
+					ips = append(ips, ip)
+				}
+			}
+		}
+		if len(ips) == 0 {
+			return nil, lerr
+		}
+		// Every address's error is reported, not just the last one's.
+		var errs []error
+		for _, ip := range ips {
+			c, err := d.DialContext(ctx, network, net.JoinHostPort(ip, port))
+			if err == nil {
+				if v, _ := publicDNSGood.Load(host); v == nil || !slices.Contains(v.([]string), ip) {
+					good, _ := v.([]string)
+					publicDNSGood.Store(host, append(slices.Clone(good), ip))
+				}
+				return c, nil
+			}
+			errs = append(errs, err)
+		}
+		return nil, errors.Join(errs...)
+	}
+	tr := &http.Transport{DialContext: dial, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
 		Proxy: nil, ForceAttemptHTTP2: false, DisableKeepAlives: true}
 	return &http.Client{Timeout: timeout, Transport: tr}
 }
@@ -108,14 +155,39 @@ type resp struct {
 	err  error
 }
 
+// fetch makes one request. A failure to resolve or connect (no response at
+// all) is retried for up to a minute, 2 s apart: right after a Funnel name
+// first answers, public resolvers can still hold a cached NXDOMAIN from
+// before it existed, and the edge's IPv6 path can flap. That is not what
+// the checks test, and any response, whatever its status, is returned as is.
 func fetch(hc *http.Client, method, u string, body io.Reader, hdr ...string) resp {
-	req, _ := http.NewRequest(method, u, body)
-	for i := 0; i+1 < len(hdr); i += 2 {
-		req.Header.Set(hdr[i], hdr[i+1])
+	var payload []byte
+	if body != nil {
+		payload, _ = io.ReadAll(body)
 	}
-	r, err := hc.Do(req)
+	var r *http.Response
+	var err error
+	deadline := time.Now().Add(time.Minute)
+	for {
+		var rd io.Reader
+		if payload != nil {
+			rd = bytes.NewReader(payload)
+		}
+		req, _ := http.NewRequest(method, u, rd)
+		for i := 0; i+1 < len(hdr); i += 2 {
+			req.Header.Set(hdr[i], hdr[i+1])
+		}
+		r, err = hc.Do(req)
+		var dnsErr *net.DNSError
+		var opErr *net.OpError
+		if err == nil || time.Now().After(deadline) || !(errors.As(err, &dnsErr) || (errors.As(err, &opErr) && opErr.Op == "dial")) {
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
 	if err != nil {
-		return resp{err: err}
+		// In m too, so a failed check's detail (which prints m) says why.
+		return resp{err: err, m: map[string]any{"fetch_error": err.Error()}}
 	}
 	defer r.Body.Close()
 	b, _ := io.ReadAll(r.Body)
@@ -320,7 +392,7 @@ func TestE2EPublic(t *testing.T) {
 
 	// 4. The app: the hostd fixture with tags this tailnet already owns.
 	app := filepath.Join(work, "pubprobe")
-	e.MustJSON(nil, "init", app, "--template", "hello", "--keep-tags")
+	e.MustJSON(nil, "init", app, "--template", "hello")
 	fx := filepath.Join(root, "hostd", "testdata", "apps", "pubprobe")
 	src, _ := os.ReadFile(filepath.Join(fx, "src", "index.js"))
 	os.WriteFile(filepath.Join(app, "src", "index.js"), src, 0o644)
@@ -423,8 +495,19 @@ func TestE2EPublic(t *testing.T) {
 	e.TrackObjectNodes()
 
 	// 9. tw expose off: an in-flight public stream is cut; on reopens.
-	sr, _ := http.NewRequest("GET", base+"/slow", nil)
-	stream, err := publicClient(0).Do(sr)
+	// Like fetch, retry a failure to resolve or connect for up to a minute:
+	// a lookup can return only the edge's IPv6 address, which a runner
+	// without IPv6 can't reach (release run 45346852696).
+	var stream *http.Response
+	for deadline := time.Now().Add(time.Minute); ; time.Sleep(2 * time.Second) {
+		sr, _ := http.NewRequest("GET", base+"/slow", nil)
+		stream, err = publicClient(0).Do(sr)
+		var dnsErr *net.DNSError
+		var opErr *net.OpError
+		if err == nil || time.Now().After(deadline) || !(errors.As(err, &dnsErr) || (errors.As(err, &opErr) && opErr.Op == "dial")) {
+			break
+		}
+	}
 	if err != nil || stream.StatusCode != 200 {
 		t.Fatalf("/slow: %v %v", err, stream)
 	}
@@ -484,21 +567,32 @@ func TestE2EPublic(t *testing.T) {
 			Detail    json.RawMessage `json:"detail"`
 		} `json:"records"`
 	}
-	var n int
-	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(time.Second) {
+	// One public_request record per request that reached the app (at least
+	// 8 above). Refused ones (the route checks' not_public and bad_request)
+	// are rolled into netd's per-minute public_rejected summary instead
+	// (H03, #68), so wait up to that window for it.
+	var n, notPublic, badRequest int
+	for deadline := time.Now().Add(90 * time.Second); time.Now().Before(deadline); time.Sleep(2 * time.Second) {
 		e.MustJSON(&aud, "audit", pub.ID)
-		n = 0
+		n, notPublic, badRequest = 0, 0, 0
 		for _, it := range aud.Items {
-			if it.Kind == "public_request" {
+			switch it.Kind {
+			case "public_request":
 				n++
+			case "public_rejected":
+				var sum struct{ NotPublic, BadRequest int }
+				json.Unmarshal(it.Detail, &sum)
+				notPublic += sum.NotPublic
+				badRequest += sum.BadRequest
 			}
 		}
-		if n >= 12 {
+		if n >= 8 && notPublic >= 2 && badRequest >= 1 {
 			break
 		}
 	}
 	raw := js(aud)
-	check("audit_public_requests", n >= 12 && !strings.Contains(raw, "secret-value"), fmt.Sprintf("%d public_request records", n))
+	check("audit_public_requests", n >= 8 && !strings.Contains(raw, "secret-value"), fmt.Sprintf("%d public_request records", n))
+	check("audit_public_rejected", notPublic >= 2 && badRequest >= 1, fmt.Sprintf("public_rejected summaries: notPublic %d, badRequest %d (want ≥2, ≥1: the route checks)", notPublic, badRequest))
 
 	// 11. tw doctor probes the public URL.
 	var doc struct {

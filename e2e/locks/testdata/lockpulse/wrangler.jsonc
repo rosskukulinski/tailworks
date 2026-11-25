@@ -1,0 +1,13 @@
+{
+  "name": "locks",
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-01",
+  "durable_objects": {
+    "bindings": [
+      { "name": "LOCK", "class_name": "Lock" },
+      { "name": "PULSE", "class_name": "Pulse" },
+    ],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Lock", "Pulse"] }],
+  "vars": { "DEFAULT_TTL_MS": "10000", "MAX_TTL_MS": "10000" },
+}

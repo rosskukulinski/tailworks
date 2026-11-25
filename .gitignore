@@ -7,8 +7,8 @@ node_modules/
 js/packages/*/dist/
 guest/out/
 .scratch/
-/twd
-/twd-mgmt
-/twd-hostd
-/twd-netd
+/tw
+/tw-mgmt
+/tw-hostd
+/tw-netd
 e2e/*/results/

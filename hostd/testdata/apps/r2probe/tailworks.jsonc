@@ -1,0 +1,7 @@
+{
+  "name": "r2probe",
+  "tailnet": {
+    "tags": ["tag:ttest"],
+    "objects": { "Box": { "tags": ["tag:ttest"] } },
+  },
+}

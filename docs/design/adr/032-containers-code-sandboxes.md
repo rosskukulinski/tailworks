@@ -1,14 +1,14 @@
 # ADR-032: Containers and code sandboxes: Cloudflare's `ctx.container` on the microVM tier, one VM per container, attached to its DO, no tailnet reach by default
 
 **Date:** 2026-11-13
-**Status:** Accepted (Ross, 2026-11-13: "Build it all"). Implementation: twd branch `slimy-pig` (in progress).
+**Status:** Accepted (Ross, 2026-11-13: "Build it all"). Implementation: tailworks branch `slimy-pig` (in progress).
 
 **Context.**
 - Agents increasingly need to **run arbitrary code**: generated scripts,
   tool binaries, `git`, Python and headless browsers.
-  - twd marks `harness/container/*` ❌ (twd `docs/COMPAT.md`).
+  - tailworks marks `harness/container/*` ❌ (tailworks `docs/COMPAT.md`).
   - Cloudflare offers Containers and the Sandbox SDK.
-  - twd's microVM tier (ADR-007, ADR-024; twd M8, L3) already runs
+  - tailworks' microVM tier (ADR-007, ADR-024; tailworks M8, L3) already runs
     jailed Firecracker VMs with no tailnet keys in the guest.
 - **Cloudflare's surface moved** (verified 2026-11-13 against
   developers.cloudflare.com and the Apache-2.0 sources):
@@ -46,7 +46,7 @@
       `/networks/bridge`, and ingress on workerd's own `127.0.0.1`
       (`container-client.c++:1197`).
     - Emulating the Docker API is therefore brittle.
-- twd's sandbox seam (`hostd/sandbox.Backend`/`Spec`) assumes a workerd
+- tailworks' sandbox seam (`hostd/sandbox.Backend`/`Spec`) assumes a workerd
   guest.
 - Placement capacity is `CapacityNodes − LiveNodes` only.
 - hostd's `tierFor` silently downgrades microvm to the process tier.
@@ -54,7 +54,7 @@
 **Decision.**
 1. **API surface: implement `ctx.container` (D1).**
    - **How:** the generated platform wrapper, which already subclasses
-     every DO class, hands the class a `ctx` whose `.container` is a twd
+     every DO class, hands the class a `ctx` whose `.container` is a tailworks
      polyfill. The polyfill calls hostd over the existing `hostd` outbound
      service, which drives the VM. No workerd patch.
    - **Result:** the legacy `Container` class, Sandbox 0.x and Sandbox 1.0
@@ -62,7 +62,7 @@
    - **Upstream ask (WD-n):** a pluggable `containerEngine` (an external
      `rpc::Container` server), which retires the polyfill as WD-3 retires
      the egress wrapper.
-   - There is no twd-native `env.SANDBOX` in v1. Any later sugar wraps
+   - There is no tw-native `env.SANDBOX` in v1. Any later sugar wraps
      `ctx.container` and adds no second backend.
    - **v1 methods:** `start`, `running`, `inspect`, `monitor`, `signal`,
      `destroy`, `setInactivityTimeout`, `exec` (piped stdio, streaming,
@@ -87,20 +87,20 @@
      - It **dies with its host**; nothing migrates.
    - **ADR-028:** a container **inherits its parent class's fence bit.**
      The risk is two live copies under one identity, not disk state.
-   - `twd kill <object>` destroys the container.
+   - `tw kill <object>` destroys the container.
 3. **Images (D3).**
    - **Format:**
      - The OCI image is flattened on the host into a read-only **erofs**,
        addressed by digest.
      - Each instance gets an ephemeral sparse ext4 **scratch disk**
        (overlay upper).
-     - twd's kernel and `twd-guestd` stay PID 1 and run
+     - tailworks' kernel and `tw-guestd` stay PID 1 and run
        `ENTRYPOINT`/`CMD` as a child.
-   - **Build:** `twd deploy` builds from the `Dockerfile` **on the
+   - **Build:** `tw deploy` builds from the `Dockerfile` **on the
      developer's machine**. It pushes to a **mgmt-hosted OCI registry on
      tsnet** (WhoIs-authenticated, one repo per tenant). External
      `image:` refs are mirrored into it at deploy.
-   - **Hosts pull only from the twd registry and never run a container
+   - **Hosts pull only from the tailworks registry and never run a container
      engine,** so the shared-host socket rule is unchanged.
    - **Pinning:** by digest, resolved once at deploy. Signing (cosign) is
      deferred.
@@ -112,7 +112,7 @@
      - Hosts register `arch`, and the image must match.
      - **amd64 microVM assets (kernel, guestd) are a v1 prerequisite,** so
        stock images run as-is on x86.
-     - On arm64, twd publishes arm64 rebuilds of `cloudflare/sandbox` (the
+     - On arm64, tailworks publishes arm64 rebuilds of `cloudflare/sandbox` (the
        Bun server and `sandbox-shim` are Apache-2.0) and swaps them in
        through a documented alias map; the app code doesn't change.
      - On macOS, see (7) for Rosetta.
@@ -153,7 +153,7 @@
      - `pids.max` in the guest and on the VMM;
      - inactivity timeout ≤ 6 h, plus an operator **hard max lifetime**
        (default 24 h).
-   - **Kill:** `destroy`, `twd kill` and fencing all end in a VMM SIGKILL
+   - **Kill:** `destroy`, `tw kill` and fencing all end in a VMM SIGKILL
      plus jail teardown (sub-second; M8 measured 14 ms). The `destroy()`
      SIGTERM grace is capped.
    - **No-keys scan:** `vmcheck --keyscan` runs on sandboxes in e2e with a
@@ -191,7 +191,7 @@
    - **macOS: a Virtualization.framework (vz) backend in v1,** as a
      second `sandbox.Backend`.
      - **The full microVM tier,** for DOs and containers, both in
-       `twd dev` and on real Mac hosts.
+       `tw dev` and on real Mac hosts.
      - It uses `VZVirtioSocketDevice` for the vsock protocol and a
        file-handle NIC for the host-side network (tailvisor's macOS
        pattern).
@@ -206,7 +206,7 @@
 8. **Build vs adopt (D8).**
    - **Keep driving Firecracker directly** by extending `hostd/vm`, the
      helper and the jailer.
-   - **`twd-guestd` gains a container mode:**
+   - **`tw-guestd` gains a container mode:**
      - erofs + overlay pivot;
      - the image config (env, cwd, user, entrypoint);
      - exec, files and signals over vsock NDJSON, plus a stdio byte-stream
@@ -266,7 +266,7 @@ unmodified):
   - digest pinning in deployments;
   - `containers` and `arch` host capabilities;
   - container quotas and reservations.
-- **CLI:** `twd deploy` builds the image locally and pushes it.
+- **CLI:** `tw deploy` builds the image locally and pushes it.
 - **The vz backend** for the macOS microVM tier.
 - **Tests:**
   - e2e: both examples; kill < 1 s; fence inheritance; deny-all egress

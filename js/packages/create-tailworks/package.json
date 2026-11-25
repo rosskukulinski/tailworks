@@ -1,0 +1,30 @@
+{
+  "name": "create-tailworks",
+  "version": "0.5.0",
+  "description": "Scaffold (templates hello, agent, mcp, ai-agent, lock, static-site, refund-approval, node-workflow) and bundle tailworks apps",
+  "keywords": [
+    "tw",
+    "tailscale",
+    "workers",
+    "create"
+  ],
+  "type": "module",
+  "bin": { "create-tailworks": "bin/create-tailworks.js" },
+  "exports": { "./build": "./lib/build.mjs", "./build-node": "./lib/build-node.mjs" },
+  "files": ["bin", "lib", "templates"],
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": { "esbuild": "0.28.2" },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rosskukulinski/tailworks.git",
+    "directory": "js/packages/create-tailworks"
+  },
+  "homepage": "https://github.com/rosskukulinski/tailworks#readme",
+  "bugs": "https://github.com/rosskukulinski/tailworks/issues",
+  "license": "BSD-3-Clause"
+}

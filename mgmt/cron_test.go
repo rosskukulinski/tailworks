@@ -6,11 +6,12 @@ import (
 )
 
 func TestBundleCrons(t *testing.T) {
+	t.Parallel()
 	for name, tc := range map[string]struct {
 		files map[string]string
 		want  string // joined crons, or "error:<substring>"
 	}{
-		"none":         {map[string]string{"twd.jsonc": "{}"}, ""},
+		"none":         {map[string]string{"tailworks.jsonc": "{}"}, ""},
 		"no triggers":  {map[string]string{"wrangler.jsonc": `{"name":"x"}`}, ""},
 		"jsonc":        {map[string]string{"wrangler.jsonc": `{"triggers":{"crons":["*/5 * * * *", /* c */ "0 18 * * friL",]}}`}, "*/5 * * * *|0 18 * * friL"},
 		"json":         {map[string]string{"wrangler.json": `{"triggers":{"crons":["0 0 * * *"]}}`}, "0 0 * * *"},
@@ -40,12 +41,13 @@ func TestBundleCrons(t *testing.T) {
 // TestAPIDeployRejectsBadCrons: an invalid cron trigger fails the deploy
 // (and its preflight) with 400 bad_bundle before anything is written.
 func TestAPIDeployRejectsBadCrons(t *testing.T) {
-	e := newTestEnv(t, nil)
+	t.Parallel()
+	e := newTestEnv(t)
 	c, h1 := e.c, e.asHost("h1")
 	var tn struct{ TenantID string }
-	c.ok("POST", "/v1/tenants", map[string]any{"tailnet": "t.ts.net", "mintMode": "apikey", "apiKeyFile": e.keyFile}, &tn)
+	c.ok("POST", "/v1/tenants", map[string]any{"tailnet": "t.ts.net", "mintMode": "oauth", "oauthClientFile": e.keyFile}, &tn)
 	h1.ok("PUT", "/v1/hosts/h1", map[string]any{"capacityNodes": 100, "tiers": []string{"process"}}, nil)
-	bad := makeBundle(t, map[string]string{"twd.jsonc": testTwdJSONC, "dist/index.js": "export default {}",
+	bad := makeBundle(t, map[string]string{"tailworks.jsonc": testTwJSONC, "dist/index.js": "export default {}",
 		"wrangler.jsonc": `{"main":"dist/index.js","triggers":{"crons":["*/5 * * * * *"]}}`})
 	body := map[string]any{"tenantID": tn.TenantID, "workload": "support", "bundle": bad}
 	r := c.fail("POST", "/v1/deployments", body, 400, "bad_bundle")
@@ -58,7 +60,7 @@ func TestAPIDeployRejectsBadCrons(t *testing.T) {
 	if len(as) != 0 {
 		t.Fatalf("a rejected deploy was assigned: %+v", as)
 	}
-	good := makeBundle(t, map[string]string{"twd.jsonc": testTwdJSONC, "dist/index.js": "export default {}",
+	good := makeBundle(t, map[string]string{"tailworks.jsonc": testTwJSONC, "dist/index.js": "export default {}",
 		"wrangler.jsonc": `{"main":"dist/index.js","triggers":{"crons":["*/5 * * * *"]}}`})
 	var dep DeployResponse
 	c.ok("POST", "/v1/deployments", map[string]any{"tenantID": tn.TenantID, "workload": "support", "bundle": good}, &dep)

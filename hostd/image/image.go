@@ -1,11 +1,11 @@
-// Package image turns OCI container images into what twd's container
+// Package image turns OCI container images into what tailworks' container
 // guests boot (ADR-032 D3): a read-only erofs, addressed by the image's
 // digest, plus the parsed image config (entrypoint, cmd, env, working
 // directory, user).
 //
 // The host never runs a container engine. An image arrives as a file (a
 // `docker save` tarball or an OCI image layout, or an image pinned at deploy
-// and pulled by digest from twd's registry: pinned.go), its layers are flattened here in Go (whiteouts, opaque
+// and pulled by digest from tailworks' registry: pinned.go), its layers are flattened here in Go (whiteouts, opaque
 // directories, replaced subtrees, hard links), and mkfs.erofs writes the
 // filesystem from the merged tar without root, keeping every owner, mode
 // and xattr from the layers.
@@ -67,11 +67,12 @@ type Store struct {
 	Aliases []Alias
 	// Public lists refs (after aliasing) shared across tenants.
 	Public map[string]bool
-	// Puller fetches images pinned at deploy from twd's registry
+	// Puller fetches images pinned at deploy from tailworks' registry
 	// (GetPinned; nil: pinned images are unavailable).
 	Puller Puller
 	// MaxBytes caps the converted images on disk (0 = no cap): past it the
-	// least recently used ones not in use (Hold) are removed.
+	// least recently used ones not in use (Hold) are removed. Images in use,
+	// including the one GetHeld just returned, stay even past the cap.
 	MaxBytes int64
 	// Limits caps one conversion's layers, entries and uncompressed bytes
 	// (zero fields: the defaults; see Limits).
@@ -130,17 +131,17 @@ func (d DirSource) Find(_ context.Context, ref string) (string, error) {
 
 // Alias rewrites From (an exact, normalised ref) to To when the host's
 // architecture is Arch ("" = any). ADR-032 D3: Cloudflare publishes
-// cloudflare/sandbox for linux/amd64 only; on arm64 hosts twd substitutes
+// cloudflare/sandbox for linux/amd64 only; on arm64 hosts tailworks substitutes
 // its own rebuild from the Apache-2.0 source (guest/images/README.md).
 type Alias struct {
 	From, To, Arch string
 }
 
-// DefaultAliases are the arm64 rebuilds twd ships (built by
+// DefaultAliases are the arm64 rebuilds tailworks ships (built by
 // guest/images/build-sandbox-images.sh; see guest/images/README.md).
 var DefaultAliases = []Alias{
-	{From: "docker.io/cloudflare/sandbox:0.12.14", To: "twd.local/cloudflare-sandbox:0.12.14-arm64", Arch: "arm64"},
-	{From: "docker.io/cloudflare/sandbox:1.0.1", To: "twd.local/cloudflare-sandbox:1.0.1-arm64", Arch: "arm64"},
+	{From: "docker.io/cloudflare/sandbox:0.12.14", To: "tw.local/cloudflare-sandbox:0.12.14-arm64", Arch: "arm64"},
+	{From: "docker.io/cloudflare/sandbox:1.0.1", To: "tw.local/cloudflare-sandbox:1.0.1-arm64", Arch: "arm64"},
 }
 
 // NormalizeRef adds docker.io/ and library/ (and :latest) the way Docker
@@ -203,8 +204,9 @@ func (s *Store) Runs(arch string) bool {
 
 var scopeRE = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
 
-// Get returns ref converted for tenant (from the cache, or converted now).
-func (s *Store) Get(ctx context.Context, tenant, ref string) (*Image, error) {
+// get returns ref converted for tenant (from the cache, or converted now);
+// GetHeld holds it and then runs GC (hold.go).
+func (s *Store) get(ctx context.Context, tenant, ref string) (*Image, error) {
 	r := s.Resolve(ref)
 	scope := tenant
 	if s.Public[NormalizeRef(r)] || s.Public[r] {
@@ -249,9 +251,6 @@ func (s *Store) Get(ctx context.Context, tenant, ref string) (*Image, error) {
 	s.mu.Lock()
 	delete(s.inflight, key)
 	s.mu.Unlock()
-	if c.err == nil {
-		s.gc()
-	}
 	return c.img, c.err
 }
 
@@ -338,7 +337,7 @@ func (s *Store) mkfs(a *archive, out, hx string) error {
 	for i, p := range a.layers {
 		layers[i] = func() (io.ReadCloser, error) { return openLayer(p) }
 	}
-	merged, err := os.CreateTemp("", "twd-image-merged-")
+	merged, err := os.CreateTemp("", "tw-image-merged-")
 	if err != nil {
 		return err
 	}
@@ -353,7 +352,7 @@ func (s *Store) mkfs(a *archive, out, hx string) error {
 	// A fixed UUID from the digest and preserved mtimes: the same image
 	// gives the same erofs bytes (on one erofs-utils version).
 	uuid := hx[0:8] + "-" + hx[8:12] + "-" + hx[12:16] + "-" + hx[16:20] + "-" + hx[20:32]
-	cmd := exec.Command(mk, "--quiet", "--tar=f", "-b4096", "--preserve-mtime", "-U"+uuid, "-Ltwd-image", out, merged.Name())
+	cmd := exec.Command(mk, "--quiet", "--tar=f", "-b4096", "--preserve-mtime", "-U"+uuid, "-Ltw-image", out, merged.Name())
 	if b, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("mkfs.erofs: %v: %s", err, strings.TrimSpace(string(b)))
 	}

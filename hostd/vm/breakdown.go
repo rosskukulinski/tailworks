@@ -4,7 +4,7 @@ import (
 	"math"
 	"sort"
 
-	"github.com/rosskukulinski/twd/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
 )
 
 // Stage is one step of a microVM start, in ms.

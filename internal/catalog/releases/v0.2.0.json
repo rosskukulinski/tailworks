@@ -1,0 +1,338 @@
+{
+  "version": "0.2.0",
+  "date": "2026-11-17",
+  "workerd": "1.20261114.1",
+  "schema": "202611161200_tenant_owner_tag_name_prefix",
+  "protocols": {
+    "cliJSON": 1,
+    "guest": 1,
+    "helper": 2,
+    "push": 1,
+    "rest": 1,
+    "vz": 1
+  },
+  "upgrade": [
+    "cli-json",
+    "config-default",
+    "feature-string",
+    "format",
+    "protocol",
+    "schema-contract",
+    "schema-expand",
+    "workerd"
+  ],
+  "notes": [
+    {
+      "kind": "feature",
+      "upgrade": [
+        "cli-json"
+      ],
+      "source": "agent-first-dx-issue-25.md",
+      "text": "Coding agents can drive tailworks: `tw agent setup` installs skills, `--json` output is a stable, documented contract (docs/cli-json.md, `schema/cli.schema.json`), errors carry `hint` and `doc_url`, `tw docs` searches the docs offline, and tw-mgmt serves an MCP server at `/mcp` (ADR-035)."
+    },
+    {
+      "kind": "feature",
+      "upgrade": [
+        "cli-json"
+      ],
+      "source": "app-testing-issue-47.md",
+      "text": "Testing tailworks apps (docs/testing.md). `@tailworks/tailnet/testing` adds\n`withCaller` / `withPublic` and a fake `ctx.tailnet` for unit tests, in Node\nor under `@cloudflare/vitest-plugin`, which runs tailworks apps' Worker and Durable\nObject logic as on Cloudflare. `tw dev --caller \u003cname\u003e[=\u003ctag\u003e,…]` adds extra\ndev identities, each with its own local URL, listed as `callers` in the\n`ready` event and in `tw dev --once --json`; `@tailworks/tailnet/testing/dev`\n(`startDev`) runs an app under `tw dev` for black-box tests. Every template\nnow has a test and an `npm test` script. `tw dev` no longer misses an edit\nmade right after its `ready` event."
+    },
+    {
+      "kind": "feature",
+      "upgrade": [
+        "protocol",
+        "cli-json"
+      ],
+      "source": "approver-ux-issue-50.md",
+      "text": "Approvers no longer need a tenant ID, and they hear about waiting approvals\n(issue #50).\n\n- `GET /v1/whoami` now returns `tailnet` (the caller's own), `tenants` (the\n  tenants on that tailnet; every tenant for the local operator) and\n  `approveGrants` (the caller's `github.com/rosskukulinski/tailworks/cap/approve` grants). The admin\n  UI's approvals page and `tw approvals` / `tw approve` from a linked\n  machine default to those tenants; the page hides the tenant box when\n  there is exactly one.\n- `tw notify set --webhook -` sets a tenant webhook (stored in custody;\n  only its origin is ever shown). When a Workflow starts waiting for an\n  approval, mgmt POSTs a JSON `approval_requested` event with a deep link\n  to the request's row (`/ui/approvals?tenant=…#\u003cinstance\u003e`); Slack-style\n  incoming webhooks show its `text`. New API: `GET/PUT/DELETE\n  /v1/tenants/{id}/notifications`, `POST …/notifications/test`; new audit\n  kinds `notification_put`, `notification_delete`, `notification_failed`,\n  `notification_test`.\n- `GET /v1/audit?order=desc` lists newest first. The console's audit page\n  uses it and combines tenant, event, caller, object, trace and app\n  filters; a new **Objects** page filters by tenant, app, status, tag and\n  acting-for, with paging; every activity list is newest first.\n- The approvals page matches the rest of the console: card filter bar,\n  facts as a definition list, an anchor per row, and \"What you may decide\".\n- Browsers on public (Funnel) routes get a minimal HTML error page (status,\n  code, docs link, nothing about the request) instead of JSON when they ask\n  for `text/html`. JSON stays the default.\n- `tw dev` serves a read-only data console on `127.0.0.1` (press `e`, or\n  open the printed `console on …` URL): Workers KV namespaces, keys and\n  values, and D1 tables and rows of the run. `--console-port \u003cport\u003e` picks\n  the port (default: a free one); `--console-port -1` turns it off. With\n  `--json`, a `console` event gives its URL."
+    },
+    {
+      "kind": "security",
+      "upgrade": [
+        "protocol"
+      ],
+      "source": "audit-chain-flood-issue-68.md",
+      "text": "The host audit chain survives a flood (red-team H03, #68). Before, a flood\nof tenant `audit()` notes or of public requests to unlisted paths, while\nmgmt was slow or unreachable, made hostd drop the oldest queued records.\nThose records were already chained, so mgmt refused every later batch and\nthe host's chain stayed broken for good. Now hostd never drops a chained\nrecord: host records spill to `\u003cdata-dir\u003e/audit-spill.jsonl` once 10 000\nwait in memory, and are flushed in order, in batches. Records that may be\nshed are refused before they are chained and counted in a new in-chain\n`audit_dropped` record, so the chain still verifies and the gap shows in\n`tw audit`. Those records are tenant notes over a per-object rate (10/s,\nburst 200) or sent while the queue is backed up, and `public_request`\nrecords once the spill reaches 256 MiB. Public `404 not_public` and\n`400 bad_request` refusals are no longer one `public_request` record each.\nThey are counted in the per-minute `public_rejected` summary\n(`notPublic`, `badRequest`).\n\n`audit_dropped` is a new `AuditKind`. An older mgmt stores it like any host\nrecord."
+    },
+    {
+      "kind": "feature",
+      "upgrade": [
+        "cli-json",
+        "config-default"
+      ],
+      "source": "benchmark-dx-infra-vs-cloudflare-workerd-vercel.md",
+      "text": "`tw dev` prints each request with its `console.*` lines and the stack of any uncaught exception (`--json`: a new `request` event), and picks up edits within about 0.2 s. An unknown command suggests the nearest one (`tw tail` → `tw logs`), `--help` shows each flag's type, and `tw ls` shows why a deployment failed. `tw init` names `package.json` after the app and adds `npm run dev`. The admin console and `tw audit` render audit records the same way (no raw JSON); the approvals page has one comment box with Approve and Reject buttons. `tw docs search` ranks the guides above the API contract and the ADRs."
+    },
+    {
+      "kind": "feature",
+      "upgrade": [
+        "protocol",
+        "cli-json",
+        "config-default"
+      ],
+      "source": "cli-ergonomics-issue-46.md",
+      "text": "`tw completion bash|zsh|fish` prints a tab-completion script for every command, subcommand (`kv key put`, `d1 migrations apply`) and flag, generated from the CLI's own command table. `tw whoami [--json]` shows who the CLI acts as (your tailnet login through `tw link`, or the local operator), the mgmt it talks to, the tenant, and what that identity may do: admin, approve and the MCP tools. `GET /v1/whoami` adds `caps`, `approver` and `mcpTools` for it. `tw help` groups the commands (Set up · Develop · Deploy · Data · Observe · Operate) with one short line each; `tw help --all` prints every usage line. `tw version --check` compares with the latest GitHub release, prints `tw upgrade`, and says whether the running `tw up` needs a restart; an interactive `tw` prints a newer-release notice at most once a day (off with `--json`, `CI`, or `TW_NO_UPDATE_CHECK=1`). From a source checkout, `tw doctor` and a `build_failed` for an unresolved `@tailworks/*` import point at `make deps`."
+    },
+    {
+      "kind": "feature",
+      "source": "critique-developer-experience-admin-deployers.md",
+      "text": "Worker secrets (`tw secret`, ADR-034), `tw logs` from a linked machine, and many developer-experience fixes."
+    },
+    {
+      "kind": "feature",
+      "source": "d1-databases.md",
+      "text": "**D1** databases (wrangler `d1_databases`) with wrangler-layout migrations: `tw d1` creates, queries, exports and migrates them (ADR-038)."
+    },
+    {
+      "kind": "breaking",
+      "upgrade": [
+        "config-default"
+      ],
+      "source": "delete-confirm-issue-72.md",
+      "text": "Every command that deletes data or a tenant's resources now asks first:\n`tw d1 delete`, `tw kv namespace delete`, `tw queues rm`,\n`tw queues purge`, `tw r2 bucket rm`, `tw tenant rm` and `tw host rm`.\nOn a terminal it says what will be lost and asks you to type the name.\nWithout a terminal (a script, a coding agent, `--json`) it refuses with\n`confirmation_required` and does nothing; add `--yes` to go ahead.\n`tw d1 delete` without `--yes` now prompts on a terminal, and its refusal\ncode is `confirmation_required` (it was `bad_request`).\n\nOperator action: scripts that run these commands need `--yes`."
+    },
+    {
+      "kind": "feature",
+      "upgrade": [
+        "schema-expand",
+        "protocol",
+        "cli-json",
+        "config-default"
+      ],
+      "source": "deploy-history-rollback-issue-45.md",
+      "text": "`tw deployments \u003cworkload\u003e` lists a workload's deployment history, newest\nfirst: id, created, who deployed, bundle SHA-256, status, error and host.\n`tw rollback \u003cworkload\u003e [\u003cdeployment\u003e]` redeploys an earlier deployment's\nstored bundle as a new deployment, through the same path as `tw deploy`\n(placement, lease epoch, host fencing, preflight); with no ID it goes back\nto the previous deployment that ran. It is audited as `kind: rollback`. A\nrollback changes code and configuration only: Durable Object storage, D1\n(migrations are forward-only), KV, R2 and queues keep their data, and\nsecrets are the workload's current ones (ADR-046).\n\nmgmt now keeps the bundles of each workload's newest 10 deployments and\nprunes older ones, keeping their record and hash (tw-mgmt\n`-bundle-retention`, `-1` keeps every bundle). New API:\n`GET /v1/tenants/{id}/workloads/{workload}/deployments` and\n`POST /v1/tenants/{id}/workloads/{workload}/rollbacks`.\n\nOperator action: none. The store migration adds columns to `deployments`.\nThe first deploy of each workload after the upgrade prunes that workload's\nbundles beyond the newest 10; pass `-bundle-retention -1` to tw-mgmt\nbeforehand to keep them all."
+    },
+    {
+      "kind": "feature",
+      "upgrade": [
+        "cli-json"
+      ],
+      "source": "deploy-plan-issue-73.md",
+      "text": "`tw policy [dir]` prints everything an app needs in the tailnet policy, as\none snippet, before it is deployed. It runs the same check as `tw deploy`'s\npreflight and deploys nothing. The snippet holds the missing `tagOwners`, a\ngrant for each `tailnet.connects`, the Tailscale Service auto-approval and\nthe public-ingress `nodeAttrs`, plus the grant that lets people call the app\n(which tailworks can't check). It exits `acl_denied` while a checked part is\nmissing, so CI can run it before a deploy. `tw init` and the README's first\ndeploy now use it, so a first deploy takes one policy edit. With `--json`\nthe result is `$defs/policy`."
+    },
+    {
+      "kind": "feature",
+      "upgrade": [
+        "schema-expand",
+        "protocol",
+        "feature-string",
+        "format",
+        "cli-json"
+      ],
+      "source": "design-component-upgrade-release-process.md",
+      "text": "You can now plan, check and undo upgrades (ADR-041).\n\n- **Versions everywhere.**\n  - Every binary carries the release version (`--version`).\n  - Hosts report their version, protocols and features to mgmt, and mgmt\n    replicas record their own versions.\n  - `/v1/status` shows every version running in the fleet.\n- **Skew policy.** A host may run one release line behind mgmt, but never\n  ahead of it.\n  - mgmt refuses a host outside that window with `version_skew`, and places\n    nothing new on it.\n  - The CLI warns you when it is too old or too new for mgmt.\n- **Numbered mgmt migrations.**\n  - The store records each migration it applies in `schema_migrations`.\n  - A binary older than the store's minimum version refuses to start, so a\n    downgrade can't corrupt the store.\n  - `tw-mgmt migrate --check` lists the pending migrations.\n- **Feature-gated placement.** A deployment that uses KV, R2 or D1 goes\n  only to hosts that advertise that feature. If no host does, the deploy\n  fails with `feature_unavailable`.\n- **Host cordon and drain.** `tw host cordon`, `uncordon` and `drain`\n  take a host out of placement and move its workloads off it before\n  maintenance.\n- **`tw upgrade`.**\n  - It plans the upgrade, then backs up the store and custody together.\n  - It installs and restarts the new release, then health-checks it.\n  - It rolls back automatically if the health check fails.\n  - `install.sh` keeps the previous install as `bin.prev` and `share.prev`,\n    and `install.sh --rollback` restores it.\n- **Release catalog.** tw-mgmt embeds the notes and upgrade facts of every\n  release up to its own. `tw release import` adds a newer one, so\n  `tw upgrade --plan` works offline.\n- **Upgrade runs.**\n  - mgmt drives a fleet upgrade host by host, starting with a canary and\n    health-checking each host before the next.\n  - The run keeps going if the CLI disconnects: it is stored in mgmt and\n    driven by whichever replica holds its lease.\n  - A host started with `tw-hostd -self-upgrade`, under a service manager,\n    downloads the release tarball from mgmt, installs it and restarts.\n    Other hosts show an operator step, and the run waits for them.\n  - `tw upgrade status`, `pause`, `resume` and `abort` control the run.\n- **Versioned data formats.** `objects.json`, node `object.json`,\n  `tw.json` and the R2 index entries now carry a version. A `tw` reads older\n  formats and refuses newer ones.\n\nOperator action: none for a homelab. For a fleet, upgrade tw-mgmt before\nany host. Hosts that predate version reporting count as 0.1.x, so they stay\nwithin the window of a 0.2 tw-mgmt. See docs/upgrading.md."
+    },
+    {
+      "kind": "fix",
+      "source": "docs-first-deploy-issue-48.md",
+      "text": "Docs for a first deploy. The README quick start now grants callers access to the workload (without that grant, the `curl` hangs on any tailnet whose policy isn't allow-all), and `tw deploy` prints that grant next to the tagOwners lines it prints for new tags. New pages: `docs/troubleshooting.md` (a first deploy that doesn't answer, `identity_pending`, tagOwners after renaming an app, `peer_not_visible`, a `failed` deployment), `docs/concepts.md` (a glossary) and `docs/install-testing.md` (the Linux support matrix and measured timings, moved out of `docs/INSTALL.md`). INSTALL's intro is shorter, and its isolation notes and `tw dev` section come after the install steps."
+    },
+    {
+      "kind": "feature",
+      "source": "docs-product-issue-51.md",
+      "text": "Docs: runnable recipes (`docs/recipes.md`: internet APIs and LLMs through a tailnet gateway, a Durable Object per user authorized by `getCaller`, a signed public webhook, cron into KV), a CLI reference generated from every command's `--help` (`docs/cli.md`, found by `tw docs search`), a limits page with the code behind every limit (`docs/limits.md`), a README in every template, a one-page security model (`docs/security-model.md`) and a private disclosure process (`SECURITY.md`), and a user-facing `CHANGELOG.md` rendered from the release catalog. `tw docs search` now finds the README's quick start, the changelog and the security policy (`tw docs show ../README.md`)."
+    },
+    {
+      "kind": "security",
+      "upgrade": [
+        "protocol",
+        "cli-json",
+        "schema-expand"
+      ],
+      "source": "explain-tailnet-multi-tenancy-team-workloads.md",
+      "text": "Several teams on one tailnet (ADR-043, docs/teams.md).\n\n- Tenant admins: grant a team `github.com/rosskukulinski/tailworks/cap/tenant-admin` on `tag:tw-mgmt`\n  with values like `{\"tenants\": [\"tn_example-pay\"], \"actions\": [\"read\",\n  \"deploy\", \"kill\"]}`. The actions are `read`, `deploy`, `kill`, `secrets`\n  and `data`.\n  - The team can `tw link`, deploy, list, read logs and audit, and kill in\n    those tenants, through the CLI, the API, the registry and the admin\n    console.\n  - An `\"mcp\"` entry admits tailworks's MCP server for those tenants, and an\n    `\"approve\"` entry makes the team an approver there only.\n  - Hosts, tenant settings, releases and upgrades stay with admins.\n  - Refusals are `403 tenant_forbidden` with the grant to add; another\n    tenant's deployment or object is `404`.\n- Owner tags and name prefixes: `tw tenant add \u003ctailnet\u003e --owner-tag\n  tag:tw-t-\u003cteam\u003e --name-prefix \u003cp\u003e` adds a second team's tenant to a\n  tailnet. Each tenant on a shared tailnet must have its own owner tag\n  (`409 shared_owner_tag`), and the OAuth client scoped to it can't mint\n  another team's tags. Its tailnet names get the prefix (`\u003cp\u003e-…`,\n  `svc:\u003cp\u003e-…`).\n- `tw policy` and `tw deploy` warn about grants to `tag:tw-mgmt` that\n  don't do what they look like (`accessWarnings`), and about tags another\n  team owns (`tagOwnerProblems`).\n\nFix: a tailnet user holding only `github.com/rosskukulinski/tailworks/cap/approve` could push and\npull every tenant's images in mgmt's registry. The registry now admits only\nadmins, hosts and tenant admins.\n\nOperator action: none for a tenant alone on its tailnet. To add a second\nteam's tenant to a tailnet, first move the existing tenant to its own owner\ntag (`tw tenant set \u003ctenant\u003e --owner-tag … --oauth-client-file …`). Don't\nscope a team by adding values to `github.com/rosskukulinski/tailworks/cap/admin`: older mgmts ignore\nthem and treat the holder as a full admin."
+    },
+    {
+      "kind": "fix",
+      "source": "fix-linux-ci-tests-issue-75.md",
+      "text": "Two netd fixes found while making the test suite pass on Linux.\n\n- **Joins after a restart no longer hang.** A node whose saved key control\n  had expired could stay in `NoState`, retrying its login, without ever\n  reaching NeedsLogin. Its rejoin then never ended, and it held a join slot\n  while it waited. A login error that persists during a rejoin now counts as\n  a rejection, and the object is re-minted. Join slots are now handed out in\n  the order objects were created.\n- **The first call to a just-created object no longer takes up to 5 s.** An\n  object that calls one created a moment ago now waits for the new node to\n  answer a disco ping, not just for a path to it. Without this, the first\n  WireGuard handshake could arrive before the new node knew the caller, and\n  was retried only after 5 s."
+    },
+    {
+      "kind": "fix",
+      "source": "fix-orphan-workerd-issue-44.md",
+      "text": "`tw dev` no longer leaves workerd running and `/tmp/tw-dev-*` behind when it is killed with SIGKILL (an IDE, a coding agent or a CI timeout). A small watchdog stops its workerd and node processes and removes the dir however `tw dev` exits, and the next `tw dev` cleans up after any earlier run whose process is gone. Another `tw dev` that is still running is left alone. The hostd and netd test helpers do the same for their workerd processes (#44)."
+    },
+    {
+      "kind": "fix",
+      "source": "fix-web-ui-refresh-jitter-restyle.md",
+      "text": "Admin UI: no more jitter on refresh, a more readable layout, and it uses only the public `/v1` API."
+    },
+    {
+      "kind": "feature",
+      "source": "implement-adr-15-head-scale.md",
+      "text": "tailworks runs on a self-hosted **Headscale** control plane (ADR-015): `tw up --control=headscale` and `tw tenant add --control=headscale`. It needs Headscale v0.29 or later. There is no Funnel (public routes) and there are no Tailscale Services there; see docs/headscale.md."
+    },
+    {
+      "kind": "feature",
+      "source": "implement-do-lease-locks-issue-26.md",
+      "text": "Distributed locks and leader election on Durable Object leases: measured guarantees in docs/locks.md, and a `lock` template whose fencing tokens carry the lease epoch."
+    },
+    {
+      "kind": "feature",
+      "upgrade": [
+        "schema-expand"
+      ],
+      "source": "implement-queues-issue-18.md",
+      "text": "Cloudflare **Queues** (wrangler `queues`): producers, push consumers, retries and dead-letter queues, on a sealed, lease-fenced broker in tw-mgmt (`tw queues`; ADR-039)."
+    },
+    {
+      "kind": "feature",
+      "upgrade": [
+        "cli-json"
+      ],
+      "source": "npm-packages-types-issue-41.md",
+      "text": "**Typed templates and `tw types`.** Every `tw init` template has a `tsconfig.json` and `@cloudflare/workers-types` and `typescript` dev dependencies, so `npm install \u0026\u0026 npx tsc --noEmit` passes and editors know `getCaller`, `Request`, `DurableObjectState` and `ctx.tailnet` (`@tailworks/tailnet` now declares `ctx.tailnet` on `DurableObjectState` and `ExecutionContext`). New `tw types`, like `wrangler types`, writes `worker-configuration.d.ts` with the app's `Env` (vars, Durable Object, KV, R2, D1, Queue and Workflow bindings, secret names from `.dev.vars`, `.dev.vars.example`, `secrets.required` or `--remote`); `tw types --check` fails with `types_stale` in CI. The `@tailworks/*` packages and `create-tailworks` are ready to publish to npm, and `npm create tailworks` runs `tw init` when tailworks is installed."
+    },
+    {
+      "kind": "breaking",
+      "upgrade": [
+        "config-default"
+      ],
+      "source": "observability-logs-metrics-traces-20.md",
+      "text": "`tw logs \u003cworkload\u003e` now prints one structured line per request, with filters (`--errors`, `--status`, `--trace`, …) and `--json` request records. Pass `--console` for the app's raw output, which used to be the default. tailworks also gains Prometheus `/metrics` and OTLP export of logs, metrics and traces (`tw telemetry`).\n\nOperator action: scripts that read `tw logs` output need `--console`. tw-hostd and tw-mgmt now serve `/metrics` on port 9464 of their tailnet node by default (`-metrics-port 0` turns it off); scraping it needs a policy grant."
+    },
+    {
+      "kind": "feature",
+      "source": "platform-stores.md",
+      "text": "Platform stores: a SQLite Durable Object per store, backed by a fenced, encrypted journal in tw-mgmt, so a store survives restarts and moves between hosts. KV, D1, R2 and Queues build on it."
+    },
+    {
+      "kind": "security",
+      "source": "prelaunch-100-security-model.md",
+      "text": "`tw status` and `GET /v1/status` no longer report Node-tier egress as `enforced` on a Linux host whose Landlock ABI is below 4 (kernels before 6.7, such as Ubuntu 22.04's 5.15). Landlock can't restrict TCP there, so egress is now reported as `unenforced`, as on macOS. netd now strips client copies of every `Tailscale-*` header and the underscore spellings `X_TW_*` and `tw_*` by prefix, not only a list of exact names. docs/security-model.md now lists what the process-tier sandbox confines on each platform and Landlock ABI, which hosts may be shared between tenants, and whom a tenant trusts (host operator, mgmt operator, tailnet admin) (#100)."
+    },
+    {
+      "kind": "fix",
+      "source": "prelaunch-102-license-notices.md",
+      "text": "Release tarballs now include the project's `LICENSE` and a `THIRD_PARTY_NOTICES` file. The notices cover workerd, the Go modules compiled into the binaries, the vendored JavaScript packages and, where a tarball includes the microVM guest, Firecracker, the Linux kernel and the guest image's Ubuntu packages. Tarballs with a microVM guest also include `share/tailworks/vm/KERNEL-SOURCE.md` and `ROOTFS-SOURCE.md`, which say where to get the corresponding source and include a written offer for it. The guest image now carries the Debian copyright files of the Ubuntu packages it takes files from (in `/usr/share/doc`), and its `manifest.json` lists those packages (#102)."
+    },
+    {
+      "kind": "fix",
+      "upgrade": [
+        "cli-json",
+        "config-default"
+      ],
+      "source": "prelaunch-104-update-check.md",
+      "text": "`tw init` and `tw dev` no longer run the once-a-day update check, so they make no outbound request (before, they could ask `api.github.com` for the latest release after they finished). `tw version --json` adds `updateCheck`: whether this tw runs the check (a release build without `CI` or `TW_NO_UPDATE_CHECK` set). The README (\"What tw sends\") and `docs/security-model.md` (\"Telemetry and the update check\") now say what the check sends, when it runs and how to turn it off; tailworks has no other telemetry."
+    },
+    {
+      "kind": "security",
+      "upgrade": [
+        "protocol"
+      ],
+      "source": "prelaunch-105-host-allowlist.md",
+      "text": "tw-mgmt now refuses tailnet requests whose `Host` header is not one of its own names (its MagicDNS FQDN or short name, `-tsnet-hostname`, `-tsnet-service`) or an IP literal, with the new error `421 misdirected_request`. This closes a DNS-rebinding hole: before, a web page on an attacker's domain rebound to mgmt's tailnet IP was same-origin with mgmt's plain-HTTP `:80` listener and could read `/v1` and post admin UI forms with the admin's identity. The `tw` CLI, hosts and the admin UI address mgmt by those names or its IP and are unaffected. The admin UI's `Origin` check is now tied to the same allowlist.\n\nOperator action: if you reach tw-mgmt through a CNAME or another DNS name of your own, use its tailnet name or IP instead. If you renamed the mgmt node, restart tw-mgmt so it learns the new name."
+    },
+    {
+      "kind": "fix",
+      "source": "prelaunch-93-audit-chain.md",
+      "text": "`tw audit` and audit verification no longer report an intact chain as\nbroken while records are being appended (#93). Verification read a chain's\nrecords and its head in two separate queries, so a record appended between\nthem made the head look one record ahead and the chain failed with \"chain\nhead mismatch\" (`audit_unverified`). Both are now read in one read\ntransaction. Detection of real truncation and tampering is unchanged."
+    },
+    {
+      "kind": "security",
+      "source": "prelaunch-98-upgrade-sig.md",
+      "text": "`tw upgrade` on a `tw up` machine now checks the release signature. It extracts the tarball with the hardened extractor tw-hostd uses, then checks its `SHA256SUMS.sig` against the release keys built into `tw` (or `TW_RELEASE_SIGNERS`) with the same verifier as tw-hostd's self-upgrade, before anything in the release runs. Before, it only compared the tarball with a `SHA256SUMS` downloaded from the same place, and `--from \u003cdir\u003e` checked nothing, so a tampered tarball's own `install.sh` would have run. An unsigned release is refused with `release_unsigned` and a badly signed one with `release_bad_signature`, on `--plan` too and for `--from`. `tw upgrade --allow-unsigned` (or `TW_ALLOW_UNSIGNED=1`) installs a build you made yourself, with a warning in the plan. `tw upgrade \u003cversion\u003e` also refuses a download whose release is a different version (#98)."
+    },
+    {
+      "kind": "feature",
+      "upgrade": [
+        "protocol",
+        "cli-json"
+      ],
+      "source": "preview-deploys-issue-45.md",
+      "text": "`tw deploy --preview` runs a bundle next to the workload instead of\nreplacing it, as the workload `\u003cworkload\u003e--preview-\u003calias\u003e` (the alias is\n`--preview-alias`, or the start of the bundle's SHA-256). A preview has the\nworkload's tags and secrets, but its own lease, Durable Object storage and\nKV, R2 and D1 stores, which start empty; it joins no Tailscale Service, has\nno public routes and runs one replica. Bundles that bind queues can't be\npreviewed (queues are tenant-wide). `tw previews \u003cworkload\u003e` lists the\nrunning previews. `tw promote \u003cworkload\u003e \u003calias\u003e` deploys the preview's\nbundle to the workload through the same path as `tw deploy` (lease epoch,\nhost fencing, preflight), audited as `kind: promote`, then undeploys the\npreview (`--keep-preview` keeps it). The preview's data is not copied\n(ADR-048).\n\nNew API: `POST /v1/deployments` `preview` and `previewAlias`,\n`GET /v1/tenants/{id}/workloads/{workload}/previews` and\n`POST /v1/tenants/{id}/workloads/{workload}/promotions`."
+    },
+    {
+      "kind": "security",
+      "upgrade": [
+        "protocol",
+        "config-default"
+      ],
+      "source": "public-conn-limit-issue-69.md",
+      "text": "One client can no longer fill a workload's public (Funnel) connections and lock everyone else out. The public listener now caps connections per client address (`public.limits.maxConnsPerIp`, default 32; an IPv6 client counts per /64), gives a new connection 5 seconds to send its first request, and closes upgraded (WebSocket) connections after `public.limits.upgradeLifetimeSeconds` (default 3600). Refused connections are counted in the per-minute `public_rejected` audit summary (`ipConnsRefused`) and in the new `tw.public.rejected` metric (#69).\n\nOperator action: WebSocket clients of a public workload must reconnect when the lifetime ends; raise `upgradeLifetimeSeconds` or `maxConnsPerIp` in `tailworks.jsonc` if your users need longer sessions or share one address. A host on this version keeps the new defaults even while mgmt is older."
+    },
+    {
+      "kind": "security",
+      "upgrade": [
+        "schema-expand",
+        "protocol"
+      ],
+      "source": "public-name-claim-issue-70.md",
+      "text": "Public ingress: a public name now has one owner per tailnet (red-team\nH10). The first tenant to deploy `\"public\"` routes under a workload name\nowns `https://\u003cname\u003e.\u003ctailnet\u003e.ts.net/` on that tailnet, across undeploys,\nredeploys and kills, until it releases the name. Another tenant on the same\ntailnet that declares `\"public\"` under that name is refused with\n`409 public_name_owned`, at deploy, at `--dry-run`, and when its host asks\nfor the public node. Before this, a second tenant could take the name after\na kill and redeploy and receive the first tenant's public traffic, such as\nsigned webhooks.\n\nNew API: `GET /v1/tenants/{id}/public-names` lists a tenant's names, and\n`DELETE /v1/tenants/{id}/public-names/{name}` releases one once nothing\nserves it (`409 public_name_in_use` otherwise). Deleting a tenant releases\nits names. New audit kinds: `public_name_claim`, `public_name_release`.\n\nOperator action: none. The store migration adds the `public_names` table.\nNames already served before the upgrade are claimed for the tenant serving\nthem the first time anyone deploys or recreates them, so the upgrade can't\nhand a name to another tenant. If several tenants share a tailnet, give\nthem all the same `tailnet` name (its MagicDNS suffix), because ownership is\nscoped by that name."
+    },
+    {
+      "kind": "feature",
+      "source": "r2-bucket-binding-issue-16.md",
+      "text": "**R2** buckets (wrangler `r2_buckets`): the index is a platform store, and the bytes go to a host `fs` or `s3` backend (`-r2-backend`; `tw r2`; ADR-036). Bytes on the `fs` backend stay on their host."
+    },
+    {
+      "kind": "security",
+      "source": "release-signing-issue-71.md",
+      "text": "Releases are signed. Each release's `SHA256SUMS`, and each tarball's, gets a `SHA256SUMS.sig`: an SSH signature (`ssh-keygen -Y`) by a tailworks release key that is pinned in `scripts/get.sh`, `install.sh` and the tailworks binaries. `get.sh` checks the signature before it trusts the checksums, and `install.sh` checks it before it installs. tw-hostd's self-upgrade checks it in Go against the keys built into the running binary, so a compromised tw-mgmt can no longer push a release of its own. An unsigned or badly signed release is refused. `install.sh --allow-unsigned` (or `TW_ALLOW_UNSIGNED=1`) installs a build you made yourself, and local builds (`x.y.z-\u003ccommit\u003e`) install with a warning. `get.sh` refuses an unsigned release whatever its tag (no unsigned release was ever published). tw-hostd also checks that a release it is ordered to install is that version (`VERSION`), and extracts tarballs so that no entry can write or link outside the extract directory. To check a release by hand, see INSTALL.md, \"Verify a release\" (#71).\n\nOperator action: a host that self-upgrades now refuses unsigned releases. Until a release key is pinned (docs/RELEASING.md, \"Signing\"), upgrade hosts by hand."
+    },
+    {
+      "kind": "breaking",
+      "upgrade": [
+        "protocol",
+        "cli-json",
+        "config-default"
+      ],
+      "source": "remove-wif-apikey.md",
+      "text": "tailworks now mints node keys on Tailscale with an OAuth client only. The\n`apikey` and `wif` (workload identity federation) mint modes are removed\n(ADR-042). The Headscale profile is unchanged: it still\nmints with a Headscale API key.\n\nRemoved: `tw up --wif`, `--wif-client-id`, `--wif-lifecycle-client-id`,\n`--issuer-authkey-file`, `--login-timeout`, and `--api-key-file` outside\n`--control=headscale`; `tw tenant set --wif-client-id` and\n`--wif-lifecycle-client-id`; `tw doctor --tailnet/--api-key-file`; mgmt's\nOIDC issuer (`tw-mgmt -issuer-url`, `-issuer-listen`, `-funnel`,\n`-issuer-tsnet-*`, and the discovery and JWKS endpoints);\n`POST /v1/tenants/{id}/wif-check`; the tenant fields `wifClientID`,\n`wifLifecycleClientID` and `wif`; `tw-netd -mint-api-key-file` (now\n`-mint-oauth-client-file`). New: `tw tenant add --oauth-client-file`,\n`tw tenant set --oauth-client-file`, and the error code\n`mint_mode_removed`.\n\nOperator action: if `tw doctor` fails its `mint_mode` row, or `tw up`\nsays `mint_mode_removed`, the install mints with an API key or WIF. Create\nan OAuth client (docs/INSTALL.md, \"The OAuth client\"), then run\n`tw up --oauth-client-file \u003cfile\u003e`. This keeps the tenant, its deployments\nand mgmt's node. Do the same for each added tenant with\n`tw tenant set \u003ctenant\u003e --oauth-client-file \u003cfile\u003e`. Then revoke the old\nAPI key, or delete the WIF trust credentials, the `tw-issuer` machine and\nthe `tag:tw-issuer` policy entries. Running nodes keep serving until then,\nbut nothing new can be minted."
+    },
+    {
+      "kind": "breaking",
+      "upgrade": [
+        "protocol",
+        "cli-json",
+        "format",
+        "schema-contract",
+        "workerd",
+        "config-default"
+      ],
+      "source": "rename-twd-to-tailworks-86.md",
+      "text": "twd is now **tailworks** (issue #86). The project, the repo\n(`github.com/rosskukulinski/tailworks`), the Go module, the npm packages\n(`@tailworks/tailnet`, `@tailworks/node`, `@tailworks/mcp`,\n`npm create tailworks`), the install root (`~/.tailworks`), the per-app\nconfig (`tailworks.jsonc`, top-level key `\"tw\"`) and the release tarballs\n(`tailworks-\u003cversion\u003e-\u003cos\u003e-\u003carch\u003e.tar.gz`) use the long name. The command is\n`tw` (`install.sh` also links `tailworks` → `tw`), and everything else uses\nthe short name: the daemons (`tw-mgmt`, `tw-hostd`, `tw-netd`,\n`tw-vmhelper`, `tw-vz`, `tw-guestd`), env vars (`TW_*`), tags (`tag:tw`,\n`tag:tw-mgmt`, `tag:tw-host`, `tag:tw-public`, `tag:tw-wl-*`), the Service\n`svc:tw-mgmt`, node hostnames (`tw-`), headers (`x-tw-*`, `Tw-Error`,\n`Tw-Actor`, `Tw-MCP-Tools`), metrics (`tw_*`), the launchd label\n`dev.tailworks.up` and the systemd units `tw.service` and\n`tw-vmhelper.service`. Peer capabilities move from `twd.dev/cap/*` to\n`github.com/rosskukulinski/tailworks/cap/*`.\n\nThere is no upgrade path from twd 0.x: nothing reads `~/.twd`,\n`twd.jsonc`, the old env vars, tags or headers.\n\nOperator action: tear down and reinstall. On each machine, run\n`twd down --purge --service`, remove any hand-made agents\n(`dev.twd.hostd`, `twd-vmhelper.service`) and delete `~/.twd`. In the\nadmin console, remove the `tag:twd*` devices, then the `tag:twd*` tag\nowners, `svc:twd-mgmt` and the `twd.dev/cap/*` grants; revoke the OAuth\nclient and create one scoped to `tag:tw`. Rename each app's `twd.jsonc` to\n`tailworks.jsonc` (key `\"tw\"`) and its `@twd/*` imports to\n`@tailworks/*`. Then install with `get.sh` and run `tw doctor`."
+    },
+    {
+      "kind": "security",
+      "source": "review-fixes.md",
+      "text": "Security fixes from review. `tw up` runs as a single process by default (mgmt with the host agent embedded; `--separate-host` keeps the old layout), and tw-mgmt serves an admin UI at `/ui/`."
+    },
+    {
+      "kind": "fix",
+      "upgrade": [
+        "cli-json",
+        "config-default"
+      ],
+      "source": "upgrade-prefix-health-issue-63.md",
+      "text": "`tw upgrade` on a `tw up` machine now replaces the install that runs the state dir (the binary the service or the running supervisor was started from, or the state dir itself), not whichever directory the `tw` binary happens to live in. Running it from an extracted release, as the first upgrade from 0.1.0 needs, used to plan against the extracted directory; it now refuses with `prefix_mismatch` unless `--prefix` names the install. docs/upgrading.md covers the first upgrade.\n\nThe health check after the restart now only waits for deployments that were active before the upgrade. One that had already failed no longer rolls a good upgrade back; `--plan` and the start of the run warn about it, and the result lists it (`notActiveBefore` in `--json`) (#63)."
+    },
+    {
+      "kind": "fix",
+      "upgrade": [
+        "protocol"
+      ],
+      "source": "workerd-restart-issue-43.md",
+      "text": "A workerd that crashes after its deployment has served is now restarted until it comes back. hostd retries with exponential backoff (200 ms doubling to 5 min) and never gives up. Before, six quick exits marked the deployment `failed` for good. Before each restart hostd kills the old workerd's process group and waits for it to empty. The stale ingress socket is then removed, so a restart no longer fails with `bind(): Address already in use`. hostd also no longer misses an exit when a child process still holds workerd's log. From the second exit in a row the deployment reports a new status, `crashloop`, and its error gives the attempt count, the next delay and the last log lines. `tw ls`, `--json`, the console and the API show this status. The deployment goes back to `active` by itself once workerd answers again. `tw deploy` stops waiting with `deploy_crashloop` when the deployment enters a crash loop. A deploy whose workerd never becomes healthy (a bad bundle or config) still ends `failed` within a few seconds.\n\nOperator action: clients that match on deployment status should treat `crashloop` as \"assigned here, not serving right now\". A deployment left `failed` by this bug on an older host needs one `tw deploy` after the upgrade."
+    },
+    {
+      "kind": "feature",
+      "source": "workers-kv-binding-issue-15.md",
+      "text": "**Workers KV** (wrangler `kv_namespaces`): the KV API inside Workers and `tw kv` for operators. Read-your-writes on the namespace's host (ADR-037)."
+    },
+    {
+      "kind": "feature",
+      "upgrade": [
+        "workerd"
+      ],
+      "source": "workflows-approvals.md",
+      "text": "Cloudflare **Workflows** (wrangler `workflows`) run on workerd's built-in engine, and `step.waitForApproval` is decided by tailnet identities holding `github.com/rosskukulinski/tailworks/cap/approve` (`tw approvals`, `tw approve`; ADR-040).\n\nOperator action: workerd moves to 1.20261114.1."
+    },
+    {
+      "kind": "feature",
+      "source": "wrangler-cli-integration-issue-19.md",
+      "text": "tailworks works with the wrangler CLI: `wrangler.toml`, `--env`, and apps bundled by wrangler (`--wrangler`, `--from-wrangler-out`); see docs/wrangler.md."
+    }
+  ]
+}

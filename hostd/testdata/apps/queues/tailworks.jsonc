@@ -1,0 +1,12 @@
+{
+  "name": "queues",
+  "tailnet": {
+    "tags": ["tag:ttest"],
+    "objects": {
+      // internal class: the consumer's log, created from queue()
+      "Log": { "node": false },
+      // a facet-mode object that sends through its own env.JOBS
+      "Box": { "tags": ["tag:ttest"] },
+    },
+  },
+}

@@ -1,0 +1,6 @@
+{"v":1,"o":"put","k":"docs/hello.txt","row":{"version":"7f3a","size":5,"etag":"5d41402abc4b2a76b9719d911017c592","uploaded":1763208000000,"checksums":{"md5":"5d41402abc4b2a76b9719d911017c592"},"http":{"contentType":"text/plain"},"custom":{"a":"b"},"blobs":[{"id":"b1","size":5}]}}
+{"v":1,"o":"mpu","id":"u1","k":"big.bin","http":{},"custom":{},"created":1763208000000}
+{"v":1,"o":"part","id":"u1","n":1,"blob":"b2","size":5242880,"etag":"e1","md5":"m1"}
+{"v":1,"o":"put","k":"big.bin","row":{"version":"7f3a","size":5,"etag":"5d41402abc4b2a76b9719d911017c592","uploaded":1763208000000,"checksums":{"md5":"5d41402abc4b2a76b9719d911017c592"},"http":{"contentType":"text/plain"},"custom":{"a":"b"},"blobs":[{"id":"b1","size":5}]},"up":"u1"}
+{"v":1,"o":"mpx","id":"u1"}
+{"v":1,"o":"del","k":"docs/hello.txt"}

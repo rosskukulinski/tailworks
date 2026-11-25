@@ -25,15 +25,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/internal/caps"
-	"github.com/rosskukulinski/twd/internal/nodecert"
-	"github.com/rosskukulinski/twd/mgmt"
+	"github.com/rosskukulinski/tailworks/internal/caps"
+	"github.com/rosskukulinski/tailworks/internal/nodecert"
+	"github.com/rosskukulinski/tailworks/mgmt"
 )
 
 // A policy where the child's sub-agent tag is granted BOTH lookup_order and
 // refund, the parent only lookup_order, and tag:sub is owned by tag:agent.
 const rt01Policy = `{
-  "tagOwners": { "tag:agent": ["tag:twd"], "tag:sub": ["tag:agent"] },
+  "tagOwners": { "tag:agent": ["tag:tw"], "tag:sub": ["tag:agent"] },
   "grants": [
     { "src": ["tag:agent"], "dst": ["tag:mcp"], "app": { "example.com/cap/mcp": [ {"tools": ["lookup_order"]} ] } },
     { "src": ["tag:sub"],   "dst": ["tag:mcp"], "app": { "example.com/cap/mcp": [ {"tools": ["lookup_order", "refund"]} ] } }
@@ -107,7 +107,7 @@ func TestRT01_SpawnLimBindsToIdentity(t *testing.T) {
 		t.Fatalf("the child must keep exactly what lim allows: %v", tools)
 	}
 
-	// A peer with no certificate (not a twd object) keeps its WhoIs caps:
+	// A peer with no certificate (not a tailworks object) keeps its WhoIs caps:
 	// lim never widens, and its absence never narrows.
 	if got := toolsOf(caps.Intersect(whois, nil)); len(got) != 2 {
 		t.Fatalf("no lim must leave the capMap unchanged: %v", got)

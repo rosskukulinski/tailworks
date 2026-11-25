@@ -1,25 +1,27 @@
 # Container images for arm64 hosts (ADR-032 D3)
 
 Cloudflare publishes `docker.io/cloudflare/sandbox` for **linux/amd64 only**.
-On arm64 twd hosts, `hostd/image.DefaultAliases` swaps in twd's own arm64
+On arm64 tailworks hosts, `hostd/image.DefaultAliases` swaps in tailworks' own arm64
 rebuilds, so app code and Dockerfiles stay unchanged:
 
 | ref the app names | arm64 host resolves to |
 |---|---|
-| `docker.io/cloudflare/sandbox:0.12.14` | `twd.local/cloudflare-sandbox:0.12.14-arm64` |
-| `docker.io/cloudflare/sandbox:1.0.1` | `twd.local/cloudflare-sandbox:1.0.1-arm64` |
+| `docker.io/cloudflare/sandbox:0.12.14` | `tw.local/cloudflare-sandbox:0.12.14-arm64` |
+| `docker.io/cloudflare/sandbox:1.0.1` | `tw.local/cloudflare-sandbox:1.0.1-arm64` |
 
 amd64 hosts use the stock images. The alias applies in two places:
 
 - **at deploy** (mgmt, `internal/registry.Resolver`): the stock ref is pinned to
-  the rebuild in twd's registry (`public/cloudflare-sandbox`, pushed by the
-  operator with `twd image push`) for arm64 hosts, to the mirrored stock image
-  for amd64 ones; hosts without a registry still alias in `image.Store.Resolve`;
-- **at build time** (`twd deploy`, `internal/imagebuild`): a Dockerfile
+  the rebuild in tailworks' registry (`public/cloudflare-sandbox`) for arm64
+  hosts, to the mirrored stock image for amd64 ones; hosts without a registry
+  still alias in `image.Store.Resolve`. mgmt fills a missing rebuild from the
+  alias's digest-pinned `source` (the published image, below); without one,
+  or with `-no-mirror`, the operator pushes it with `tw image push`;
+- **at build time** (`tw deploy`, `internal/imagebuild`): a Dockerfile
   `FROM docker.io/cloudflare/sandbox:<v>` (or `COPY --from=` it, or an ARG
   default naming it) is built for arm64 with a BuildKit named context
   (`--build-context docker.io/cloudflare/sandbox:<v>=oci-layout://…`, the
-  rebuild fetched from twd's registry or the local Docker store), so the app's
+  rebuild fetched from tailworks' registry or the local Docker store), so the app's
   Dockerfile is used as written. (This script still uses `docker-image://`
   contexts on images it has just loaded.)
 
@@ -57,6 +59,18 @@ contexts), `docker save`s every image to `OUT_DIR`, and writes
 
 Built 2026-11-13 on macOS (OrbStack, BuildKit 0.33.1): the 0.12.14 rebuild is
 ~250 MB as a tarball and 569 MiB as erofs; the shims are 1.6 MB.
+
+## Publishing
+
+`.github/workflows/publish-sandbox-images.yml` (run by hand by a maintainer)
+builds the three rebuilds with this script on a hosted `ubuntu-24.04-arm`
+runner and pushes them as `ghcr.io/rosskukulinski/cloudflare-sandbox:<v>-arm64`
+(immutable tags: an existing tag is never overwritten; `--provenance=false`;
+the licence and a link to this file as OCI labels). The digests it reports go
+into `sandboxSourceDigests` in `internal/registry/aliassource.go` in a normal
+PR, which makes them the default aliases' `source`; `make test-images` checks
+each one resolves. Until then those digests are placeholders and the aliases
+have no `source`.
 
 ## Licence
 

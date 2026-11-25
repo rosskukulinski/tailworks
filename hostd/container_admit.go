@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd/mgmtapi"
-	"github.com/rosskukulinski/twd/internal/container"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/internal/container"
 )
 
 // Container admission (ADR-032 D9). ctx.container.start() reaches hostd,
@@ -122,9 +122,9 @@ type ContainerSlot struct {
 }
 
 // containersOffered: the host runs containers (one microVM each): it has a
-// container backend and an image store (twd-hostd sets them only when the
+// container backend and an image store (tw-hostd sets them only when the
 // backend is usable: helper, kernel with erofs, mkfs.erofs; see
-// cmd/twd-hostd), and isn't forced to the process tier.
+// cmd/tw-hostd), and isn't forced to the process tier.
 func (h *Host) containersOffered() bool {
 	return h.cfg.Containers != nil && h.cfg.Images != nil && !h.cfg.ForceProcessTier
 }
@@ -134,7 +134,7 @@ func (h *Host) containersOffered() bool {
 // comment above for the order of checks and their errors.
 func (h *Host) AcquireContainer(ctx context.Context, key ContainerKey, res container.Resources) (*ContainerSlot, error) {
 	if !h.containersOffered() {
-		return nil, &apiError{Code: "tier_unavailable", Detail: "this host has no container backend (containers run in microVMs: Linux with KVM and twd-vmhelper); ctx.container.start() is refused, not run another way"}
+		return nil, &apiError{Code: "tier_unavailable", Detail: "this host has no container backend (containers run in microVMs: Linux with KVM and tw-vmhelper); ctx.container.start() is refused, not run another way"}
 	}
 	if key.TenantID == "" || key.Workload == "" || key.Class == "" || key.Object == "" || !res.Valid() {
 		return nil, &apiError{Code: "bad_request", Detail: fmt.Sprintf("container %s: a key and positive resources are required", key)}

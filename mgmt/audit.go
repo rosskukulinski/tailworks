@@ -89,27 +89,36 @@ type ChainStatus struct {
 	Records  int    `json:"records"`
 	BrokenAt int64  `json:"brokenAt,omitempty"` // seq of the first bad record
 	Error    string `json:"error,omitempty"`
+
+	// PrunedThrough: audit retention deleted the records up to this seq
+	// (retention.go); 0 = none.
+	PrunedThrough int64 `json:"prunedThrough,omitempty"`
 }
 
 // VerifyChain recomputes every hash and link of a chain, and checks the
 // chain head (detects truncation of the tail). pubKey (optional) verifies
-// hostSig on every record.
+// hostSig on every record. The records and the head come from one
+// snapshot (AuditChainSnapshot), so a concurrent append is not mistaken
+// for tampering.
 func VerifyChain(ctx context.Context, s Store, chain string, pubKey ed25519.PublicKey) ChainStatus {
 	st := ChainStatus{Chain: chain, OK: true}
-	recs, err := s.ListAudit(ctx, AuditFilter{Chain: chain})
+	snap, err := s.AuditChainSnapshot(ctx, chain)
 	if err != nil {
 		return ChainStatus{Chain: chain, Error: err.Error()}
 	}
-	st.Records = len(recs)
+	recs, hseq, hhash := snap.Records, snap.HeadSeq, snap.HeadHash
+	st.Records, st.PrunedThrough = len(recs), snap.Checkpoint.Seq
 	fail := func(seq int64, f string, a ...any) ChainStatus {
 		st.OK, st.BrokenAt, st.Error = false, seq, fmt.Sprintf(f, a...)
 		return st
 	}
-	prev := ""
-	var lastSeq int64
+	// Audit retention (retention.go) deleted the records up to the
+	// checkpoint: the first one kept must link to its hash.
+	prev := snap.Checkpoint.Hash
+	lastSeq := snap.Checkpoint.Seq
 	for i, r := range recs {
-		if r.Seq != int64(i+1) {
-			return fail(r.Seq, "sequence gap: expected %d", i+1)
+		if want := snap.Checkpoint.Seq + int64(i+1); r.Seq != want {
+			return fail(r.Seq, "sequence gap: expected %d", want)
 		}
 		h, err := HashRecord(r.Raw)
 		if err != nil {
@@ -132,10 +141,6 @@ func VerifyChain(ctx context.Context, s Store, chain string, pubKey ed25519.Publ
 			}
 		}
 		prev, lastSeq = r.Hash, r.Seq
-	}
-	hseq, hhash, err := s.AuditHead(ctx, chain)
-	if err != nil {
-		return fail(0, "head: %v", err)
 	}
 	if hseq != lastSeq || hhash != prev {
 		return fail(lastSeq+1, "chain head mismatch (records removed or appended out of band)")

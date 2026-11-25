@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd"
+	"github.com/rosskukulinski/tailworks/hostd"
 )
 
 // internetStandIn is the hermetic public internet for E2E-CONTAINER:
@@ -96,7 +96,7 @@ for d in sorted(os.listdir("/sys/block")):
     major, minor = map(int, open("/sys/block/%s/dev" % d).read().split(":"))
     m = {"dev": "%d:%d" % (major, minor)}
     for where in ("tmp", "dev"):
-        p = "/%s/twd-probe-%s" % (where, d)
+        p = "/%s/tw-probe-%s" % (where, d)
         try:
             os.mknod(p, 0o600 | stat.S_IFBLK, os.makedev(major, minor)); m["mknod_" + where] = "ok"
         except OSError as e: m["mknod_" + where] = en(e)
@@ -112,7 +112,7 @@ for l in open("/proc/self/mountinfo"):
     f = l.split()
     if f[4] in ("/", "/dev"): out[("root" if f[4] == "/" else "dev") + "_nodev"] = "nodev" in f[5].split(",")
 try:
-    os.mkfifo("/tmp/twd-probe-fifo"); os.unlink("/tmp/twd-probe-fifo"); out["mkfifo"] = "ok"
+    os.mkfifo("/tmp/tw-probe-fifo"); os.unlink("/tmp/tw-probe-fifo"); out["mkfifo"] = "ok"
 except OSError as e: out["mkfifo"] = en(e)
 try:
     open("/dev/null", "w").write("x"); out["dev_null"] = "ok"
@@ -125,7 +125,7 @@ const fetchScript = `
 import json, ssl, sys, urllib.request
 ctx = ssl.create_default_context(cafile=sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2] else None
 try:
-    r = urllib.request.urlopen(urllib.request.Request(sys.argv[1], headers={"x-from-guest": "1", "x-twd-object": "forged"}), timeout=20, context=ctx)
+    r = urllib.request.urlopen(urllib.request.Request(sys.argv[1], headers={"x-from-guest": "1", "x-tw-object": "forged"}), timeout=20, context=ctx)
     print(json.dumps({"status": r.status, "body": r.read().decode()}))
 except Exception as e:
     print(json.dumps({"error": type(e).__name__ + ": " + str(e)}))
@@ -207,7 +207,7 @@ func testEgress(t *testing.T, ev *egressEnv, set func(string, any)) {
 		if r["status"] != float64(200) || json.Unmarshal([]byte(fmt.Sprint(r["body"])), &body) != nil {
 			t.Fatalf("%v", r)
 		}
-		if body.FromParent != "eg" || body.URL != "http://api.internal/v1?x=1" || body.Headers["x-twd-object"] != "" || body.Headers["x-from-guest"] != "1" {
+		if body.FromParent != "eg" || body.URL != "http://api.internal/v1?x=1" || body.Headers["x-tw-object"] != "" || body.Headers["x-from-guest"] != "1" {
 			t.Fatalf("%+v", body)
 		}
 		ok := false

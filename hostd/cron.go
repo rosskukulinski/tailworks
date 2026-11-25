@@ -11,8 +11,10 @@ import (
 	"sort"
 	"time"
 
-	"github.com/rosskukulinski/twd/internal/cron"
-	"github.com/rosskukulinski/twd/netd"
+	"github.com/rosskukulinski/tailworks/hostd/gen"
+	"github.com/rosskukulinski/tailworks/internal/cron"
+	"github.com/rosskukulinski/tailworks/internal/wallclock"
+	"github.com/rosskukulinski/tailworks/netd"
 )
 
 // Cron triggers (wrangler.jsonc "triggers": {"crons": [...]}).
@@ -30,16 +32,26 @@ import (
 //     stepped forwards (or a host that slept) does not backfill the missed
 //     minutes. Like Cloudflare's, delivery is best effort, not exactly once.
 //   - A trigger whose previous run is still going is skipped, not queued.
+//     A run lasts until scheduled() and its ctx.waitUntil() work settle
+//     (the runtime wrapper collects waitUntil promises and answers only
+//     after them), so work left in waitUntil still counts as in flight.
 //   - A run is bounded by Config.CronTimeout (wall clock) and counts as an
 //     in-flight request, so a blue/green switch drains it like any other.
+//     At the timeout hostd drops the run's connection, which makes workerd
+//     cancel it, waitUntil work included, so a timed-out run does not keep
+//     going beside the next one (H17, #152). It is logged as
+//     "cron trigger timed out".
 //   - The invocation reaches workerd only over the instance's private
-//     ingress, as cf.twd {kind: "scheduled"}, which only hostd can set (it
-//     overwrites cf.twd on every tailnet request). The platform wrapper
+//     ingress, as cf.tw {kind: "scheduled"}, which only hostd can set (it
+//     overwrites cf.tw on every tailnet request). The platform wrapper
 //     accepts only crons the deployment declares.
 
 // DefaultCronTimeout bounds one scheduled() run (Cloudflare's limit for
 // cron triggers is 15 minutes of wall time).
 const DefaultCronTimeout = 15 * time.Minute
+
+// errCronTimeout: a run hit Config.CronTimeout and was cancelled.
+var errCronTimeout = errors.New("scheduled() exceeded the cron timeout")
 
 // CronResult is one scheduled() run's outcome, as workerd reports it.
 type CronResult struct {
@@ -91,16 +103,21 @@ func (h *Host) cronDue(now time.Time) []cronRun {
 			w.mu.Unlock()
 			continue
 		}
+		if w.cronLast.IsZero() {
+			w.cronLast = h.cronLasts.load(w.tenantID+"/"+w.name, now) // cronlast.go: what ran before a restart (#594)
+		}
 		if !minute.After(w.cronLast) {
 			w.mu.Unlock() // this minute (or a later one, before a clock step back) already ran
 			continue
 		}
 		w.cronLast = minute
+		h.cronLasts.save(w.tenantID+"/"+w.name, minute)
 		for _, expr := range inst.app.Crons {
 			s, err := cron.Parse(expr)
 			if err != nil || !s.Matches(minute) {
 				continue // validated at deploy; an error here cannot happen
 			}
+			// limits.md#cron-no-overlap
 			if w.cronRunning[expr] {
 				h.log.Warn("cron trigger skipped: previous run still in progress", "workload", w.name, "cron", expr, "scheduledTime", minute)
 				continue
@@ -143,7 +160,7 @@ func (h *Host) now() time.Time {
 	if h.nowFn != nil {
 		return h.nowFn()
 	}
-	return time.Now()
+	return wallclock.Now() // cron is wall-clock time
 }
 
 // runScheduled runs one due trigger and clears its running mark.
@@ -157,6 +174,8 @@ func (h *Host) runScheduled(r cronRun) {
 	res, err := h.invokeCron(h.ctx, r.w, r.cron, r.at)
 	log := h.log.With("workload", r.w.name, "tenant", r.w.tenantID, "cron", r.cron, "scheduledTime", r.at, "ms", time.Since(st).Milliseconds())
 	switch {
+	case errors.Is(err, errCronTimeout):
+		log.Warn("cron trigger timed out", "outcome", "exceededTimeout", "err", err)
 	case err != nil:
 		log.Warn("cron trigger failed", "err", err)
 	case res.Outcome != "ok":
@@ -167,7 +186,7 @@ func (h *Host) runScheduled(r cronRun) {
 }
 
 // RunCron runs one of a workload's declared cron triggers now, outside its
-// schedule (twd dev --test-scheduled, tests). at is the controller's
+// schedule (tw dev --test-scheduled, tests). at is the controller's
 // scheduledTime. It skips the schedule and lease checks but not the
 // declared-cron check.
 func (h *Host) RunCron(ctx context.Context, tenantID, workload, cronExpr string, at time.Time) (CronResult, error) {
@@ -181,9 +200,8 @@ func (h *Host) RunCron(ctx context.Context, tenantID, workload, cronExpr string,
 }
 
 // invokeCron sends one scheduled() invocation to the workload's active
-// instance (cf.twd.kind = scheduled) and waits for its outcome.
-func (h *Host) invokeCron(ctx context.Context, w *workload, cronExpr string, at time.Time) (CronResult, error) {
-	var res CronResult
+// instance (cf.tw.kind = scheduled) and waits for its outcome.
+func (h *Host) invokeCron(ctx context.Context, w *workload, cronExpr string, at time.Time) (res CronResult, err error) {
 	actx, cancel := context.WithTimeout(ctx, h.cfg.DrainTimeout+5*time.Second)
 	inst, release := w.acquire(actx)
 	cancel()
@@ -202,18 +220,24 @@ func (h *Host) invokeCron(ctx context.Context, w *workload, cronExpr string, at 
 	}
 	ctx, cancel = context.WithTimeout(ctx, timeout)
 	defer cancel()
+	trace := newTraceID()
 	blob, _ := json.Marshal(map[string]any{
-		"twd":     map[string]any{"kind": "scheduled", "cron": cronExpr, "scheduledTime": at.UnixMilli(), "workload": w.name},
-		"traceId": newTraceID(),
+		// The ticket lets scheduled() create objects through its guarded env.
+		"tw": map[string]any{"kind": "scheduled", "cron": cronExpr, "scheduledTime": at.UnixMilli(), "workload": w.name,
+			"ticket": gen.CreateTicket(inst.macKey(), trace, wallclock.Now())},
+		"traceId": trace,
 	})
-	req, _ := http.NewRequestWithContext(ctx, "POST", "http://platform/_twd/scheduled", nil)
+	req, _ := http.NewRequestWithContext(ctx, "POST", "http://platform/_tw/scheduled", nil)
 	req.Header.Set(netd.HeaderCF, string(blob))
+	cs := h.tel.startCron(w, inst, cronExpr, trace, req) // crontrace.go
+	defer func() { cs.end(res, err) }()
 	// inst.direct's client timeout is for short admin calls; a run may take
 	// up to CronTimeout, bounded by ctx instead.
 	resp, err := (&http.Client{Transport: inst.direct.Transport}).Do(req)
 	if err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return res, fmt.Errorf("scheduled() exceeded the %v cron timeout", timeout)
+			// Dropping the connection cancels the run in workerd.
+			return res, fmt.Errorf("%w (%v): the run was cancelled", errCronTimeout, timeout)
 		}
 		return res, err
 	}

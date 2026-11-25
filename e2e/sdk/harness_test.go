@@ -1,13 +1,13 @@
 //go:build sdk
 
 // Package sdk is the M5 SDK conformance suite (make test-sdk): real
-// Cloudflare Agents SDK and Vercel AI SDK code on twd's process tier
-// (twd-hostd + generated platform + stock workerd), driven over a hermetic
+// Cloudflare Agents SDK and Vercel AI SDK code on tailworks' process tier
+// (tw-hostd + generated platform + stock workerd), driven over a hermetic
 // tailnet (testcontrol + local DERP/STUN). No real tailnet, no LLM keys.
 //
 // Two hosts share one control plane: host A runs the agent apps, host B the
-// MCP servers, so agent → MCP calls cross the tailnet (netd refuses
-// same-host sibling hairpins; see TestSameHostMCPRefused).
+// MCP servers, so agent → MCP calls cross the tailnet (a same-host call
+// takes netd's in-process hop instead; see SameHostMCP).
 package sdk
 
 import (
@@ -22,11 +22,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd"
-	"github.com/rosskukulinski/twd/hostd/fakemgmt"
-	"github.com/rosskukulinski/twd/hostd/hostdtest"
-	"github.com/rosskukulinski/twd/hostd/mgmtapi"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/hostd"
+	"github.com/rosskukulinski/tailworks/hostd/fakemgmt"
+	"github.com/rosskukulinski/tailworks/hostd/hostdtest"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 	"tailscale.com/tailcfg"
 )
 
@@ -51,7 +51,12 @@ func app(name string) string {
 	return p
 }
 
-func startSuite(t *testing.T) *suite {
+func startSuite(t *testing.T) *suite { return startSuiteOn(t, hostdtest.BackendFake) }
+
+// startSuiteOn is startSuite with both hosts on backend: fakemgmt, or the
+// real mgmt (hostdtest.BackendReal, which declares only tailnet.objects
+// classes, as a deployed control plane does).
+func startSuiteOn(t *testing.T, backend string) *suite {
 	t.Helper()
 	ctl, err := nettest.StartControl()
 	if err != nil {
@@ -66,8 +71,9 @@ func startSuite(t *testing.T) *suite {
 	})
 	start := func(prefix string) *hostdtest.Env {
 		return hostdtest.Start(t, hostdtest.Options{ControlURL: ctl.URL, Fake: fakemgmt.Config{StaticKey: nettest.DummyKey}, Ephemeral: true,
-			HostnamePrefix: prefix, KillTombstone: 5 * time.Second, Sandbox: hostd.SandboxAuto, // twd-hostd's default
-			Tenant: mgmtapi.Tenant{Tailnet: "ttest.ts.net", ControlURL: ctl.URL, MintMode: "static"}})
+			HostnamePrefix: prefix, KillTombstone: 5 * time.Second, Sandbox: hostd.SandboxAuto, // tw-hostd's default
+			Tenant:  mgmtapi.Tenant{Tailnet: "ttest.ts.net", ControlURL: ctl.URL, MintMode: "static"},
+			Backend: backend})
 	}
 	s := &suite{t: t, ctl: ctl, a: start("a-"), b: start("b-")}
 	// Every SDK app ran under the host's process sandbox (Seatbelt on

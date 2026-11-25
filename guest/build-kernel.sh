@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Build the twd microVM guest kernel (Linux only; no root needed).
+# Build the tailworks microVM guest kernel (Linux only; no root needed).
 #
 #   TARGETARCH=amd64|arm64 guest/build-kernel.sh [OUT_DIR]   (default: this
 #   machine's arch, guest/out/kernel-<arch>)
 #
 # kernel.org linux-$KERNEL_VERSION with Firecracker's CI guest config for that
-# kernel line, plus guest/kernel/twd.config (erofs + overlayfs for container
+# kernel line, plus guest/kernel/tw.config (erofs + overlayfs for container
 # mode; the same fragment for both arches). All three are pinned in
 # guest/inputs.sh. Cross builds need the cross compiler
 # (gcc-x86-64-linux-gnu / gcc-aarch64-linux-gnu) and both need flex, bison,
@@ -26,7 +26,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 guest_arch "${TARGETARCH:-}"
 OUT=${1:-$ROOT/guest/out/kernel-$GARCH}
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-1762560000} # 2025-11-08T00:00:00Z
-FRAGMENT=$ROOT/guest/kernel/twd.config
+FRAGMENT=$ROOT/guest/kernel/tw.config
 [ "$(uname -s)" = Linux ] || { echo "build-kernel: Linux only (run it in Lima)" >&2; exit 1; }
 
 # Always the triplet-prefixed toolchain, native builds too (Debian/Ubuntu's
@@ -57,13 +57,13 @@ fi
 src_tar=$(fetch "$KERNEL_URL" "$KERNEL_SHA256")
 config=$(fetch "$KERNEL_CONFIG_URL_BASE/$FCARCH/vmlinux-$KERNEL_VERSION.config" "$config_sha" "fc-ci-vmlinux-$KERNEL_VERSION-$FCARCH.config")
 
-WORK=$(mktemp -d /tmp/twd-kernel-$GARCH.XXXXXX)
+WORK=$(mktemp -d /tmp/tw-kernel-$GARCH.XXXXXX)
 trap 'rm -rf "$WORK"' EXIT
 echo "build-kernel: linux-$KERNEL_VERSION for $GARCH ($CC_VERSION, on $(uname -m)) in $WORK"
 tar -xJf "$src_tar" -C "$WORK"
 K=$WORK/linux-$KERNEL_VERSION
 export KBUILD_BUILD_TIMESTAMP="$(date -u -d "@$SOURCE_DATE_EPOCH" '+%a %b %e %H:%M:%S UTC %Y')"
-export KBUILD_BUILD_USER=twd KBUILD_BUILD_HOST=twd KBUILD_BUILD_VERSION=1
+export KBUILD_BUILD_USER=tw KBUILD_BUILD_HOST=tw KBUILD_BUILD_VERSION=1
 mk() { make -C "$K" -s ARCH="$KARCH" CROSS_COMPILE="$CROSS" "$@"; }
 
 cp "$config" "$K/.config"

@@ -12,8 +12,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/rosskukulinski/twd/guest/proto"
-	"github.com/rosskukulinski/twd/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/guest/proto"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
 )
 
 // The guest network is the same in every VM (each has its own host-side
@@ -44,20 +44,20 @@ func writeConfigDrive(path string, s sandbox.Spec, mtu int, token string, extra 
 	return writeDrive(path, gc, func(tw *tar.Writer) error { return tarDir(tw, s.AppDir) })
 }
 
-// The warm-up app on a pool VM's config drive: twd's own, no tenant code.
+// The warm-up app on a pool VM's config drive: tailworks' own, no tenant code.
 // One request through a Durable Object with SQLite and KV storage faults in
 // the code paths the platform runtime uses (workerd, V8, the isolate, SQLite),
 // on top of the workerd binary itself. It listens on loopback only.
 const (
 	warmupCapnp = `using Workerd = import "/workerd/workerd.capnp";
 const config :Workerd.Config = (
-  services = [ (name = "main", worker = .w), (name = "do", disk = (path = "/run/twd/app/warmdo", writable = true)) ],
-  sockets = [ (name = "in", address = "127.0.0.1:8080", service = "main", http = (cfBlobHeader = "x-twd-cf")) ],
+  services = [ (name = "main", worker = .w), (name = "do", disk = (path = "/run/tailworks/app/warmdo", writable = true)) ],
+  sockets = [ (name = "in", address = "127.0.0.1:8080", service = "main", http = (cfBlobHeader = "x-tw-cf")) ],
 );
 const w :Workerd.Worker = (
   compatibilityDate = "2026-04-01",
   modules = [ (name = "w.js", esModule = embed "w.js") ],
-  durableObjectNamespaces = [ (className = "W", uniqueKey = "twd-warmup", enableSql = true) ],
+  durableObjectNamespaces = [ (className = "W", uniqueKey = "tw-warmup", enableSql = true) ],
   durableObjectStorage = (localDisk = "do"),
   bindings = [ (name = "NS", durableObjectNamespace = "W") ],
 );
@@ -93,7 +93,7 @@ func writePoolDrive(path string, mtu int, token string) error {
 		if err := tw.WriteHeader(&tar.Header{Name: "warmdo/", Mode: 0o700, Typeflag: tar.TypeDir}); err != nil {
 			return err
 		}
-		for name, body := range map[string]string{"config.capnp": warmupCapnp, "w.js": warmupJS, proto.WarmupMarker: "twd warm-up app (no tenant code)\n"} {
+		for name, body := range map[string]string{"config.capnp": warmupCapnp, "w.js": warmupJS, proto.WarmupMarker: "tw warm-up app (no tenant code)\n"} {
 			if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o600, Size: int64(len(body)), Typeflag: tar.TypeReg}); err != nil {
 				return err
 			}

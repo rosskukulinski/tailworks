@@ -1,7 +1,8 @@
 import http from "node:http";
 import fs from "node:fs";
 import net from "node:net";
-import { getCaller, requireCaller, CallerError, fetch as twdFetch, dispatcher, installGlobalDispatcher, enforceEgress } from "@twd/node";
+import util from "node:util";
+import { getCaller, requireCaller, CallerError, fetch as twFetch, dispatcher, installGlobalDispatcher, enforceEgress } from "@tailworks/node";
 // The /net sandbox probe must use the UNPATCHED connect (enforceEgress
 // tunnels raw connects through the proxy; the probe measures the OS
 // sandbox). net.connect() itself goes through Socket.prototype.connect, so
@@ -15,21 +16,21 @@ const json = (res, code, v) => { res.writeHead(code, { "content-type": "applicat
 
 async function egress(mode, url) {
   let r;
-  if (mode === "sdk") r = await twdFetch(url);
+  if (mode === "sdk") r = await twFetch(url);
   else if (mode === "global") r = await fetch(url); // NODE_USE_ENV_PROXY + HTTPS_PROXY/HTTP_PROXY (CONNECT)
   else if (mode === "http") {
     r = await new Promise((resolve, reject) => http.get(url, (res) => { let b = ""; res.on("data", (c) => (b += c)); res.on("end", () => resolve({ status: res.statusCode, headers: new Headers(Object.entries(res.headers).filter(([, v]) => typeof v === "string")), text: async () => b })); }).on("error", reject));
   } else if (mode === "connect") {
     // A raw CONNECT tunnel through the proxy (what env proxies do for https).
-    const pu = new URL(process.env.TWD_EGRESS_PROXY), t = new URL(url);
+    const pu = new URL(process.env.TW_EGRESS_PROXY), t = new URL(url);
     const auth = "Basic " + Buffer.from(decodeURIComponent(pu.username) + ":" + decodeURIComponent(pu.password)).toString("base64");
     const status = await new Promise((resolve, reject) => {
       const q = http.request({ host: pu.hostname, port: pu.port, method: "CONNECT", path: `${t.hostname.replace(/^\[|\]$/g, "")}:${t.port || 80}`.replace(/^([^:]*:[^:]*:.*):(\d+)$/, "[$1]:$2"), agent: false, headers: { "proxy-authorization": auth } });
-      q.on("connect", (res, sock) => { sock.destroy(); resolve({ code: res.statusCode, err: res.headers["twd-error"] }); });
+      q.on("connect", (res, sock) => { sock.destroy(); resolve({ code: res.statusCode, err: res.headers["tw-error"] }); });
       q.on("error", reject);
       q.end();
     });
-    return { status: status.code, twdError: status.err ?? null, body: "" };
+    return { status: status.code, twError: status.err ?? null, body: "" };
   } else if (mode === "undici") {
     const undici = await import("undici");
     r = await undici.fetch(url, { dispatcher: await dispatcher(undici) });
@@ -37,7 +38,7 @@ async function egress(mode, url) {
     // would now bypass the env proxy); put the egress proxy back.
     await installGlobalDispatcher(undici);
   } else throw new Error("mode");
-  return { status: r.status, twdError: r.headers.get("twd-error"), body: await r.text() };
+  return { status: r.status, twError: r.headers.get("tw-error"), body: await r.text() };
 }
 
 http.createServer(async (req, res) => {
@@ -52,7 +53,7 @@ http.createServer(async (req, res) => {
       case "/maybe": return json(res, 200, { caller: getCaller(req) });
       case "/egress": return json(res, 200, await egress(u.searchParams.get("mode") ?? "sdk", u.searchParams.get("url")));
       case "/proc": return json(res, 200, { pid: process.pid, rss: process.memoryUsage().rss, uptimeMs: Math.round(process.uptime() * 1000),
-        env: Object.keys(process.env).filter((k) => k.startsWith("TWD_") || k.endsWith("PROXY") || k.endsWith("proxy")).sort() });
+        env: Object.keys(process.env).filter((k) => k.startsWith("TW_") || k.endsWith("PROXY") || k.endsWith("proxy")).sort() });
       case "/fs": {
         // Sandbox probe: only the outcome (and a length), never file contents.
         const p = u.searchParams.get("path"), op = u.searchParams.get("op") ?? "read";
@@ -75,6 +76,29 @@ http.createServer(async (req, res) => {
         });
         return json(res, 200, r);
       }
+      case "/listen": {
+        // Sandbox probe: a raw TCP listener (libuv's TCP handle, below any
+        // JS patching, as hostile code would), on host:port, or with no
+        // bind at all (unbound: the kernel picks *:<ephemeral>). It stays
+        // open for 20 s; the test dials it from outside.
+        const { TCP, constants } = process.binding("tcp_wrap");
+        const h = new TCP(constants.SERVER);
+        const host = u.searchParams.get("host");
+        let err = 0;
+        if (host) err = host.includes(":") ? h.bind6(host, Number(u.searchParams.get("port")), 0) : h.bind(host, Number(u.searchParams.get("port")));
+        if (!err) err = h.listen(16);
+        if (err) { h.close(); return json(res, 200, { ok: false, code: util.getSystemErrorName(err) }); }
+        h.onconnection = (_e, c) => c?.close();
+        setTimeout(() => h.close(), 20000);
+        const a = {};
+        h.getsockname(a);
+        return json(res, 200, { ok: true, address: a.address, port: a.port });
+      }
+      case "/signal": {
+        // Sandbox probe: kill(pid, 0). Only the outcome is returned.
+        try { process.kill(Number(u.searchParams.get("pid")), 0); return json(res, 200, { ok: true }); }
+        catch (e) { return json(res, 200, { ok: false, code: e.code ?? String(e) }); }
+      }
       case "/log": console.log("probe-log-line", u.searchParams.get("m")); return json(res, 200, { ok: true });
       case "/crash": json(res, 200, { bye: process.pid }); setTimeout(() => process.exit(3), 10); return;
       case "/stream": {
@@ -89,4 +113,6 @@ http.createServer(async (req, res) => {
     if (e instanceof CallerError) return json(res, 401, { code: e.code, message: e.message });
     json(res, 500, { error: String(e?.cause?.message ?? e?.message ?? e) });
   }
-}).listen(...(process.env.TWD_SOCKET ? [process.env.TWD_SOCKET] : [port, "127.0.0.1"]));
+// PROBE_LISTEN_ALL: listen as many apps do, ignoring HOST (Node then binds
+// every interface).
+}).listen(...(process.env.TW_SOCKET ? [process.env.TW_SOCKET] : process.env.PROBE_LISTEN_ALL ? [port] : [port, "127.0.0.1"]));

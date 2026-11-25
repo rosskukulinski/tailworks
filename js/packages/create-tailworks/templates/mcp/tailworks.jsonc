@@ -1,0 +1,12 @@
+{
+  "$schema": "https://raw.githubusercontent.com/rosskukulinski/tailworks/master/schema/tailworks.schema.json",
+  "tailnet": {
+    "tags": ["tag:tw-wl-mcp"]
+    // TwBudget (the budget counters) isn't in "objects", so it is internal:
+    // a plain Durable Object with no tailnet node of its own
+  }
+  // policy: grant callers the app cap, e.g.
+  //   { "src": ["tag:tw-agent-support"], "dst": ["tag:tw-wl-mcp"], "ip": ["tcp:80"],
+  //     "app": { "example.com/cap/mcp": [{ "tools": ["lookup_order", "refund"],
+  //              "limits": { "refund": { "maxUsd": 50, "perDayUsd": 200 } } }] } }
+}

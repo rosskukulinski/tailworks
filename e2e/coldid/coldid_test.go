@@ -2,7 +2,7 @@
 
 // Package coldid measures a new object's cold identity: create → the
 // object's own node reachable from a caller, stage by stage. It drives the
-// real code path: twd-mgmt (in process, SQLite, its v1 API on a unix
+// real code path: tw-mgmt (in process, SQLite, its v1 API on a unix
 // socket, exactly as hostd calls it) mints through the mint worker and
 // releases the key over the fenced credential long-poll; a netd Registry
 // joins the node with that key (hostd's KeySource loop); a separate caller
@@ -37,9 +37,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/mgmt"
-	"github.com/rosskukulinski/twd/netd"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/mgmt"
+	"github.com/rosskukulinski/tailworks/netd"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 	"tailscale.com/ipn"
 )
 
@@ -49,7 +49,7 @@ type env struct {
 	controlURL string
 	tailnet    string
 	apiBase    string // the Tailscale API for mgmt's broker ("" = production)
-	apiKeyFile string
+	oauthFile  string // the tenant's OAuth client (mgmt mints with it)
 	tags       []string
 	prefix     string // class slug: object IDs/hostnames are <prefix>-<id10>
 	callerKey  func(ctx context.Context) (string, error)
@@ -59,7 +59,7 @@ type env struct {
 	mutate     func(*mgmt.Config)               // optional (A/B experiments)
 	// dial is when the caller sends its first request:
 	//   "netmap"    as soon as the peer is in its netmap (a client polling MagicDNS);
-	//   "ready"     after the node is ready (tsnet.Up returned; twd's old "ready");
+	//   "ready"     after the node is ready (tsnet.Up returned; tailworks' old "ready");
 	//   "path"      once the caller's own status shows a path (netd.WaitPeerPath).
 	dial   string
 	onMint func(keyID string) // every key mgmt minted (cleanup)
@@ -249,7 +249,7 @@ func (p *peerWatch) wait(ctx context.Context, host string) (time.Time, string, e
 func runColdIdentity(t *testing.T, e env) []sample {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
-	dir, err := os.MkdirTemp("/tmp", "twd-coldid-")
+	dir, err := os.MkdirTemp("/tmp", "tw-coldid-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +263,7 @@ func runColdIdentity(t *testing.T, e env) []sample {
 		defer capt.mu.Unlock()
 		if strings.Contains(capt.buf.String(), "tskey-") {
 			t.Error("a key reached the logs")
-		} else if f := os.Getenv("TWD_COLDID_DUMP"); strings.HasPrefix(f, "/") {
+		} else if f := os.Getenv("TW_COLDID_DUMP"); strings.HasPrefix(f, "/") {
 			os.WriteFile(f, capt.buf.Bytes(), 0o600) // redacted tsnet + mgmt logs, for timelines
 		}
 		for _, r := range capt.recs {
@@ -284,7 +284,7 @@ func runColdIdentity(t *testing.T, e env) []sample {
 	}
 	cfg := mgmt.Config{Store: store, Custody: custody, Broker: &mgmt.Broker{BaseURL: e.apiBase}, IDSecret: bytes.Repeat([]byte{7}, 32),
 		ReapInterval: time.Hour, Log: log}
-	if n, _ := strconv.Atoi(os.Getenv("TWD_COLDID_WARM")); n > 0 {
+	if n, _ := strconv.Atoi(os.Getenv("TW_COLDID_WARM")); n > 0 {
 		cfg.WarmKeys = n // the warm-key pool; the deploy seeds it, each take refills it
 	}
 	if e.mutate != nil {
@@ -325,11 +325,11 @@ func runColdIdentity(t *testing.T, e env) []sample {
 			bb, _ := json.Marshal(body)
 			rd = bytes.NewReader(bb)
 		}
-		req, _ := http.NewRequestWithContext(ctx, method, "http://twd-mgmt"+path, rd)
+		req, _ := http.NewRequestWithContext(ctx, method, "http://tw-mgmt"+path, rd)
 		if rd != nil {
 			req.Header.Set("Content-Type", "application/json")
 		}
-		req.Header.Set("Twd-Host-ID", hostID)
+		req.Header.Set("Tw-Host-ID", hostID)
 		req.Header.Set(mgmt.HostTokenHeader, hostToken)
 		resp, err := hc.Do(req)
 		if err != nil {
@@ -346,7 +346,7 @@ func runColdIdentity(t *testing.T, e env) []sample {
 	}
 	var tn struct{ TenantID string }
 	if _, err := call(ctx, "POST", "/v1/tenants", map[string]any{"tailnet": e.tailnet, "controlURL": e.controlURL,
-		"mintMode": "apikey", "apiKeyFile": e.apiKeyFile}, &tn); err != nil {
+		"mintMode": "oauth", "oauthClientFile": e.oauthFile}, &tn); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := call(ctx, "PUT", "/v1/hosts/"+hostID, map[string]any{"capacityNodes": 64, "tiers": []string{"process"}}, nil); err != nil {
@@ -354,7 +354,7 @@ func runColdIdentity(t *testing.T, e env) []sample {
 	}
 	var dep mgmt.DeployResponse
 	if _, err := call(ctx, "POST", "/v1/deployments", map[string]any{"tenantID": tn.TenantID, "workload": e.prefix,
-		"namespaces": []mgmt.ClassConfig{{Class: e.prefix, Tags: e.tags, Agent: true}}}, &dep); err != nil {
+		"namespaces": []mgmt.ClassConfig{{Class: e.prefix, Tags: e.tags}}}, &dep); err != nil {
 		t.Fatal(err)
 	}
 
@@ -380,7 +380,7 @@ func runColdIdentity(t *testing.T, e env) []sample {
 		}
 	})
 	reg, err := netd.New(netd.Config{ControlURL: e.controlURL, StateRoot: filepath.Join(dir, "nodes"), Keys: keys, Ephemeral: true,
-		Tags: e.tags, Logger: log, TSNetLogs: os.Getenv("TWD_COLDID_DUMP") != "", Upstream: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok") })})
+		Tags: e.tags, Logger: log, TSNetLogs: os.Getenv("TW_COLDID_DUMP") != "", Upstream: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok") })})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +406,7 @@ func runColdIdentity(t *testing.T, e env) []sample {
 	}
 	clog := log.With("object", "caller", "src", "tsnet")
 	caller, err := nettest.NewNodeLogf(ctx, e.controlURL, ck, e.prefix+"-caller", filepath.Join(dir, "caller"), func(f string, a ...any) {
-		if os.Getenv("TWD_COLDID_DUMP") != "" {
+		if os.Getenv("TW_COLDID_DUMP") != "" {
 			clog.Debug(netd.Redact(fmt.Sprintf(f, a...)))
 		}
 	})
@@ -439,7 +439,7 @@ func runColdIdentity(t *testing.T, e env) []sample {
 			continue
 		}
 		out = append(out, s)
-		if i == 0 && os.Getenv("TWD_COLDID_DUMP") != "" {
+		if i == 0 && os.Getenv("TW_COLDID_DUMP") != "" {
 			capt.mu.Lock()
 			for _, l := range strings.Split(capt.buf.String(), "\n") {
 				if strings.Contains(l, s.Object) {
@@ -700,14 +700,14 @@ func report(t *testing.T, e env, ss []sample) string {
 
 // TestColdIdentityAggregate pools result files into one p50/p95 table:
 //
-//	TWD_COLDID_AGG='results/real-*.json' go test -tags e2e -run Aggregate ./e2e/coldid/
+//	TW_COLDID_AGG='results/real-*.json' go test -tags e2e -run Aggregate ./e2e/coldid/
 //
 // Node-side stages pool every file; caller stages are split by dial mode
 // (files whose env ends in -dialready vs the rest).
 func TestColdIdentityAggregate(t *testing.T) {
-	pat := os.Getenv("TWD_COLDID_AGG")
+	pat := os.Getenv("TW_COLDID_AGG")
 	if pat == "" {
-		t.Skip("TWD_COLDID_AGG not set")
+		t.Skip("TW_COLDID_AGG not set")
 	}
 	files, _ := filepath.Glob(pat)
 	var all []sample

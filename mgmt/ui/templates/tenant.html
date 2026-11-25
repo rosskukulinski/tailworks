@@ -1,0 +1,69 @@
+{{define "content"}}
+<h1><span class="mono">{{.Tenant.Tailnet}}</span> <span class="muted mono">{{.Tenant.TenantID}}</span></h1>
+<p class="crumbs"><a href="/ui/#tenants">← All tenants</a></p>
+
+<div class="grid">
+  <div class="card">
+    <h2>Configuration</h2>
+    <p class="hint">Secrets are never returned by the API, so they aren't shown here.</p>
+    <dl class="kv">
+      <dt>Tailnet</dt><dd class="mono">{{.Tenant.Tailnet}}</dd>
+      {{if .Tenant.ControlURL}}<dt>Control URL</dt><dd class="mono">{{.Tenant.ControlURL}}</dd>{{end}}
+      <dt title="How mgmt gets node keys from this tailnet's control plane">Mint mode</dt><dd class="mono">{{.Tenant.MintMode}}</dd>
+      {{if .Tenant.APIKeyFile}}<dt>Headscale API key file</dt><dd class="mono">{{.Tenant.APIKeyFile}}</dd>{{end}}
+      {{if .Tenant.OAuthClientID}}<dt>OAuth client</dt><dd class="mono">{{.Tenant.OAuthClientID}}{{if .Tenant.OAuthClientFile}} <span class="muted">{{.Tenant.OAuthClientFile}}</span>{{end}}</dd>{{end}}
+      <dt>Max objects</dt><dd class="mono">{{.Tenant.MaxObjects}}</dd>
+      <dt>Registrations / min</dt><dd class="mono">{{.Tenant.RegistrationsPerMinute}} <span class="muted">(effective {{printf "%.1f" .Tenant.EffectiveRegistrationsPerMinute}})</span></dd>
+      <dt title="Objects waiting for a node key (registration throttle)">Mint queue</dt><dd class="mono">{{.Tenant.MintQueue}}</dd>
+      <dt>Pool / tier</dt><dd class="mono">{{or .Tenant.Pool "—"}} / {{or .Tenant.Tier "—"}}</dd>
+      <dt>OBO public key</dt><dd class="mono">{{or .Tenant.OBOPublicKey "—"}}</dd>
+      <dt>Created</dt><dd class="mono">{{stamp .Tenant.CreatedAt}}</dd>
+    </dl>
+  </div>
+  <div class="card">
+    <h2>Objects by status</h2>
+    <dl class="kv" data-live="counts">
+      <dt>Live</dt><dd class="mono">{{.Live}} of {{.Tenant.MaxObjects}} allowed</dd>
+      {{range $k, $v := .Counts}}<dt>{{$k}}</dt><dd class="mono">{{$v}}</dd>{{end}}
+    </dl>
+  </div>
+</div>
+
+<section data-live="deployments">
+  <div class="sect-head"><div><h2>Deployments <span class="count">{{len .Deployments}}</span></h2></div></div>
+  <div class="tbl">
+  <table>
+    <thead><tr><th>Workload</th><th>Status</th><th>Address</th><th>Host</th><th>Deployed by</th><th>Deployed</th><th>Deployment ID</th></tr></thead>
+    <tbody>{{range .Deployments}}<tr>
+      <td><a href="/ui/deployments/{{.DeploymentID}}"><b>{{.Workload}}</b></a> <a class="small" href="/ui/tenants/{{.TenantID}}/workloads/{{.Workload}}/logs">logs</a></td>
+      <td>{{template "status" .Status}}</td>
+      <td class="mono">{{if .Endpoint.MagicDNS}}<a href="http://{{.Endpoint.MagicDNS}}/" rel="noreferrer">{{.Endpoint.MagicDNS}}</a>{{else}}<span class="muted">—</span>{{end}}</td>
+      <td class="mono"><a href="/ui/hosts/{{.Host}}">{{.Host}}</a></td>
+      <td>{{or .DeployedBy "—"}}</td>
+      <td class="small">{{since .CreatedAt}}</td>
+      <td class="mono muted">{{.DeploymentID}}</td>
+    </tr>{{else}}<tr><td colspan="7" class="empty">This tenant has no deployments.</td></tr>{{end}}</tbody>
+  </table>
+  </div>
+</section>
+
+<section data-live="objects">
+  <div class="sect-head"><div><h2>Objects <span class="count">{{len .Objects}}</span></h2></div></div>
+  <div class="tbl">
+  <table class="objects">
+    <thead>{{template "objhead"}}</thead>
+    <tbody>{{template "objrows" .Objects}}{{if not .Objects}}<tr><td colspan="9" class="empty">This tenant has no objects.</td></tr>{{end}}</tbody>
+  </table>
+  </div>
+</section>
+
+<section class="card act">
+  <h2>Delete this tenant</h2>
+  <form method="post" action="/ui/tenants/{{.Tenant.TenantID}}/delete"
+        data-confirm="Delete tenant {{.Tenant.Tailnet}} ({{.Tenant.TenantID}})? With force, its live objects are killed first.">
+    <label><input type="checkbox" name="force" value="true"> Force (kill {{.Live}} live object(s) and stop deployments first)</label>
+    <button type="submit" class="danger">Delete tenant</button>
+  </form>
+  <p class="small muted">Without force, deletion is refused while objects are live (tenant_has_live_objects).</p>
+</section>
+{{end}}

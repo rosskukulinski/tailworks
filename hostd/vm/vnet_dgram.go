@@ -19,7 +19,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/link/ethernet"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 
-	"github.com/rosskukulinski/twd/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
 )
 
 // dgramPair returns a connected AF_UNIX SOCK_DGRAM pair sized for an

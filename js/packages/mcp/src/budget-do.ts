@@ -1,10 +1,10 @@
-// TwdBudget: the Durable Object behind @twd/mcp budget(). Declare it in
-// wrangler.jsonc durable_objects and mark it `"node": false` in twd.jsonc
-// (it is internal state; it needs no tailnet node of its own).
+// TwBudget: the Durable Object behind @tailworks/mcp budget(). Declare it in
+// wrangler.jsonc durable_objects and leave it out of tailworks.jsonc's
+// tailnet.objects (it is internal state; it needs no tailnet node of its own).
 // @ts-ignore: provided by workerd
 import { DurableObject } from "cloudflare:workers";
 
-export class TwdBudget extends (DurableObject as any) {
+export class TwBudget extends (DurableObject as any) {
   declare ctx: any;
   async reserve(amount: number, limit: number | null, day: string) {
     if (typeof amount !== "number" || !Number.isFinite(amount) || amount < 0) throw new Error("budget: amount must be a non-negative number");

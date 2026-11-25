@@ -11,11 +11,11 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/rosskukulinski/twd/hostd/hostdtest"
+	"github.com/rosskukulinski/tailworks/hostd/hostdtest"
 )
 
 // TestCloudflareAgents runs real `agents` Agent classes (facet and plain-DO
-// egress modes) on twd and checks the SDK surface the RFC relies on.
+// egress modes) on tailworks and checks the SDK surface the RFC relies on.
 func TestCloudflareAgents(t *testing.T) {
 	s := startSuite(t)
 	dCF := s.a.Deploy(app("cfagents"), "cfagents", nil)
@@ -156,14 +156,19 @@ func TestCloudflareAgents(t *testing.T) {
 		}
 	})
 
-	t.Run("SameHostMCPRefused", func(t *testing.T) {
-		// Documented limitation: an object's egress may not hairpin to a
-		// sibling node on the same host (netd forbidden_destination; RFC
-		// §4.5). Here the agent targets its own app's /mcp on host A.
+	t.Run("SameHostMCP", func(t *testing.T) {
+		// An object's egress to a node on the same host is delivered by
+		// netd's in-process hop (RFC §4.8, ADR-053), after the
+		// same netmap and packet-filter checks; it no longer needs
+		// --allow-sibling-egress. Here the agent targets its own app's /mcp
+		// on host A.
 		code, r := s.getJSON(base + "/agents/state-agent/mc2/mcp-client?url=" + url.QueryEscape(base+"/mcp"))
 		t.Logf("same-host addMcpServer: %d %v", code, r)
-		if r["error"] == nil || !strings.Contains(js(r), "forbidden_destination") && !strings.Contains(js(r), "403") {
-			t.Fatalf("same-host MCP call should be refused: %d %v", code, r)
+		if code != 200 || r["error"] != nil || get(r, "add", "state") != "ready" {
+			t.Fatalf("same-host addMcpServer: %d %v", code, r)
+		}
+		if get(r, "lookup", "isError") != false || !strings.Contains(js(r["lookup"]), "shipped") {
+			t.Fatalf("same-host allowed tool: %v", r["lookup"])
 		}
 	})
 
@@ -187,14 +192,14 @@ func TestCloudflareAgents(t *testing.T) {
 	t.Run("UnsupportedBindings", func(t *testing.T) {
 		code, r := s.getJSON(base + "/agents/state-agent/pr1/probe")
 		t.Logf("probe: %d %v", code, r)
-		for _, k := range []string{"AI", "KV", "WORKFLOW", "BROWSER", "LOADER"} {
+		// env.KV is absent because this app binds no kv_namespaces; Workers
+		// KV itself is supported (TestOAuthProviderKV, ADR-037).
+		for _, k := range []string{"AI", "BROWSER", "LOADER"} { // Workflows: TestWorkflowApprovals
 			if r[k] != "undefined" {
 				t.Fatalf("env.%s is %v; expected absent (update docs/COMPAT.md)", k, r[k])
 			}
 		}
-		if !strings.Contains(js(r["email"]), "not supported on twd") {
-			t.Fatalf("cloudflare:email: %v", r["email"])
-		}
+		emailCheck(t)
 		// subAgent() inside a facet: the facet's Dynamic Worker has no
 		// ctx.exports for tenant classes (documented gap).
 		if !strings.Contains(js(r["subAgent"]), "not found in worker exports") {

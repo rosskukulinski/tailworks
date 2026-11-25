@@ -1,0 +1,12 @@
+{
+  "name": "compat",
+  "tailnet": {
+    "tags": ["tag:ttest"],
+    "objects": {
+      // facet mode (default): the object's egress is its own node
+      "Facet": { "tags": ["tag:ttest"] },
+      // plain-DO mode
+      "Plain": { "tags": ["tag:ttest"], "egress": "workload" },
+    },
+  },
+}

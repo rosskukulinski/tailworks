@@ -11,17 +11,17 @@ package attacks
 // Fixed invariant: tenant code can only produce records of kind
 // `tenant_note` with source `tenant`; the platform assigns the object, the
 // trace ID and the acting principal; the tenant's claims survive only
-// inside the note's detail (claimedKind, parentHint). twd-mgmt refuses any
+// inside the note's detail (claimedKind, parentHint). tw-mgmt refuses any
 // host-submitted record whose source is "tenant" with another kind, and
-// `twd audit` renders tenant notes distinctly. This test calls the real
+// `tw audit` renders tenant notes distinctly. This test calls the real
 // sanitizer hostd uses (hostd.TenantAuditRecord) and mgmt's ingest check.
 
 import (
 	"strings"
 	"testing"
 
-	"github.com/rosskukulinski/twd/hostd"
-	"github.com/rosskukulinski/twd/mgmt"
+	"github.com/rosskukulinski/tailworks/hostd"
+	"github.com/rosskukulinski/tailworks/mgmt"
 )
 
 func TestRT02_AppAuditCannotForgeAuthorization(t *testing.T) {

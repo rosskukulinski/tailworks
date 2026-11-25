@@ -3,6 +3,7 @@
 package procsb_test
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"os"
@@ -13,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/internal/procsb"
+	"github.com/rosskukulinski/tailworks/internal/procsb"
 )
 
 func needLandlock(t *testing.T) int {
@@ -160,7 +161,7 @@ func TestSandboxProbes(t *testing.T) {
 	}
 	// Pathname unix sockets outside the own dirs: Landlock refuses the
 	// connect from ABI 9; below that only servers that Guard their
-	// listener refuse it (all of twd's do).
+	// listener refuse it (all of tailworks' do).
 	got := probe(t, p, procsb.ProbeConnectUnix, usock)
 	t.Logf("unguarded unix socket outside own dirs (ABI %d): %s", abi, got)
 	if abi >= 9 && got == "ok" {
@@ -250,7 +251,9 @@ const w :Workerd.Worker = ( modules = [ (name = "w.js", esModule = embed "w.js")
 		t.Fatal(err)
 	}
 	defer cmd.Process.Kill()
-	hc := &http.Client{Transport: &http.Transport{Dial: func(_, _ string) (net.Conn, error) { return net.Dial("unix", sock) }}}
+	hc := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", sock)
+	}}}
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		r, err := hc.Get("http://x/")

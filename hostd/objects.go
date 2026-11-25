@@ -11,10 +11,11 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd/mgmtapi"
-	"github.com/rosskukulinski/twd/netd"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/netd"
 )
 
 const (
@@ -27,6 +28,9 @@ const (
 // object is one tailnet identity hosted here: a workload entry node
 // (Class == "") or a Durable Object instance.
 type object struct {
+	// V is the objects.json record version (ADR-041 §4):
+	// 0 = written before versioning (the same layout as 1).
+	V        int      `json:"v"`
 	ID       string   `json:"id"` // mgmt object ID
 	NetdID   string   `json:"netdID"`
 	TenantID string   `json:"tenantID"`
@@ -50,9 +54,18 @@ type object struct {
 	reserved  bool          // a pool node offered to a create in flight (poolnodes.go)
 	readyCh   chan struct{} // closed on ready/failed/killed
 	joinFails int           // consecutive bootstrap failures (retryNode)
-}
 
-func (o *object) namespace() string { return mgmtapi.Namespace(o.Workload, o.Class) }
+	// kill is the state of killLocal's run for this object (kill.go).
+	kill *killRun
+
+	// nodeGen counts node starts (startNodeLocked); an awaitNode whose
+	// start was superseded leaves the object alone (nodestart.go).
+	nodeGen uint64
+
+	// report is mgmt's answer to the node's ready reports; egress waits
+	// for it (egressgate.go, #331).
+	report readyReport
+}
 
 // key is the local lookup key: tenant|workload|class|name.
 func (o *object) key() string { return objKey(o.TenantID, o.Workload, o.Class, o.Name) }
@@ -156,7 +169,11 @@ func (h *Host) ensure(ctx context.Context, w *workload, class, name string, pare
 		// (it would hold the identity a later object is given).
 		return nil, &apiError{Code: "bad_request", Detail: "class " + class + " is reserved"}
 	}
+	if e := nodelessClass(w, class); e != nil { // nodeless.go
+		return nil, e
+	}
 	key := objKey(w.tenantID, w.name, class, name)
+	pubOK := false
 	for {
 		h.mu.Lock()
 		if o := h.byKey[key]; o != nil {
@@ -178,6 +195,19 @@ func (h *Host) ensure(ctx context.Context, w *workload, class, name string, pare
 				return nil, &apiError{Code: "identity_pending", Detail: "object creation still in progress"}
 			}
 		}
+		if e := badObjectName(class, name); e != nil { // objname.go
+			h.mu.Unlock()
+			return nil, e
+		}
+		if needsAdmission(class, parent) && !pubOK && !h.takeAdmissionLocked(key) {
+			h.mu.Unlock()
+			if !h.pubCreates.has(w.tenantID, w.name, class, name) {
+				return nil, &apiError{Code: "create_not_admitted", Detail: "object " + class + "/" + name + " does not exist and no request admitted its creation: " +
+					"a tailnet request reaches new objects through the env tailworks hands the handler (not a raw or cached binding), and a public request only through public.create"}
+			}
+			pubOK = true // a publicly created name (ADR-029 D5)
+			continue
+		}
 		c := &createCall{done: make(chan struct{})}
 		h.creating[key] = c
 		h.mu.Unlock()
@@ -197,7 +227,16 @@ func (h *Host) ensure(ctx context.Context, w *workload, class, name string, pare
 }
 
 func (h *Host) create(ctx context.Context, w *workload, class, name string, parent *object, caps json.RawMessage, ttl, actingFor string) (*object, error) {
-	if w.tenant == nil {
+	gateDone, gateErr := h.gateCreate() // teardown.go
+	if gateErr != nil {
+		return nil, gateErr
+	}
+	defer gateDone()
+	// deploy sets w.tenant under w.mu from another syncAssignments goroutine.
+	w.mu.Lock()
+	deployed := w.tenant != nil
+	w.mu.Unlock()
+	if !deployed {
 		return nil, &apiError{Code: "upstream_unavailable", Detail: "workload " + w.name + " is not deployed"}
 	}
 	hn := h.hostnameFor(w.name, class, name)
@@ -205,21 +244,21 @@ func (h *Host) create(ctx context.Context, w *workload, class, name string, pare
 		actingFor = parent.ActingFor // a sub-agent acts for its root's principal
 	}
 	req := mgmtapi.CreateObjectRequest{TenantID: w.tenantID, Workload: w.name, Namespace: mgmtapi.Namespace(w.name, class), ObjectName: name,
-		Caps: caps, TTL: ttl, Hostname: hn, ActingFor: actingFor}
+		Caps: caps, TTL: ttl, Hostname: hn, ActingFor: actingFor, Epoch: w.epochNow()}
 	if parent != nil {
 		req.Parent = &mgmtapi.ObjectRef{ObjectID: parent.ID}
 	}
 	// A pre-joined node of this class, if one is idle (ADR-031): mgmt takes
 	// it only for a new, non-ephemeral object of exactly its tags.
 	var pool *object
-	if parent == nil && ttl == "" && poolable(class) {
+	pooled := parent == nil && ttl == "" && poolable(class)
+	if pooled {
 		h.mu.Lock()
 		pool = h.takePoolLocked(w.tenantID, w.name, class)
 		h.mu.Unlock()
 		if pool != nil {
 			req.PoolObjectID = pool.ID
 		}
-		defer h.noteDemand(w.tenantID, w.name, class)
 	}
 	release := func() {
 		if pool != nil {
@@ -235,13 +274,18 @@ func (h *Host) create(ctx context.Context, w *workload, class, name string, pare
 		release()
 		return nil, err
 	}
+	if pooled {
+		// Only a create mgmt accepted is demand: a refused one (an
+		// undeclared class) must not start a pool refill mgmt refuses too.
+		defer h.noteDemand(w.tenantID, w.name, class)
+	}
 	if pool != nil && resp.Status != mgmtapi.StatusAssigned {
 		release() // mgmt minted instead (an existing object, or the node didn't qualify)
 		pool = nil
 	}
 	if resp.Hostname != "" && resp.Hostname != hn {
 		// mgmt names the node (M2: the object ID); keep the host's prefix
-		// (per-run test names, ttest-*/twd-*).
+		// (per-run test names, ttest-*/tw-*).
 		hn = resp.Hostname
 		if p := h.cfg.HostnamePrefix; p != "" && !strings.HasPrefix(hn, p) {
 			hn = label(p + hn)
@@ -322,6 +366,7 @@ func (h *Host) startNodeLocked(o *object) {
 	}
 	eph := h.cfg.Ephemeral
 	opts := netd.ObjectOptions{Hostname: o.Hostname, Tags: o.Tags, Ephemeral: &eph}
+	opts.HTTPS = h.tailnetHTTPSLocked(o) // tailnethttps.go
 	if o.isPublicNode() {
 		// A public node never starts without its public options (it would
 		// otherwise come up as a tailnet listener): wait for applyPublic.
@@ -341,15 +386,16 @@ func (h *Host) startNodeLocked(o *object) {
 	if o.Status != statusReady {
 		o.Status = statusPending
 	}
-	go h.awaitNode(t, o, no)
+	go h.awaitNode(t, o, no, o.bumpNodeGenLocked())
 }
 
-func (h *Host) awaitNode(t *tenant, o *object, no *netd.Object) {
+func (h *Host) awaitNode(t *tenant, o *object, no *netd.Object, gen uint64) {
+	// limits.md#node-join-after-create
 	ctx, cancel := context.WithTimeout(h.ctx, 3*time.Minute)
 	defer cancel()
 	err := no.Ready(ctx)
 	h.mu.Lock()
-	if o.Status == statusKilled {
+	if o.Status == statusKilled || o.nodeGen != gen {
 		h.mu.Unlock()
 		return
 	}
@@ -358,10 +404,10 @@ func (h *Host) awaitNode(t *tenant, o *object, no *netd.Object) {
 		ch := o.readyCh
 		o.readyCh = make(chan struct{}) // a later ensure may retry
 		o.joinFails++
-		fails := o.joinFails
+		fails, errMsg := o.joinFails, o.Err
 		h.mu.Unlock()
 		closeOnce(ch)
-		h.log.Warn("object node failed", "object", o.ID, "err", o.Err, "attempt", fails)
+		h.log.Warn("object node failed", "object", o.ID, "err", errMsg, "attempt", fails)
 		h.retryNode(o, fails)
 		return
 	}
@@ -383,20 +429,24 @@ func (h *Host) awaitNode(t *tenant, o *object, no *netd.Object) {
 		}
 	}
 	ch := o.readyCh
+	magicDNS, ip, errMsg := o.MagicDNS, o.IP, o.Err // read under h.mu: a later start may rewrite them
 	h.mu.Unlock()
 	if nameTaken {
 		if err := t.reg.SetPublicEnabled(o.NetdID, false); err != nil {
 			h.log.Warn("public node: closing listener after a name clash failed", "object", o.ID, "err", netd.RedactError(err))
 		}
-		h.log.Error("public node name taken; public ingress stays closed", "object", o.ID, "want", o.Hostname, "got", o.MagicDNS)
-		h.audit.add(mgmtapi.AuditRecord{ObjectID: o.ID, Kind: "deny", Code: "public_name_taken", Detail: mgmtapi.Note(o.Err), TraceID: newTraceID()})
+		h.log.Error("public node name taken; public ingress stays closed", "object", o.ID, "want", o.Hostname, "got", magicDNS)
+		h.audit.add(mgmtapi.AuditRecord{ObjectID: o.ID, Kind: "deny", Code: "public_name_taken", Detail: mgmtapi.Note(errMsg), TraceID: newTraceID()})
 	}
 	rctx, rcancel := context.WithTimeout(h.ctx, 15*time.Second)
 	var epoch int64
 	if w := h.workloadOf(o); w != nil {
 		epoch = w.epochNow()
 	}
-	if err := h.mgmt.Ready(rctx, o.ID, mgmtapi.ReadyRequest{NodeID: info.NodeID, StableNodeID: info.NodeID, MagicDNS: o.MagicDNS, Epoch: epoch}); err != nil {
+	req := mgmtapi.ReadyRequest{NodeID: info.NodeID, StableNodeID: info.NodeID, MagicDNS: magicDNS, Epoch: epoch}
+	err = h.mgmt.Ready(rctx, o.ID, req)
+	h.noteReport(o, req.StableNodeID, err) // egressgate.go (#331)
+	if err != nil {
 		h.log.Warn("mgmt ready failed", "object", o.ID, "err", err)
 		if e, ok := mgmtapi.AsError(err); ok && e.Code == mgmtapi.CodeKilled {
 			rcancel()
@@ -404,16 +454,19 @@ func (h *Host) awaitNode(t *tenant, o *object, no *netd.Object) {
 			go h.killLocal(o.ID, "killed during join")
 			return
 		}
+		if retryableReady(err) {
+			go h.retryReady(o, req, gen) // readyretry.go (#210, #604)
+		}
 	}
 	rcancel()
 	closeOnce(ch)
 	h.saveObjects()
-	h.log.Info("object node ready", "object", o.ID, "hostname", o.Hostname, "ip", o.IP, "join_ms", info.JoinMS, "rejoined", info.Rejoined, "reminted", info.Reminted)
+	h.log.Info("object node ready", "object", o.ID, "hostname", o.Hostname, "ip", ip, "join_ms", info.JoinMS, "rejoined", info.Rejoined, "reminted", info.Reminted)
 }
 
 // retryNode re-joins a node whose bootstrap failed while its workload is
 // still deployed, after a backoff (1, 2, 4, 8, 16 s; 5 tries). The case
-// that needs it: a `twd deploy` while this host is still bringing up the
+// that needs it: a `tw deploy` while this host is still bringing up the
 // previous deployment's nodes bumps the lease epoch, so the mint in flight
 // is refused with lease_lost; nothing else would retry it and the workload
 // would stay "active" with a dead entry node ("node minted" forever). The
@@ -429,17 +482,7 @@ func (h *Host) retryNode(o *object, fails int) {
 	}
 	backoff := time.Second << (fails - 1)
 	time.AfterFunc(backoff, func() {
-		if as, err := h.mgmt.Assignments(h.ctx, h.cfg.HostID); err == nil {
-			for _, a := range as {
-				if a.TenantID == w.tenantID && a.Workload == w.name {
-					w.mu.Lock()
-					if a.Epoch > w.epoch {
-						w.epoch = a.Epoch
-					}
-					w.mu.Unlock()
-				}
-			}
-		}
+		h.refreshEpoch(w) // readyretry.go
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		if o.live || o.terminal() || o.Status == statusReady || !w.isActive() {
@@ -450,10 +493,18 @@ func (h *Host) retryNode(o *object, fails int) {
 	})
 }
 
+// closeOnceMu makes closeOnce's check and close one step: a kill and the
+// node join that it races (awaitNode) each close the object's readyCh
+// outside h.mu, and two unguarded check-then-close calls panicked hostd
+// with "close of closed channel".
+var closeOnceMu sync.Mutex
+
 func closeOnce(ch chan struct{}) {
 	if ch == nil {
 		return
 	}
+	closeOnceMu.Lock()
+	defer closeOnceMu.Unlock()
 	select {
 	case <-ch:
 	default:
@@ -493,18 +544,26 @@ func (h *Host) waitReady(ctx context.Context, o *object, timeout time.Duration) 
 // killLocal is kill tier 1 on this host: RST every flow of the object's
 // node (netd), keep it as a tombstone that RSTs new connections, stop the
 // object in workerd, and record audit. mgmt deletes the device (tier 2).
-func (h *Host) killLocal(objectID, reason string) {
+// It returns when all of that is done, also for a caller that finds the
+// kill already running (kill.go), with the in-process step's error.
+func (h *Host) killLocal(objectID, reason string) error {
 	h.mu.Lock()
 	o := h.objects[objectID]
-	if o == nil || o.Status == statusKilled {
+	if o == nil {
 		h.mu.Unlock()
-		return
+		return nil
+	}
+	if o.Status == statusKilled {
+		h.mu.Unlock()
+		return h.awaitKill(o, reason)
 	}
 	o.Status = statusKilled
+	run := newKillRun()
+	o.kill = run
 	delete(h.byKey, o.key())
+	h.dropAdmissionLocked(o) // admitkill.go (#153)
 	ch := o.readyCh
 	t := h.tenants[o.TenantID]
-	w := h.workloads[o.TenantID+"/"+o.Workload]
 	live := o.live
 	h.mu.Unlock()
 	closeOnce(ch)
@@ -522,14 +581,10 @@ func (h *Host) killLocal(objectID, reason string) {
 			h.log.Info("object killed (tier 1)", "object", o.ID, "flows", rep.FlowsAborted, "abort_ms", rep.AbortMS)
 		}
 	}
-	if o.ActingFor == OriginPublic && o.Class != "" {
+	if o.Class != "" { // admitkill.go: not only ActingFor "public" (#153)
 		h.pubCreates.forget(o.TenantID, o.Workload, o.Class, o.Name)
 	}
-	if w != nil && o.Class != "" && !o.isPublicNode() && !o.isPool() { // workerd never had a pool node's class
-		if inst := w.current(); inst != nil {
-			inst.admin(map[string]any{"kind": "admin", "op": "kill", "class": o.Class, "name": o.Name, "reason": reason})
-		}
-	}
+	inErr := h.killInProcess(o, reason) // kill.go
 	if o.Class != "" {
 		// Its container goes with it (ADR-032 D2): VMM SIGKILL, no grace.
 		if h.ctr.destroy(ctrKey{o.TenantID, o.Workload, o.Class, o.Name}, "object killed: "+trimReason(reason), 0) {
@@ -539,6 +594,8 @@ func (h *Host) killLocal(objectID, reason string) {
 	h.audit.add(mgmtapi.AuditRecord{ObjectID: o.ID, Kind: "kill", Detail: mgmtapi.Note(reason), TraceID: newTraceID()})
 	h.saveObjects()
 	h.log.Info("object killed", "object", o.ID, "reason", reason, "ms", time.Since(st).Milliseconds())
+	h.endKill(run, inErr)
+	return inErr
 }
 
 // ---- persistence ----
@@ -554,7 +611,7 @@ func (h *Host) forgetLocked(o *object) {
 	}
 }
 
-// Purge forgets every killed object (twd down --purge), removes its saved
+// Purge forgets every killed object (tw down --purge), removes its saved
 // node state (its device is gone; a kill's tombstone would otherwise keep
 // the state dir until it expires, and a redeploy of the same identity would
 // re-mint instead of joining fresh), and saves objects.json without them.
@@ -586,6 +643,24 @@ func (h *Host) Purge() []string {
 	return ids
 }
 
+// objectsVersion is the objects.json record version this hostd writes.
+const objectsVersion = 1
+
+// decodeObjects parses objects.json, refusing records newer than this
+// hostd knows.
+func decodeObjects(b []byte) ([]*object, error) {
+	var list []*object
+	if err := json.Unmarshal(b, &list); err != nil {
+		return nil, fmt.Errorf("hostd: objects.json: %w", err)
+	}
+	for _, o := range list {
+		if o.V > objectsVersion {
+			return nil, fmt.Errorf("hostd: objects.json record v%d was written by a newer tailworks (this one reads up to v%d); upgrade tw-hostd", o.V, objectsVersion)
+		}
+	}
+	return list, nil
+}
+
 func (h *Host) objectsPath() string { return filepath.Join(h.cfg.DataDir, "objects.json") }
 
 func (h *Host) loadObjects() error {
@@ -596,9 +671,9 @@ func (h *Host) loadObjects() error {
 	if err != nil {
 		return err
 	}
-	var list []*object
-	if err := json.Unmarshal(b, &list); err != nil {
-		return fmt.Errorf("hostd: objects.json: %w", err)
+	list, err := decodeObjects(b)
+	if err != nil {
+		return err
 	}
 	for _, o := range list {
 		o.readyCh = make(chan struct{})
@@ -619,6 +694,7 @@ func (h *Host) saveObjects() {
 	list := make([]*object, 0, len(h.objects))
 	for _, o := range h.objects {
 		c := *o
+		c.V = objectsVersion
 		list = append(list, &c)
 	}
 	h.mu.Unlock()

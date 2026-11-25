@@ -7,24 +7,24 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rosskukulinski/twd/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
 )
 
 const guestSeesCPUCap = false
 
 // ctrSmokeBackend is Firecracker (needs root and KVM,
-// TWD_VM_CONTAINER_KERNEL with erofs, TWD_VM_ROOTFS).
+// TW_VM_CONTAINER_KERNEL with erofs, TW_VM_ROOTFS).
 func ctrSmokeBackend(t *testing.T) (sandbox.ContainerBackend, []string) {
 	t.Helper()
-	kernel, rootfs := os.Getenv("TWD_VM_CONTAINER_KERNEL"), os.Getenv("TWD_VM_ROOTFS")
+	kernel, rootfs := os.Getenv("TW_VM_CONTAINER_KERNEL"), os.Getenv("TW_VM_ROOTFS")
 	if kernel == "" || rootfs == "" {
-		t.Skip("TWD_VM_CONTAINER_KERNEL / TWD_VM_ROOTFS not set")
+		t.Skip("TW_VM_CONTAINER_KERNEL / TW_VM_ROOTFS not set")
 	}
-	// twd-hostd's defaults: the warm pool (auto) and snapshots on. They
+	// tw-hostd's defaults: the warm pool (auto) and snapshots on. They
 	// are for Durable Object guests; containers must still cold-boot next
 	// to them (checkCtrColdBoot).
-	b, err := New(Config{Kernel: kernel, ContainerKernel: kernel, Rootfs: rootfs, BootArgs: os.Getenv("TWD_VM_BOOTARGS"), HugePages: os.Getenv("TWD_VM_HUGEPAGES"), Helper: os.Getenv("TWD_VM_HELPER"),
-		Snapshot: os.Getenv("TWD_VM_E2E_SNAPSHOT") != "0"})
+	b, err := New(Config{Kernel: kernel, ContainerKernel: kernel, Rootfs: rootfs, BootArgs: os.Getenv("TW_VM_BOOTARGS"), HugePages: os.Getenv("TW_VM_HUGEPAGES"), Helper: os.Getenv("TW_VM_HELPER"),
+		Snapshot: os.Getenv("TW_VM_E2E_SNAPSHOT") != "0"})
 	if err != nil {
 		t.Skip(err)
 	}

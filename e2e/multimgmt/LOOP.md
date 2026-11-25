@@ -1,10 +1,10 @@
-# Loop: multi-replica twd-mgmt on Postgres (chaos + invariants)
+# Loop: multi-replica tw-mgmt on Postgres (chaos + invariants)
 
 Run with: `/loop Follow e2e/multimgmt/LOOP.md` (self-paced, no interval).
 
-You are validating that **N ≥ 2 twd-mgmt replicas sharing one Postgres** are
+You are validating that **N ≥ 2 tw-mgmt replicas sharing one Postgres** are
 safe and live when replicas die, stall, lose the database, or disagree on the
-time. twd-mgmt has **no leader election**: every replica serves the API, runs
+time. tw-mgmt has **no leader election**: every replica serves the API, runs
 the reaper, and runs mint workers, so correctness rests entirely on Postgres
 conditional writes plus whatever in-memory state each replica keeps. Your job
 is to find where that breaks, prove it with a reproducible test, and record it.
@@ -21,8 +21,8 @@ State lives in `e2e/multimgmt/LEDGER.md`. Read it first, every iteration.
    `mm-loop` only (create it from master on the first iteration). Never
    commit `e2e/multimgmt/results/` (gitignored by `e2e/*/results/`).
 3. **Only kill what you started.** Every process and container you start is
-   recorded in `e2e/multimgmt/results/pids` / named `twd-mm-*`. Kill by that
-   record, never by name pattern. Remove `twd-mm-*` containers when a run ends.
+   recorded in `e2e/multimgmt/results/pids` / named `tw-mm-*`. Kill by that
+   record, never by name pattern. Remove `tw-mm-*` containers when a run ends.
 4. **Budget:** one experiment per iteration, ≤ 10 min wall clock per run, ≤ 3
    reruns of the same seed. If a run hangs past budget, that is a finding
    (liveness), not a reason to retry forever.
@@ -58,7 +58,7 @@ State lives in `e2e/multimgmt/LEDGER.md`. Read it first, every iteration.
 5. **For CONFIRMED:**
    - Write the smallest deterministic regression test: a unit test where
      possible, named `TestMM_<Hxx>_<slug>`. On Postgres it is gated by
-     `TWD_TEST_POSTGRES_DSN`, as in `scripts/test-pg.sh`.
+     `TW_TEST_POSTGRES_DSN`, as in `scripts/test-pg.sh`.
    - Add a `t.Skip("mm-loop: Hxx open")` only in `propose` mode, so `make test`
      stays green.
    - Record the root cause with `file:line` and a fix sketch.
@@ -79,7 +79,7 @@ State lives in `e2e/multimgmt/LEDGER.md`. Read it first, every iteration.
 
 ## Harness (build once, in `e2e/multimgmt/`, build tag `e2emultimgmt`)
 
-- **Postgres:** `postgres:17-alpine` in OrbStack, named `twd-mm-pg`; copy the
+- **Postgres:** `postgres:17-alpine` in OrbStack, named `tw-mm-pg`; copy the
   start and readiness logic from `scripts/test-pg.sh`. Enable
   `log_lock_waits=on`, `deadlock_timeout=200ms` and
   `track_activity_query_size` large enough to see whole queries.
@@ -87,23 +87,23 @@ State lives in `e2e/multimgmt/LEDGER.md`. Read it first, every iteration.
   replica and Postgres. It supports `pass`, `delay(d)`, `blackhole` (accept
   connections but forward nothing) and `reset` (RST every connection). No new
   dependencies.
-- **Replicas:** N=3 real `twd-mgmt` processes, each with `-local-dev`, its own
+- **Replicas:** N=3 real `tw-mgmt` processes, each with `-local-dev`, its own
   `-state-dir` and `-socket`, and the same `-db postgres://…` (through its
   proxy). Use `-tsapi-url` pointing at a shared fake TS API, and
   `-custody setec -setec-url` pointing at a shared fake setec. Promote
   `newFakeTS` and `fakeSetec` into an importable `mgmt/mgmttest` package.
   The fake TS API must count `CreateKey` calls and devices per object.
-- **Front:** an in-test L7 proxy standing in for `svc:twd-mgmt`. It sends each
+- **Front:** an in-test L7 proxy standing in for `svc:tw-mgmt`. It sends each
   request to a replica chosen by policy: `random`, `sticky-per-client`,
   `pin(i)`, or `avoid(i)`. Every response carries the replica index so the
   history records which replica served it.
 - **Hosts:** fake hosts by default (goroutines that register, heartbeat every
   2 s, renew leases, fetch credentials, report ready, and obey
   revoke/revokeObjects). They record every lease epoch they believe they
-  hold, with timestamps. Add one real `twd-hostd` only for the S11 smoke test.
+  hold, with timestamps. Add one real `tw-hostd` only for the S11 smoke test.
 - **Faults:** SIGKILL, SIGSTOP/SIGCONT (a paused process is the classic
   zombie-writer case), graceful restart, a PG proxy fault per replica,
-  `docker restart twd-mm-pg`, and clock skew. Skew needs a hidden test-only
+  `docker restart tw-mm-pg`, and clock skew. Skew needs a hidden test-only
   flag; add `-test-clock-offset` behind the `e2emultimgmt` build tag or an
   env var that's refused unless `-local-dev` is set. Record that in the ledger.
 - **Workload generator (seeded):** a mix of deploy, create, spawn (trees up
@@ -143,10 +143,10 @@ State lives in `e2e/multimgmt/LEDGER.md`. Read it first, every iteration.
 | S2 | SIGKILL a random replica every 5–20 s; restart it after 3 s |
 | S3 | SIGSTOP one replica for 20–40 s (longer than the 15 s lease TTL) while it serves a hot tenant, then SIGCONT |
 | S4 | PG blackhole for one replica for 30 s; the others keep going |
-| S5 | `docker restart twd-mm-pg` mid-load, with transactions in flight |
+| S5 | `docker restart tw-mm-pg` mid-load, with transactions in flight |
 | S6 | 200 ms–2 s PG latency on one replica, so lock hold times grow |
 | S7 | All 3 replicas cold-start at once: (a) empty DB; (b) a DB at the pre-M7 schema (migration race) |
 | S8 | Clock skew of +5 s / −5 s / +20 s on one replica |
 | S9 | Hot tenant: 500 concurrent create/spawn spread across replicas (audit-head and throttle contention) |
 | S10 | Kill storm: overlapping cascade kills on the same trees from different replicas |
-| S11 | Host failover: a host dies, its leases expire, and the workload is redeployed through a different replica (one real twd-hostd) |
+| S11 | Host failover: a host dies, its leases expire, and the workload is redeployed through a different replica (one real tw-hostd) |

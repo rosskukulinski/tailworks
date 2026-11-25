@@ -1,4 +1,4 @@
-# oapi-codegen config: server interfaces + types for twd-mgmt. The spec itself
+# oapi-codegen config: server interfaces + types for tw-mgmt. The spec itself
 # is embedded as YAML by package api (api/spec.go), not as a base64 blob here.
 # Regenerate with `make api`; CI checks the output is current (`make api-check`).
 package: v1
@@ -13,4 +13,4 @@ output-options:
   skip-prune: false
   name-normalizer: ToCamelCaseWithInitialisms
   # Keep in sync with excludedTags in mgmt/api/v1/validate.go.
-  exclude-tags: [registry]
+  exclude-tags: [mcp, registry]

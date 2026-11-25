@@ -14,8 +14,9 @@ import (
 
 // TestStoreWarmKeyTakeOnce: concurrent takes of one pool hand out each key
 // once, only to the right (tenant, pool), never an expired one. SQLite and
-// (TWD_TEST_POSTGRES_DSN) Postgres.
+// (TW_TEST_POSTGRES_DSN) Postgres.
 func TestStoreWarmKeyTakeOnce(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		pa := PoolName([]string{"tag:b", "tag:a"}, false)
@@ -98,7 +99,7 @@ type poolEnv struct {
 }
 
 func newPoolEnv(t *testing.T, rpm int, mutate func(*Config)) *poolEnv {
-	e := newTestEnvWith(t, nil, func(c *Config) {
+	e := newTestEnvWith(t, func(c *Config) {
 		c.WarmKeys, c.WarmPoolInterval = 3, 50*time.Millisecond
 		if mutate != nil {
 			mutate(c)
@@ -106,13 +107,13 @@ func newPoolEnv(t *testing.T, rpm int, mutate func(*Config)) *poolEnv {
 	})
 	c, h1 := e.c, e.asHost("h1")
 	var tn struct{ TenantID string }
-	body := map[string]any{"tailnet": "t.ts.net", "mintMode": "apikey", "apiKeyFile": e.keyFile}
+	body := map[string]any{"tailnet": "t.ts.net", "mintMode": "oauth", "oauthClientFile": e.keyFile}
 	if rpm > 0 {
 		body["registrationsPerMinute"] = rpm
 	}
 	c.ok("POST", "/v1/tenants", body, &tn)
 	h1.ok("PUT", "/v1/hosts/h1", map[string]any{"capacityNodes": 100, "tiers": []string{"process"}}, nil)
-	bundle := makeBundle(t, map[string]string{"twd.jsonc": testTwdJSONC, "dist/index.js": "export default {}"})
+	bundle := makeBundle(t, map[string]string{"tailworks.jsonc": testTwJSONC, "dist/index.js": "export default {}"})
 	c.ok("POST", "/v1/deployments", map[string]any{"tenantID": tn.TenantID, "workload": "support", "bundle": bundle}, nil)
 	return &poolEnv{testEnv: e, h1: h1, tenant: tn.TenantID}
 }
@@ -171,8 +172,9 @@ func (f *fakeTS) wasDeleted(id string) bool {
 // credential is released through the normal fenced path; mint and release
 // are audited; the pool refills; a kill revokes the adopted key.
 func TestWarmKeyPool(t *testing.T) {
+	t.Parallel()
 	e := newPoolEnv(t, 0, nil)
-	support := PoolName([]string{"tag:twd-agent-support"}, false)
+	support := PoolName([]string{"tag:tw-agent-support"}, false)
 	rogue := PoolName([]string{"tag:crm"}, false)
 	e.waitWarm(t, support, 1, 5*time.Second)
 	e.waitWarm(t, rogue, 1, 5*time.Second)
@@ -184,13 +186,13 @@ func TestWarmKeyPool(t *testing.T) {
 	e.h1.ok("POST", "/v1/objects/"+o.ObjectID+"/credentials?epoch=1&wait=10", nil, &cred)
 	t.Logf("create → credential with a warm key: %v", time.Since(t0).Round(time.Millisecond))
 	obj, _ := e.store.GetObject(context.Background(), o.ObjectID) // the v1 view hides keyID
-	if !strings.HasPrefix(e.ts.keyDesc(obj.KeyID), "twd pool ") {
+	if !strings.HasPrefix(e.ts.keyDesc(obj.KeyID), "tw pool ") {
 		t.Fatalf("object key %s was not a pooled key (description %q)", obj.KeyID, e.ts.keyDesc(obj.KeyID))
 	}
 	e.ts.mu.Lock()
 	secret := e.ts.secrets[obj.KeyID]
 	for id, b := range e.ts.keys {
-		if b["description"] == "twd "+o.ObjectID {
+		if b["description"] == "tw "+o.ObjectID {
 			t.Errorf("a fresh key %s was minted for the object despite a warm one", id)
 		}
 	}
@@ -198,7 +200,7 @@ func TestWarmKeyPool(t *testing.T) {
 	if cred.AuthKey != secret {
 		t.Fatal("the released credential is not the adopted key")
 	}
-	if got := e.ts.keyTags(obj.KeyID); !slices.Equal(got, []string{"tag:twd-agent-support"}) || e.ts.keyEphemeral(obj.KeyID) {
+	if got := e.ts.keyTags(obj.KeyID); !slices.Equal(got, []string{"tag:tw-agent-support"}) || e.ts.keyEphemeral(obj.KeyID) {
 		t.Fatalf("adopted key tags %v ephemeral %v, want exactly the object's", got, e.ts.keyEphemeral(obj.KeyID))
 	}
 	if _, err := e.m.custody.Get(context.Background(), poolCustodyName(e.tenant, obj.KeyID)); err == nil {
@@ -262,12 +264,13 @@ func TestWarmKeyPool(t *testing.T) {
 // TestWarmKeyExpiry: unused pooled keys are revoked before their API expiry
 // (decided on the store clock) and replaced; their custody copies go too.
 func TestWarmKeyExpiry(t *testing.T) {
+	t.Parallel()
 	clk := &offsetClock{}
 	e := newPoolEnv(t, 0, func(c *Config) {
 		c.WarmKeyTTL = 3 * time.Minute
 		c.Store.(*SQLStore).SetClock(clk)
 	})
-	support := PoolName([]string{"tag:twd-agent-support"}, false)
+	support := PoolName([]string{"tag:tw-agent-support"}, false)
 	e.waitWarm(t, support, 1, 5*time.Second)
 	ws := e.m.warmStore()
 	before, _ := ws.ListWarmKeys(context.Background(), WarmKeyWarm)
@@ -294,29 +297,88 @@ func TestWarmKeyExpiry(t *testing.T) {
 			t.Fatal("expired warm keys were not revoked")
 		}
 	}
+	// revokeWarm deletes the custody copy after DeleteKey returns and the row
+	// last, so the API seeing the delete doesn't mean custody is clean yet
+	// (#248). Wait for the rows to go, then custody must be clean.
+	rowsLeft := func() []string {
+		ks, _ := ws.ListWarmKeys(context.Background(), "")
+		have := map[string]bool{}
+		for _, k := range ks {
+			have[k.KeyID] = true
+		}
+		var left []string
+		for _, k := range before {
+			if have[k.KeyID] {
+				left = append(left, k.KeyID)
+			}
+		}
+		return left
+	}
+	for dl := time.Now().Add(5 * time.Second); len(rowsLeft()) > 0; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(dl) {
+			t.Fatalf("rows of revoked keys %v kept", rowsLeft())
+		}
+	}
 	for _, k := range before {
 		if _, err := e.m.custody.Get(context.Background(), poolCustodyName(e.tenant, k.KeyID)); err == nil {
 			t.Errorf("custody copy of revoked key %s kept", k.KeyID)
 		}
 	}
-	e.waitWarm(t, support, 1, 5*time.Second) // replaced with fresh keys
-	recs, _ := e.store.ListAudit(context.Background(), AuditFilter{Chain: "mgmt"})
-	revokes := 0
-	for _, r := range recs {
-		if r.Kind == "revoke" {
-			revokes++
+	// expireWarm writes each key's "revoke" record after its DeleteKey
+	// returns, so seeing the delete at the API doesn't mean the record is
+	// there yet. Nor does a replacement key: the refill doesn't count keys
+	// inside the take margin, so it can mint one before they expire (#137).
+	// Wait for the records themselves.
+	unaudited := func() []string {
+		recs, _ := e.store.ListAudit(context.Background(), AuditFilter{Chain: "mgmt", TenantID: e.tenant, Kinds: []string{"revoke"}})
+		got := map[string]bool{}
+		for _, r := range recs {
+			var d struct{ KeyID string }
+			json.Unmarshal(r.Detail, &d)
+			got[d.KeyID] = true
+		}
+		var missing []string
+		for _, k := range before {
+			if !got[k.KeyID] {
+				missing = append(missing, k.KeyID)
+			}
+		}
+		return missing
+	}
+	for dl := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		missing := unaudited()
+		if len(missing) == 0 {
+			break
+		}
+		if time.Now().After(dl) {
+			t.Fatalf("no revoke record for %d of %d expired keys: %v", len(missing), len(before), missing)
 		}
 	}
-	if revokes < len(before) {
-		t.Fatalf("%d revoke records for %d expired keys", revokes, len(before))
+	e.waitWarm(t, support, 1, 5*time.Second) // replaced with fresh keys
+	// Drain revokes the keys that are warm when it runs. The pool loop keeps
+	// running, and the deployment is under an hour old, so it may refill
+	// right after (#137): check the drained keys, not an empty pool.
+	warm := func() map[string]bool {
+		ks, _ := ws.ListWarmKeys(context.Background(), WarmKeyWarm)
+		out := map[string]bool{}
+		for _, k := range ks {
+			if k.TenantID == e.tenant {
+				out[k.KeyID] = true
+			}
+		}
+		return out
 	}
+	pre := warm()
 	if n, err := e.m.DrainWarmKeys(context.Background()); err != nil || n == 0 {
 		t.Fatalf("drain: %d %v", n, err)
 	}
-	st, _ := e.m.WarmKeyStats(context.Background())
-	for k := range st {
-		if strings.HasPrefix(k, e.tenant+" ") {
-			t.Fatalf("after drain: %v", st)
+	post := warm()
+	for id := range pre {
+		if post[id] {
+			t.Fatalf("warm key %s left after drain (warm before: %v, after: %v)", id, pre, post)
+		}
+		if !e.ts.wasDeleted(id) {
+			t.Fatalf("drained warm key %s not revoked at the API", id)
 		}
 	}
 }
@@ -326,13 +388,18 @@ func TestWarmKeyExpiry(t *testing.T) {
 // (burst 1), the deploy's seed refill takes the one token; after a take,
 // the next refill waits for a token (~6 s), not a moment less.
 func TestWarmKeyRefillRespectsThrottle(t *testing.T) {
+	t.Parallel()
 	e := newPoolEnv(t, 10, nil)
 	classOf := map[string]string{
-		PoolName([]string{"tag:twd-agent-support"}, false):     "SupportAgent",
-		PoolName([]string{"tag:twd-agent-support-sub"}, false): "LookupAgent",
-		PoolName([]string{"tag:crm"}, false):                   "Rogue",
+		PoolName([]string{"tag:tw-agent-support"}, false):     "SupportAgent",
+		PoolName([]string{"tag:tw-agent-support-sub"}, false): "LookupAgent",
+		PoolName([]string{"tag:crm"}, false):                  "Rogue",
 	}
+	// seeded: when the seed key was first seen. Its CreateKey spent the one
+	// token just before, so the next token is due ~6 s after it (#137: timing
+	// from the take instead failed under load, when the take came > 2 s later).
 	var pool string
+	var seeded time.Time
 	for dl := time.Now().Add(5 * time.Second); pool == ""; time.Sleep(20 * time.Millisecond) {
 		st, _ := e.m.WarmKeyStats(context.Background())
 		for k := range st {
@@ -340,6 +407,7 @@ func TestWarmKeyRefillRespectsThrottle(t *testing.T) {
 				pool = p
 			}
 		}
+		seeded = time.Now()
 		if time.Now().After(dl) {
 			t.Fatal("no warm key after 5 s")
 		}
@@ -371,7 +439,7 @@ func TestWarmKeyRefillRespectsThrottle(t *testing.T) {
 			t.Fatal("no refill within 10 s at 10/min")
 		}
 	}
-	if d := time.Since(t0); d < 4*time.Second {
-		t.Fatalf("refill after %v, faster than the 10/min budget allows", d)
+	if d := time.Since(seeded); d < 4*time.Second {
+		t.Fatalf("refill %v after the seed mint, faster than the 10/min budget allows", d)
 	}
 }

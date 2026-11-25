@@ -1,46 +1,46 @@
-# The Node process tier (opt-in, `"runtime": "node"`)
+# The Node runtime (opt-in, `"runtime": "node"`)
 
 ADR-022: some agent SDKs need a real Node.js (`node:vm`, child processes,
-native modules) and cannot run in workerd. twd runs those as **one supervised
+native modules) and cannot run in workerd. Tailworks runs those as **one supervised
 `node` process per deployment with one tailnet identity** (the workload
-node). There are no per-object nodes in this tier. A Node process costs
+node). There are no per-object nodes in this runtime. A Node process costs
 ~70 MB (plain app) to ~320 MB (Vercel Workflow + AI SDK) of RSS, against a
 few MB per workerd isolate, so it suits a few long-lived services per tenant,
 not one per object.
 
 ```jsonc
-// twd.jsonc
+// tailworks.jsonc
 {
   "name": "my-svc",
   "runtime": "node",
-  "main": "src/server.ts",          // bundled to dist/server.mjs by create-twd build-node
+  "main": "src/server.ts",          // bundled to dist/server.mjs by create-tailworks build-node
   "node": {
-    "health": "/healthz",           // any HTTP answer = up (default "/")
-    "listen": "tcp",                // tcp: PORT on 127.0.0.1 (default) | unix: TWD_SOCKET
-    "env": { "LOG_LEVEL": "info" }, // TWD_* is reserved
+    "health": "/healthz",           // optional: any HTTP answer on "/" (the default) already counts as up
+    "listen": "tcp",                // tcp: PORT on 127.0.0.1 (default) | unix: TW_SOCKET, keeps AF_UNIX (see "Linux sandbox limits")
+    "env": { "LOG_LEVEL": "info" }, // TW_* is reserved
     "args": ["--enable-source-maps"]
   },
-  "tailnet": { "tags": ["tag:twd-wl-my-svc"] }
+  "tailnet": { "tags": ["tag:tw-wl-my-svc"] }
 }
 ```
 
-`twd init my-svc --template node-workflow`, `npm install`, `twd deploy`.
-hostd runs `node` from PATH (`twd-hostd -node /path/to/node` or `$TWD_NODE`
+`tw init my-svc --template node-workflow`, `npm install`, `tw deploy`.
+hostd runs `node` from PATH (`tw-hostd -node /path/to/node` or `$TW_NODE`
 to pin it). Node ≥ 24 is required for `NODE_USE_ENV_PROXY`.
 
 ## Ingress: the verified caller
 
 ```
-caller ─WG─▶ workload node (netd: WhoIs, strips every inbound x-twd-*/cf-*/forwarded header)
-       ─▶ hostd ─▶ app, with  x-twd-caller: v1.<base64url(claims)>.<base64url(HMAC-SHA256(TWD_CALLER_KEY, "v1." + claims))>
+caller ─WG─▶ workload node (netd: WhoIs, strips every inbound x-tw-*/cf-*/forwarded header)
+       ─▶ hostd ─▶ app, with  x-tw-caller: v1.<base64url(claims)>.<base64url(HMAC-SHA256(TW_CALLER_KEY, "v1." + claims))>
 ```
 
 `claims = {v:1, caller:{nodeId,node,hostname,addrs,tags,user?,capMap}, objectId, workload, traceId, iat}`.
-`TWD_CALLER_KEY` is 32 random bytes, fresh for **every process start**, and
-exists only in that process's environment. Verify with `@twd/node`:
+`TW_CALLER_KEY` is 32 random bytes, fresh for **every process start**, and
+exists only in that process's environment. Verify with `@tailworks/node`:
 
 ```ts
-import { requireCaller, getCaller, CallerError } from "@twd/node";
+import { requireCaller, getCaller, CallerError } from "@tailworks/node";
 const claims = requireCaller(req);   // throws CallerError (→ 401 no_identity)
 const who = getCaller(req);          // or null
 ```
@@ -54,11 +54,11 @@ does not block unauthenticated local connections to the app's port.
 ## Egress: attributed, ADR-019
 
 Each process gets its own HTTP proxy on `127.0.0.1:<random>`, with Basic
-credentials `twd:<token>` that are fresh for every process start. hostd sets:
+credentials `tw:<token>` that are fresh for every process start. hostd sets:
 
 | env | value |
 |---|---|
-| `TWD_EGRESS_PROXY`, `HTTP_PROXY`, `HTTPS_PROXY` (+ lower case) | `http://twd:<token>@127.0.0.1:<port>` |
+| `TW_EGRESS_PROXY`, `HTTP_PROXY`, `HTTPS_PROXY` (+ lower case) | `http://tw:<token>@127.0.0.1:<port>` |
 | `NODE_USE_ENV_PROXY` | `1` (Node's `fetch()` and `http` honour the proxy vars) |
 | `NO_PROXY` | only the app's own port (self-calls, e.g. the Workflow queue) and the proxy itself |
 
@@ -67,14 +67,14 @@ under the M1 guard: names resolve only from the node's netmap, and loopback,
 self, host IPs, link-local/metadata, 100.100.100.100 and non-tailnet
 destinations are refused with a typed `403 forbidden_destination` or
 `peer_not_visible`. Requests come in one of two forms:
-- absolute form (`GET http://peer/…`): `@twd/node` `fetch`, Node `http` with
+- absolute form (`GET http://peer/…`): `@tailworks/node` `fetch`, Node `http` with
   env proxies, and an undici `ProxyAgent` with `proxyTunnel:false`. For
   `https://` targets the TLS is originated by netd.
 - `CONNECT host:port` tunnels: Node's built-in `fetch()` with env proxies
   uses CONNECT even for `http://`. These are raw TCP from the node's tsnet
   (`netd.Registry.DialEgress`), still guarded and still RST on kill.
 
-Helpers in `@twd/node`:
+Helpers in `@tailworks/node`:
 - `fetch(url, init)`: the egress proxy in absolute form.
 - `dispatcher(undici)`: an undici `ProxyAgent`.
 - `installGlobalDispatcher(undici)`: routes the global `fetch()` through the proxy.
@@ -85,16 +85,17 @@ later global `fetch()` in the process then **silently bypasses**
 `NODE_USE_ENV_PROXY` and goes straight to the host network. `make test-node`
 reached 1.1.1.1 this way before the fix. If your app (or a dependency) loads
 undici, call `installGlobalDispatcher(undici)` afterwards, or use
-`@twd/node`'s `fetch`. The Vercel Workflow bundles include their own copy of
-undici, so the template uses `@twd/node` `fetch` explicitly.
+`@tailworks/node`'s `fetch`. The Vercel Workflow bundles include their own copy of
+undici, so the template uses `@tailworks/node` `fetch` explicitly.
 
 ### Enforcement boundary (read this before sharing a host)
 
 **On Linux with Landlock (ABI ≥ 4, kernel 6.7+; Ubuntu 24.04's 6.8 has
-ABI 4), egress through the proxy is enforced, not cooperative.** twd-hostd
+ABI 4), egress through the proxy is enforced, not cooperative.** tw-hostd
 starts every Node app under its Landlock sandbox (`internal/procsb`, L2):
-the app may bind and connect only its own app port (TCP listen mode) and
-connect only to its egress proxy's port. Every other TCP `connect()`, to
+the app may connect only to its own app port (TCP listen mode) and its
+egress proxy's port, and can't listen on anything itself (see
+[Listening](#listening)). Every other TCP `connect()`, to
 loopback, the LAN or the internet, fails with `EACCES` before a packet is
 sent, and a seccomp filter refuses UDP, ICMP, raw, MPTCP and SCTP sockets.
 So the undici pitfall above, an own dispatcher, or `net.connect` can no
@@ -104,22 +105,28 @@ from inside the app: `net.connect` to 1.1.1.1:80 and :443 and to a
 host-loopback listener all fail (`EACCES`); its own port works; egress via
 the proxy is attributed as before (measured on Ubuntu 24.04, kernel 6.8,
 ABI 4). Unix sockets: on ABI < 9 Landlock can't refuse a connect to a
-pathname socket, so twd's own sockets (hostd's, mgmt's, the instance
+pathname socket, so tailworks' own sockets (hostd's, mgmt's, the instance
 egress sockets) refuse sandboxed peers themselves; see INSTALL.md.
 
-**Elsewhere it is cooperative.** On macOS (Seatbelt confines files and unix
-sockets, not TCP) and on Linux kernels with Landlock ABI < 4, a malicious or
+**On macOS it is enforced too.** The Seatbelt profile refuses every
+network operation except IPv4 TCP connects to `127.0.0.1:<proxy port>` and
+`127.0.0.1:<own port>` (not `[::1]`), a bind of its own port, and unix
+sockets in its own dirs; `make test-node` checks the same probes there
+(`EPERM`).
+
+**Elsewhere it is cooperative.** On Linux kernels with Landlock ABI < 4
+(and under `tw-hostd -sandbox seatbelt-legacy`), a malicious or
 buggy Node app can ignore the env proxies, override the global dispatcher,
 or open raw sockets to loopback, the LAN, the internet or other local
 services, because it is an ordinary process with the host user's network.
-`twd doctor` says which case applies. What the process tier guarantees
+`tw doctor` says which case applies. What the process tier guarantees
 everywhere:
 - the app holds no tailnet key;
 - it can't speak as any node except through the proxy, which attributes
   everything to this deployment;
 - it can't forge an inbound caller.
 
-`@twd/node` closes the *accidental* bypasses in-process: `enforceEgress()`
+`@tailworks/node` closes the *accidental* bypasses in-process: `enforceEgress()`
 (also run by `installGlobalDispatcher()`; the `node-workflow` template calls
 it at startup) patches `net`/`tls` so that any TCP connect to something
 other than the proxy or the app's own port becomes a CONNECT tunnel through
@@ -128,20 +135,20 @@ sees this deployment's node), makes direct `dns.lookup`/`dns.resolve*` and
 UDP sockets fail with `forbidden_destination`, and refuses unix sockets
 other than the app's own. It runs inside the app's process, so hostile code
 can undo it; it is defence in depth, not a boundary. Verified callers:
-`x-twd-caller` now carries a `nonce` and `@twd/node` refuses a replayed
-header (RT-05), plus `callerObjectId`/`lim` when the caller is a twd object
+`x-tw-caller` now carries a `nonce` and `@tailworks/node` refuses a replayed
+header (RT-05), plus `callerObjectId`/`lim` when the caller is a tailworks object
 whose caps were narrowed by its node certificate (RT-01).
 
 hostd makes the state visible and refuses the dangerous combination:
-- `twd status` and `GET /v1/status` show `egress unenforced` for every
-  Node-tier workload on such a host; `twd doctor` warns (`node_egress`);
-- a Node-tier deployment on a host **without any process sandbox** that
+- `tw status` and `GET /v1/status` show `egress unenforced` for every
+  Node-runtime workload on such a host; `tw doctor` warns (`node_egress`);
+- a Node-runtime deployment on a host **without any process sandbox** that
   serves other tenants fails with `egress_unenforced` (and the general
   shared-host rule, `sandbox_unavailable`, applies to every process-tier
   workload there) unless the operator starts the host with
-  `twd up --insecure-shared-host` (`twd-hostd -insecure-shared-host`).
+  `tw up --insecure-shared-host` (`tw-hostd -insecure-shared-host`).
   Under Seatbelt or Landlock the deployment runs; status stays honest about
-  whether egress is enforced (`enforced` only under Landlock).
+  whether egress is enforced (`enforced` only under Landlock ABI ≥ 4).
 
 The strongest boundary is the **microVM tier**. There, the guest's only
 network is hostd's gVisor gateway, which exposes only the egress, workload
@@ -162,6 +169,29 @@ any AF_UNIX socket; `listen: "unix"` apps keep AF_UNIX, and a host with
 such an app and a reachable system tailscaled socket is not shareable (see
 INSTALL.md `host_sockets`).
 
+## Listening
+
+Under a sandbox, the app is reachable only through tailworks' ingress,
+never on the host's LAN address, even if it ignores `HOST` and calls
+`listen(PORT)` (which binds every interface). hostd owns the listener:
+
+- **Linux (Landlock):** hostd opens `127.0.0.1:<PORT>` (or the
+  `listen: "unix"` socket) and passes it to the app as fd 3. A seccomp rule
+  makes every `listen()` a no-op, so a socket the app opens itself never
+  listens.
+- **macOS (Seatbelt):** the app may not bind or listen on TCP at all. It
+  listens on a unix socket in its instance dir, which ingress dials, and
+  hostd forwards `127.0.0.1:<PORT>` to that socket for the app's
+  self-calls.
+
+A preload makes this invisible to the app: `server.listen(PORT[, host])`,
+`listen({ port: PORT })` and `listen(TW_SOCKET)` are pointed at hostd's
+listener, and `server.address()` still reports `127.0.0.1:<PORT>`. A
+listen on any other port, or a native module's own listener, fails with
+`EPERM`/`EACCES` (macOS, or Linux with Landlock ABI ≥ 4). On Linux with
+ABI < 4 such a listen returns 0, but the socket never listens. Without a
+sandbox (`-sandbox none`) the app binds its port itself, as before.
+
 ## Supervision and logs
 
 - **Restarts.** On exit, the app restarts with exponential backoff (250 ms,
@@ -171,37 +201,40 @@ INSTALL.md `host_sockets`).
 - **Shutdown.** The process runs in its own process group, and stop is
   SIGTERM, then SIGKILL after 3 s, for the whole group.
 - **Logs.** stdout and stderr go to `<instance>/app.log`; read them with
-  `twd logs <workload>` (`-f` to follow).
+  `tw logs <workload>` (`-f` to follow).
 - **Status.** `GET /v1/status` shows `Runtime: "node"`, `Node.{PID, Starts,
   ReadyMs, LogFile, DataDir}`.
 - **Environment.** The app does not inherit hostd's environment. It gets
-  `PATH`, `HOME`/`TWD_DATA_DIR` (persistent:
+  `PATH`, `HOME`/`TW_DATA_DIR` (persistent:
   `<data>/tenants/<t>/workloads/<w>/node`), `TMPDIR`, `NODE_ENV=production`,
-  the variables above, `TWD_WORKLOAD`, `TWD_DEPLOYMENT` and
-  `TWD_NODE_NAME`, plus `node.env` and `twd deploy --var`.
+  the variables above, `TW_WORKLOAD`, `TW_DEPLOYMENT` and
+  `TW_NODE_NAME`, plus `node.env` and `tw deploy --var`, and the
+  workload's secrets (`tw secret put`, [secrets.md](secrets.md)) on top of
+  those. Secrets are loaded into `process.env` by a `--require` preload,
+  not passed in the environment, so they aren't visible to `ps -E`.
 - **Deploys** are **stop-then-start**, with requests held at the gate.
   Durable runtimes such as Workflow's local World and SQLite files assume one
   process per data dir, so blue/green overlap is not used here.
 
-## Vercel Workflow on the Node tier
+## Vercel Workflow on the Node runtime
 
 The `node-workflow` template is a plain `node:http` server with a durable
 `"use workflow"` function (`workflows/support.ts`). In that function:
 1. An AI SDK `WorkflowAgent` with a scripted mock `LanguageModelV4` (no LLM,
-   no keys) calls two twd MCP tools over the tailnet: `lookup_order` and
+   no keys) calls two tailworks MCP tools over the tailnet: `lookup_order` and
    `refund`, on the `mcp` template.
 2. The function sleeps durably (`sleep("3s")`).
 3. It waits on a human-approval hook (`createHook`, resumed by
    `POST /hooks/<token>`).
 
 - **World.** `@workflow/world-local`, the filesystem World, in
-  `$TWD_DATA_DIR/workflow-data`. The SDK documents it for "local development
+  `$TW_DATA_DIR/workflow-data`. The SDK documents it for "local development
   and testing", with an in-memory queue and single process per data dir.
   `start()` re-enqueues active runs, which is what makes kill/restart resume
   work. For self-hosted production, the SDK's supported option is
   `@workflow/world-postgres` (pg + graphile-worker). It is not used in the
   hermetic tests (no Postgres in Lima); see the gaps.
-- **Build.** `create-twd build-node` runs the SDK's `StandaloneBuilder` (the
+- **Build.** `create-tailworks build-node` runs the SDK's `StandaloneBuilder` (the
   builder behind `workflow build`) for `workflows/`. It copies `flow.mjs`, the
   combined workflow and step route bundle (~22 MB), and esbuilds the server
   with the SDK's step-mode SWC transform, so `start(fn)` sees `fn.workflowId`.
@@ -216,12 +249,12 @@ The `node-workflow` template is a plain `node:http` server with a durable
 
 ## Compatibility (M9)
 
-| Thing | Version | Status on the Node tier |
+| Thing | Version | Status on the Node runtime |
 |---|---|---|
 | Node.js | 25.1 (macOS), 24.x (Lima) | ✅ (needs ≥ 24 for `NODE_USE_ENV_PROXY`) |
-| `workflow` (Vercel Workflow SDK) | 5.4.0 | ✅ `"use workflow"`, steps, `sleep`, `createHook`/`resumeHook`, kill/resume |
-| `@workflow/world-local` | 5.2.1 | ✅ (single process per data dir) |
+| `workflow` (Vercel Workflow SDK) | 5.6.1 | ✅ `"use workflow"`, steps, `sleep`, `createHook`/`resumeHook`, kill/resume |
+| `@workflow/world-local` | 5.4.1 | ✅ (single process per data dir) |
 | `@workflow/world-postgres` | 5.1.1 | not tested (follow-up) |
-| `@ai-sdk/workflow` `WorkflowAgent` | 2.0.97 (`ai` 7.0.165) | ✅ `generate()` with tools as steps, mock `LanguageModelV4` |
+| `@ai-sdk/workflow` `WorkflowAgent` | 2.0.109 (`ai` 7.0.177) | ✅ `generate()` with tools as steps, mock `LanguageModelV4` |
 | `undici` | 8.12.4 | ✅ via `dispatcher(undici)` / `installGlobalDispatcher(undici)`; ⚠ importing it disables env proxies |
 | Node built-in `fetch` / `http` with env proxies | Node 25 | ✅ (CONNECT / absolute form) |

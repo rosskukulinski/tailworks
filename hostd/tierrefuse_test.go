@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd"
-	"github.com/rosskukulinski/twd/hostd/bundle"
-	"github.com/rosskukulinski/twd/hostd/fakemgmt"
-	"github.com/rosskukulinski/twd/hostd/hostdtest"
-	"github.com/rosskukulinski/twd/hostd/mgmtapi"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/hostd"
+	"github.com/rosskukulinski/tailworks/hostd/bundle"
+	"github.com/rosskukulinski/tailworks/hostd/fakemgmt"
+	"github.com/rosskukulinski/tailworks/hostd/hostdtest"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 )
 
 // TestMicroVMRefusedWithoutBackend (ADR-032 D5b): a "tier": "microvm"
@@ -21,6 +21,7 @@ import (
 // mgmt sees the typed failure on the deployment. Before, hostd ran it in the
 // process tier with only a log warning.
 func TestMicroVMRefusedWithoutBackend(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("short")
 	}
@@ -36,11 +37,11 @@ func TestMicroVMRefusedWithoutBackend(t *testing.T) {
 		t.Fatal(err)
 	}
 	var cfg map[string]any
-	if err := bundle.UnmarshalJSONC(files["twd.jsonc"], &cfg); err != nil {
+	if err := bundle.UnmarshalJSONC(files["tailworks.jsonc"], &cfg); err != nil {
 		t.Fatal(err)
 	}
 	cfg["tier"] = "microvm"
-	files["twd.jsonc"], _ = json.Marshal(cfg)
+	files["tailworks.jsonc"], _ = json.Marshal(cfg)
 	dep := e.DeployFiles(files, "agent")
 	deadline := time.Now().Add(30 * time.Second)
 	for {

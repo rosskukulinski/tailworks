@@ -1,0 +1,8 @@
+# The Pyodide bundles workerd 1.20261121.1 asks for, one per line, oldest
+# first: <file name> <sha256> <size in bytes>. Read by internal/pyodide (the
+# process tier fetches them per host) and guest/build-image.sh (the microVM
+# guest image carries them). Update with the workerd pin
+# (TestBundlesMatchWorkerd; docs/python.md#updating-the-pins).
+pyodide_0.26.0a2_2024-03-01_91.capnp.bin 37273cc289599d7fc4cd2eb352e50d33c70fd5f02e391d02e05d2957ea4afc83 22473136
+pyodide_0.28.2_2025-01-16_22.capnp.bin ad0dafa91dd0e98f845ccd6298d92b969e6cc208b9648170b596fab7bbe9c8da 17501408
+pyodide_314.0.6_2026-08-17_12.capnp.bin b95469bc5c223ce884686e4fb0547a3a909a0513706f5c1dc659717550284a04 13717056

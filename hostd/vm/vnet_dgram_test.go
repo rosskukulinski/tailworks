@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/guest/proto"
+	"github.com/rosskukulinski/tailworks/guest/proto"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
 	"gvisor.dev/gvisor/pkg/tcpip/network/arp"

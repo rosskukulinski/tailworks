@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd"
-	"github.com/rosskukulinski/twd/hostd/fakemgmt"
-	"github.com/rosskukulinski/twd/hostd/hostdtest"
-	"github.com/rosskukulinski/twd/hostd/sandbox/sandboxtest"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/hostd"
+	"github.com/rosskukulinski/tailworks/hostd/fakemgmt"
+	"github.com/rosskukulinski/tailworks/hostd/hostdtest"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox/sandboxtest"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 	"tailscale.com/tailcfg"
 )
 
@@ -20,9 +20,10 @@ import (
 // object's sandbox must not outlive the lease); a workload whose classes
 // are all "fence": "never" keeps its containers, and they keep working.
 func TestContainerFenceInheritance(t *testing.T) {
+	t.Parallel()
 	const fenceAfter = time.Second
 	procs := &sandboxtest.Procs{}
-	st, err := sandboxtest.ImageStore(t.TempDir(), []string{"sleep", "3600"}, "twd.test/box:1")
+	st, err := sandboxtest.ImageStore(t.TempDir(), []string{"sleep", "3600"}, "tw.test/box:1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,14 +39,14 @@ func TestContainerFenceInheritance(t *testing.T) {
 	for k, v := range files {
 		never[k] = v
 	}
-	tj := string(files["twd.jsonc"])
+	tj := string(files["tailworks.jsonc"])
 	for _, c := range []string{`"Box": { "tags"`, `"PBox": { "tags"`, `"Plain": { "egress"`} {
 		if !strings.Contains(tj, c) {
-			t.Fatalf("fixture twd.jsonc changed: no %s", c)
+			t.Fatalf("fixture tailworks.jsonc changed: no %s", c)
 		}
 		tj = strings.Replace(tj, c, strings.Replace(c, "{ ", `{ "fence": "never", `, 1), 1)
 	}
-	never["twd.jsonc"] = []byte(tj)
+	never["tailworks.jsonc"] = []byte(tj)
 	dF := e.DeployFiles(files, "fenced")
 	dN := e.DeployFiles(never, "nofence")
 	wF, wN := e.WaitActive("fenced", dF, 60*time.Second), e.WaitActive("nofence", dN, 60*time.Second)

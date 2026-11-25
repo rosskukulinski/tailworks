@@ -1,32 +1,45 @@
-module github.com/rosskukulinski/twd
+module github.com/rosskukulinski/tailworks
 
-go 1.27.3
+go 1.27.4
 
 require (
+	github.com/BurntSushi/toml v1.6.0
+	github.com/Code-Hex/vz/v3 v3.8.0
 	github.com/coder/websocket v1.8.15
 	github.com/evanw/esbuild v0.28.2
-	github.com/getkin/kin-openapi v0.142.0
-	github.com/go-jose/go-jose/v4 v4.1.9
-	github.com/jackc/pgx/v5 v5.12.0
+	github.com/getkin/kin-openapi v0.153.0
+	github.com/jackc/pgx/v5 v5.13.0
 	github.com/jsimonetti/rtnetlink v1.4.2
-	github.com/klauspost/compress v1.20.2
-	github.com/landlock-lsm/go-landlock v0.11.0
+	github.com/klauspost/compress v1.20.5
+	github.com/landlock-lsm/go-landlock v0.11.2
 	github.com/oapi-codegen/nullable v1.2.0
-	github.com/oapi-codegen/runtime v1.8.0
+	github.com/oapi-codegen/runtime v1.9.0
 	github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f
 	github.com/tailscale/peercred v0.0.0-20250107143737-35a0c7bd7edc
-	golang.org/x/net v0.62.0
-	golang.org/x/sys v0.49.0
-	golang.org/x/term v0.47.0
+	golang.org/x/net v0.63.0
+	golang.org/x/sys v0.50.0
+	golang.org/x/term v0.48.0
+	golang.org/x/time v0.16.0
 	gvisor.dev/gvisor v0.0.0-20260915211658-a6f909f08a72
 	modernc.org/sqlite v1.62.0
+
+	// tailscale.com is pinned to main commit 5030108 (2026-11-07), not a tag.
+	// Why: the design spikes (RFC "Prototype results") ran on that commit,
+	// and M0 took it as is. No feature we use needs it: the tree builds and
+	// vets against v1.104.5. But v1.104.x branched from main on 2026-09-30,
+	// so any 1.104 tag would roll back five weeks of main under netd, which
+	// reaches into tsnet, ipn and gVisor internals (docs/RELEASING.md, "Upstream advisories").
+	// Un-pin: move to the first tagged release cut from main after 5030108
+	// (v1.106.0) once `make lint test e2e-placement` and `make e2e-real` pass.
+	// From then on, tagged releases only, taken within two weeks of each one
+	// (Dependabot's "tailscale" group). hujson, peercred and gvisor have no
+	// tags; they follow whatever tailscale.com requires.
 	tailscale.com v1.105.0-pre.0.20261107202901-503010831ecd
 )
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/Code-Hex/go-infinity-channel v1.0.0 // indirect
-	github.com/Code-Hex/vz/v3 v3.8.0 // indirect
 	github.com/akutz/memconn v0.1.0 // indirect
 	github.com/alexbrainman/sspi v0.0.0-20250919150558-7d374ff0d59e // indirect
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
@@ -61,8 +74,6 @@ require (
 	github.com/mitchellh/go-ps v1.0.0 // indirect
 	github.com/ncruces/go-strftime v1.1.0 // indirect
 	github.com/oapi-codegen/oapi-codegen/v2 v2.8.2 // indirect
-	github.com/oasdiff/yaml v0.1.1 // indirect
-	github.com/oasdiff/yaml3 v0.0.14 // indirect
 	github.com/pires/go-proxyproto v0.15.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/safchain/ethtool v0.7.0 // indirect
@@ -76,20 +87,20 @@ require (
 	github.com/vmware-labs/yaml-jsonpath v0.3.2 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
+	go.yaml.in/yaml/v4 v4.0.0 // indirect
 	go4.org/mem v0.0.0-20240501181205-ae6ca9944745 // indirect
 	go4.org/netipx v0.0.0-20260823151212-3075585bcbeb // indirect
-	golang.org/x/crypto v0.58.0 // indirect
+	golang.org/x/crypto v0.59.0 // indirect
 	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba // indirect
 	golang.org/x/mod v0.42.0 // indirect
 	golang.org/x/oauth2 v0.37.0 // indirect
-	golang.org/x/sync v0.24.0 // indirect
-	golang.org/x/text v0.43.0 // indirect
-	golang.org/x/time v0.16.0 // indirect
+	golang.org/x/sync v0.25.0 // indirect
+	golang.org/x/text v0.44.0 // indirect
 	golang.org/x/tools v0.52.0 // indirect
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
 	golang.zx2c4.com/wireguard/windows v1.0.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	kernel.org/pub/linux/libs/security/libcap/psx v1.2.77 // indirect
+	kernel.org/pub/linux/libs/security/libcap/psx v1.2.78 // indirect
 	modernc.org/libc v1.80.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect

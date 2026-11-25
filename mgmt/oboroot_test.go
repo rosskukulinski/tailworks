@@ -15,6 +15,7 @@ import (
 // tenant's OBO root key end up with the same key; a pre-F11 legacy key is
 // adopted by both.
 func TestMM_F11_OBORootChosenOnce(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	st, err := OpenStore(ctx, filepath.Join(dir, "m.db"))

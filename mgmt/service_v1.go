@@ -2,13 +2,18 @@ package mgmt
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
 
-	"github.com/rosskukulinski/twd/internal/tsapi"
+	"github.com/rosskukulinski/tailworks/internal/policy"
+	"github.com/rosskukulinski/tailworks/internal/tsapi"
 )
 
 // Service methods added for /v1 (REST semantics: PATCH, DELETE with
@@ -20,8 +25,6 @@ import (
 type TenantPatch struct {
 	MintMode               *string
 	APIKeyFile             *string
-	WIFClientID            *string
-	WIFLifecycleClientID   *string
 	OAuthClientID          *string
 	OAuthClientFile        *string
 	RegistrationsPerMinute *int
@@ -34,11 +37,22 @@ type TenantPatch struct {
 	// PublicIngress is the ADR-029 gate ("allow" | "deny"; null clears = deny).
 	PublicIngress *string
 	By            string
+
+	// teams.go: the owner tag (null = tag:tw) and the name prefix (only
+	// before the tenant's first deploy).
+	OwnerTag   *string
+	NamePrefix *string
+
+	// quota.go: storage quotas (0 = unlimited).
+	MaxStoreBytes *int64
+	MaxQueueBytes *int64
+	MaxStores     *int64
 }
 
-// UpdateTenant applies a merge patch. Switching to wif (or changing a WIF
-// client ID) drops cached tokens; apikey needs an absolute, existing key
-// file.
+// UpdateTenant applies a merge patch. Changing the mode, client ID or
+// credential file drops cached tokens. A tenant an older tailworks left in a
+// removed mint mode (mintmodes.go) can still be patched, and switching it
+// to oauth is how it gets minting again.
 func (m *Mgmt) UpdateTenant(ctx context.Context, id string, p TenantPatch) (Tenant, error) {
 	t, err := m.store.GetTenant(ctx, id)
 	if err != nil {
@@ -47,9 +61,12 @@ func (m *Mgmt) UpdateTenant(ctx context.Context, id string, p TenantPatch) (Tena
 	changed := map[string]any{}
 	if p.MintMode != nil {
 		switch *p.MintMode {
-		case MintAPIKey, MintWIF, MintOAuth:
+		case MintOAuth, MintHeadscale:
 		default:
-			return Tenant{}, errf(400, "bad_request", "mintMode must be oauth, apikey or wif")
+			if removedMintMode(*p.MintMode) {
+				return Tenant{}, errSetRemovedMintMode(*p.MintMode)
+			}
+			return Tenant{}, errf(400, "bad_request", "mintMode must be oauth or headscale")
 		}
 		t.MintMode = *p.MintMode
 		changed["mintMode"] = t.MintMode
@@ -57,14 +74,6 @@ func (m *Mgmt) UpdateTenant(ctx context.Context, id string, p TenantPatch) (Tena
 	if p.APIKeyFile != nil {
 		t.APIKeyFile = *p.APIKeyFile
 		changed["apiKeyFile"] = t.APIKeyFile != ""
-	}
-	if p.WIFClientID != nil {
-		t.WIFClientID = *p.WIFClientID
-		changed["wifClientID"] = t.WIFClientID
-	}
-	if p.WIFLifecycleClientID != nil {
-		t.WIFLifecycleClientID = *p.WIFLifecycleClientID
-		changed["lifecycle"] = t.WIFLifecycleClientID != ""
 	}
 	if p.OAuthClientID != nil {
 		t.OAuthClientID = *p.OAuthClientID
@@ -109,6 +118,9 @@ func (m *Mgmt) UpdateTenant(ctx context.Context, id string, p TenantPatch) (Tena
 		t.MaxContainerVCPU = *p.MaxContainerVCPU
 		changed["maxContainerVCPU"] = t.MaxContainerVCPU
 	}
+	if err := applyQuotaPatch(&t, p, changed); err != nil { // quota.go
+		return Tenant{}, err
+	}
 	if p.Pool != nil {
 		t.Pool = *p.Pool
 		changed["pool"] = t.Pool
@@ -129,17 +141,13 @@ func (m *Mgmt) UpdateTenant(ctx context.Context, id string, p TenantPatch) (Tena
 		t.PublicIngress = *p.PublicIngress
 		changed["publicIngress"] = t.PublicIngress
 	}
+	if err := m.patchTeamFields(ctx, &t, p, changed); err != nil { // teams.go
+		return Tenant{}, err
+	}
 	switch t.MintMode {
-	case MintAPIKey:
-		if t.APIKeyFile == "" {
-			return Tenant{}, errf(400, "bad_request", "mintMode apikey needs apiKeyFile")
-		}
-	case MintWIF:
-		if t.WIFClientID == "" {
-			return Tenant{}, errf(400, "bad_request", "mintMode wif needs wifClientID")
-		}
-		if m.broker.Issuer == nil {
-			return Tenant{}, errf(400, "bad_request", "mintMode wif needs twd-mgmt to run with an issuer (-issuer-url)")
+	case MintHeadscale:
+		if err := checkHeadscaleTenant(t.APIKeyFile, t.ControlURL, t.PublicIngress); err != nil {
+			return Tenant{}, err
 		}
 	case MintOAuth:
 		id, err := checkOAuthFile(t.OAuthClientFile, t.OAuthClientID)
@@ -147,6 +155,9 @@ func (m *Mgmt) UpdateTenant(ctx context.Context, id string, p TenantPatch) (Tena
 			return Tenant{}, err
 		}
 		t.OAuthClientID = id
+		// A tenant switched from the removed apikey mode drops its old key
+		// file path (sandboxes no longer need it denied).
+		t.APIKeyFile = ""
 	}
 	t.UpdatedAt = m.now().UnixMilli()
 	if err := m.store.UpdateTenant(ctx, t); err != nil {
@@ -172,12 +183,16 @@ type TenantDeleteResult struct {
 	Purged             []string `json:"purged"`
 	DeploymentsStopped []string `json:"deploymentsStopped"`
 	DevicesDeleting    []string `json:"devicesDeleting,omitempty"`
+
+	// Removed counts what the delete removed, by kind (tenantpurge.go).
+	Removed map[string]int64 `json:"removed,omitempty"`
 }
 
 // DeleteTenant removes a tenant. Without force it refuses while any object
 // is live (409 tenant_has_live_objects); with force it kills every live
-// root (cascade), purges, stops deployments, releases leases and finally
-// drops the row and the tenant's custody entries. Audited as tenant_delete.
+// root (cascade), purges, stops deployments, and finally removes everything
+// the tenant owns (tenantpurge.go: custody entries, every row, the tenant
+// row; hosts remove its files). Audited as tenant_delete, with counts.
 func (m *Mgmt) DeleteTenant(ctx context.Context, id string, force bool, by string) (TenantDeleteResult, error) {
 	res := TenantDeleteResult{TenantID: id, Killed: []string{}, Purged: []string{}, DeploymentsStopped: []string{}}
 	t, err := m.store.GetTenant(ctx, id)
@@ -225,13 +240,13 @@ func (m *Mgmt) DeleteTenant(ctx context.Context, id string, force bool, by strin
 			if l, err := m.store.GetLease(ctx, LeaseName(id, d.Workload)); err == nil && l.Holder != "" {
 				m.store.ReleaseLease(ctx, l.Name, l.Holder, l.Epoch)
 			}
-			m.mu.Lock()
-			m.mu.Unlock()
 		}
 	}
-	if err := m.store.DeleteTenant(ctx, id); err != nil {
+	removed, err := m.purgeTenant(ctx, id) // tenantpurge.go: custody entries, every row, then the tenant
+	if err != nil {
 		return res, err
 	}
+	res.Removed = removed
 	m.broker.Forget(id)
 	m.mu.Lock()
 	delete(m.throttles, id)
@@ -240,26 +255,29 @@ func (m *Mgmt) DeleteTenant(ctx context.Context, id string, force bool, by strin
 		delete(m.queues, id)
 	}
 	m.mu.Unlock()
-	if kid, err := m.store.SecretChoice(ctx, oboChoiceName(id)); err == nil {
-		m.custody.Delete(ctx, oboKeyName(id, kid))
-	}
-	m.custody.Delete(ctx, oboCustodyName(id))
-	m.store.DeleteSecretChoice(ctx, oboChoiceName(id))
 	m.audit(ctx, AuditRecord{TenantID: id, Kind: "tenant_delete", ActingFor: by}, map[string]any{"tailnet": t.Tailnet, "force": force,
-		"killed": len(res.Killed), "purged": len(res.Purged), "deployments": res.DeploymentsStopped, "by": by})
+		"killed": len(res.Killed), "purged": len(res.Purged), "deployments": res.DeploymentsStopped, "by": by,
+		"removed": removed})
 	return res, nil
 }
 
 // HostJoin is POST /v1/hosts: the record plus a single-use join key for
-// the host's tag:twd-host node.
+// the host's tag:tw-host node.
 type HostJoin struct {
-	Host       Host     `json:"host"`
-	AuthKey    string   `json:"authKey"`
-	ExpiresAt  int64    `json:"expiresAt"`
-	Tags       []string `json:"tags"`
-	Hostname   string   `json:"hostname"`
-	ControlURL string   `json:"controlURL,omitempty"`
-	Tailnet    string   `json:"tailnet,omitempty"`
+	Host    Host   `json:"host"`
+	AuthKey string `json:"authKey"`
+	// RegistrationSecret (M1) is the one-time secret the host presents in
+	// its first PUT /v1/hosts/{id}; mgmt keeps only its SHA-256, so the
+	// join key alone (a tag:tw-host node) cannot claim this host ID.
+	RegistrationSecret string   `json:"registrationSecret"`
+	ExpiresAt          int64    `json:"expiresAt"`
+	Tags               []string `json:"tags"`
+	Hostname           string   `json:"hostname"`
+	ControlURL         string   `json:"controlURL,omitempty"`
+	Tailnet            string   `json:"tailnet,omitempty"`
+
+	// KeyTagsOnly: the host's node advertises no tags (Headscale).
+	KeyTagsOnly bool `json:"keyTagsOnly,omitempty"`
 }
 
 // String never prints the key.
@@ -277,8 +295,21 @@ type HostCreate struct {
 // HostJoinKeyExpiry is how long a host join key lives.
 const HostJoinKeyExpiry = 10 * time.Minute
 
+// newRegistrationSecret returns 32 random bytes as base64url (no padding).
+func newRegistrationSecret() string {
+	b := make([]byte, 32)
+	rand.Read(b)
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// hashRegistrationSecret is what the store keeps: hex(SHA-256(secret)).
+func hashRegistrationSecret(secret string) string {
+	h := sha256.Sum256([]byte(secret))
+	return hex.EncodeToString(h[:])
+}
+
 // HostNodeName is the tsnet hostname of a host's own node.
-func HostNodeName(hostID string) string { return "twd-host-" + hostID }
+func HostNodeName(hostID string) string { return "tw-host-" + hostID }
 
 // operatorTenant finds the tenant whose tailnet is mgmt's own (the one
 // whose credential mints host and mgmt keys). With an explicit ID it is
@@ -307,7 +338,7 @@ func (m *Mgmt) operatorTenant(ctx context.Context, id string) (Tenant, error) {
 }
 
 // CreateHost records a host (status pending until it registers) and mints
-// a single-use, pre-authorized tag:twd-host key for its node. Re-running it
+// a single-use, pre-authorized tag:tw-host key for its node. Re-running it
 // for a pending host mints a fresh key; a bound host is 409 exists.
 func (m *Mgmt) CreateHost(ctx context.Context, r HostCreate) (HostJoin, bool, error) {
 	if !validHostID(r.HostID) {
@@ -328,11 +359,11 @@ func (m *Mgmt) CreateHost(ctx context.Context, r HostCreate) (HostJoin, bool, er
 	}
 	tags := []string{HostTag}
 	k, err := api.CreateKey(ctx, tsapi.KeyOptions{Tags: tags, Preauthorized: true, ExpirySeconds: int(HostJoinKeyExpiry / time.Second),
-		Description: "twd host " + r.HostID})
+		Description: "tw host " + r.HostID})
 	if err != nil {
 		if tsapi.IsTagsNotPermitted(err) {
 			e := errf(403, "policy_missing_tag_owners", "the control plane refused to mint a %s key with tenant %s's %s credential: %v", HostTag, t.ID, t.MintMode, err)
-			e.Snippet = TagOwnersSnippet()
+			e.Snippet = HostTagOwnersSnippet(t)
 			return HostJoin{}, false, e
 		}
 		return HostJoin{}, false, errf(502, "bootstrap_failed", "mint host join key: %v", err)
@@ -342,7 +373,10 @@ func (m *Mgmt) CreateHost(ctx context.Context, r HostCreate) (HostJoin, bool, er
 	if len(tiers) == 0 {
 		tiers = []string{"process"}
 	}
-	h := Host{ID: r.HostID, Tiers: tiers, Pool: r.Pool, CreatedAt: old.CreatedAt, UpdatedAt: now}
+	// A fresh one-time secret each time (re-running host add for a pending
+	// host invalidates the previous join file as a whole).
+	secret := newRegistrationSecret()
+	h := Host{ID: r.HostID, Tiers: tiers, Pool: r.Pool, CreatedAt: old.CreatedAt, UpdatedAt: now, RegistrationSecretHash: hashRegistrationSecret(secret)}
 	if h.CreatedAt == 0 {
 		h.CreatedAt = now
 	}
@@ -352,8 +386,9 @@ func (m *Mgmt) CreateHost(ctx context.Context, r HostCreate) (HostJoin, bool, er
 	}
 	m.audit(ctx, AuditRecord{TenantID: t.ID, Kind: "host_add", ActingFor: r.By}, map[string]any{"host": r.HostID, "keyID": k.ID,
 		"tags": tags, "mode": t.MintMode, "by": r.By, "new": created})
-	return HostJoin{Host: h, AuthKey: k.Secret, ExpiresAt: m.now().Add(HostJoinKeyExpiry).UnixMilli(), Tags: tags,
-		Hostname: HostNodeName(r.HostID), ControlURL: m.cfg.OperatorControlURL, Tailnet: t.Tailnet}, created, nil
+	return HostJoin{Host: h, AuthKey: k.Secret, RegistrationSecret: secret, ExpiresAt: m.now().Add(HostJoinKeyExpiry).UnixMilli(), Tags: tags,
+		Hostname: HostNodeName(r.HostID), ControlURL: m.cfg.OperatorControlURL, Tailnet: t.Tailnet,
+		KeyTagsOnly: t.MintMode == MintHeadscale}, created, nil
 }
 
 func validHostID(s string) bool {
@@ -430,7 +465,7 @@ func (m *Mgmt) DeleteHost(ctx context.Context, id string, drain bool, by string)
 		if ds, err := m.store.Assignments(ctx, id); err == nil {
 			for _, d := range ds {
 				if d.TenantID == tenantID && d.Workload == workload {
-					m.setDepStatus(d.ID, DeploymentStatus{Status: "draining"})
+					m.setDepStatus(id, d.ID, DeploymentStatus{Status: "draining"})
 				}
 			}
 		}
@@ -505,10 +540,26 @@ func (m *Mgmt) Undeploy(ctx context.Context, id, reason, by string) (KillResult,
 	if err := m.store.StopDeployment(ctx, id, m.now()); err != nil {
 		return res, err
 	}
-	m.setDepStatus(d.ID, DeploymentStatus{Status: "stopped"})
+	m.setDepStatus(d.HostID, d.ID, DeploymentStatus{Status: "stopped"})
 	go m.push(d.HostID, "/v1/push/assignments", map[string]any{})
 	m.audit(ctx, AuditRecord{TenantID: d.TenantID, Kind: "undeploy", ActingFor: by}, map[string]any{"deploymentID": d.ID,
 		"workload": d.Workload, "host": d.HostID, "killed": len(res.Killed), "reason": reason, "by": by})
+	// Undeploying a workload stops its replicas too (tailworks.jsonc "replicas").
+	if replicaGroup(d.Namespaces) == "" {
+		if reps, err := m.replicasOf(ctx, d.TenantID, d.Workload); err == nil {
+			for _, rd := range reps {
+				rr, err := m.Undeploy(ctx, rd.ID, reason, by)
+				if err != nil {
+					m.log.Warn("undeploy replica failed", "replica", rd.Workload, "err", err)
+					continue
+				}
+				res.Killed = append(res.Killed, rr.Killed...)
+				res.Pushed = append(res.Pushed, rr.Pushed...)
+				res.DevicesDeleted = append(res.DevicesDeleted, rr.DevicesDeleted...)
+				res.DevicesDeleting = append(res.DevicesDeleting, rr.DevicesDeleting...)
+			}
+		}
+	}
 	return res, nil
 }
 
@@ -525,10 +576,13 @@ func (m *Mgmt) PreflightBundle(ctx context.Context, r DeployRequest) (PreflightR
 	}
 	classes := slices.Clone(r.Namespaces)
 	var connects []string
-	var svcCfg *TwdConfig
+	var svcCfg *TwConfig
 	var pub *DeploymentPublic
 	if len(r.Bundle) > 0 {
 		if _, err := BundleCrons(r.Bundle); err != nil {
+			return res, errf(400, "bad_bundle", "%v", err)
+		}
+		if _, err := BundleQueues(r.Bundle); err != nil {
 			return res, errf(400, "bad_bundle", "%v", err)
 		}
 		cfg, err := BundleConfig(r.Bundle)
@@ -543,6 +597,11 @@ func (m *Mgmt) PreflightBundle(ctx context.Context, r DeployRequest) (PreflightR
 			if err := checkPublicDeploy(t, r.Workload, pub); err != nil {
 				return res, err
 			}
+			if pub != nil {
+				if err := m.checkPublicName(ctx, t, t.Name(r.Workload)); err != nil { // publicnames.go (H10)
+					return res, err
+				}
+			}
 			if len(classes) == 0 {
 				classes = cfg.Classes()
 			}
@@ -550,9 +609,18 @@ func (m *Mgmt) PreflightBundle(ctx context.Context, r DeployRequest) (PreflightR
 			svcCfg = cfg
 		}
 	}
-	svcName, err := applyService(svcCfg, r.Workload, classes)
+	svcName, err := applyTeamService(t, svcCfg, r.Workload, classes) // teams.go
 	if err != nil {
 		return res, errf(400, "bad_bundle", "%v", err)
+	}
+	if t, err := m.store.GetTenant(ctx, r.TenantID); err == nil {
+		stateful := true
+		if len(r.Bundle) > 0 {
+			stateful, _ = BundleStateful(r.Bundle)
+		}
+		if _, err := m.checkReplicas(ctx, t, r, svcCfg, classes, stateful); err != nil {
+			return res, err
+		}
 	}
 	var wlTags []string
 	for _, c := range classes {
@@ -561,15 +629,23 @@ func (m *Mgmt) PreflightBundle(ctx context.Context, r DeployRequest) (PreflightR
 		}
 	}
 	if len(classes) == 0 {
-		return res, errf(400, "bad_bundle", "no namespaces: the bundle's twd.jsonc declares neither tailnet.tags (the workload node) nor tailnet.objects")
+		return res, errf(400, "bad_bundle", "no namespaces: the bundle's tailworks.jsonc declares neither tailnet.tags (the workload node) nor tailnet.objects")
 	}
 	classes = withPublicNamespace(classes, pub)
 	var src []string
 	for _, c := range classes {
 		for _, t := range c.Tags {
+			if e := validateObjectTag(c.Class, t); e != nil {
+				return res, e
+			}
 			if !slices.Contains(src, t) {
 				src = append(src, t)
 			}
+		}
+	}
+	if tn, err := m.store.GetTenant(ctx, r.TenantID); err == nil {
+		if err := m.checkTenantTags(ctx, tn, src, nil); err != nil { // teams.go: no owner tags
+			return res, err
 		}
 	}
 	res, err = m.Preflight(ctx, r.TenantID, PreflightRequest{SrcTags: src, Connects: connects, Public: pub != nil, Service: svcName, WorkloadTags: wlTags})
@@ -616,6 +692,8 @@ type StatusCounts struct {
 	PendingDeletes   int
 	Clock            ClockStatus
 	Replicas         ReplicaStatus
+
+	Versions VersionStatus
 }
 
 // Status gathers counters.
@@ -643,6 +721,7 @@ func (m *Mgmt) Status(ctx context.Context) (StatusCounts, error) {
 	st.PendingDeletes = m.PendingDeletes()
 	st.Clock = m.clockStatus()
 	st.Replicas = m.replicaStatus()
+	st.Versions = m.versionStatus(ctx, hosts)
 	return st, nil
 }
 
@@ -668,9 +747,13 @@ func (m *Mgmt) deploymentStatus(ctx context.Context, d Deployment) (string, stri
 
 var _ = fmt.Sprintf
 
-// TagOwnersSnippet is the tagOwners twd's own nodes need: tag:twd (the
-// mint credential's tag) must own the mgmt and host tags so an OAuth
-// client or trust credential tagged tag:twd can mint their keys.
-func TagOwnersSnippet() string {
-	return `"tagOwners": { "tag:twd": ["autogroup:admin"], "` + MgmtTag + `": ["autogroup:admin", "tag:twd"], "` + HostTag + `": ["autogroup:admin", "tag:twd"] }`
+// HostTagOwnersSnippet is the one tagOwners entry a refused host join key
+// lacks (issue #443). mgmt is running, so tag:tw and tag:tw-mgmt are
+// already in the policy: only tag:tw-host needs tag:tw among its owners.
+// It is one line to paste inside the existing "tagOwners" section; a whole
+// second "tagOwners" block would not parse (issue #389).
+// On Headscale it is owned by tag:tw alone (tagOwnersFor).
+func HostTagOwnersSnippet(t Tenant) string {
+	return fmt.Sprintf(`%q: %s, // inside the existing "tagOwners" section (replace any line for %s; don't add a second section)`,
+		HostTag, policy.ListHuJSON(tagOwnersFor(t)), HostTag)
 }

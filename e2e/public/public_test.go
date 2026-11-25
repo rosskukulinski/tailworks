@@ -1,35 +1,37 @@
 //go:build e2epublic
 
 // E2E-PUBLIC (ADR-029) on tailnet 1: public ingress over real Funnel.
-// `twd up --oauth-client-file`, then a workload with twd.jsonc "public"
-// routes: its public node (tag:twd-public, named after the workload) serves
+// `tw up --oauth-client-file`, then a workload with tailworks.jsonc "public"
+// routes: its public node (tag:tw-public, named after the workload) serves
 // https://<name>.<tailnet>.ts.net/ from the public internet, and this test
 // fetches it through public DNS (1.1.1.1) like any internet client:
 //
 //   - the handler sees {kind:"public"} with the real client IP, never a
 //     tailnet caller, and spoofed identity headers never land;
-//   - unlisted paths, /_twd and odd paths are refused by netd;
+//   - unlisted paths, /_tw and odd paths are refused by netd;
 //   - a public request reaches an existing object but cannot create one
 //     (public_create_denied) unless the class opts in, up to maxObjects;
-//   - `twd expose off` cuts an in-flight public stream, `twd expose on`
+//   - `tw expose off` cuts an in-flight public stream, `tw expose on`
 //     reopens the listener;
-//   - every public request is in `twd audit`, without its query string;
-//   - `twd doctor` probes the public URL.
+//   - every public request is in `tw audit`, without its query string;
+//   - `tw doctor` probes the public URL.
 //
-// The API key in TWD_E2E_API_KEY_FILE is used ONLY to (a) create and
+// The API key in TW_E2E_API_KEY_FILE is used ONLY to (a) create and
 // delete the OAuth client, (b) mint the test's own client node key, (c)
 // apply the policy additions (validated, If-Match; the run REFUSES to write
-// anything beyond the tag:twd-public tagOwner and its funnel nodeAttr) and
+// anything beyond the tag:tw-public tagOwner and its funnel nodeAttr) and
 // (d) clean up by ID.
 package public
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -37,16 +39,18 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/e2e/cliflow"
-	"github.com/rosskukulinski/twd/internal/policy"
-	"github.com/rosskukulinski/twd/internal/tsapi"
-	"github.com/rosskukulinski/twd/mgmt"
-	"github.com/rosskukulinski/twd/netd"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/e2e/cliflow"
+	"github.com/rosskukulinski/tailworks/internal/policy"
+	"github.com/rosskukulinski/tailworks/internal/tsapi"
+	"github.com/rosskukulinski/tailworks/mgmt"
+	"github.com/rosskukulinski/tailworks/netd"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 )
 
 const prodControl = "https://controlplane.tailscale.com"
@@ -68,7 +72,7 @@ func Policy() policy.Snippet {
 }
 
 // approvedOnly reports whether a missing-entries diff is at most what Ross
-// approved for this run: the tag:twd-public tagOwner and its funnel
+// approved for this run: the tag:tw-public tagOwner and its funnel
 // nodeAttr. Anything else means the tailnet drifted: refuse to write.
 func approvedOnly(m policy.Snippet) error {
 	pub := policy.PublicSnippet()
@@ -82,7 +86,7 @@ func approvedOnly(m policy.Snippet) error {
 	}
 	for _, n := range m.NodeAttrs {
 		b, _ := json.Marshal(n)
-		if !strings.Contains(string(b), `"tag:twd-public"`) || !strings.Contains(string(b), `"funnel"`) {
+		if !strings.Contains(string(b), `"tag:tw-public"`) || !strings.Contains(string(b), `"funnel"`) {
 			return fmt.Errorf("policy is also missing nodeAttr %s (not approved for this run)", b)
 		}
 	}
@@ -91,12 +95,55 @@ func approvedOnly(m policy.Snippet) error {
 
 // publicClient fetches like an internet client: public DNS (1.1.1.1),
 // verified TLS, never this machine's tailscaled or MagicDNS.
+// publicDNSGood: host → the public addresses that have connected (publicClient).
+var publicDNSGood sync.Map
+
 func publicClient(timeout time.Duration) *http.Client {
 	r := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "udp", "1.1.1.1:53")
 	}}
 	d := &net.Dialer{Timeout: 10 * time.Second, Resolver: r}
-	tr := &http.Transport{DialContext: d.DialContext, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+	// Public DNS for a new Funnel name flaps for a while after it first
+	// resolves (an anycast resolver node can still hold the NXDOMAIN from
+	// before it existed), which is not what this suite tests. So the
+	// addresses that connected are kept, and used when a later lookup fails
+	// or leaves them out: the request still goes over the internet to the
+	// Funnel edge.
+	dial := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		ips, lerr := r.LookupHost(ctx, host)
+		// A lookup can also answer with only part of the name's addresses
+		// (only the AAAA, on a runner without IPv6). So addresses that
+		// connected before are tried after this lookup's.
+		if v, ok := publicDNSGood.Load(host); ok {
+			for _, ip := range v.([]string) {
+				if !slices.Contains(ips, ip) {
+					ips = append(ips, ip)
+				}
+			}
+		}
+		if len(ips) == 0 {
+			return nil, lerr
+		}
+		// Every address's error is reported, not just the last one's.
+		var errs []error
+		for _, ip := range ips {
+			c, err := d.DialContext(ctx, network, net.JoinHostPort(ip, port))
+			if err == nil {
+				if v, _ := publicDNSGood.Load(host); v == nil || !slices.Contains(v.([]string), ip) {
+					good, _ := v.([]string)
+					publicDNSGood.Store(host, append(slices.Clone(good), ip))
+				}
+				return c, nil
+			}
+			errs = append(errs, err)
+		}
+		return nil, errors.Join(errs...)
+	}
+	tr := &http.Transport{DialContext: dial, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
 		Proxy: nil, ForceAttemptHTTP2: false, DisableKeepAlives: true}
 	return &http.Client{Timeout: timeout, Transport: tr}
 }
@@ -108,14 +155,39 @@ type resp struct {
 	err  error
 }
 
+// fetch makes one request. A failure to resolve or connect (no response at
+// all) is retried for up to a minute, 2 s apart: right after a Funnel name
+// first answers, public resolvers can still hold a cached NXDOMAIN from
+// before it existed, and the edge's IPv6 path can flap. That is not what
+// the checks test, and any response, whatever its status, is returned as is.
 func fetch(hc *http.Client, method, u string, body io.Reader, hdr ...string) resp {
-	req, _ := http.NewRequest(method, u, body)
-	for i := 0; i+1 < len(hdr); i += 2 {
-		req.Header.Set(hdr[i], hdr[i+1])
+	var payload []byte
+	if body != nil {
+		payload, _ = io.ReadAll(body)
 	}
-	r, err := hc.Do(req)
+	var r *http.Response
+	var err error
+	deadline := time.Now().Add(time.Minute)
+	for {
+		var rd io.Reader
+		if payload != nil {
+			rd = bytes.NewReader(payload)
+		}
+		req, _ := http.NewRequest(method, u, rd)
+		for i := 0; i+1 < len(hdr); i += 2 {
+			req.Header.Set(hdr[i], hdr[i+1])
+		}
+		r, err = hc.Do(req)
+		var dnsErr *net.DNSError
+		var opErr *net.OpError
+		if err == nil || time.Now().After(deadline) || !(errors.As(err, &dnsErr) || (errors.As(err, &opErr) && opErr.Op == "dial")) {
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
 	if err != nil {
-		return resp{err: err}
+		// In m too, so a failed check's detail (which prints m) says why.
+		return resp{err: err, m: map[string]any{"fetch_error": err.Error()}}
 	}
 	defer r.Body.Close()
 	b, _ := io.ReadAll(r.Body)
@@ -141,9 +213,9 @@ func get(m map[string]any, path ...string) any {
 func js(v any) string { b, _ := json.Marshal(v); return string(b) }
 
 func TestE2EPublic(t *testing.T) {
-	keyFile, tailnet := os.Getenv("TWD_E2E_API_KEY_FILE"), os.Getenv("TWD_E2E_TAILNET")
+	keyFile, tailnet := os.Getenv("TW_E2E_API_KEY_FILE"), os.Getenv("TW_E2E_TAILNET")
 	if keyFile == "" || tailnet == "" {
-		t.Skip("TWD_E2E_API_KEY_FILE / TWD_E2E_TAILNET not set")
+		t.Skip("TW_E2E_API_KEY_FILE / TW_E2E_TAILNET not set")
 	}
 	if !allowedTailnets[tailnet] {
 		t.Fatalf("refusing to run against tailnet %q (not in the allow list)", tailnet)
@@ -152,7 +224,7 @@ func TestE2EPublic(t *testing.T) {
 	if err != nil {
 		t.Skip(err)
 	}
-	t.Setenv("TWD_WORKERD", wd)
+	t.Setenv("TW_WORKERD", wd)
 	apiKey, err := tsapi.LoadEnvFile(keyFile, "TS_API_KEY")
 	if err != nil {
 		t.Fatal(err)
@@ -161,7 +233,7 @@ func TestE2EPublic(t *testing.T) {
 	b := make([]byte, 3)
 	rand.Read(b)
 	run := hex.EncodeToString(b)
-	testPrefix, twdPrefix, label := cliflow.RunPrefixes("m13", run)
+	testPrefix, twPrefix, label := cliflow.RunPrefixes("m13", run)
 	root, _ := nettest.FindRepoRoot()
 	res := cliflow.NewResults(label+"-"+run, tailnet)
 	resultsTo := filepath.Join(root, "e2e", "real", "results", "m13-public-"+time.Now().Format("20060102-150405")+"-"+run+".json")
@@ -203,7 +275,7 @@ func TestE2EPublic(t *testing.T) {
 
 	// 2. The OAuth client (API key use (a)).
 	work := t.TempDir()
-	oc, err := api.CreateOAuthClient(ctx, []string{"auth_keys", "devices:core", "policy_file:read"}, []string{"tag:twd"}, testPrefix+"oauth")
+	oc, err := api.CreateOAuthClient(ctx, []string{"auth_keys", "devices:core", "policy_file:read"}, []string{"tag:tw"}, testPrefix+"oauth")
 	check("create_oauth_client", err == nil, fmt.Sprint(netd.RedactError(err)))
 	clientFile := filepath.Join(work, "oauth.env")
 	if err := os.WriteFile(clientFile, []byte("TS_OAUTH_CLIENT_ID="+oc.ID+"\nTS_OAUTH_CLIENT_SECRET="+oc.Secret+"\n"), 0o600); err != nil {
@@ -215,7 +287,7 @@ func TestE2EPublic(t *testing.T) {
 	minter := tsapi.MintSource(api, quiet)
 	tracker := tsapi.NewTracker(api)
 	bin := cliflow.BuildBinaries(t)
-	state := filepath.Join("/tmp", "twd-e2e-m13-"+run)
+	state := filepath.Join("/tmp", "tw-e2e-m13-"+run)
 	var nodes []*nettest.Node
 	newNode := func(role string, tags []string) *nettest.Node {
 		k, err := minter.AuthKey(ctx, netd.KeyRequest{ObjectID: role, Tags: tags, Ephemeral: true})
@@ -233,12 +305,12 @@ func TestE2EPublic(t *testing.T) {
 		return n
 	}
 	e := &cliflow.Env{T: t, BinDir: bin, StateDir: state, WorkDir: work, Tailnet: tailnet, OAuthClientFile: clientFile,
-		ControlURL: prodControl, Prefix: twdPrefix, Res: res, ClientTagged: true}
+		ControlURL: prodControl, Prefix: twPrefix, Res: res, ClientTagged: true}
 	downDone := false
 	t.Cleanup(func() {
 		if !downDone {
-			if _, se, _, err := e.Twd("down", "--purge"); err != nil {
-				t.Logf("twd down (cleanup): %v %s", err, netd.Redact(se))
+			if _, se, _, err := e.Tw("down", "--purge"); err != nil {
+				t.Logf("tw down (cleanup): %v %s", err, netd.Redact(se))
 			}
 		}
 		for _, c := range []string{"supervisor", "mgmt", "hostd"} {
@@ -253,22 +325,22 @@ func TestE2EPublic(t *testing.T) {
 		cctx, ccancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer ccancel()
 		devs, keys := cliflow.Leftovers(cctx, api, res)
-		res.Cleanup["twd_devices_tracked"] = len(res.NodeIDs)
-		res.Cleanup["twd_devices_left_after_down"] = len(devs)
-		res.Cleanup["twd_keys_valid_after_down"] = len(keys)
+		res.Cleanup["tw_devices_tracked"] = len(res.NodeIDs)
+		res.Cleanup["tw_devices_left_after_down"] = len(devs)
+		res.Cleanup["tw_keys_valid_after_down"] = len(keys)
 		for _, id := range res.NodeIDs {
-			tracker.Track(id, "twd")
+			tracker.Track(id, "tw")
 		}
 		for _, id := range res.InfraNodeIDs {
-			tracker.Track(id, "twd-infra")
+			tracker.Track(id, "tw-infra")
 		}
 		time.Sleep(3 * time.Second)
 		crep := tracker.Cleanup(cctx, testPrefix)
-		var untrackedTwd []string
+		var untrackedTw []string
 		if all, err := api.ListDevices(cctx); err == nil {
 			for _, d := range all {
-				if strings.HasPrefix(d.Hostname, twdPrefix) || strings.HasPrefix(d.Name, twdPrefix) || strings.HasPrefix(d.Hostname, "twd-host-"+strings.TrimSuffix(twdPrefix, "-")) {
-					untrackedTwd = append(untrackedTwd, d.Name)
+				if strings.HasPrefix(d.Hostname, twPrefix) || strings.HasPrefix(d.Name, twPrefix) || strings.HasPrefix(d.Hostname, "tw-host-"+strings.TrimSuffix(twPrefix, "-")) {
+					untrackedTw = append(untrackedTw, d.Name)
 				}
 			}
 		}
@@ -291,7 +363,7 @@ func TestE2EPublic(t *testing.T) {
 		res.Cleanup["devices_deleted_by_cleanup"] = crep.Deleted
 		res.Cleanup["devices_left"] = crep.Left
 		res.Cleanup["untracked_run_devices"] = crep.Untracked
-		res.Cleanup["twd_named_devices_left"] = untrackedTwd
+		res.Cleanup["tw_named_devices_left"] = untrackedTw
 		res.Cleanup["oauth_client_deleted"] = oc.ID
 		res.Cleanup["errors"] = errs
 		os.RemoveAll(state)
@@ -301,14 +373,14 @@ func TestE2EPublic(t *testing.T) {
 		os.WriteFile(resultsTo, out, 0o644)
 		t.Logf("results: %s\n%s", resultsTo, out)
 		if len(devs) > 0 || len(keys) > 0 {
-			t.Errorf("after twd down: leftover twd devices %v, valid keys %d", devs, len(keys))
+			t.Errorf("after tw down: leftover tw devices %v, valid keys %d", devs, len(keys))
 		}
-		if crep.Left != 0 || len(crep.Untracked) > 0 || len(untrackedTwd) > 0 || len(errs) > 0 {
-			t.Errorf("cleanup: %+v twd-named left %v errors %v", crep, untrackedTwd, errs)
+		if crep.Left != 0 || len(crep.Untracked) > 0 || len(untrackedTw) > 0 || len(errs) > 0 {
+			t.Errorf("cleanup: %+v tw-named left %v errors %v", crep, untrackedTw, errs)
 		}
 	})
 
-	// 3. twd up (OAuth). The single-tenant tenant gets publicIngress allow.
+	// 3. tw up (OAuth). The single-tenant tenant gets publicIngress allow.
 	var up struct {
 		TenantID   string `json:"tenantID"`
 		MgmtNodeID string `json:"mgmtNodeID"`
@@ -327,10 +399,10 @@ func TestE2EPublic(t *testing.T) {
 	os.Remove(filepath.Join(app, "src", "index.ts"))
 	wr, _ := os.ReadFile(filepath.Join(fx, "wrangler.jsonc"))
 	os.WriteFile(filepath.Join(app, "wrangler.jsonc"), wr, 0o644)
-	tj, _ := os.ReadFile(filepath.Join(fx, "twd.jsonc"))
-	tjs := strings.ReplaceAll(string(tj), `"tags": ["tag:ttest"],`, `"tags": ["tag:twd-wl-agent"],`)
-	tjs = strings.ReplaceAll(tjs, `{ "tags": ["tag:ttest"]`, `{ "tags": ["tag:twd-agent-support"]`)
-	os.WriteFile(filepath.Join(app, "twd.jsonc"), []byte(tjs), 0o644)
+	tj, _ := os.ReadFile(filepath.Join(fx, "tailworks.jsonc"))
+	tjs := strings.ReplaceAll(string(tj), `"tags": ["tag:ttest"],`, `"tags": ["tag:tw-wl-agent"],`)
+	tjs = strings.ReplaceAll(tjs, `{ "tags": ["tag:ttest"]`, `{ "tags": ["tag:tw-agent-support"]`)
+	os.WriteFile(filepath.Join(app, "tailworks.jsonc"), []byte(tjs), 0o644)
 
 	var dep struct {
 		DeploymentID string `json:"deploymentID"`
@@ -348,13 +420,13 @@ func TestE2EPublic(t *testing.T) {
 	check("deploy", dep.Public != nil && dep.Public.Allowed && dep.Public.Exposed, fmt.Sprintf("in %v, public %s", d.Round(time.Millisecond), js(dep.Public)))
 	res.Numbers["deploy_ready_ms"] = float64(d.Milliseconds())
 
-	// 5. The public node: _public namespace, tag:twd-public, named after
+	// 5. The public node: _public namespace, tag:tw-public, named after
 	// the workload (with this run's prefix).
 	pub := e.WaitObjectReady("_public", "pubprobe", 3*time.Minute)
 	e.TrackObjectNodes()
-	wantName := twdPrefix + "pubprobe"
+	wantName := twPrefix + "pubprobe"
 	label0, _, _ := strings.Cut(pub.MagicDNS, ".")
-	check("public_node", label0 == wantName && len(pub.Tags) == 1 && pub.Tags[0] == "tag:twd-public",
+	check("public_node", label0 == wantName && len(pub.Tags) == 1 && pub.Tags[0] == "tag:tw-public",
 		fmt.Sprintf("%s tags %v", pub.MagicDNS, pub.Tags))
 	base := "https://" + strings.TrimSuffix(pub.MagicDNS, ".")
 
@@ -365,7 +437,7 @@ func TestE2EPublic(t *testing.T) {
 	for {
 		first = fetch(hc, "GET", base+"/hook/echo?token=secret-value", nil,
 			"Tailscale-User-Login", "evil@example.com", "X-Forwarded-For", "6.6.6.6", "CF-Connecting-IP", "6.6.6.6",
-			"x-twd-cf", `{"tailscale":{"caller":{"nodeId":"nFORGED","tags":["tag:admin"]}}}`)
+			"x-tw-cf", `{"tailscale":{"caller":{"nodeId":"nFORGED","tags":["tag:admin"]}}}`)
 		if first.err == nil {
 			break
 		}
@@ -392,10 +464,10 @@ func TestE2EPublic(t *testing.T) {
 		status     int
 	}{{"/private", "not_public", 404}, {"/", "not_public", 404}, {"/hook/../private", "bad_request", 400}} {
 		r := fetch(hc, "GET", base+c.path, nil)
-		check("route "+c.path, r.err == nil && r.code == c.status && r.h.Get("twd-error") == c.code, fmt.Sprintf("%d %q %v", r.code, r.h.Get("twd-error"), r.err))
+		check("route "+c.path, r.err == nil && r.code == c.status && r.h.Get("tw-error") == c.code, fmt.Sprintf("%d %q %v", r.code, r.h.Get("tw-error"), r.err))
 	}
-	r = fetch(hc, "GET", base+"/_twd/o/Room/alice/", nil)
-	check("route /_twd", r.err == nil && r.code >= 400 && r.code < 500, fmt.Sprintf("%d %v", r.code, r.err))
+	r = fetch(hc, "GET", base+"/_tw/o/Room/alice/", nil)
+	check("route /_tw", r.err == nil && r.code >= 400 && r.code < 500, fmt.Sprintf("%d %v", r.code, r.err))
 
 	// 8. Objects: existing yes, new no, opted-in class up to maxObjects.
 	client := newNode("client", []string{cliflow.TestTag})
@@ -409,22 +481,33 @@ func TestE2EPublic(t *testing.T) {
 	check("public_existing_object", r.code == 200 && r.m["object"] == "alice" && get(r.m, "requester", "kind") == "public", fmt.Sprintf("%d %v", r.code, r.m))
 	r = fetch(hc, "GET", base+"/agents/room/bob", nil)
 	_, bobExists := e.FindObject("Room", "bob")
-	check("public_create_denied", r.code == 403 && r.h.Get("twd-error") == "public_create_denied" && !bobExists, fmt.Sprintf("%d %q exists=%v", r.code, r.h.Get("twd-error"), bobExists))
+	check("public_create_denied", r.code == 403 && r.h.Get("tw-error") == "public_create_denied" && !bobExists, fmt.Sprintf("%d %q exists=%v", r.code, r.h.Get("tw-error"), bobExists))
 	for _, n := range []string{"a", "b"} {
 		r = fetch(hc, "GET", base+"/agents/open/"+n, nil)
 		check("public_create_opt_in "+n, r.code == 200, fmt.Sprintf("%d %v", r.code, r.m))
 	}
 	r = fetch(hc, "GET", base+"/agents/open/c", nil)
-	check("public_create_max_objects", r.code == 403 && r.h.Get("twd-error") == "public_create_denied", fmt.Sprintf("%d %q", r.code, r.h.Get("twd-error")))
+	check("public_create_max_objects", r.code == 403 && r.h.Get("tw-error") == "public_create_denied", fmt.Sprintf("%d %q", r.code, r.h.Get("tw-error")))
 	r = fetch(hc, "GET", base+"/spawn", nil)
 	check("public_spawn_denied", r.code == 299 && r.m["code"] == "public_create_denied", fmt.Sprintf("%d %v", r.code, r.m))
 	r = fetch(hc, "POST", base+"/big", strings.NewReader(strings.Repeat("x", 4096)))
-	check("public_body_limit", r.code == 413 && r.h.Get("twd-error") == "payload_too_large", fmt.Sprintf("%d %q", r.code, r.h.Get("twd-error")))
+	check("public_body_limit", r.code == 413 && r.h.Get("tw-error") == "payload_too_large", fmt.Sprintf("%d %q", r.code, r.h.Get("tw-error")))
 	e.TrackObjectNodes()
 
-	// 9. twd expose off: an in-flight public stream is cut; on reopens.
-	sr, _ := http.NewRequest("GET", base+"/slow", nil)
-	stream, err := publicClient(0).Do(sr)
+	// 9. tw expose off: an in-flight public stream is cut; on reopens.
+	// Like fetch, retry a failure to resolve or connect for up to a minute:
+	// a lookup can return only the edge's IPv6 address, which a runner
+	// without IPv6 can't reach (release run 45346852696).
+	var stream *http.Response
+	for deadline := time.Now().Add(time.Minute); ; time.Sleep(2 * time.Second) {
+		sr, _ := http.NewRequest("GET", base+"/slow", nil)
+		stream, err = publicClient(0).Do(sr)
+		var dnsErr *net.DNSError
+		var opErr *net.OpError
+		if err == nil || time.Now().After(deadline) || !(errors.As(err, &dnsErr) || (errors.As(err, &opErr) && opErr.Op == "dial")) {
+			break
+		}
+	}
 	if err != nil || stream.StatusCode != 200 {
 		t.Fatalf("/slow: %v %v", err, stream)
 	}
@@ -442,15 +525,15 @@ func TestE2EPublic(t *testing.T) {
 		}
 	}()
 	tOff := time.Now()
-	_, se, offDur, err := e.Twd("expose", "off", "pubprobe")
+	_, se, offDur, err := e.Tw("expose", "off", "pubprobe")
 	if err != nil {
-		t.Fatalf("twd expose off: %v %s", err, netd.Redact(se))
+		t.Fatalf("tw expose off: %v %s", err, netd.Redact(se))
 	}
 	var cutAt time.Time
 	select {
 	case cutAt = <-cut:
 	case <-time.After(10 * time.Second):
-		t.Fatal("in-flight public stream not cut 10 s after twd expose off")
+		t.Fatal("in-flight public stream not cut 10 s after tw expose off")
 	}
 	stream.Body.Close()
 	sinceCmd, sinceDone := cutAt.Sub(tOff), cutAt.Sub(tOff.Add(offDur))
@@ -461,15 +544,15 @@ func TestE2EPublic(t *testing.T) {
 	r = fetch(publicClient(15*time.Second), "GET", base+"/hook/x", nil)
 	check("expose_off_refuses", r.err != nil || r.code >= 500, fmt.Sprintf("%d %v", r.code, r.err))
 	tOn := time.Now()
-	if _, se, _, err := e.Twd("expose", "on", "pubprobe"); err != nil {
-		t.Fatalf("twd expose on: %v %s", err, netd.Redact(se))
+	if _, se, _, err := e.Tw("expose", "on", "pubprobe"); err != nil {
+		t.Fatalf("tw expose on: %v %s", err, netd.Redact(se))
 	}
 	for {
 		if r = fetch(hc, "GET", base+"/hook/x", nil); r.err == nil && r.code == 200 {
 			break
 		}
 		if time.Since(tOn) > 60*time.Second {
-			t.Fatalf("public URL did not answer 60 s after twd expose on: %d %v", r.code, r.err)
+			t.Fatalf("public URL did not answer 60 s after tw expose on: %d %v", r.code, r.err)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
@@ -484,23 +567,34 @@ func TestE2EPublic(t *testing.T) {
 			Detail    json.RawMessage `json:"detail"`
 		} `json:"records"`
 	}
-	var n int
-	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(time.Second) {
+	// One public_request record per request that reached the app (at least
+	// 8 above). Refused ones (the route checks' not_public and bad_request)
+	// are rolled into netd's per-minute public_rejected summary instead
+	// (H03, #68), so wait up to that window for it.
+	var n, notPublic, badRequest int
+	for deadline := time.Now().Add(90 * time.Second); time.Now().Before(deadline); time.Sleep(2 * time.Second) {
 		e.MustJSON(&aud, "audit", pub.ID)
-		n = 0
+		n, notPublic, badRequest = 0, 0, 0
 		for _, it := range aud.Items {
-			if it.Kind == "public_request" {
+			switch it.Kind {
+			case "public_request":
 				n++
+			case "public_rejected":
+				var sum struct{ NotPublic, BadRequest int }
+				json.Unmarshal(it.Detail, &sum)
+				notPublic += sum.NotPublic
+				badRequest += sum.BadRequest
 			}
 		}
-		if n >= 12 {
+		if n >= 8 && notPublic >= 2 && badRequest >= 1 {
 			break
 		}
 	}
 	raw := js(aud)
-	check("audit_public_requests", n >= 12 && !strings.Contains(raw, "secret-value"), fmt.Sprintf("%d public_request records", n))
+	check("audit_public_requests", n >= 8 && !strings.Contains(raw, "secret-value"), fmt.Sprintf("%d public_request records", n))
+	check("audit_public_rejected", notPublic >= 2 && badRequest >= 1, fmt.Sprintf("public_rejected summaries: notPublic %d, badRequest %d (want ≥2, ≥1: the route checks)", notPublic, badRequest))
 
-	// 11. twd doctor probes the public URL.
+	// 11. tw doctor probes the public URL.
 	var doc struct {
 		Checks []struct{ Name, Status, Detail string }
 	}
@@ -515,8 +609,8 @@ func TestE2EPublic(t *testing.T) {
 
 	// 12. Down.
 	e.TrackObjectNodes()
-	if _, se, _, err := e.Twd("down", "--purge"); err != nil {
-		t.Fatalf("twd down: %v %s", err, netd.Redact(se))
+	if _, se, _, err := e.Tw("down", "--purge"); err != nil {
+		t.Fatalf("tw down: %v %s", err, netd.Redact(se))
 	}
 	downDone = true
 	res.Pass("down", "purged")

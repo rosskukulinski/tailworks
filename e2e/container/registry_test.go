@@ -3,11 +3,11 @@
 package container
 
 // E2E-CONTAINER-REGISTRY (ADR-032 D3): the acceptance examples deployed
-// from their own Dockerfiles through twd's registry to Firecracker
-// containers. The images were built on the developer machine by twd
+// from their own Dockerfiles through tailworks' registry to Firecracker
+// containers. The images were built on the developer machine by tailworks
 // deploy's builder (build_test.go, `make e2e-container-build`: docker
 // buildx, alias map as named contexts); here they are pushed with the
-// same push code twd deploy uses, the deploy pins them by digest, and
+// same push code tw deploy uses, the deploy pins them by digest, and
 // hostd, whose image store has no other source, pulls exactly those
 // digests from the registry as a host, converts them and boots them.
 
@@ -24,15 +24,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd/fakemgmt"
-	"github.com/rosskukulinski/twd/hostd/hostdtest"
-	"github.com/rosskukulinski/twd/hostd/image"
-	"github.com/rosskukulinski/twd/hostd/mgmtapi"
-	"github.com/rosskukulinski/twd/hostd/vm"
-	"github.com/rosskukulinski/twd/internal/imagebuild"
-	"github.com/rosskukulinski/twd/internal/oci"
-	"github.com/rosskukulinski/twd/internal/registry"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/hostd/fakemgmt"
+	"github.com/rosskukulinski/tailworks/hostd/hostdtest"
+	"github.com/rosskukulinski/tailworks/hostd/image"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/hostd/vm"
+	"github.com/rosskukulinski/tailworks/internal/imagebuild"
+	"github.com/rosskukulinski/tailworks/internal/oci"
+	"github.com/rosskukulinski/tailworks/internal/registry"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 	"tailscale.com/tailcfg"
 )
 
@@ -46,10 +46,10 @@ type builtImage struct {
 }
 
 func TestE2EContainerRegistry(t *testing.T) {
-	kernel, ckernel, rootfs := os.Getenv("TWD_VM_KERNEL"), os.Getenv("TWD_VM_CONTAINER_KERNEL"), os.Getenv("TWD_VM_ROOTFS")
-	imgs, apps, builtDir := os.Getenv("TWD_CTR_IMAGES"), os.Getenv("TWD_CTR_APPS"), os.Getenv("TWD_CTR_BUILT")
+	kernel, ckernel, rootfs := os.Getenv("TW_VM_KERNEL"), os.Getenv("TW_VM_CONTAINER_KERNEL"), os.Getenv("TW_VM_ROOTFS")
+	imgs, apps, builtDir := os.Getenv("TW_CTR_IMAGES"), os.Getenv("TW_CTR_APPS"), os.Getenv("TW_CTR_BUILT")
 	if kernel == "" || ckernel == "" || rootfs == "" || imgs == "" || apps == "" || builtDir == "" {
-		t.Skip("TWD_VM_KERNEL, TWD_VM_CONTAINER_KERNEL, TWD_VM_ROOTFS, TWD_CTR_IMAGES, TWD_CTR_APPS and TWD_CTR_BUILT must be set (make e2e-container-registry)")
+		t.Skip("TW_VM_KERNEL, TW_VM_CONTAINER_KERNEL, TW_VM_ROOTFS, TW_CTR_IMAGES, TW_CTR_APPS and TW_CTR_BUILT must be set (make e2e-container-registry)")
 	}
 	var built []builtImage
 	if b, err := os.ReadFile(filepath.Join(builtDir, "built.json")); err != nil {
@@ -57,7 +57,7 @@ func TestE2EContainerRegistry(t *testing.T) {
 	} else if err := json.Unmarshal(b, &built); err != nil {
 		t.Fatal(err)
 	}
-	be, err := vm.New(vm.Config{Kernel: kernel, ContainerKernel: ckernel, Rootfs: rootfs, HugePages: os.Getenv("TWD_VM_HUGEPAGES"), Helper: os.Getenv("TWD_VM_HELPER")})
+	be, err := vm.New(vm.Config{Kernel: kernel, ContainerKernel: ckernel, Rootfs: rootfs, HugePages: os.Getenv("TW_VM_HUGEPAGES"), Helper: os.Getenv("TW_VM_HELPER")})
 	if err != nil {
 		t.Fatalf("microVM backend unavailable: %v", err)
 	}
@@ -83,12 +83,12 @@ func TestE2EContainerRegistry(t *testing.T) {
 	defer func() {
 		b, _ := json.MarshalIndent(results, "", "  ")
 		t.Logf("results:\n%s", b)
-		if p := os.Getenv("TWD_E2E_RESULTS"); p != "" {
+		if p := os.Getenv("TW_E2E_RESULTS"); p != "" {
 			os.WriteFile(p, b, 0o644)
 		}
 	}()
 
-	// The operator pushes the public bases (twd image push): the raw flow's
+	// The operator pushes the public bases (tw image push): the raw flow's
 	// image and the arm64 alias targets.
 	adm := e.Mgmt.OCI() // the local admin (no host ID)
 	var idx map[string]string
@@ -115,7 +115,7 @@ func TestE2EContainerRegistry(t *testing.T) {
 		set("public_push "+ref, map[string]any{"ms": time.Since(st).Milliseconds(), "mb": cp.Bytes >> 20, "digest": cp.Digest})
 	}
 
-	// The developer pushes twd deploy's builds (imagebuild.Push) and
+	// The developer pushes tw deploy's builds (imagebuild.Push) and
 	// deploys with containerImages.
 	pushed := map[string]map[string]mgmtapi.BuiltImages{}
 	refs := map[string]string{}
@@ -149,12 +149,12 @@ func TestE2EContainerRegistry(t *testing.T) {
 		}
 		return files
 	}
-	// The twd.jsonc twd deploy sees without pins (the prep script's pins
+	// The tailworks.jsonc tw deploy sees without pins (the prep script's pins
 	// are for the DirSource e2e): the Dockerfile flow.
 	v0 := build(filepath.Join(apps, "v0min"))
-	v0["twd.jsonc"] = []byte(`{}`)
+	v0["tailworks.jsonc"] = []byte(`{}`)
 	v1 := build(filepath.Join(apps, "v1min"))
-	v1["twd.jsonc"] = []byte(`{"tailnet": {"objects": {"Sandbox": {"egress": "workload"}}}}`)
+	v1["tailworks.jsonc"] = []byte(`{"tailnet": {"objects": {"Sandbox": {"egress": "workload"}}}}`)
 	raw := build(filepath.Join(apps, "raw10"))
 	deploy := func(files map[string][]byte, wl string, bi map[string]mgmtapi.BuiltImages) string {
 		d, err := e.DeployBuilt(files, wl, bi)
@@ -259,7 +259,7 @@ func TestE2EContainerRegistry(t *testing.T) {
 		for _, c := range e.Host.Containers() {
 			want := refs[map[string]string{"sbx0": "v0min", "sbx1": "v1min"}[c.Workload]]
 			if c.Workload == "raw10" {
-				want = "twd.local/debian-trixie-python:1"
+				want = "tw.local/debian-trixie-python:1"
 			}
 			if c.Image != want || !oci.ValidDigest(c.Digest) {
 				t.Fatalf("%s runs %s (%s), want %s", c.Workload, c.Image, c.Digest, want)

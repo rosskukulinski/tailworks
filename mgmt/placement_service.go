@@ -94,6 +94,7 @@ func (m *Mgmt) storePaths(ctx context.Context, hostID string, rp PathReport) err
 			continue
 		}
 		seen[s.Target] = true
+		s = boundSample(s) // placement_bounds.go
 		ms = append(ms, PathMeasurement{HostID: hostID, TenantID: rp.TenantID, Target: s.Target, Peer: s.Peer, Path: s.Path,
 			RTTMicros: int64(s.RTTMs * 1000), DERPRegion: s.DERPRegion, MeasuredAt: now.Add(-time.Duration(s.AgeMs) * time.Millisecond).UnixMilli()})
 	}
@@ -105,11 +106,15 @@ type placementInput struct {
 	Workload string
 	Pinned   string
 	Replace  bool
-	Config   *TwdConfig
+	Config   *TwConfig
 	// Need carries what the bundle's containers need (ADR-032: the
 	// "containers" capability for the images' arch); its Tier is set here
 	// from Config and the tenant.
 	Need placementNeed
+
+	// Exclude: hosts placement must not choose (other replicas of the same
+	// workload already run there; workload_replicas.go).
+	Exclude map[string]bool
 }
 
 // place decides the deployment's host. It returns the decision and the
@@ -125,7 +130,11 @@ func (m *Mgmt) place(ctx context.Context, t Tenant, in placementInput) (Placemen
 	live := map[string]bool{}
 	byID := map[string]Host{}
 	for _, h := range hosts {
+		if in.Exclude[h.ID] {
+			continue
+		}
 		c := candidateOf(h, now)
+		c.Skew = m.hostSkew(h)
 		cands = append(cands, c)
 		live[h.ID], byID[h.ID] = c.Live, h
 	}
@@ -134,13 +143,13 @@ func (m *Mgmt) place(ctx context.Context, t Tenant, in placementInput) (Placemen
 	need.Tier = placementTier(t, in.Config) // "" = any host (process)
 	req := Requirements{Pool: t.Pool, Pinned: in.Pinned, Replace: in.Replace,
 		Mode: pc.Mode, Targets: pc.Targets, Aggregate: pc.Aggregate, Now: now,
-		Containers: need.Containers, Arch: need.Arch, Arches: need.Arches}
+		Containers: need.Containers, Arch: need.Arch, Arches: need.Arches, Features: need.Features}
 	if need.Tier != "" {
 		req.Tiers = []string{need.Tier}
 	}
 	req.Capacity = placementCapacity(req.Tiers, req.Containers)
 	if h, ok := byID[in.Pinned]; ok && live[in.Pinned] && !h.offers(need) {
-		return PlacementDecision{}, nil, errf(409, "tier_unavailable", "host %q does not offer %s (it offers %s); deploy without --host, or pick a host set up with `sudo twd host setup --microvm`", in.Pinned, need, tierList(h))
+		return PlacementDecision{}, nil, errf(409, "tier_unavailable", "host %q does not offer %s (it offers %s); deploy without --host, or pick a host set up with `sudo tw host setup --microvm`", in.Pinned, need, tierList(h))
 	}
 	var held *Lease
 	if l, err := m.store.GetLease(ctx, LeaseName(t.ID, in.Workload)); err == nil && l.Holder != "" && live[l.Holder] {
@@ -149,8 +158,11 @@ func (m *Mgmt) place(ctx context.Context, t Tenant, in placementInput) (Placemen
 		// Stickiness never keeps a workload on the wrong tier, or where its
 		// containers can't run: refuse (or, with --replace, let placement
 		// move it).
+		if h := byID[l.Holder]; !in.Replace && featureGap(h, need.Features) != "" {
+			return PlacementDecision{}, held, errf(409, "feature_unavailable", "workload %q runs on host %s, which %s; upgrade that host first, or redeploy with --replace to move the workload", in.Workload, h.ID, featureGap(h, need.Features))
+		}
 		if h := byID[l.Holder]; !h.offers(need) && !in.Replace {
-			return PlacementDecision{}, held, errf(409, "tier_unavailable", "workload %q runs on host %s, which does not offer %s it now asks for (the host offers %s); redeploy with --replace to move it to a host that does, or run `twd undeploy %s` and deploy again", in.Workload, h.ID, need, tierList(h), in.Workload)
+			return PlacementDecision{}, held, errf(409, "tier_unavailable", "workload %q runs on host %s, which does not offer %s it now asks for (the host offers %s); redeploy with --replace to move it to a host that does, or run `tw undeploy %s` and deploy again", in.Workload, h.ID, need, tierList(h), in.Workload)
 		}
 	}
 	var ms []PathMeasurement
@@ -178,6 +190,9 @@ func (m *Mgmt) place(ctx context.Context, t Tenant, in placementInput) (Placemen
 		if in.Pinned != "" && !live[in.Pinned] {
 			return d, held, errf(503, "no_host", "host %q is not live (no heartbeat within %v)", in.Pinned, HostLeaseTTL)
 		}
+		if len(need.Features) > 0 && onlyFeatureGaps(d.Hosts) {
+			return d, held, errf(409, "feature_unavailable", "%s", d.Summary)
+		}
 		return d, held, errf(503, "no_host", "%s", d.Summary)
 	}
 	return d, held, nil
@@ -197,7 +212,7 @@ const probeTimeout = 2 * time.Second
 func (m *Mgmt) probeMissing(ctx context.Context, t Tenant, cands []Candidate, ms []PathMeasurement, req Requirements) bool {
 	fresh := map[string]int{}
 	for _, x := range ms {
-		if req.Now.Sub(time.UnixMilli(x.MeasuredAt)) <= PathTTL/2 {
+		if req.Now.Sub(time.UnixMilli(x.MeasuredAt)) <= PathTTL/2 && unusableMeasurement(x, req.Now) == "" {
 			fresh[x.HostID]++
 		}
 	}
@@ -296,9 +311,9 @@ func (m *Mgmt) pushJSON(ctx context.Context, hostID, path string, body, out any)
 }
 
 // bundlePlacement fills cfg.Placement from wrangler.jsonc / wrangler.json
-// when twd.jsonc has no placement block (a Cloudflare project keeps its
+// when tailworks.jsonc has no placement block (a Cloudflare project keeps its
 // `placement` where wrangler reads it).
-func bundlePlacement(bundle []byte, cfg *TwdConfig) {
+func bundlePlacement(bundle []byte, cfg *TwConfig) {
 	p := cfg.Placement
 	if p.Mode != "" || len(p.Targets) > 0 || p.Host != "" || p.Hostname != "" || p.Region != "" {
 		return
@@ -330,4 +345,20 @@ func bundlePlacement(bundle []byte, cfg *TwdConfig) {
 		cfg.Placement.Mode, cfg.Placement.Region, cfg.Placement.Host, cfg.Placement.Hostname = w.Placement.Mode, w.Placement.Region, w.Placement.Host, w.Placement.Hostname
 		return
 	}
+}
+
+// onlyFeatureGaps: some live host was turned down, and every live host
+// that was turned down lacks a feature (so the fix is a host upgrade).
+func onlyFeatureGaps(hs []HostScore) bool {
+	n := 0
+	for _, h := range hs {
+		if h.Eligible || h.Why == "not live" {
+			continue
+		}
+		if !strings.HasPrefix(h.Why, "lacks feature ") {
+			return false
+		}
+		n++
+	}
+	return n > 0
 }

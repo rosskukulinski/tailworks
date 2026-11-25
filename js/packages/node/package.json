@@ -1,7 +1,12 @@
 {
-  "name": "@twd/node",
-  "version": "0.1.0",
-  "description": "twd Node process tier SDK: verified caller (x-twd-caller), attributed egress (proxy fetch / undici dispatcher)",
+  "name": "@tailworks/node",
+  "version": "0.5.0",
+  "description": "tw Node process tier SDK: verified caller (x-tw-caller), attributed egress (proxy fetch / undici dispatcher)",
+  "keywords": [
+    "tw",
+    "tailscale",
+    "node"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -24,7 +29,18 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
     "test": "node --test test/*.test.js"
   },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rosskukulinski/tailworks.git",
+    "directory": "js/packages/node"
+  },
+  "homepage": "https://github.com/rosskukulinski/tailworks#readme",
+  "bugs": "https://github.com/rosskukulinski/tailworks/issues",
   "license": "BSD-3-Clause"
 }

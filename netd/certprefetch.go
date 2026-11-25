@@ -16,7 +16,9 @@ import (
 // happens to land after issuance (seen on the WIF issuer's own node). ACME
 // orders also fail transiently (CreateOrder 404), so it retries a few
 // times; a later handshake would retry on its own anyway, this only warms.
-func PrefetchCert(lc *local.Client, name string, log *slog.Logger) {
+// Cancel ctx before closing the node: an in-flight request holds
+// tsnet.Server.Close's LocalAPI shutdown for its 5 s grace (#245).
+func PrefetchCert(ctx context.Context, lc *local.Client, name string, log *slog.Logger) {
 	name = strings.TrimSuffix(name, ".")
 	if lc == nil || name == "" {
 		return
@@ -24,18 +26,25 @@ func PrefetchCert(lc *local.Client, name string, log *slog.Logger) {
 	go func() {
 		st := time.Now()
 		for attempt := 1; ; attempt++ {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-			_, _, err := lc.CertPair(ctx, name)
+			cctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+			_, _, err := lc.CertPair(cctx, name)
 			cancel()
 			if err == nil {
 				log.Info("HTTPS certificate ready", "name", name, "ms", time.Since(st).Milliseconds(), "attempts", attempt)
 				return
 			}
+			if ctx.Err() != nil {
+				return // the node is closing
+			}
 			log.Warn("HTTPS certificate prefetch failed", "name", name, "attempt", attempt, "err", RedactError(err))
 			if attempt == 4 {
 				return
 			}
-			time.Sleep(time.Duration(attempt) * 20 * time.Second)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Duration(attempt) * 20 * time.Second):
+			}
 		}
 	}()
 }

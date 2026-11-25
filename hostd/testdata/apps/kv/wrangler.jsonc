@@ -1,0 +1,16 @@
+{
+  // Workers KV fixture (hostd/kv_test.go): KV and KV2 bind one namespace
+  // ("main"), OTHER its own (named after the binding); a facet (Box) uses
+  // the same bindings.
+  "name": "kv",
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-01",
+  "kv_namespaces": [
+    { "binding": "KV", "id": "main" },
+    { "binding": "KV2", "id": "main", "preview_id": "ignored" },
+    { "binding": "OTHER" },
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "BOX", "class_name": "Box" }],
+  },
+}

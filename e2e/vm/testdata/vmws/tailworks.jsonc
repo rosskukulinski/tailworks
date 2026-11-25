@@ -1,0 +1,12 @@
+{
+  "name": "vmws",
+  "tailnet": {
+    "tags": ["tag:ttest"],
+    "objects": {
+      // facet mode (the default)
+      "Room": { "tags": ["tag:ttest"] },
+      // plain-DO mode
+      "PlainRoom": { "tags": ["tag:ttest"], "egress": "workload" },
+    },
+  },
+}

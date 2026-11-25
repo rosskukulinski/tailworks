@@ -25,8 +25,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rosskukulinski/twd/guest/proto"
-	"github.com/rosskukulinski/twd/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/guest/proto"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
 )
 
 // writeGuestJSON writes a config drive holding only guest.json.
@@ -94,7 +94,7 @@ func (s *ctrState) event(msg proto.Msg) bool {
 			s.exitCode = msg.ExitCode
 			s.mu.Unlock()
 			if msg.Error != "" {
-				s.log.Write([]byte("twd: " + msg.Error + "\n"))
+				s.log.Write([]byte("tw: " + msg.Error + "\n"))
 				s.m.mu.Lock()
 				s.m.lastErr = msg.Error
 				s.m.mu.Unlock()
@@ -389,7 +389,7 @@ func (c *ctrVM) Stop(grace time.Duration) {
 		c.m.log.Warn("container VM did not exit after kill")
 	}
 	c.m.teardown()
-	if os.Getenv("TWD_KEEP_INSTANCES") == "" {
+	if os.Getenv("TW_KEEP_INSTANCES") == "" {
 		os.RemoveAll(c.m.dir)
 	}
 }

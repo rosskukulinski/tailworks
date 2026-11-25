@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd/mgmtapi"
-	"github.com/rosskukulinski/twd/netd"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/netd"
 )
 
 // tenant is one tenant's netd registry on this host.
@@ -25,7 +25,7 @@ type tenant struct {
 }
 
 // failClosedCerts is the CertSource of a tenant whose OBO public key mgmt
-// did not publish: every twd caller's caps are withheld.
+// did not publish: every tailworks caller's caps are withheld.
 type failClosedCerts struct{}
 
 func (failClosedCerts) Lookup(context.Context, string) (*netd.CallerObject, error) {
@@ -72,6 +72,9 @@ func (h *Host) ensureTenant(ctx context.Context, id string) (*tenant, error) {
 	if err != nil {
 		return nil, fmt.Errorf("tenant %s: %w", id, err)
 	}
+	if err := checkTenantLayout(h.sandbox, info); err != nil { // sandboxlayout.go (#342)
+		return nil, err
+	}
 	control := h.cfg.ControlURL
 	if control == "" {
 		control = info.ControlURL
@@ -82,10 +85,10 @@ func (h *Host) ensureTenant(ctx context.Context, id string) (*tenant, error) {
 	t = &tenant{id: id, info: *info}
 	// RT-01: pin the tenant's OBO root public key now; every inbound
 	// caller's node certificate is verified against it. Without a key,
-	// certificates can't be verified and netd withholds twd callers' caps.
+	// certificates can't be verified and netd withholds tailworks callers' caps.
 	certs, err := newCertSource(h, id, info.OBOPublicKey)
 	if err != nil {
-		h.log.Error("node certificates unavailable for tenant; twd callers' caps will be withheld (fail closed)", "tenant", id, "err", err)
+		h.log.Error("node certificates unavailable for tenant; tw callers' caps will be withheld (fail closed)", "tenant", id, "err", err)
 		certs = nil
 	}
 	var certSrc netd.CertSource
@@ -97,14 +100,18 @@ func (h *Host) ensureTenant(ctx context.Context, id string) (*tenant, error) {
 	}
 	reg, err := netd.New(netd.Config{
 		ControlURL:    control,
+		KeyTagsOnly:   info.MintMode == "headscale",
 		StateRoot:     filepath.Join(h.tenantDir(id), "nodes"),
 		Keys:          &keySource{h: h, tenantID: id},
 		Upstream:      h.ingressHandler(t),
 		CallerCerts:   certSrc,
 		AllowSiblings: h.cfg.AllowSiblingEgress,
+		Internet:      h.internetConfig(), // internet.go
 		Ephemeral:     h.cfg.Ephemeral,
 		Hostname:      func(oid string) string { return oid },
+		OnRejected:    func(nid string) { h.onNodeRejected(id, nid) }, // noderejected.go (#200)
 		ReadyTimeout:  h.cfg.ReadyTimeout,
+		EgressGate:    h.egressGate(id), // egressgate.go (#331)
 		JoinParallel:  h.cfg.JoinParallel,
 		Logger:        h.log.With("tenant", id),
 		TSNetLogs:     h.cfg.TSNetLogs,
@@ -112,6 +119,9 @@ func (h *Host) ensureTenant(ctx context.Context, id string) (*tenant, error) {
 		PublicListen:     h.cfg.PublicListen,
 		OnPublicRequest:  h.onPublicRequest,
 		OnPublicRejected: h.onPublicRejected,
+
+		// Tailnet HTTPS (tailnethttps.go).
+		HTTPSCert: h.cfg.TailnetHTTPSCert,
 	})
 	if err != nil {
 		return nil, err
@@ -187,7 +197,7 @@ func (k *keySource) AuthKey(ctx context.Context, req netd.KeyRequest) (string, e
 			switch {
 			case e.Code == "already_joined" && !req.Remint && !moved:
 				// The node joined from another host (the workload moved here:
-				// `twd deploy --replace`, or a confirmed takeover) and its saved
+				// `tw deploy --replace`, or a confirmed takeover) and its saved
 				// state is on that host's disk. Re-mint under the same hostname,
 				// fenced by this host's lease epoch (only the current holder can);
 				// mgmt deletes the previous device. Costs one registration

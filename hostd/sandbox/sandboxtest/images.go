@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/rosskukulinski/twd/hostd/image"
+	"github.com/rosskukulinski/tailworks/hostd/image"
 )
 
 // ImageStore returns an image.Store over dir holding one tiny docker-save

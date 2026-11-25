@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/guest/proto"
-	"github.com/rosskukulinski/twd/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/guest/proto"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
 )
 
 // heavyJS spends a few hundred ms of CPU in module top-level code: if
@@ -26,18 +26,18 @@ const heavyJS = `let x = 0; for (let i = 0; i < 3e8; i++) { x = (x + i) % 100000
 export default { async fetch(req) { return new Response("ok " + x); } };
 `
 
-// TestBootBench boots the guest N times (TWD_VM_BENCH=N) serially and
+// TestBootBench boots the guest N times (TW_VM_BENCH=N) serially and
 // records the per-stage breakdown (Phase 1 of the fast-VM work), as JSON
-// into TWD_VM_BENCH_OUT. Variants: the tiny smoke config without a volume,
+// into TW_VM_BENCH_OUT. Variants: the tiny smoke config without a volume,
 // the same with a fresh encrypted DO volume per boot (what hostd always
 // attaches), and one boot with 300 ms of top-level module work.
 func TestBootBench(t *testing.T) {
-	n := envInt("TWD_VM_BENCH")
-	kernel, rootfs := os.Getenv("TWD_VM_KERNEL"), os.Getenv("TWD_VM_ROOTFS")
+	n := envInt("TW_VM_BENCH")
+	kernel, rootfs := os.Getenv("TW_VM_KERNEL"), os.Getenv("TW_VM_ROOTFS")
 	if n <= 0 || kernel == "" || rootfs == "" {
-		t.Skip("TWD_VM_BENCH / TWD_VM_KERNEL / TWD_VM_ROOTFS not set")
+		t.Skip("TW_VM_BENCH / TW_VM_KERNEL / TW_VM_ROOTFS not set")
 	}
-	b, err := New(Config{Kernel: kernel, Rootfs: rootfs, HugePages: os.Getenv("TWD_VM_HUGEPAGES"), Helper: os.Getenv("TWD_VM_HELPER")})
+	b, err := New(Config{Kernel: kernel, Rootfs: rootfs, HugePages: os.Getenv("TW_VM_HUGEPAGES"), Helper: os.Getenv("TW_VM_HELPER")})
 	if err != nil {
 		t.Skip(err)
 	}
@@ -53,12 +53,12 @@ func TestBootBench(t *testing.T) {
 	smoke, heavy := mk(smokeJS), mk(heavyJS)
 	ctx := context.Background()
 	t.Cleanup(func() {
-		if p := os.Getenv("TWD_VM_BENCH_OUT"); p != "" {
+		if p := os.Getenv("TW_VM_BENCH_OUT"); p != "" {
 			bb, _ := json.MarshalIndent(out, "", "  ")
 			os.WriteFile(p, bb, 0o644)
 		}
 	})
-	only := os.Getenv("TWD_VM_BENCH_ONLY")
+	only := os.Getenv("TW_VM_BENCH_ONLY")
 	run := func(name, app string, count int, volume bool) {
 		if only != "" && !strings.Contains(","+only+",", ","+name+",") {
 			return

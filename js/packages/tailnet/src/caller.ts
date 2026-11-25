@@ -1,5 +1,10 @@
 import { TailnetError } from "./errors.js";
 
+/**
+ * Caller is the tailnet node that connected, verified over WireGuard.
+ * On-behalf-of assertions (which human an agent acts for, RFC §4.6) are not
+ * built: a caller is always the node itself, never a human behind it.
+ */
 export interface Caller {
   /** Stable node ID; the primary key to authorize on. */
   nodeId: string;
@@ -11,19 +16,16 @@ export interface Caller {
   addrs: readonly string[];
   /** Untagged (human) callers only. */
   user?: { login: string };
-  actingFor?: { sub: string; login?: string; groups: string[]; verified: "twd-assertion" | "control" };
-  /** Nearest hop first. */
-  chain: ReadonlyArray<{ nodeId: string; tags: readonly string[] }>;
   /** The object (node) the request was delivered to. */
   objectId: string;
   traceId: string;
   /**
-   * Set when the caller is a twd object with a node certificate (ADR-010):
+   * Set when the caller is a tailworks object with a node certificate (ADR-010):
    * its object ID and the cap limit (`lim`) its spawner set. caps() is
    * already narrowed to CapMap ∩ lim by netd, so a sub-agent spawned with
    * narrower caps than its class tag's grants cannot use the difference.
    */
-  twd?: { objectId: string; lim?: Record<string, unknown>; parent?: string; root?: string };
+  tw?: { objectId: string; lim?: Record<string, unknown>; parent?: string; root?: string };
   /**
    * True when netd could not verify the caller's node certificate and
    * withheld its caps (fail closed): caps() is empty whatever the policy says.
@@ -41,7 +43,7 @@ interface WireCaller {
   tags?: string[];
   user?: string;
   capMap?: Record<string, unknown[]>;
-  twd?: { objectId: string; lim?: Record<string, unknown>; parent?: string; root?: string };
+  tw?: { objectId: string; lim?: Record<string, unknown>; parent?: string; root?: string };
   capsWithheld?: boolean;
 }
 
@@ -49,7 +51,11 @@ interface WireCaller {
  * getCaller returns the verified tailnet caller of a request delivered by
  * netd (request.cf.tailscale). Throws TailnetError("no_identity") otherwise.
  * request.cf survives entry Worker → DO stub → facet, so pass the original
- * request along (or its cf) when you forward it in-process.
+ * request along (or a Request with its cf) when you forward it in-process.
+ * On tailworks the caller is sealed by hostd and checked before your code
+ * sees a request: a caller attached in-process without that seal is
+ * dropped (RT3-08). A cf passed as plain data (not on a Request) is not
+ * checked; don't authorize on it.
  */
 export function getCaller(req: Request | { cf?: any } | null | undefined): Caller {
   const cf = (req as any)?.cf;
@@ -69,11 +75,9 @@ export function getCaller(req: Request | { cf?: any } | null | undefined): Calle
     node: c.node ?? "",
     addrs: Object.freeze([...(c.addrs ?? [])]),
     user: c.user ? Object.freeze({ login: c.user }) : undefined,
-    actingFor: undefined,
     objectId: cf.objectId ?? "",
-    chain: Object.freeze([Object.freeze({ nodeId: c.nodeId, tags })]),
     traceId: cf.traceId ?? "",
-    twd: c.twd ? Object.freeze({ objectId: c.twd.objectId, lim: c.twd.lim ? structuredClone(c.twd.lim) : undefined, parent: c.twd.parent, root: c.twd.root }) : undefined,
+    tw: c.tw ? Object.freeze({ objectId: c.tw.objectId, lim: c.tw.lim ? structuredClone(c.tw.lim) : undefined, parent: c.tw.parent, root: c.tw.root }) : undefined,
     capsWithheld: !!c.capsWithheld,
     caps<T = unknown>(name: string): T[] {
       return (capMap[name] ?? []).map((v) => structuredClone(v) as T);
@@ -88,7 +92,7 @@ export function principalKey(who: Caller): string {
   if ((who as any)?.kind === "public" || !who?.nodeId) {
     throw new TailnetError("public_request", "principalKey needs a tailnet caller; a public requester has no identity");
   }
-  return who.actingFor?.login ?? who.user?.login ?? who.nodeId;
+  return who.user?.login ?? who.nodeId;
 }
 
 /**

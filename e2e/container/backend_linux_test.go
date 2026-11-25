@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rosskukulinski/twd/hostd/sandbox"
-	"github.com/rosskukulinski/twd/hostd/vm"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/hostd/vm"
 )
 
 // memoryDumpRequired: the strict keyscan must cover guest RAM (Firecracker
@@ -19,14 +19,14 @@ const memoryDumpRequired = true
 // newBackend is Firecracker: one jailed VM per container.
 func newBackend(t *testing.T) (sandbox.ContainerBackend, []string) {
 	t.Helper()
-	kernel, ckernel, rootfs := os.Getenv("TWD_VM_KERNEL"), os.Getenv("TWD_VM_CONTAINER_KERNEL"), os.Getenv("TWD_VM_ROOTFS")
+	kernel, ckernel, rootfs := os.Getenv("TW_VM_KERNEL"), os.Getenv("TW_VM_CONTAINER_KERNEL"), os.Getenv("TW_VM_ROOTFS")
 	if kernel == "" || ckernel == "" || rootfs == "" {
-		t.Skip("TWD_VM_KERNEL, TWD_VM_CONTAINER_KERNEL and TWD_VM_ROOTFS must be set (make e2e-container)")
+		t.Skip("TW_VM_KERNEL, TW_VM_CONTAINER_KERNEL and TW_VM_ROOTFS must be set (make e2e-container)")
 	}
-	// twd-hostd's defaults: warm pool (auto) and snapshots on, for the
+	// tw-hostd's defaults: warm pool (auto) and snapshots on, for the
 	// parents' DO VMs; containers cold-boot next to them.
-	be, err := vm.New(vm.Config{Kernel: kernel, ContainerKernel: ckernel, Rootfs: rootfs, BootArgs: os.Getenv("TWD_VM_BOOTARGS"), HugePages: os.Getenv("TWD_VM_HUGEPAGES"), Helper: os.Getenv("TWD_VM_HELPER"),
-		Snapshot: os.Getenv("TWD_VM_E2E_SNAPSHOT") != "0"})
+	be, err := vm.New(vm.Config{Kernel: kernel, ContainerKernel: ckernel, Rootfs: rootfs, BootArgs: os.Getenv("TW_VM_BOOTARGS"), HugePages: os.Getenv("TW_VM_HUGEPAGES"), Helper: os.Getenv("TW_VM_HELPER"),
+		Snapshot: os.Getenv("TW_VM_E2E_SNAPSHOT") != "0"})
 	if err != nil {
 		t.Fatalf("microVM backend unavailable: %v", err)
 	}

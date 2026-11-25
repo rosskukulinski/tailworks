@@ -18,13 +18,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rosskukulinski/twd/guest/proto"
-	"github.com/rosskukulinski/twd/hostd/image"
-	"github.com/rosskukulinski/twd/hostd/mgmtapi"
-	"github.com/rosskukulinski/twd/hostd/sandbox"
-	"github.com/rosskukulinski/twd/internal/container"
-	"github.com/rosskukulinski/twd/netd"
-	"github.com/rosskukulinski/twd/netd/sbxnet"
+	"github.com/rosskukulinski/tailworks/guest/proto"
+	"github.com/rosskukulinski/tailworks/hostd/image"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/internal/container"
+	"github.com/rosskukulinski/tailworks/netd"
+	"github.com/rosskukulinski/tailworks/netd/sbxnet"
 )
 
 // Containers (ADR-032): one microVM per container, attached to exactly
@@ -32,7 +32,7 @@ import (
 // keyed by (tenant, workload, class, object), not by the isolate: it
 // survives the object's eviction and its workload's blue/green redeploys
 // (the new code sees `running`), and dies with an inactivity timeout, an
-// operator hard max lifetime, destroy(), `twd kill` of the object, or the
+// operator hard max lifetime, destroy(), `tw kill` of the object, or the
 // workload being stopped or fenced (ADR-028: a container inherits its
 // parent's fence).
 //
@@ -55,7 +55,7 @@ const (
 
 // ContainerCapacity optionally bounds this host's containers on top of the
 // capacity vector they share with microVM DO instances (0 = no extra bound;
-// twd-hostd -container-max / -container-mem-mib / -container-vcpu).
+// tw-hostd -container-max / -container-mem-mib / -container-vcpu).
 type ContainerCapacity struct {
 	Max    int
 	MemMiB int
@@ -190,7 +190,7 @@ func (m *ctrManager) start(ctx context.Context, inst *instance, k ctrKey, cc *co
 		ref = cc.Image
 	}
 	if ref == "" {
-		return nil, ctrError("bad_request", "class %s has no built image (wrangler image %q): twd deploy builds and pins it", k.class, cc.Source)
+		return nil, ctrError("bad_request", "class %s has no built image (wrangler image %q): tw deploy builds and pins it", k.class, cc.Source)
 	}
 	allowed := false
 	for _, a := range refs {
@@ -262,24 +262,24 @@ func (m *ctrManager) start(ctx context.Context, inst *instance, k ctrKey, cc *co
 	}
 	release := func() { slot.Release(context.WithoutCancel(ctx)) }
 	var img *image.Image
+	var unhold func() // held before GC runs, so it never evicts this image
 	if len(cc.Pins) > 0 {
 		// Pinned at deploy (ADR-032 D3): only this arch's pin of this ref,
-		// pulled by digest from twd's registry. Nothing else is fetched.
+		// pulled by digest from tailworks' registry. Nothing else is fetched.
 		p := cc.PinFor(ref, m.images.HostArch())
 		if p == nil {
 			release()
 			return fail(ctrError("image_unavailable", "image %q of class %s has no pin for linux/%s (deploy pinned %s); redeploy so mgmt pins it for this host's arch",
 				ref, k.class, m.images.HostArch(), pinArches(cc.Pins, ref)))
 		}
-		img, err = m.images.GetPinned(ctx, k.tenant, *p)
+		img, unhold, err = m.images.GetPinnedHeld(ctx, k.tenant, *p)
 	} else {
-		img, err = m.images.Get(ctx, k.tenant, ref)
+		img, unhold, err = m.images.GetHeld(ctx, k.tenant, ref)
 	}
 	if err != nil {
 		release()
 		return fail(ctrError("image_unavailable", "%v", err))
 	}
-	unhold := m.images.Hold(img.Path)
 	release = func(slotRelease func()) func() {
 		return func() { unhold(); slotRelease() }
 	}(release)
@@ -294,7 +294,7 @@ func (m *ctrManager) start(ctx context.Context, inst *instance, k ctrKey, cc *co
 	id := fmt.Sprintf("c%d", m.seq)
 	m.mu.Unlock()
 	// The guest's only network: its own sandbox egress proxy (ADR-032 D4).
-	pn, err := sbxnet.New(m.netConfig(c, k, r.EnableInternet, inst.app.Internet))
+	pn, err := sbxnet.New(m.netConfig(c, k, r.EnableInternet, inst.app.Internet.Containers()))
 	if err != nil {
 		release()
 		return fail(ctrError("container_start_failed", "egress proxy: %v", err))
@@ -343,13 +343,16 @@ func (m *ctrManager) watch(c *ctr, gen int64, vm sandbox.Container) {
 			m.finish(c, gen, vm, vm.ExitCode(), "exited", 0)
 			return
 		case <-vm.Done():
-			code := -1
+			// When the process exits, Exited and Done can both be ready,
+			// and select picks either: a process exit is "exited" either
+			// way (it used to be reported as "vm exited" at random, a
+			// different error for the app; issue #75).
 			select {
 			case <-vm.Exited():
-				code = vm.ExitCode()
+				m.finish(c, gen, vm, vm.ExitCode(), "exited", 0)
 			default:
+				m.finish(c, gen, vm, -1, "vm exited", 0)
 			}
-			m.finish(c, gen, vm, code, "vm exited", 0)
 			return
 		case <-tk.C:
 			c.mu.Lock()
@@ -488,7 +491,7 @@ func (m *ctrManager) destroyWhere(match func(ctrKey) bool, reason string, grace 
 	return n
 }
 
-// ContainerStatus is one container as seen by tests and `twd host status`.
+// ContainerStatus is one container as seen by tests and `tw host status`.
 type ContainerStatus struct {
 	Tenant, Workload, Class, Object string
 	State                           string
@@ -587,7 +590,7 @@ func (h *Host) ctrKeyFor(inst *instance, as *ctrAs) (ctrKey, *container.Class, e
 }
 
 // asHeader carries the attested caller on the streaming endpoints.
-const asHeader = "x-twd-as"
+const asHeader = "x-tw-as"
 
 func (h *Host) containerAPI(inst *instance, w http.ResponseWriter, r *http.Request) {
 	m := h.ctr
@@ -876,8 +879,8 @@ func (m *ctrManager) serveExec(w http.ResponseWriter, r *http.Request, k ctrKey,
 	}()
 	w.Header().Set("content-type", "application/octet-stream")
 	w.Header().Set("cache-control", "no-store")
-	w.Header().Set("x-twd-exec", id)
-	w.Header().Set("x-twd-exec-pid", strconv.Itoa(ex.PID()))
+	w.Header().Set("x-tw-exec", id)
+	w.Header().Set("x-tw-exec-pid", strconv.Itoa(ex.PID()))
 	w.WriteHeader(200)
 	fl, _ := w.(http.Flusher)
 	if fl != nil {
@@ -1012,14 +1015,15 @@ func (m *ctrManager) servePort(w http.ResponseWriter, r *http.Request, k ctrKey,
 		FlushInterval: -1,
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
+			netd.KeepBodyEOF(pr) // #138
 			pr.Out.URL.Path, pr.Out.URL.RawPath, pr.Out.URL.RawQuery = path, "", r.URL.RawQuery
-			if h := r.Header.Get("x-twd-host"); h != "" {
+			if h := r.Header.Get("x-tw-host"); h != "" {
 				pr.Out.Host = h
 			} else {
 				pr.Out.Host = "localhost"
 			}
 			for hk := range pr.Out.Header {
-				if strings.HasPrefix(strings.ToLower(hk), "x-twd") {
+				if strings.HasPrefix(strings.ToLower(hk), "x-tw-") {
 					pr.Out.Header.Del(hk)
 				}
 			}
@@ -1130,7 +1134,7 @@ func (m *ctrManager) netConfig(c *ctr, k ctrKey, internet bool, allow []string) 
 // deliverIntercept hands one intercepted container request to the parent
 // object's handler: through the workload's current instance (it may be a
 // newer deployment than the one that started the container) to the
-// platform wrapper, which only hostd can address (cf.twd), and on to
+// platform wrapper, which only hostd can address (cf.tw), and on to
 // ctx.container's registered handler for key in the object itself.
 func (m *ctrManager) deliverIntercept(ctx context.Context, k ctrKey, key string, req *http.Request) (*http.Response, error) {
 	m.h.mu.Lock()
@@ -1143,12 +1147,12 @@ func (m *ctrManager) deliverIntercept(ctx context.Context, k ctrKey, key string,
 	if inst == nil || inst.direct == nil {
 		return nil, fmt.Errorf("the parent workload is not running")
 	}
-	blob, _ := json.Marshal(map[string]any{"twd": map[string]any{"kind": "intercept", "class": k.class, "name": k.name, "key": key, "url": req.URL.String()}})
+	blob, _ := json.Marshal(map[string]any{"tw": map[string]any{"kind": "intercept", "class": k.class, "name": k.name, "key": key, "url": req.URL.String()}})
 	out := req.Clone(ctx)
-	out.URL = &url.URL{Scheme: "http", Host: "platform", Path: "/_twd/intercept"}
+	out.URL = &url.URL{Scheme: "http", Host: "platform", Path: "/_tw/intercept"}
 	out.Host, out.RequestURI = "platform", ""
 	for hk := range out.Header {
-		if l := strings.ToLower(hk); strings.HasPrefix(l, "x-twd") || strings.HasPrefix(l, "twd-") || strings.HasPrefix(l, "cf-") {
+		if l := strings.ToLower(hk); strings.HasPrefix(l, "x-tw-") || strings.HasPrefix(l, "tw-") || strings.HasPrefix(l, "cf-") {
 			out.Header.Del(hk)
 		}
 	}
@@ -1165,7 +1169,7 @@ func (m *ctrManager) deliverIntercept(ctx context.Context, k ctrKey, key string,
 func newCanary() string {
 	var b [16]byte
 	rand.Read(b[:])
-	return "twd-canary-" + hex.EncodeToString(b[:])
+	return "tw-canary-" + hex.EncodeToString(b[:])
 }
 
 // pinArches lists the arches ref was pinned for.

@@ -4,17 +4,17 @@
 # config + virtiofs/erofs), rootfs.ext4 + manifest.json (guest/build-image.sh,
 # the same image the linux-arm64 release ships) and kernel-manifest.json.
 # Both builds need Linux, so on macOS a copy of this tree goes to Lima
-# $TWD_DEV_VM (default twd-dev, running; glibc comes from the pinned ubuntu-base, guest/inputs.sh), they run
-# there in /tmp/twd-vz-assets, and the files come back with `limactl copy`.
+# $TW_DEV_VM (default tw-dev, running; glibc comes from the pinned ubuntu-base, guest/inputs.sh), they run
+# there in /tmp/tw-vz-assets, and the files come back with `limactl copy`.
 # Cached: <outdir>/inputs.sha256 hashes every input (guest/, go.mod, go.sum,
-# the workerd version, the in-repo packages twd-guestd depends on), so an
+# the workerd version, the in-repo packages tw-guestd depends on), so an
 # unchanged guest is not rebuilt (~5 min for the kernel the first time).
 # Exit 0: assets are in <outdir>. 3: can't build here (no limactl, or the dev
 # VM is not running); anything else: the build failed.
 set -u
 OUT=${1:?outdir}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-DEV=${TWD_DEV_VM:-twd-dev}
+DEV=${TW_DEV_VM:-tw-dev}
 cd "$ROOT" || exit 1
 mkdir -p "$OUT"
 case $OUT in /*) ;; *) OUT=$ROOT/$OUT ;; esac
@@ -33,7 +33,7 @@ fi
 remote '[ "$(uname -m)" = aarch64 ]' ||
 	{ say "the builder must be arm64 Linux"; exit 3; }
 
-deps=$(go list -deps -f '{{if not .Standard}}{{.Dir}}{{end}}' ./guest/twd-guestd 2>/dev/null | grep "^$ROOT/" | sed "s|^$ROOT/||")
+deps=$(go list -deps -f '{{if not .Standard}}{{.Dir}}{{end}}' ./guest/tw-guestd 2>/dev/null | grep "^$ROOT/" | sed "s|^$ROOT/||")
 inputs=$( (git ls-files -co --exclude-standard guest go.mod go.sum; for d in $deps; do git ls-files -co --exclude-standard "$d"; done) | sort -u |
 	while read -r f; do [ -f "$f" ] && shasum -a 256 "$f"; done
 	node -p "require('$ROOT/package-lock.json').packages['node_modules/@cloudflare/workerd-linux-arm64'].version")
@@ -55,14 +55,14 @@ if [ "$os" = Linux ]; then
 	for f in $FILES; do cp "$B/out/$f" "$OUT/$f" || exit 1; done
 	rm -rf "$B"
 else
-	say "building in Lima $DEV:/tmp/twd-vz-assets (first time: npm ci, the guest image and the kernel)"
-	remote 'rm -rf /tmp/twd-vz-assets && mkdir -p /tmp/twd-vz-assets' || exit 1
-	git ls-files -co --exclude-standard | tar cf - -T - | limactl shell "$DEV" -- tar xf - -C /tmp/twd-vz-assets || exit 1
-	remote "cd /tmp/twd-vz-assets && $build" || exit 1
+	say "building in Lima $DEV:/tmp/tw-vz-assets (first time: npm ci, the guest image and the kernel)"
+	remote 'rm -rf /tmp/tw-vz-assets && mkdir -p /tmp/tw-vz-assets' || exit 1
+	git ls-files -co --exclude-standard | tar cf - -T - | limactl shell "$DEV" -- tar xf - -C /tmp/tw-vz-assets || exit 1
+	remote "cd /tmp/tw-vz-assets && $build" || exit 1
 	for f in $FILES; do
-		limactl copy "$DEV:/tmp/twd-vz-assets/out/$f" "$OUT/$f" || exit 1
+		limactl copy "$DEV:/tmp/tw-vz-assets/out/$f" "$OUT/$f" || exit 1
 	done
-	limactl copy "$DEV:/tmp/twd-vz-assets/build.log" "$OUT/build.log" 2>/dev/null
+	limactl copy "$DEV:/tmp/tw-vz-assets/build.log" "$OUT/build.log" 2>/dev/null
 fi
 printf '%s\n' "$want" >"$OUT/inputs.sha256"
 say "built in $(( $(date +%s) - t0 )) s -> $OUT"

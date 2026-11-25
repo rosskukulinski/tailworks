@@ -1,0 +1,32 @@
+[
+ {
+  "v": 1,
+  "id": "obj_1",
+  "netdID": "n1",
+  "tenantID": "t1",
+  "workload": "chat",
+  "class": "Room",
+  "name": "lobby",
+  "hostname": "chat-room-lobby",
+  "tags": [
+   "tag:chat"
+  ],
+  "status": "ready",
+  "nodeID": "nNODE1",
+  "wakes": 3,
+  "created": "2026-11-15T12:00:00Z"
+ },
+ {
+  "v": 1,
+  "id": "obj_2",
+  "netdID": "n2",
+  "tenantID": "t1",
+  "workload": "chat",
+  "name": "chat",
+  "hostname": "chat",
+  "tags": null,
+  "status": "killed",
+  "wakes": 0,
+  "created": "2026-11-15T12:00:01Z"
+ }
+]

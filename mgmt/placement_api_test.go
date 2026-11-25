@@ -12,10 +12,11 @@ import (
 // moves the lease at epoch+1, the stateful-move guard, and tier
 // eligibility.
 func TestAPIPlacement(t *testing.T) {
-	e := newTestEnv(t, nil)
+	t.Parallel()
+	e := newTestEnv(t)
 	c := e.c
 	var tn struct{ TenantID string }
-	c.ok("POST", "/v1/tenants", map[string]any{"tailnet": "t.ts.net", "mintMode": "apikey", "apiKeyFile": e.keyFile}, &tn)
+	c.ok("POST", "/v1/tenants", map[string]any{"tailnet": "t.ts.net", "mintMode": "oauth", "oauthClientFile": e.keyFile}, &tn)
 	hosts := map[string]*apiClient{}
 	for _, h := range []struct {
 		id    string
@@ -25,8 +26,9 @@ func TestAPIPlacement(t *testing.T) {
 		hosts[h.id] = e.asHost(h.id)
 		hosts[h.id].ok("PUT", "/v1/hosts/"+h.id, map[string]any{"capacityNodes": h.cap, "tiers": h.tiers}, nil)
 	}
+	keepHostsLive(t, e, "h1", "h2", "h3")
 	stateless := func(extra string) []byte {
-		return makeBundle(t, map[string]string{"twd.jsonc": `{` + extra + ` "tailnet": {"tags": ["tag:w"], "connects": ["tag:db"]}}`, "dist/index.js": "export default {}"})
+		return makeBundle(t, map[string]string{"tailworks.jsonc": `{` + extra + ` "tailnet": {"tags": ["tag:w"], "connects": ["tag:db"]}}`, "dist/index.js": "export default {}"})
 	}
 	type dep struct {
 		DeploymentID, Host string
@@ -127,7 +129,7 @@ func TestAPIPlacement(t *testing.T) {
 	}
 
 	// A stateful workload: a move off its live host must be confirmed.
-	sf := makeBundle(t, map[string]string{"twd.jsonc": testTwdJSONC, "dist/index.js": "export default {}"})
+	sf := makeBundle(t, map[string]string{"tailworks.jsonc": testTwJSONC, "dist/index.js": "export default {}"})
 	s1 := deploy(map[string]any{"workload": "agent", "bundle": sf, "host": "h1"})
 	c.fail("POST", "/v1/deployments", map[string]any{"tenantID": tn.TenantID, "workload": "agent", "bundle": sf, "host": "h2"}, 409, "lease_held")
 	c.fail("POST", "/v1/deployments", map[string]any{"tenantID": tn.TenantID, "workload": "agent", "bundle": sf, "host": "h2", "replace": true}, 409, "move_unconfirmed")

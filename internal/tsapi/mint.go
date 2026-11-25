@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/rosskukulinski/twd/netd"
+	"github.com/rosskukulinski/tailworks/netd"
 )
 
 // MintSource returns a netd.KeySource that mints one single-use,
@@ -34,7 +34,7 @@ func (m *Minter) AuthKey(ctx context.Context, req netd.KeyRequest) (string, erro
 		return "", errors.New("minting requires tags")
 	}
 	k, err := m.api.CreateKey(ctx, KeyOptions{Tags: req.Tags, Ephemeral: req.Ephemeral, Preauthorized: true,
-		ExpirySeconds: 300, Description: "twd " + req.ObjectID})
+		ExpirySeconds: 300, Description: "tw " + req.ObjectID})
 	if err != nil {
 		return "", err
 	}

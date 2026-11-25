@@ -1,0 +1,78 @@
+{{define "content"}}
+{{if .Node}}
+<h1><span class="mono">{{.Node.NodeName}}</span> logs {{template "status" .Node.Status}}</h1>
+<p class="crumbs">
+  Node <a class="mono" href="/ui/objects/{{.Node.ObjectID}}">{{.Node.ObjectID}}</a>
+  {{if .Workload}} · workload <a class="mono" href="{{.WorkloadPage}}">{{.Workload}}</a>{{end}}
+  · tenant <a class="mono" href="/ui/tenants/{{.TenantID}}">{{if .Tenant.Tailnet}}{{.Tenant.Tailnet}}{{else}}{{.TenantID}}{{end}}</a>
+</p>
+{{else}}
+<h1><span class="mono">{{.Workload}}</span> logs</h1>
+<p class="crumbs">
+  Workload {{if .DeploymentID}}<a class="mono" href="/ui/deployments/{{.DeploymentID}}">{{.Workload}}</a>{{else}}<span class="mono">{{.Workload}}</span>{{end}}
+  · tenant <a class="mono" href="/ui/tenants/{{.TenantID}}">{{if .Tenant.Tailnet}}{{.Tenant.Tailnet}}{{else}}{{.TenantID}}{{end}}</a>
+</p>
+{{end}}
+
+<nav class="tabs">
+  <a href="{{.With "source" "requests"}}"{{if eq .Source "requests"}} class="cur"{{end}}>Requests</a>
+  {{if .Node}}<a href="{{.WorkloadPage}}?source=console" title="The raw output is the workload's, not per node">Console output (workload) ↗</a>
+  {{else}}<a href="{{.With "source" "console" "errors" "" "status" "" "caller" "" "trace" "" "object" ""}}"{{if eq .Source "console"}} class="cur"{{end}}>Console output</a>{{end}}
+</nav>
+
+<section class="card toolbar">
+  <form method="get" action="{{.Self}}" class="filters">
+    {{if eq .Source "console"}}<input type="hidden" name="source" value="console">{{end}}
+    <label>Show
+      <select name="n">{{range .Sizes}}<option value="{{.}}"{{if eq . $.N}} selected{{end}}>last {{.}}</option>{{end}}</select>
+    </label>
+    {{if eq .Source "requests"}}
+    {{if not .Node}}<label>Node <input type="text" name="object" class="mono" value="{{.ObjectQ}}" placeholder="object ID, Class/name"></label>{{end}}
+    <label>Status <input type="text" name="status" class="mono" value="{{.StatusQ}}" placeholder="404, 5xx" size="6"></label>
+    <label>Caller <input type="text" name="caller" value="{{.Caller}}" placeholder="login or node (contains)"></label>
+    <label>Trace <input type="text" name="trace" class="mono" value="{{.Trace}}" placeholder="trace ID"></label>
+    <label class="check"><input type="checkbox" name="errors" value="1"{{if .Errors}} checked{{end}}> Errors only</label>
+    {{end}}
+    <button type="submit">{{if eq .Source "console"}}Show{{else}}Filter{{end}}</button>
+    {{if .Filtered}}<a href="{{.Self}}">Clear</a>{{end}}
+  </form>
+  <p class="small muted">{{if eq .Source "console"}}The workload's raw output (workerd's stdout, the node tier's app.log or the microVM console), oldest first.{{else}}One record per request or invocation, newest first, with the code's <span class="mono">console.*</span> lines and exceptions. Filtered on the host.{{end}} Read from the host that runs the workload; this page refreshes every 5 s.</p>
+</section>
+
+<section data-live="logs">
+{{range .Notes}}<div class="flash bad small">{{.}}</div>{{end}}
+{{if .Err}}<div class="flash bad">{{.Err}}</div>
+{{else if .Empty}}<div class="tbl"><table><tbody><tr><td class="empty">{{.Empty}}</td></tr></tbody></table></div>
+{{else if eq .Source "console"}}
+  {{if .Lines}}<pre class="console mono">{{range .Lines}}{{if .Replica}}<span class="muted">[{{.Replica}}] </span>{{end}}{{.Text}}
+{{end}}</pre>{{else}}<div class="tbl"><table><tbody><tr><td class="empty">No output yet.</td></tr></tbody></table></div>{{end}}
+{{else}}
+  <div class="tbl">
+  <table class="records">
+    <thead><tr><th>Time (UTC)</th><th>Request</th><th>Status</th><th>Duration</th>{{if not $.Node}}<th>Node</th>{{end}}<th>Caller</th><th>Trace</th></tr></thead>
+    <tbody>
+    {{range .Records}}
+    <tr class="rec{{if .IsError}} err{{end}}">
+      <td class="mono nowrap" title="{{.Stamp}}">{{.Clock}}{{if .Replica}}<div class="sub-line">{{.Replica}}</div>{{end}}</td>
+      <td class="mono">{{.What}}{{if and .Event (or .Method .Path)}}{{if ne .Event "fetch"}} <span class="muted">({{.Event}})</span>{{end}}{{end}}</td>
+      <td>{{if .Status}}<span class="badge {{.StatusClass}}">{{.Status}}</span>{{end}}{{if and .Outcome (ne .Outcome "ok")}} <span class="badge bad">{{.Outcome}}</span>{{end}}</td>
+      <td class="mono nowrap">{{.Duration}}</td>
+      {{if not $.Node}}<td class="mono">{{if .Object}}<a href="/ui/objects/{{.Object}}/logs" title="{{.Object}}">{{.Where}}</a>{{else}}{{.Where}}{{end}}</td>{{end}}
+      <td class="small">{{.Who}}</td>
+      <td class="mono">{{if .TraceID}}<a href="{{$.With "trace" .TraceID}}" title="Only this trace">{{short .TraceID}}</a>{{end}}{{if .AuditTraceID}} <a class="small" href="/ui/audit?trace={{.AuditTraceID}}" title="The audit records of this request">audit</a>{{end}}</td>
+    </tr>
+    {{if or .Logs .Exceptions .Truncated}}
+    <tr class="rec-detail"><td></td><td colspan="{{if $.Node}}5{{else}}6{{end}}">
+      {{if .Logs}}<pre class="console mono">{{range .Logs}}<span class="lvl lvl-{{.Level}}">{{.Level}}</span> {{.Message}}
+{{end}}</pre>{{end}}
+      {{range .Exceptions}}<div class="exc"><span class="bad-text mono">{{.Name}}: {{.Message}}</span>{{if .Stack}}<pre class="mono">{{.Stack}}</pre>{{end}}</div>{{end}}
+      {{if .Truncated}}<p class="small muted">Some lines were left out (a record keeps at most 100 lines and 16 KiB).</p>{{end}}
+    </td></tr>
+    {{end}}
+    {{else}}<tr><td colspan="7" class="empty">{{if .Filtered}}No records match these filters.{{else}}No requests yet.{{end}}</td></tr>{{end}}
+    </tbody>
+  </table>
+  </div>
+{{end}}
+</section>
+{{end}}

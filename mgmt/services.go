@@ -7,19 +7,19 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/rosskukulinski/twd/internal/tsapi"
-	"github.com/rosskukulinski/twd/internal/tssvc"
+	"github.com/rosskukulinski/tailworks/internal/tsapi"
+	"github.com/rosskukulinski/tailworks/internal/tssvc"
 )
 
 // ServicePort is the only port a workload Service exposes: the workload
 // node's attributed HTTP ingress.
 const ServicePort = "tcp:80"
 
-// serviceOwnerPrefix marks a Service definition twd manages. The full
+// serviceOwnerPrefix marks a Service definition tailworks manages. The full
 // comment is serviceOwner(tenant, workload); a deploy adopts a Service only
 // if its comment is exactly that, so one tenant's (or workload's) deploy can
 // never take over another's Service name on a shared tailnet.
-const serviceOwnerPrefix = "managed by twd: "
+const serviceOwnerPrefix = "managed by tailworks: "
 
 func serviceOwner(tenantID, workload string) string {
 	return serviceOwnerPrefix + "tenant=" + tenantID + " workload=" + workload
@@ -33,9 +33,9 @@ type ServiceAPI interface {
 }
 
 // ServiceName returns the Tailscale Service the workload's entry node hosts,
-// from twd.jsonc tailnet.service: true means "svc:<workload>", a string is
+// from tailworks.jsonc tailnet.service: true means "svc:<workload>", a string is
 // the name ("svc:" optional), false/absent means none.
-func (c *TwdConfig) ServiceName(workload string) (string, error) {
+func (c *TwConfig) ServiceName(workload string) (string, error) {
 	raw := c.Tailnet.Service
 	if len(raw) == 0 || string(raw) == "null" {
 		return "", nil
@@ -49,7 +49,7 @@ func (c *TwdConfig) ServiceName(workload string) (string, error) {
 	}
 	var name string
 	if err := json.Unmarshal(raw, &name); err != nil {
-		return "", fmt.Errorf("twd.jsonc: tailnet.service must be true, false or a Service name (\"svc:<label>\")")
+		return "", fmt.Errorf("tailworks.jsonc: tailnet.service must be true, false or a Service name (\"svc:<label>\")")
 	}
 	if name == "" {
 		return "", nil
@@ -58,15 +58,15 @@ func (c *TwdConfig) ServiceName(workload string) (string, error) {
 		name = "svc:" + name
 	}
 	if err := tssvc.Validate(name); err != nil {
-		return "", fmt.Errorf("twd.jsonc: tailnet.service: %v", err)
+		return "", fmt.Errorf("tailworks.jsonc: tailnet.service: %v", err)
 	}
 	return name, nil
 }
 
-// applyService resolves twd.jsonc tailnet.service onto the _workload
+// applyService resolves tailworks.jsonc tailnet.service onto the _workload
 // namespace. A Service needs the workload node, i.e. tailnet.tags (Service
 // hosts must be tagged nodes).
-func applyService(cfg *TwdConfig, workload string, classes []ClassConfig) (string, error) {
+func applyService(cfg *TwConfig, workload string, classes []ClassConfig) (string, error) {
 	if cfg == nil {
 		return "", nil
 	}
@@ -76,7 +76,7 @@ func applyService(cfg *TwdConfig, workload string, classes []ClassConfig) (strin
 	}
 	i := slices.IndexFunc(classes, func(c ClassConfig) bool { return c.Class == WorkloadNamespace })
 	if i < 0 {
-		return "", fmt.Errorf("twd.jsonc: tailnet.service needs tailnet.tags: the Service is hosted by the workload's entry node, which must be a tagged node")
+		return "", fmt.Errorf("tailworks.jsonc: tailnet.service needs tailnet.tags: the Service is hosted by the workload's entry node, which must be a tagged node")
 	}
 	classes[i].Service = name
 	return name, nil
@@ -94,7 +94,7 @@ func workloadService(classes []ClassConfig) string {
 
 // ensureService makes sure the tenant tailnet has the Service definition,
 // creating it (with ServicePort) if missing. An existing definition is
-// adopted only if twd created it for this (tenant, workload); otherwise the
+// adopted only if tailworks created it for this (tenant, workload); otherwise the
 // deploy is refused with service_conflict. The returned definition carries
 // the Service's VIPs.
 func (m *Mgmt) ensureService(ctx context.Context, t Tenant, workload, name string) (tsapi.Service, error) {
@@ -112,8 +112,8 @@ func (m *Mgmt) ensureService(ctx context.Context, t Tenant, workload, name strin
 	case err == nil:
 		if cur.Comment != owner {
 			return tsapi.Service{}, errf(409, "service_conflict",
-				"Service %s already exists and is not managed by twd for workload %q of tenant %s (its comment is %q). "+
-					"Pick another name in twd.jsonc tailnet.service, delete the Service, or, to hand an existing Service to this workload, set its comment to %q",
+				"Service %s already exists and is not managed by tailworks for workload %q of tenant %s (its comment is %q). "+
+					"Pick another name in tailworks.jsonc tailnet.service, delete the Service, or, to hand an existing Service to this workload, set its comment to %q",
 				name, workload, t.ID, cur.Comment, owner)
 		}
 		if slices.Contains(cur.Ports, ServicePort) {
@@ -132,7 +132,7 @@ func (m *Mgmt) ensureService(ctx context.Context, t Tenant, workload, name strin
 				for _, d := range devs {
 					if first, _, _ := strings.Cut(d.Name, "."); strings.EqualFold(first, label) {
 						return tsapi.Service{}, errf(409, "service_conflict",
-							"Service %s would share its MagicDNS name with device %s (MagicDNS resolves the device first, so callers would never reach the Service); pick another name in twd.jsonc tailnet.service",
+							"Service %s would share its MagicDNS name with device %s (MagicDNS resolves the device first, so callers would never reach the Service); pick another name in tailworks.jsonc tailnet.service",
 							name, d.Name)
 					}
 				}
@@ -153,7 +153,7 @@ func (m *Mgmt) ensureService(ctx context.Context, t Tenant, workload, name strin
 func serviceAPIError(name, op string, err error) error {
 	if tsapi.IsForbidden(err) || tsapi.IsUnauthorized(err) {
 		return errf(502, "service_api_failed",
-			"the Tailscale API refused to %s Service %s (%v): an OAuth client needs the Services write scope (Settings › OAuth clients › Services › Write), or create the Service in the admin console",
+			"the Tailscale API refused to %s Service %s (%v): an OAuth client needs the Services write scope (Settings › Trust credentials › Credential › OAuth › Services › Write), or create the Service in the admin console",
 			op, name, err)
 	}
 	return errf(502, "service_api_failed", "can't %s Service %s: %v", op, name, err)
@@ -187,13 +187,9 @@ func (p *Policy) HasServiceGrant(src, name string) bool {
 // workload tags must be auto-approved to host it.
 func servicePreflight(pol *Policy, res *PreflightResult, name string, wlTags []string) {
 	res.Service = name
+	res.workloadTags = slices.Clone(wlTags)
 	if pol.serviceAutoApproved(name, wlTags) {
 		return
 	}
-	res.ServiceUnapproved = true
-	tag := "tag:twd"
-	if len(wlTags) > 0 {
-		tag = wlTags[0]
-	}
-	res.ServiceSnippet = fmt.Sprintf(`"autoApprovers": { "services": { %q: [%q] } }`, name, tag)
+	res.ServiceUnapproved = true // ServiceSnippet: preflightsnippet.go
 }

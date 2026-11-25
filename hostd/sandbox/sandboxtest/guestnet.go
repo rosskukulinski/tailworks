@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
 	"golang.org/x/net/dns/dnsmessage"
 )
 

@@ -4,7 +4,7 @@ import (
 	"runtime"
 	"syscall"
 
-	"github.com/rosskukulinski/twd/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
 )
 
 // The capacity vector (ADR-032 D9): what this host registers and what its

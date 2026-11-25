@@ -9,8 +9,8 @@ package attacks
 //
 // Fixed invariant: same-uid peercred is kept as an additional check, but a
 // request on the socket is admitted only with the per-host bearer token
-// (Twd-Host-Token) that mgmt minted into a 0600 file under hostd's state
-// dir (twd-mgmt -host-token-file; rotated on `twd up`). A bare same-uid
+// (Tw-Host-Token) that mgmt minted into a 0600 file under hostd's state
+// dir (tw-mgmt -host-token-file; rotated on `tw up`). A bare same-uid
 // connection is accepted at the TCP level and then refused by every
 // endpoint, admin and host alike, including /v1/healthz. This test serves
 // the real local wrapper on the real listener and drives it as a tenant
@@ -27,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/mgmt"
+	"github.com/rosskukulinski/tailworks/mgmt"
 )
 
 func TestRT03_MgmtSocketRejectsBareSameUid(t *testing.T) {
@@ -43,7 +43,7 @@ func TestRT03_MgmtSocketRejectsBareSameUid(t *testing.T) {
 	}
 	defer ln.Close()
 
-	// The API handler, as cmd/twd-mgmt serves it on the socket. The inner
+	// The API handler, as cmd/tw-mgmt serves it on the socket. The inner
 	// handler stands for the admin API and records whether it was reached:
 	// any call that gets through with a bad token is the bug.
 	token := mgmt.NewHostToken()
@@ -60,7 +60,7 @@ func TestRT03_MgmtSocketRejectsBareSameUid(t *testing.T) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", sock)
 	}}}
 	call := func(hdr map[string]string) (int, string, string) {
-		req, _ := http.NewRequest("GET", "http://twd-mgmt/v1/tenants", nil)
+		req, _ := http.NewRequest("GET", "http://tw-mgmt/v1/tenants", nil)
 		for k, v := range hdr {
 			req.Header.Set(k, v)
 		}
@@ -87,10 +87,10 @@ func TestRT03_MgmtSocketRejectsBareSameUid(t *testing.T) {
 	if st != 403 || code != "host_token_invalid" || reached != 0 || strings.Contains(body, "tn_victim") {
 		t.Fatalf("RT-03: wrong token admitted: %d %s %s", st, code, body)
 	}
-	// Twd-Host-ID alone (the pre-fix "I am a host" header) is not a credential.
-	st, code, _ = call(map[string]string{"Twd-Host-ID": "h1"})
+	// Tw-Host-ID alone (the pre-fix "I am a host" header) is not a credential.
+	st, code, _ = call(map[string]string{"Tw-Host-ID": "h1"})
 	if st != 401 || code != "host_token_required" || reached != 0 {
-		t.Fatalf("RT-03: Twd-Host-ID without a token admitted: %d %s", st, code)
+		t.Fatalf("RT-03: Tw-Host-ID without a token admitted: %d %s", st, code)
 	}
 	// The real token (hostd, or the CLI reading the same 0600 file) works.
 	if st, _, body = call(map[string]string{mgmt.HostTokenHeader: token}); st != 200 || reached != 1 || !strings.Contains(body, "tn_victim") {
@@ -109,7 +109,7 @@ func TestRT03_MgmtSocketRejectsBareSameUid(t *testing.T) {
 	hc2 := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", sock2)
 	}}}
-	req, _ := http.NewRequest("GET", "http://twd-mgmt/v1/tenants", nil)
+	req, _ := http.NewRequest("GET", "http://tw-mgmt/v1/tenants", nil)
 	res, err := hc2.Do(req)
 	if err != nil {
 		t.Fatal(err)

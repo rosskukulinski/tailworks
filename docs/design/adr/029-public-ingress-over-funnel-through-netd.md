@@ -1,17 +1,19 @@
 # ADR-029: Public ingress over Funnel, through netd on a stable per-workload public node; tsidp deferred
 
 **Date:** 2026-11-13
-**Status:** Proposed (Ross, design interview 2026-11-13). Implemented on
-twd branch `amazing-kolibri` (see "Implementation notes" at the end).
+**Status:** Accepted (2026-11-16, built and shipped in v0.2.0: `tw expose`,
+[docs/public-ingress.md](../../public-ingress.md)). Proposed 2026-11-13 after a
+design interview; where the build differs, see "Implementation notes" at the end.
+tsidp (D4) stays deferred.
 
 **Context.**
 - Cloudflare Workers are public by default. Many apps need a public
   surface: webhook receivers, public pages, OAuth callbacks, and MCP
   servers used by hosted clients.
-- twd today is tailnet-only:
+- tailworks today is tailnet-only:
   - every workload node and object node runs netd on plain `:80`;
-  - netd does `WhoIs`, strips identity headers, stamps `x-twd-cf` and
-    reverse-proxies to workerd (twd `netd/ingress.go`);
+  - netd does `WhoIs`, strips identity headers, stamps `x-tw-cf` and
+    reverse-proxies to workerd (tailworks `netd/ingress.go`);
   - mgmt already serves its WIF issuer over tsnet `ListenFunnel :443`.
 - Measured: the first public fetch for a new node name took 76–107 s
   (certificate issuance).
@@ -38,13 +40,13 @@ twd branch `amazing-kolibri` (see "Implementation notes" at the end).
 
 **Decision.**
 1. **Opt-in (D1).**
-   - The tenant declares path prefixes in `twd.jsonc`:
+   - The tenant declares path prefixes in `tailworks.jsonc`:
      `"public": {"routes": ["/webhooks/*", "/oauth/callback"]}`.
    - There is no `"public": true` shorthand; `"/*"` must be written out.
    - Routes take effect only if the operator has set
-     `publicIngress: allow` for the tenant. `twd up` sets it
+     `publicIngress: allow` for the tenant. `tw up` sets it
      automatically in single-tenant mode.
-   - `twd expose off|on <workload>` is an operator override. It survives
+   - `tw expose off|on <workload>` is an operator override. It survives
      redeploys and closes the listener in under a second (a netd kill of
      the public node).
    - Paths not on the list get a 404 from netd and never reach workerd.
@@ -63,7 +65,7 @@ twd branch `amazing-kolibri` (see "Implementation notes" at the end).
      - A dedicated ingress gateway: a new hop and single point of
        failure, and itself a tailnet caller to every workload.
      - A bring-your-own front door: it looks like a tailnet caller. It is
-       deferred, possibly as a `twd.dev/cap/front-door` cap.
+       deferred, possibly as a `github.com/rosskukulinski/tailworks/cap/front-door` cap.
 3. **Requester identity (D3).**
    - `getCaller()` stays tailnet-only and throws
      `TailnetError("public_request")` on public traffic, so existing
@@ -108,30 +110,30 @@ twd branch `amazing-kolibri` (see "Implementation notes" at the end).
        (20/min), and objects are recorded with `origin: public`.
      - `"node": false` classes follow the same rules.
 6. **Policy and preflight (D6).**
-   - **Tag:** public nodes carry **`tag:twd-public`**, owned by
-     `tag:twd`, with no grants.
-   - **Snippet** `twd deploy` prints when the policy is missing it:
+   - **Tag:** public nodes carry **`tag:tw-public`**, owned by
+     `tag:tw`, with no grants.
+   - **Snippet** `tw deploy` prints when the policy is missing it:
      ```jsonc
-     "tagOwners": { "tag:twd-public": ["autogroup:admin", "tag:twd"] },
-     "nodeAttrs": [ { "target": ["tag:twd-public"], "attr": ["funnel"] } ]
+     "tagOwners": { "tag:tw-public": ["autogroup:admin", "tag:tw"] },
+     "nodeAttrs": [ { "target": ["tag:tw-public"], "attr": ["funnel"] } ]
      ```
-   - `internal/policy.Check` **narrows** `funnel` to `tag:twd-mgmt` and
-     `tag:twd-public` (today it allows any `tag:twd*`).
-   - **OAuth:** no new scopes; `auth_keys` + `tag:twd` covers minting
+   - `internal/policy.Check` **narrows** `funnel` to `tag:tw-mgmt` and
+     `tag:tw-public` (today it allows any `tag:tw*`).
+   - **OAuth:** no new scopes; `auth_keys` + `tag:tw` covers minting
      the new tag, and `policy_file:read` stays optional. OAuth mode stays
      Funnel-free until a workload declares routes.
    - **Deploy preflight order:**
      1. the tenant gate (`public_ingress_not_allowed`);
      2. the tagOwner and nodeAttr, if the policy is readable;
      3. the public node's netmap HTTPS and Funnel flags (`https_required`
-        / `funnel_required`, the same fixes as `twd up`);
+        / `funnel_required`, the same fixes as `tw up`);
      4. a name check: `public_name_taken` if MagicDNS would de-duplicate
-        `<workload>`, with `twd-mgmt` and `twd-host-*` reserved;
+        `<workload>`, with `tw-mgmt` and `tw-host-*` reserved;
      5. a certificate prefetch.
    - Deploy prints the URL with "first certificate ~1–2 min, public DNS
      up to 10 min", and `--wait-public` blocks until an external probe
      succeeds.
-   - **`twd doctor` rows:** `https_certs`, `public_ingress`,
+   - **`tw doctor` rows:** `https_certs`, `public_ingress`,
      `funnel_attr`, `public_cert`, `public_probe`.
 7. **Audit (D7).**
    - **Every public request** gets an audit record in the host chain,
@@ -169,11 +171,11 @@ twd branch `amazing-kolibri` (see "Implementation notes" at the end).
   `ttest-*` nodes.
 - The tsidp ADR (hosted MCP clients) and the front-door cap.
 
-**Implementation notes (twd, 2026-11-13).** Where the build differs from
+**Implementation notes (tailworks, 2026-11-13).** Where the build differs from
 the decision above:
-- **Expose off (D1):** `twd expose off` closes the Funnel listener and resets
+- **Expose off (D1):** `tw expose off` closes the Funnel listener and resets
   its flows. It does not kill the node: the node and its certificate stay
-  warm, so `twd expose on` is fast. Removing `"public"` and redeploying
+  warm, so `tw expose on` is fast. Removing `"public"` and redeploying
   deletes the node (a mgmt kill).
 - **Node state on a host move (D2):** custody for the public node's state
   is not built. The name is stable because mgmt names the node after the
@@ -200,12 +202,12 @@ the decision above:
 - **Scope:** `"runtime": "node"` with `"public"` is refused in v1.
 - **mgmt is never Funnel-capable (Ross, 2026-11-13).** mgmt's node used to
   serve the WIF issuer over Funnel. The issuer now has its own node,
-  `tag:twd-issuer`.
+  `tag:tw-issuer`.
   - **The node:** it has no grants and a Funnel-only listener, serving only
     OIDC discovery and the JWKS.
-  - **Policy:** `policy.FunnelTargets` is `tag:twd-public` and
-    `tag:twd-issuer`, and `Check` refuses `funnel` on `tag:twd-mgmt`.
-  - **Cost:** `twd up --wif` needs a second join for the issuer node (a
+  - **Policy:** `policy.FunnelTargets` is `tag:tw-public` and
+    `tag:tw-issuer`, and `Check` refuses `funnel` on `tag:tw-mgmt`.
+  - **Cost:** `tw up --wif` needs a second join for the issuer node (a
     login, or `--issuer-authkey-file`). The issuer URL also changes, so
     existing trust credentials must be re-created.
   - **RFC §4.4:** production issuers should still be at an operator-owned

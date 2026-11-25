@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rosskukulinski/twd/internal/container"
+	"github.com/rosskukulinski/tailworks/internal/container"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // Postgres driver "pgx"
 	_ "modernc.org/sqlite"             // pure-Go SQLite driver "sqlite" (no cgo)
@@ -36,9 +36,8 @@ type SQLStore struct {
 
 var _ Store = (*SQLStore)(nil)
 
-// OpenStore opens a store. dsn is "postgres://…" / "postgresql://…" for
-// Postgres, otherwise a SQLite file path (optionally "sqlite:" prefixed).
-func OpenStore(ctx context.Context, dsn string) (*SQLStore, error) {
+// openSQL opens and pings the database without migrating it.
+func openSQL(ctx context.Context, dsn string) (*SQLStore, error) {
 	var s *SQLStore
 	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
 		dsn, maxConns := takeMaxConns(dsn)
@@ -69,6 +68,16 @@ func OpenStore(ctx context.Context, dsn string) (*SQLStore, error) {
 	}
 	if err := s.db.PingContext(ctx); err != nil {
 		s.db.Close()
+		return nil, err
+	}
+	return s, nil
+}
+
+// OpenStore opens a store. dsn is "postgres://…" / "postgresql://…" for
+// Postgres, otherwise a SQLite file path (optionally "sqlite:" prefixed).
+func OpenStore(ctx context.Context, dsn string) (*SQLStore, error) {
+	s, err := openSQL(ctx, dsn)
+	if err != nil {
 		return nil, err
 	}
 	if err := s.migrate(ctx); err != nil {
@@ -153,9 +162,9 @@ func (s *SQLStore) UpdateThrottle(ctx context.Context, tenantID string, fn func(
 	return tx.Commit()
 }
 
-func (s *SQLStore) SetDeploymentStatus(ctx context.Context, id, status, errText string) error {
-	_, err := s.db.ExecContext(ctx, s.q("UPDATE deployments SET host_status=?, host_error=? WHERE id=? AND (host_status<>? OR host_error<>?)"),
-		status, errText, id, status, errText)
+func (s *SQLStore) SetDeploymentStatus(ctx context.Context, id, hostID, status, errText string) error {
+	_, err := s.db.ExecContext(ctx, s.q("UPDATE deployments SET host_status=?, host_error=? WHERE id=? AND host_id=? AND (host_status<>? OR host_error<>?)"),
+		status, errText, id, hostID, status, errText)
 	return err
 }
 
@@ -227,14 +236,14 @@ func (s *SQLStore) DeleteSecretChoice(ctx context.Context, name string) error {
 }
 
 func (s *SQLStore) UpsertReplica(ctx context.Context, r Replica) error {
-	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO replicas (id, custody, started_at, last_seen) VALUES (?, ?, ?, ?)
-		ON CONFLICT (id) DO UPDATE SET custody=excluded.custody, started_at=excluded.started_at, last_seen=excluded.last_seen`),
-		r.ID, r.Custody, r.StartedAt, r.LastSeen)
+	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO replicas (id, custody, started_at, last_seen, version) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT (id) DO UPDATE SET custody=excluded.custody, started_at=excluded.started_at, last_seen=excluded.last_seen, version=excluded.version`),
+		r.ID, r.Custody, r.StartedAt, r.LastSeen, r.Version)
 	return err
 }
 
 func (s *SQLStore) ListReplicas(ctx context.Context) ([]Replica, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id, custody, started_at, last_seen FROM replicas ORDER BY id")
+	rows, err := s.db.QueryContext(ctx, "SELECT id, custody, started_at, last_seen, version FROM replicas ORDER BY id")
 	if err != nil {
 		return nil, err
 	}
@@ -242,7 +251,7 @@ func (s *SQLStore) ListReplicas(ctx context.Context) ([]Replica, error) {
 	var out []Replica
 	for rows.Next() {
 		var r Replica
-		if err := rows.Scan(&r.ID, &r.Custody, &r.StartedAt, &r.LastSeen); err != nil {
+		if err := rows.Scan(&r.ID, &r.Custody, &r.StartedAt, &r.LastSeen, &r.Version); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -297,10 +306,10 @@ const (
 )
 
 // DefaultMaxConns bounds each replica's Postgres pool; N replicas use at
-// most N×DefaultMaxConns connections. Override with ?twd_max_conns=K.
+// most N×DefaultMaxConns connections. Override with ?tw_max_conns=K.
 const DefaultMaxConns = 16
 
-// takeMaxConns removes twd's own twd_max_conns parameter from dsn (pgx would
+// takeMaxConns removes tailworks' own tw_max_conns parameter from dsn (pgx would
 // send it to the server) and returns the pool size.
 func takeMaxConns(dsn string) (string, int) {
 	u, err := url.Parse(dsn)
@@ -309,11 +318,11 @@ func takeMaxConns(dsn string) (string, int) {
 	}
 	q := u.Query()
 	n := DefaultMaxConns
-	if v := q.Get("twd_max_conns"); v != "" {
+	if v := q.Get("tw_max_conns"); v != "" {
 		if k, err := strconv.Atoi(v); err == nil && k > 0 {
 			n = k
 		}
-		q.Del("twd_max_conns")
+		q.Del("tw_max_conns")
 		u.RawQuery = q.Encode()
 	}
 	return u.String(), n
@@ -432,17 +441,23 @@ CREATE INDEX IF NOT EXISTS host_paths_host ON host_paths (host_id, measured_at);
 `
 
 // Append-only audit: UPDATE/DELETE on audit rows abort (defence in depth;
-// the hash chain is what detects tampering).
+// the hash chain is what detects tampering). The one DELETE allowed is of
+// records at or below their chain's retention checkpoint (retention.go:
+// the pruner writes the checkpoint first). audit_no_delete was the
+// trigger before retention; it is dropped for audit_no_delete_kept.
 const sqliteTriggers = `
 CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit BEGIN SELECT RAISE(ABORT, 'audit is append-only'); END;
-CREATE TRIGGER IF NOT EXISTS audit_no_delete BEFORE DELETE ON audit BEGIN SELECT RAISE(ABORT, 'audit is append-only'); END;
+DROP TRIGGER IF EXISTS audit_no_delete;
+CREATE TRIGGER IF NOT EXISTS audit_no_delete_kept BEFORE DELETE ON audit WHEN NOT EXISTS (SELECT 1 FROM audit_checkpoints c WHERE c.chain = OLD.chain AND OLD.seq <= c.seq) BEGIN SELECT RAISE(ABORT, 'audit is append-only'); END;
 `
 
 const pgTriggers = `
-CREATE OR REPLACE FUNCTION twd_audit_append_only() RETURNS trigger AS $$
-BEGIN RAISE EXCEPTION 'audit is append-only'; END; $$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION tw_audit_append_only() RETURNS trigger AS $$
+BEGIN
+IF TG_OP = 'DELETE' AND EXISTS (SELECT 1 FROM audit_checkpoints c WHERE c.chain = OLD.chain AND OLD.seq <= c.seq) THEN RETURN OLD; END IF;
+RAISE EXCEPTION 'audit is append-only'; END; $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS audit_append_only ON audit;
-CREATE TRIGGER audit_append_only BEFORE UPDATE OR DELETE ON audit FOR EACH ROW EXECUTE FUNCTION twd_audit_append_only();
+CREATE TRIGGER audit_append_only BEFORE UPDATE OR DELETE ON audit FOR EACH ROW EXECUTE FUNCTION tw_audit_append_only();
 `
 
 func (s *SQLStore) migrate(ctx context.Context) error {
@@ -455,11 +470,23 @@ func (s *SQLStore) migrate(ctx context.Context) error {
 		}
 		defer s.db.ExecContext(context.Background(), "SELECT pg_advisory_unlock(7464)")
 	}
+	// Numbered migrations (migrations.go): refuse a store a newer
+	// tw-mgmt has contracted before touching it.
+	if err := s.ensureSchemaTables(ctx); err != nil {
+		return err
+	}
+	_, meta, err := readSchema(ctx, s.db)
+	if err != nil {
+		return err
+	}
+	if err := checkMinBinary(meta, StoreBinaryVersion); err != nil {
+		return err
+	}
 	legacy, err := s.renameLegacyObjects(ctx)
 	if err != nil {
 		return err
 	}
-	ddl := fmt.Sprintf(schemaCommon, blob)
+	ddl := fmt.Sprintf(schemaCommon, blob) + fmt.Sprintf(schemaStores, blob) + fmt.Sprintf(schemaQueues, blob)
 	if s.d == dialectPostgres {
 		// pgx runs multi-statement strings as one simple-protocol batch.
 		if _, err := s.db.ExecContext(ctx, ddl+trig); err != nil {
@@ -483,7 +510,10 @@ func (s *SQLStore) migrate(ctx context.Context) error {
 	if err := s.addColumns(ctx); err != nil {
 		return err
 	}
-	return s.addIndexes(ctx)
+	if err := s.addIndexes(ctx); err != nil {
+		return err
+	}
+	return s.applyMigrations(ctx, Migrations(), StoreBinaryVersion, !s.olderReplicaLive(ctx, StoreBinaryVersion))
 }
 
 // addIndexes creates the cursor-pagination indexes (/v1 lists are ordered
@@ -573,11 +603,14 @@ func (s *SQLStore) addColumns(ctx context.Context) error {
 		{"hosts", "usage_vec", "ALTER TABLE hosts ADD COLUMN usage_vec TEXT NOT NULL DEFAULT ''"},
 		{"deployments", "containers", "ALTER TABLE deployments ADD COLUMN containers TEXT NOT NULL DEFAULT ''"},
 		// ADR-029 public ingress: the tenant gate ('' = deny) and a
-		// deployment's validated twd.jsonc "public" (JSON, '' = none).
+		// deployment's validated tailworks.jsonc "public" (JSON, '' = none).
 		{"tenants", "public_ingress", "ALTER TABLE tenants ADD COLUMN public_ingress TEXT NOT NULL DEFAULT ''"},
 		{"deployments", "public_spec", "ALTER TABLE deployments ADD COLUMN public_spec TEXT NOT NULL DEFAULT ''"},
 		// smart placement (ADR-033): why the deployment is on its host (JSON).
 		{"deployments", "placement", "ALTER TABLE deployments ADD COLUMN placement TEXT NOT NULL DEFAULT ''"},
+		// M1 (security review): hex SHA-256 of the one-time host registration
+		// secret; '' once the node is bound (or for local-dev hosts).
+		{"hosts", "reg_secret_hash", "ALTER TABLE hosts ADD COLUMN reg_secret_hash TEXT NOT NULL DEFAULT ''"},
 	} {
 		rows, err := s.db.QueryContext(ctx, "SELECT "+c.col+" FROM "+c.table+" WHERE 1=0")
 		if err == nil {
@@ -783,13 +816,19 @@ func jsonStr(v any) string {
 
 // ---- tenants ----
 
-const tenantCols = "id, tailnet, control_url, mint_mode, api_key_file, wif_client_id, wif_lifecycle_client_id, rpm, max_objects, created_at, pool, tier, updated_at, oauth_client_id, oauth_client_file, max_containers, max_container_mem, max_container_uvcpu, public_ingress"
+// tenantCols leaves out wif_client_id and wif_lifecycle_client_id: the
+// columns stay in the schema (rows written by older tailworks versions; no
+// migration needed) but nothing reads them since the wif mint mode was
+// removed, and UpdateTenant clears them.
+const tenantCols = "id, tailnet, control_url, mint_mode, api_key_file, rpm, max_objects, created_at, pool, tier, updated_at, oauth_client_id, oauth_client_file, max_containers, max_container_mem, max_container_uvcpu, public_ingress, owner_tag, name_prefix, max_store_bytes, max_queue_bytes, max_stores"
 
 func scanTenant(sc interface{ Scan(...any) error }) (Tenant, error) {
 	var t Tenant
-	var rpm, mo, mc, mm, mv int64
-	err := sc.Scan(&t.ID, &t.Tailnet, &t.ControlURL, &t.MintMode, &t.APIKeyFile, &t.WIFClientID, &t.WIFLifecycleClientID, &rpm, &mo, &t.CreatedAt, &t.Pool, &t.Tier, &t.UpdatedAt, &t.OAuthClientID, &t.OAuthClientFile,
-		&mc, &mm, &mv, &t.PublicIngress)
+	var rpm, mo, mc, mm, mv, ms int64
+	err := sc.Scan(&t.ID, &t.Tailnet, &t.ControlURL, &t.MintMode, &t.APIKeyFile, &rpm, &mo, &t.CreatedAt, &t.Pool, &t.Tier, &t.UpdatedAt, &t.OAuthClientID, &t.OAuthClientFile,
+		&mc, &mm, &mv, &t.PublicIngress, &t.OwnerTag, &t.NamePrefix,
+		&t.MaxStoreBytes, &t.MaxQueueBytes, &ms)
+	t.MaxStores = int(ms)
 	t.RegistrationsPerMinute, t.MaxObjects = int(rpm), int(mo)
 	t.MaxContainers, t.MaxContainerMemMiB, t.MaxContainerVCPU = int(mc), int(mm), float64(mv)/1e6
 	t.containerDefaults() // rows from before the columns
@@ -809,22 +848,24 @@ func (s *SQLStore) CreateTenant(ctx context.Context, t Tenant) error {
 	if t.UpdatedAt == 0 {
 		t.UpdatedAt = t.CreatedAt
 	}
-	_, err := s.db.ExecContext(ctx, s.q("INSERT INTO tenants ("+tenantCols+") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"),
-		t.ID, t.Tailnet, t.ControlURL, t.MintMode, t.APIKeyFile, t.WIFClientID, t.WIFLifecycleClientID,
+	_, err := s.db.ExecContext(ctx, s.q("INSERT INTO tenants ("+tenantCols+") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"),
+		t.ID, t.Tailnet, t.ControlURL, t.MintMode, t.APIKeyFile,
 		t.RegistrationsPerMinute, t.MaxObjects, t.CreatedAt, t.Pool, t.Tier, t.UpdatedAt, t.OAuthClientID, t.OAuthClientFile,
-		t.MaxContainers, t.MaxContainerMemMiB, micro(t.MaxContainerVCPU), t.PublicIngress)
+		t.MaxContainers, t.MaxContainerMemMiB, micro(t.MaxContainerVCPU), t.PublicIngress, t.OwnerTag, t.NamePrefix,
+		t.MaxStoreBytes, t.MaxQueueBytes, t.MaxStores)
 	if isUnique(err) {
 		return ErrExists
 	}
 	return err
 }
 
-// UpdateTenant rewrites a tenant's mint configuration (mode, key file,
-// WIF client IDs) and limits; ID, tailnet and createdAt are immutable.
+// UpdateTenant rewrites a tenant's mint configuration (mode, credential
+// files) and limits; ID, tailnet and createdAt are immutable.
 func (s *SQLStore) UpdateTenant(ctx context.Context, t Tenant) error {
-	res, err := s.db.ExecContext(ctx, s.q("UPDATE tenants SET control_url=?, mint_mode=?, api_key_file=?, wif_client_id=?, wif_lifecycle_client_id=?, rpm=?, max_objects=?, pool=?, tier=?, updated_at=?, oauth_client_id=?, oauth_client_file=?, max_containers=?, max_container_mem=?, max_container_uvcpu=?, public_ingress=? WHERE id=?"),
-		t.ControlURL, t.MintMode, t.APIKeyFile, t.WIFClientID, t.WIFLifecycleClientID, t.RegistrationsPerMinute, t.MaxObjects, t.Pool, t.Tier, t.UpdatedAt, t.OAuthClientID, t.OAuthClientFile,
-		t.MaxContainers, t.MaxContainerMemMiB, micro(t.MaxContainerVCPU), t.PublicIngress, t.ID)
+	res, err := s.db.ExecContext(ctx, s.q("UPDATE tenants SET control_url=?, mint_mode=?, api_key_file=?, wif_client_id='', wif_lifecycle_client_id='', rpm=?, max_objects=?, pool=?, tier=?, updated_at=?, oauth_client_id=?, oauth_client_file=?, max_containers=?, max_container_mem=?, max_container_uvcpu=?, public_ingress=?, owner_tag=?, name_prefix=?, max_store_bytes=?, max_queue_bytes=?, max_stores=? WHERE id=?"),
+		t.ControlURL, t.MintMode, t.APIKeyFile, t.RegistrationsPerMinute, t.MaxObjects, t.Pool, t.Tier, t.UpdatedAt, t.OAuthClientID, t.OAuthClientFile,
+		t.MaxContainers, t.MaxContainerMemMiB, micro(t.MaxContainerVCPU), t.PublicIngress, t.OwnerTag, t.NamePrefix,
+		t.MaxStoreBytes, t.MaxQueueBytes, t.MaxStores, t.ID)
 	if err != nil {
 		return err
 	}
@@ -839,30 +880,37 @@ func (s *SQLStore) GetTenant(ctx context.Context, id string) (Tenant, error) {
 }
 
 func (s *SQLStore) DeleteTenant(ctx context.Context, id string) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
-		for _, q := range []string{"DELETE FROM objects WHERE tenant_id=?", "DELETE FROM deployments WHERE tenant_id=?", "DELETE FROM workload_public WHERE tenant_id=?",
-			"DELETE FROM leases WHERE name LIKE ? || '/%'", "DELETE FROM container_reservations WHERE tenant_id=?"} {
-			if _, err := tx.ExecContext(ctx, s.q(q), id); err != nil {
-				return err
-			}
-		}
-		// The tenant's registry namespace (ADR-032 D3): its links and tags go
-		// (blobs stay content-addressed on disk). A prefix compare, not LIKE:
-		// "_" in a tenant ID must not match another tenant's namespace.
-		for _, q := range []string{"DELETE FROM registry_links WHERE substr(repo, 1, ?) = ?", "DELETE FROM registry_tags WHERE substr(repo, 1, ?) = ?"} {
-			if _, err := tx.ExecContext(ctx, s.q(q), len(id)+1, id+"/"); err != nil {
-				return err
-			}
-		}
-		res, err := tx.ExecContext(ctx, s.q("DELETE FROM tenants WHERE id=?"), id)
-		if err != nil {
+	_, _, err := s.PurgeTenant(ctx, id, time.Now().UnixMilli()) // sqlstore_tenantpurge.go: every row the tenant owns
+	return err
+}
+
+// deleteTenantTx deletes the tenant row and what PurgeTenant leaves to it.
+func (s *SQLStore) deleteTenantTx(ctx context.Context, tx *sql.Tx, id string) error {
+	for _, q := range []string{"DELETE FROM objects WHERE tenant_id=?", "DELETE FROM deployments WHERE tenant_id=?", "DELETE FROM workload_public WHERE tenant_id=?",
+		"DELETE FROM public_names WHERE tenant_id=?", // publicnames.go: a deleted tenant releases its names
+		"DELETE FROM container_reservations WHERE tenant_id=?"} {
+		if _, err := tx.ExecContext(ctx, s.q(q), id); err != nil {
 			return err
 		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			return ErrNotFound
+	}
+	// The tenant's registry namespace (ADR-032 D3): its links and tags go
+	// (blobs stay content-addressed on disk), and its leases. A prefix
+	// compare, not LIKE: "_" in a tenant ID must not match another
+	// tenant's namespace.
+	for _, q := range []string{"DELETE FROM registry_links WHERE substr(repo, 1, ?) = ?", "DELETE FROM registry_tags WHERE substr(repo, 1, ?) = ?",
+		"DELETE FROM leases WHERE substr(name, 1, ?) = ?"} {
+		if _, err := tx.ExecContext(ctx, s.q(q), len(id)+1, id+"/"); err != nil {
+			return err
 		}
-		return nil
-	})
+	}
+	res, err := tx.ExecContext(ctx, s.q("DELETE FROM tenants WHERE id=?"), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *SQLStore) ListTenants(ctx context.Context, pg Page) ([]Tenant, error) {
@@ -888,15 +936,23 @@ func (s *SQLStore) ListTenants(ctx context.Context, pg Page) ([]Tenant, error) {
 
 // ---- hosts ----
 
-const hostCols = "id, capacity, tiers, node_id, audit_pubkey, live_nodes, last_seen, pool, push_port, created_at, updated_at, push_target, arch, capacity_vec, usage_vec"
+const hostCols = "id, capacity, tiers, node_id, audit_pubkey, live_nodes, last_seen, pool, push_port, created_at, updated_at, push_target, arch, capacity_vec, usage_vec, reg_secret_hash, " +
+	"version, os, protocols, features, cordoned_at, cordoned_by"
 
 func scanHost(sc interface{ Scan(...any) error }) (Host, error) {
 	var h Host
 	var capacity, live int64
-	var tiers, capVec, usageVec string
+	var tiers, capVec, usageVec, protocols, features string
 	var port int64
 	err := sc.Scan(&h.ID, &capacity, &tiers, &h.NodeID, &h.AuditPubKey, &live, &h.LastSeen, &h.Pool, &port, &h.CreatedAt, &h.UpdatedAt, &h.PushTarget,
-		&h.Arch, &capVec, &usageVec)
+		&h.Arch, &capVec, &usageVec, &h.RegistrationSecretHash,
+		&h.Version, &h.OS, &protocols, &features, &h.CordonedAt, &h.CordonedBy)
+	if protocols != "" {
+		json.Unmarshal([]byte(protocols), &h.Protocols)
+	}
+	if features != "" {
+		json.Unmarshal([]byte(features), &h.Features)
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return h, ErrNotFound
 	}
@@ -933,13 +989,44 @@ func (s *SQLStore) UpsertHost(ctx context.Context, h Host) error {
 	}
 	// created_at is kept from the first insert (the page key must be stable).
 	// usage_vec is the heartbeat's (TouchHost), kept across re-registration.
-	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO hosts (`+hostCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	// cordoned_at/cordoned_by belong to SetHostCordon: a re-registration
+	// keeps them.
+	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO hosts (`+hostCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT (id) DO UPDATE SET capacity=excluded.capacity, tiers=excluded.tiers, node_id=excluded.node_id,
 		audit_pubkey=excluded.audit_pubkey, last_seen=excluded.last_seen, pool=excluded.pool, push_port=excluded.push_port, updated_at=excluded.updated_at,
-		push_target=excluded.push_target, arch=excluded.arch, capacity_vec=excluded.capacity_vec`),
+		push_target=excluded.push_target, arch=excluded.arch, capacity_vec=excluded.capacity_vec, reg_secret_hash=excluded.reg_secret_hash,
+		version=excluded.version, os=excluded.os, protocols=excluded.protocols, features=excluded.features`),
 		h.ID, h.CapacityNodes, jsonStr(h.Tiers), h.NodeID, h.AuditPubKey, h.LiveNodes, h.LastSeen, h.Pool, h.PushPort, h.CreatedAt, h.UpdatedAt, h.PushTarget,
-		h.Arch, vecStr(h.Capacity), vecStr(h.Usage))
+		h.Arch, vecStr(h.Capacity), vecStr(h.Usage), h.RegistrationSecretHash,
+		h.Version, h.OS, optJSON(h.Protocols), optJSON(h.Features), h.CordonedAt, h.CordonedBy)
 	return err
+}
+
+// optJSON is a JSON column that is ” when v is empty (nil map/slice).
+func optJSON[T any](v T) string {
+	switch x := any(v).(type) {
+	case map[string]int:
+		if len(x) == 0 {
+			return ""
+		}
+	case []string:
+		if len(x) == 0 {
+			return ""
+		}
+	}
+	return jsonStr(v)
+}
+
+// SetHostCordon cordons (at > 0) or uncordons (at == 0) a host.
+func (s *SQLStore) SetHostCordon(ctx context.Context, id string, at int64, by string) error {
+	r, err := s.db.ExecContext(ctx, s.q("UPDATE hosts SET cordoned_at=?, cordoned_by=? WHERE id=?"), at, by, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *SQLStore) GetHost(ctx context.Context, id string) (Host, error) {
@@ -1257,7 +1344,7 @@ func (s *SQLStore) CreateObject(ctx context.Context, o Object) error {
 // CreateChild inserts a spawned object iff its root stays within maxLive
 // live descendants (CreateObjectChecked without a tenant quota).
 func (s *SQLStore) CreateChild(ctx context.Context, o Object, maxLive int) error {
-	return s.CreateObjectChecked(ctx, o, 0, maxLive)
+	return s.CreateObjectChecked(ctx, o, 0, maxLive, nil)
 }
 
 // CreateObjectChecked inserts o in one transaction with its limits, so
@@ -1268,8 +1355,8 @@ func (s *SQLStore) CreateChild(ctx context.Context, o Object, maxLive int) error
 // live descendants (H04). Locks are taken tenant first, then root. Postgres
 // uses FOR UPDATE; SQLite's immediate transaction holds the write lock.
 // ErrExists on a duplicate.
-func (s *SQLStore) CreateObjectChecked(ctx context.Context, o Object, maxObjects, maxLive int) error {
-	return s.createObjectTx(ctx, o, maxObjects, maxLive, "", "")
+func (s *SQLStore) CreateObjectChecked(ctx context.Context, o Object, maxObjects, maxLive int, fence *Fence) error {
+	return s.createObjectTx(ctx, o, maxObjects, maxLive, "", "", fence)
 }
 
 // ErrPoolGone: the pool node named in a transfer is no longer a ready,
@@ -1281,16 +1368,23 @@ var ErrPoolGone = errors.New("pool node no longer available")
 // the pool row becomes "transferred" with its node IDs and certificate
 // cleared, so only o names the device. Two concurrent transfers of one pool
 // node: one gets ErrPoolGone.
-func (s *SQLStore) TransferPool(ctx context.Context, o Object, poolID, stableID string, maxObjects, maxLive int) error {
-	return s.createObjectTx(ctx, o, maxObjects, maxLive, poolID, stableID)
+func (s *SQLStore) TransferPool(ctx context.Context, o Object, poolID, stableID string, maxObjects, maxLive int, fence *Fence) error {
+	return s.createObjectTx(ctx, o, maxObjects, maxLive, poolID, stableID, fence)
 }
 
-func (s *SQLStore) createObjectTx(ctx context.Context, o Object, maxObjects, maxLive int, poolID, stableID string) error {
+func (s *SQLStore) createObjectTx(ctx context.Context, o Object, maxObjects, maxLive int, poolID, stableID string, fence *Fence) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	if fence != nil {
+		// The caller must hold the workload's lease (RT3-01). Read under the
+		// same transaction as the insert, like every other fenced write.
+		if err := s.checkFence(ctx, tx, fence); err != nil {
+			return err
+		}
+	}
 	live := liveSQL
 	lock := func(q string, arg string) error {
 		var x string
@@ -1431,6 +1525,12 @@ func (s *SQLStore) ListObjects(ctx context.Context, f ObjectFilter) ([]Object, e
 	if f.HasParent {
 		where = append(where, "parent_id<>''")
 	}
+	if f.Tag != "" {
+		add(s.objectTagCond(f.Tag)) // sqlstore_auditworkload.go
+	}
+	if f.ActingFor != "" {
+		add("acting_for=?", f.ActingFor)
+	}
 	if len(f.Status) > 0 {
 		ph := strings.TrimSuffix(strings.Repeat("?,", len(f.Status)), ",")
 		where = append(where, "status IN ("+ph+")")
@@ -1476,7 +1576,10 @@ func (s *SQLStore) checkFence(ctx context.Context, tx *sql.Tx, f *Fence) error {
 	if err != nil {
 		return err
 	}
-	if epoch != f.Epoch || holder == "" || (f.Holder != "" && holder != f.Holder) {
+	// Epoch 0 means "any epoch": the fence then binds the holder only
+	// (hostd always sends the epoch; the holder check is what keeps one
+	// host off another's leases, RT3-01).
+	if (f.Epoch > 0 && epoch != f.Epoch) || holder == "" || (f.Holder != "" && holder != f.Holder) {
 		return fmt.Errorf("%w: lease %q is held by %q at epoch %d (expires %s); caller %q asked for epoch %d",
 			ErrLeaseLost, f.Lease, holder, epoch, time.UnixMilli(expires).UTC().Format(time.RFC3339), f.Holder, f.Epoch)
 	}
@@ -1653,18 +1756,31 @@ func (s *SQLStore) appendAuditTx(ctx context.Context, tx *sql.Tx, rec AuditRecor
 				return err
 			}
 		}
+		workload, err := s.auditWorkloadTx(ctx, tx, rec) // sqlstore_auditworkload.go
+		if err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, s.q(`INSERT INTO audit (chain, seq, ts, tenant_id, object_id, kind, trace_id, acting_for, prev_hash, hash, host_sig, raw)
 			VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`), rec.Chain, rec.Seq, rec.TS, rec.TenantID, rec.ObjectID, rec.Kind, rec.TraceID,
 			rec.ActingFor, rec.PrevHash, rec.Hash, rec.HostSig, string(rec.Raw)); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, s.q("UPDATE audit_heads SET seq=?, hash=? WHERE chain=? AND seq=?"), rec.Seq, rec.Hash, rec.Chain, seq)
+		if err := s.putAuditWorkloadTx(ctx, tx, rec, workload); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, s.q("UPDATE audit_heads SET seq=?, hash=? WHERE chain=? AND seq=?"), rec.Seq, rec.Hash, rec.Chain, seq)
 		return err
 	}()
 	return rec, err
 }
 
 func (s *SQLStore) ListAudit(ctx context.Context, f AuditFilter) ([]AuditRecord, error) {
+	return s.listAudit(ctx, s.db, f)
+}
+
+// listAudit runs the ListAudit query on qr (the pool, or a read
+// transaction: see AuditChainSnapshot).
+func (s *SQLStore) listAudit(ctx context.Context, qr queryer, f AuditFilter) ([]AuditRecord, error) {
 	var where []string
 	var args []any
 	add := func(cond string, v any) { where = append(where, cond); args = append(args, v) }
@@ -1682,6 +1798,9 @@ func (s *SQLStore) ListAudit(ctx context.Context, f AuditFilter) ([]AuditRecord,
 	}
 	if f.TenantID != "" {
 		add("tenant_id=?", f.TenantID)
+	}
+	if f.Workload != "" {
+		add("(chain, seq) IN (SELECT chain, seq FROM audit_workloads WHERE workload=?)", f.Workload) // sqlstore_auditworkload.go
 	}
 	if len(f.Kinds) > 0 {
 		ph := strings.TrimSuffix(strings.Repeat("?,", len(f.Kinds)), ",")
@@ -1702,9 +1821,19 @@ func (s *SQLStore) ListAudit(ctx context.Context, f AuditFilter) ([]AuditRecord,
 	if f.Chain != "" && f.Page.After == nil {
 		order = " ORDER BY chain, seq"
 	}
-	if k := f.Page.After; k != nil {
+	if k := f.Page.After; k != nil && !f.Desc {
 		where = append(where, "(ts > ? OR (ts = ? AND chain > ?) OR (ts = ? AND chain = ? AND seq > ?))")
 		args = append(args, k.TS, k.TS, k.Chain, k.TS, k.Chain, k.Seq)
+	}
+	if f.Desc { // newest first; the cursor is an upper bound
+		order = " ORDER BY ts DESC, chain DESC, seq DESC"
+		if f.Chain != "" && f.Page.After == nil {
+			order = " ORDER BY chain DESC, seq DESC"
+		}
+		if k := f.Page.After; k != nil {
+			where = append(where, "(ts < ? OR (ts = ? AND chain < ?) OR (ts = ? AND chain = ? AND seq < ?))")
+			args = append(args, k.TS, k.TS, k.Chain, k.TS, k.Chain, k.Seq)
+		}
 	}
 	q := "SELECT chain, seq, ts, tenant_id, object_id, kind, trace_id, acting_for, prev_hash, hash, host_sig, raw FROM audit"
 	if len(where) > 0 {
@@ -1714,7 +1843,7 @@ func (s *SQLStore) ListAudit(ctx context.Context, f AuditFilter) ([]AuditRecord,
 	if lim := max(f.Limit, f.Page.Limit); lim > 0 {
 		q += fmt.Sprintf(" LIMIT %d", lim)
 	}
-	rows, err := s.db.QueryContext(ctx, s.q(q), args...)
+	rows, err := qr.QueryContext(ctx, s.q(q), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1819,7 +1948,7 @@ func decodePublic(s string) *DeploymentPublic {
 	return &p
 }
 
-// GetWorkloadPublic returns a workload's `twd expose` setting; a workload
+// GetWorkloadPublic returns a workload's `tw expose` setting; a workload
 // that was never toggled is exposed (it never returns ErrNotFound).
 func (s *SQLStore) GetWorkloadPublic(ctx context.Context, tenantID, workload string) (WorkloadPublic, error) {
 	wp := WorkloadPublic{TenantID: tenantID, Workload: workload, Exposed: true}
@@ -1833,7 +1962,7 @@ func (s *SQLStore) GetWorkloadPublic(ctx context.Context, tenantID, workload str
 	return wp, err
 }
 
-// SetWorkloadPublic upserts a workload's `twd expose` setting (in a
+// SetWorkloadPublic upserts a workload's `tw expose` setting (in a
 // transaction, so an audit intent in ctx commits with it: H22).
 func (s *SQLStore) SetWorkloadPublic(ctx context.Context, wp WorkloadPublic) error {
 	exp := int64(0)

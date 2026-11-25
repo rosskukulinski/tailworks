@@ -1,0 +1,140 @@
+$ tw agent setup --dry-run
+tw agent setup · scope user · tw skills dev (10 skills)
+  found     Claude Code  ~/.claude
+  found     Codex        ~/.codex
+  found     Cursor       ~/.cursor
+  found     Gemini CLI   ~/.gemini
+  found     OpenCode     ~/.config/opencode
+  in        ~
+  create    ~/.claude/skills/tw/SKILL.md                         Claude Code
+  create    ~/.claude/skills/tw-cron/SKILL.md                    Claude Code
+  create    ~/.claude/skills/tw-debug/SKILL.md                   Claude Code
+  create    ~/.claude/skills/tw-deploy/SKILL.md                  Claude Code
+  create    ~/.claude/skills/tw-dev/SKILL.md                     Claude Code
+  create    ~/.claude/skills/tw-policy/SKILL.md                  Claude Code
+  create    ~/.claude/skills/tw-public/SKILL.md                  Claude Code
+  create    ~/.claude/skills/tw-scaffold/SKILL.md                Claude Code
+  create    ~/.claude/skills/tw-secrets/SKILL.md                 Claude Code
+  create    ~/.claude/skills/tw-teardown/SKILL.md                Claude Code
+  update    ~/.codex/AGENTS.md (tw block)                        Codex · appends a tailworks block; the rest of the file stays
+  create    ~/.gemini/GEMINI.md (tw block)                       Gemini CLI
+  create    ~/.config/opencode/AGENTS.md (tw block)              OpenCode
+  skipped   Cursor: Cursor keeps user rules in its settings, not in files: use --scope project
+dry run: nothing written
+
+$ tw agent setup --dry-run --scope project --agent claude,codex,cursor,opencode
+tw agent setup · scope project · tw skills dev (10 skills)
+  found     Claude Code  ~/.claude
+  found     Codex        ~/.codex
+  found     Cursor       ~/.cursor
+  found     Gemini CLI   ~/.gemini
+  found     OpenCode     ~/.config/opencode
+  in        $PROJECT
+  create    ./.claude/skills/tw/SKILL.md                         Claude Code
+  create    ./.claude/skills/tw-cron/SKILL.md                    Claude Code
+  create    ./.claude/skills/tw-debug/SKILL.md                   Claude Code
+  create    ./.claude/skills/tw-deploy/SKILL.md                  Claude Code
+  create    ./.claude/skills/tw-dev/SKILL.md                     Claude Code
+  create    ./.claude/skills/tw-policy/SKILL.md                  Claude Code
+  create    ./.claude/skills/tw-public/SKILL.md                  Claude Code
+  create    ./.claude/skills/tw-scaffold/SKILL.md                Claude Code
+  create    ./.claude/skills/tw-secrets/SKILL.md                 Claude Code
+  create    ./.claude/skills/tw-teardown/SKILL.md                Claude Code
+  update    ./AGENTS.md (tw block)                               Codex, OpenCode · appends a tailworks block; the rest of the file stays
+  create    ./.cursor/rules/tw.mdc                               Cursor
+  create    ./.cursor/rules/tw-cron.mdc                          Cursor
+  create    ./.cursor/rules/tw-debug.mdc                         Cursor
+  create    ./.cursor/rules/tw-deploy.mdc                        Cursor
+  create    ./.cursor/rules/tw-dev.mdc                           Cursor
+  create    ./.cursor/rules/tw-policy.mdc                        Cursor
+  create    ./.cursor/rules/tw-public.mdc                        Cursor
+  create    ./.cursor/rules/tw-scaffold.mdc                      Cursor
+  create    ./.cursor/rules/tw-secrets.mdc                       Cursor
+  create    ./.cursor/rules/tw-teardown.mdc                      Cursor
+dry run: nothing written
+
+$ tw agent setup --yes
+tw agent setup · scope user · tw skills dev (10 skills)
+  found     Claude Code  ~/.claude
+  found     Codex        ~/.codex
+  found     Cursor       ~/.cursor
+  found     Gemini CLI   ~/.gemini
+  found     OpenCode     ~/.config/opencode
+  in        ~
+  create    ~/.claude/skills/tw/SKILL.md                         Claude Code
+  create    ~/.claude/skills/tw-cron/SKILL.md                    Claude Code
+  create    ~/.claude/skills/tw-debug/SKILL.md                   Claude Code
+  create    ~/.claude/skills/tw-deploy/SKILL.md                  Claude Code
+  create    ~/.claude/skills/tw-dev/SKILL.md                     Claude Code
+  create    ~/.claude/skills/tw-policy/SKILL.md                  Claude Code
+  create    ~/.claude/skills/tw-public/SKILL.md                  Claude Code
+  create    ~/.claude/skills/tw-scaffold/SKILL.md                Claude Code
+  create    ~/.claude/skills/tw-secrets/SKILL.md                 Claude Code
+  create    ~/.claude/skills/tw-teardown/SKILL.md                Claude Code
+  update    ~/.codex/AGENTS.md (tw block)                        Codex · appends a tailworks block; the rest of the file stays
+  create    ~/.gemini/GEMINI.md (tw block)                       Gemini CLI
+  create    ~/.config/opencode/AGENTS.md (tw block)              OpenCode
+  skipped   Cursor: Cursor keeps user rules in its settings, not in files: use --scope project
+✓ 13 files changed
+next: register tailworks' MCP server with your agent: tw mcp --config
+
+$ tw agent setup --dry-run
+tw agent setup · scope user · tw skills dev (10 skills)
+  found     Claude Code  ~/.claude
+  found     Codex        ~/.codex
+  found     Cursor       ~/.cursor
+  found     Gemini CLI   ~/.gemini
+  found     OpenCode     ~/.config/opencode
+  in        ~
+  13 files already up to date
+  skipped   Cursor: Cursor keeps user rules in its settings, not in files: use --scope project
+dry run: nothing written
+
+$ tw agent remove --dry-run
+tw agent remove · scope user · tw skills dev (10 skills)
+  found     Claude Code  ~/.claude
+  found     Codex        ~/.codex
+  found     Cursor       ~/.cursor
+  found     Gemini CLI   ~/.gemini
+  found     OpenCode     ~/.config/opencode
+  in        ~
+  remove    ~/.claude/skills/tw/SKILL.md                         Claude Code
+  remove    ~/.claude/skills/tw-cron/SKILL.md                    Claude Code
+  remove    ~/.claude/skills/tw-debug/SKILL.md                   Claude Code
+  remove    ~/.claude/skills/tw-deploy/SKILL.md                  Claude Code
+  remove    ~/.claude/skills/tw-dev/SKILL.md                     Claude Code
+  remove    ~/.claude/skills/tw-policy/SKILL.md                  Claude Code
+  remove    ~/.claude/skills/tw-public/SKILL.md                  Claude Code
+  remove    ~/.claude/skills/tw-scaffold/SKILL.md                Claude Code
+  remove    ~/.claude/skills/tw-secrets/SKILL.md                 Claude Code
+  remove    ~/.claude/skills/tw-teardown/SKILL.md                Claude Code
+  remove    ~/.codex/AGENTS.md (tw block)                        Codex · removes the tailworks block; the rest of the file stays
+  remove    ~/.gemini/GEMINI.md (tw block)                       Gemini CLI
+  remove    ~/.config/opencode/AGENTS.md (tw block)              OpenCode
+  skipped   Cursor: Cursor keeps user rules in its settings, not in files: use --scope project
+dry run: nothing written
+
+$ tw agent remove --yes
+tw agent remove · scope user · tw skills dev (10 skills)
+  found     Claude Code  ~/.claude
+  found     Codex        ~/.codex
+  found     Cursor       ~/.cursor
+  found     Gemini CLI   ~/.gemini
+  found     OpenCode     ~/.config/opencode
+  in        ~
+  remove    ~/.claude/skills/tw/SKILL.md                         Claude Code
+  remove    ~/.claude/skills/tw-cron/SKILL.md                    Claude Code
+  remove    ~/.claude/skills/tw-debug/SKILL.md                   Claude Code
+  remove    ~/.claude/skills/tw-deploy/SKILL.md                  Claude Code
+  remove    ~/.claude/skills/tw-dev/SKILL.md                     Claude Code
+  remove    ~/.claude/skills/tw-policy/SKILL.md                  Claude Code
+  remove    ~/.claude/skills/tw-public/SKILL.md                  Claude Code
+  remove    ~/.claude/skills/tw-scaffold/SKILL.md                Claude Code
+  remove    ~/.claude/skills/tw-secrets/SKILL.md                 Claude Code
+  remove    ~/.claude/skills/tw-teardown/SKILL.md                Claude Code
+  remove    ~/.codex/AGENTS.md (tw block)                        Codex · removes the tailworks block; the rest of the file stays
+  remove    ~/.gemini/GEMINI.md (tw block)                       Gemini CLI
+  remove    ~/.config/opencode/AGENTS.md (tw block)              OpenCode
+  skipped   Cursor: Cursor keeps user rules in its settings, not in files: use --scope project
+✓ 13 files changed
+

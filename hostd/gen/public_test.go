@@ -4,21 +4,22 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 
-	"github.com/rosskukulinski/twd/hostd/hostdtest"
+	"github.com/rosskukulinski/tailworks/hostd/hostdtest"
 )
 
 // getPublic sends a request as netd's public (Funnel) listener would: a cf
 // blob with tailscale.requester {kind: public} and NO caller (ADR-029).
-func (in *inst) getPublic(path string, twd map[string]any) (int, http.Header, map[string]any) {
+func (in *inst) getPublic(path string, tw map[string]any) (int, http.Header, map[string]any) {
 	req, _ := http.NewRequest("GET", "http://wl.ttest.ts.net"+path, nil)
 	blob := map[string]any{
 		"tailscale": map[string]any{"requester": map[string]any{"kind": "public", "ip": "203.0.113.9", "port": 51000, "proto": "https", "host": "wl.ttest.ts.net"}},
-		"objectId":  "o1", "twd": twd, "traceId": "tr-pub",
+		"objectId":  "o1", "tw": tw, "traceId": "tr-pub",
 	}
 	b, _ := json.Marshal(blob)
-	req.Header.Set("x-twd-cf", string(b))
+	req.Header.Set("x-tw-cf", string(b))
 	resp, err := in.hc.Do(req)
 	if err != nil {
 		return 0, nil, map[string]any{"err": err.Error()}
@@ -59,9 +60,9 @@ func hasOp(ops []map[string]any, op string, pred func(map[string]any) bool) bool
 func TestGeneratedWrapperPublic(t *testing.T) {
 	in := start(t, hostdtest.Fixture("probe"), nil)
 
-	t.Run("TwdPathNeverPublic", func(t *testing.T) {
-		code, h, r := in.getPublic("/_twd/o/Probe/pz/", wl)
-		if code != 404 || h.Get("twd-error") != "not_public" {
+	t.Run("TwPathNeverPublic", func(t *testing.T) {
+		code, h, r := in.getPublic("/_tw/o/Probe/pz/", wl)
+		if code != 404 || h.Get("tw-error") != "not_public" {
 			t.Fatalf("%d %v", code, r)
 		}
 		if ops := in.opsFor("Probe", "pz"); len(ops) != 0 {
@@ -70,19 +71,19 @@ func TestGeneratedWrapperPublic(t *testing.T) {
 	})
 	t.Run("OnlyWorkloadRoute", func(t *testing.T) {
 		code, h, r := in.getPublic("/", obj("Probe", "pub-ok-direct"))
-		if code != 403 || h.Get("twd-error") != "public_request" {
+		if code != 403 || h.Get("tw-error") != "public_request" {
 			t.Fatalf("%d %v", code, r)
 		}
 	})
 	t.Run("GetCallerFailsClosed", func(t *testing.T) {
 		code, h, r := in.getPublic("/", wl)
-		if code != 403 || h.Get("twd-error") != "public_request" {
+		if code != 403 || h.Get("tw-error") != "public_request" {
 			t.Fatalf("%d %v", code, r)
 		}
 	})
 	t.Run("NewObjectRefusedBeforeCreation", func(t *testing.T) {
 		code, h, r := in.getPublic("/probe/fresh1/env", wl)
-		if code != 403 || h.Get("twd-error") != "public_create_denied" {
+		if code != 403 || h.Get("tw-error") != "public_create_denied" {
 			t.Fatalf("%d %v", code, r)
 		}
 		ops := in.opsFor("Probe", "fresh1")
@@ -95,7 +96,7 @@ func TestGeneratedWrapperPublic(t *testing.T) {
 	})
 	t.Run("RPCToNewObjectRefused", func(t *testing.T) {
 		code, h, r := in.getPublic("/rpc?name=fresh2", wl)
-		if code != 403 || h.Get("twd-error") != "public_create_denied" {
+		if code != 403 || h.Get("tw-error") != "public_create_denied" {
 			t.Fatalf("%d %v", code, r)
 		}
 		if ops := in.opsFor("Probe", "fresh2"); hasOp(ops, "ensure", nil) {
@@ -108,12 +109,13 @@ func TestGeneratedWrapperPublic(t *testing.T) {
 			t.Fatalf("%d %v", code, r)
 		}
 		ops := in.opsFor("Probe", "pub-ok-1")
-		if !hasOp(ops, "admit", nil) {
-			t.Fatalf("no admit: %v", ops)
+		// The guard admits with no ticket (public rules), and the Host DO
+		// ensures with hostd before the facet runs.
+		if !hasOp(ops, "admit", func(o map[string]any) bool { _, tk := o["ticket"].(string); return !tk && o["as"] == nil }) {
+			t.Fatalf("no ticket-less admit: %v", ops)
 		}
-		// The Host DO re-checks with hostd before the facet runs.
-		if !hasOp(ops, "ensure", func(o map[string]any) bool { return o["public"] == true }) {
-			t.Fatalf("no ensure{public:true} from the Host DO: %v", ops)
+		if !hasOp(ops, "ensure", nil) {
+			t.Fatalf("no ensure from the Host DO: %v", ops)
 		}
 		// actingFor is never a caller name for a public request.
 		for _, o := range ops {
@@ -123,28 +125,28 @@ func TestGeneratedWrapperPublic(t *testing.T) {
 		}
 	})
 	t.Run("HostDORechecksWithHostd", func(t *testing.T) {
-		// The fake admits "pub-adm*" but refuses ensure{public:true} for
-		// it, as hostd would if the tenant-side guard had been bypassed:
-		// the Host DO refuses before the facet runs (no wake ensure).
+		// The fake lets "pub-adm*" through the guard's admit but hostd's
+		// ensure refuses to create it (RT3-06: the Host DO never trusts the
+		// request to say whether creation was admitted): no facet runs.
 		code, h, r := in.getPublic("/probe/pub-adm-1/env", wl)
-		if code != 403 || h.Get("twd-error") != "public_create_denied" {
-			t.Fatalf("%d %v", code, r)
+		if code != 403 || h.Get("tw-error") != "create_not_admitted" {
+			t.Fatalf("%d %q %v", code, h.Get("tw-error"), r)
 		}
 		ops := in.opsFor("Probe", "pub-adm-1")
-		if !hasOp(ops, "ensure", func(o map[string]any) bool { return o["public"] == true }) {
-			t.Fatalf("no ensure{public:true}: %v", ops)
-		}
-		if hasOp(ops, "ensure", func(o map[string]any) bool { return o["public"] != true }) {
-			t.Fatalf("facet woke (non-public ensure) despite the refusal: %v", ops)
+		if !hasOp(ops, "ensure", nil) {
+			t.Fatalf("the Host DO did not ask hostd: %v", ops)
 		}
 	})
-	t.Run("TailnetUnchanged", func(t *testing.T) {
+	t.Run("TailnetAdmitsWithTicket", func(t *testing.T) {
+		// A tailnet request creates through its guarded env: the admit
+		// carries the request's create ticket (RT3-06/07).
 		code, _, r := in.get("/probe/fresh4/env", wl)
 		if code != 200 {
 			t.Fatalf("%d %v", code, r)
 		}
-		if ops := in.opsFor("Probe", "fresh4"); hasOp(ops, "admit", nil) {
-			t.Fatalf("tailnet request was admitted: %v", ops)
+		ops := in.opsFor("Probe", "fresh4")
+		if !hasOp(ops, "admit", func(o map[string]any) bool { tk, _ := o["ticket"].(string); return strings.HasPrefix(tk, "v1.") }) {
+			t.Fatalf("no ticketed admit for a tailnet request: %v", ops)
 		}
 	})
 }

@@ -1,19 +1,19 @@
 //go:build e2embp
 
-// E2E-MAC on a different, clean MacBook (BUILD-PLAN definition of done 1,
+// E2E-MAC on a different, clean MacBook (the macOS acceptance test,
 // the headline): from this Mac, copy the darwin release tarball and the
-// tailnet-1 API key file to `mbp` (~/.twd-e2e, mode 0600), run install.sh
-// there, `twd up` / `twd init` / `twd deploy` on mbp over ssh, and run the
+// tailnet-1 API key file to `mbp` (~/.tailworks-e2e, mode 0600), run install.sh
+// there, `tw up` / `tw init` / `tw deploy` on mbp over ssh, and run the
 // tag:ttest test client and the private echo service HERE as tsnet nodes,
 // so every check (a)–(f) of e2e/mac crosses machines over tailnet 1. Then
-// `twd down` on mbp, uninstall, remove ~/.twd-e2e (the key file goes even
+// `tw down` on mbp, uninstall, remove ~/.tailworks-e2e (the key file goes even
 // on failure: t.Cleanup here, and the Makefile's trap), and verify zero
 // leftover devices and keys from this run, by ID.
 //
 // Safety: tailnet 1 only (allow list). mbp's own Tailscale.app (Ross's
-// personal tailnet) is never used, read or called: twd on mbp runs only
-// tsnet nodes with an explicit --tailnet, and `twd doctor` checks that no
-// twd process holds the system tailscaled's socket. No policy is written
+// personal tailnet) is never used, read or called: tailworks on mbp runs only
+// tsnet nodes with an explicit --tailnet, and `tw doctor` checks that no
+// tailworks process holds the system tailscaled's socket. No policy is written
 // (the scenario's grants were added in M4; this test only checks they are
 // there). Keys are never printed.
 package mbp
@@ -40,11 +40,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/e2e/cliflow"
-	"github.com/rosskukulinski/twd/internal/policy"
-	"github.com/rosskukulinski/twd/internal/tsapi"
-	"github.com/rosskukulinski/twd/netd"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/e2e/cliflow"
+	"github.com/rosskukulinski/tailworks/internal/policy"
+	"github.com/rosskukulinski/tailworks/internal/tsapi"
+	"github.com/rosskukulinski/tailworks/netd"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 	"tailscale.com/tailcfg"
 )
 
@@ -86,9 +86,9 @@ func shq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'
 
 // timed wraps a remote command so mbp reports its own wall time (perl ships
 // with macOS; ssh round trips are not counted).
-const timedPerl = `my $t=time; my $r=system(@ARGV); printf STDERR "\n__twd_wall_ms=%.3f\n",(time-$t)*1000; exit($r==-1?127:$r>>8);`
+const timedPerl = `my $t=time; my $r=system(@ARGV); printf STDERR "\n__tw_wall_ms=%.3f\n",(time-$t)*1000; exit($r==-1?127:$r>>8);`
 
-var wallRE = regexp.MustCompile(`\n?__twd_wall_ms=([0-9.]+)\n?$`)
+var wallRE = regexp.MustCompile(`\n?__tw_wall_ms=([0-9.]+)\n?$`)
 
 func (r *remote) timed(dir string, argv ...string) (string, string, time.Duration, error) {
 	q := make([]string, len(argv))
@@ -135,9 +135,9 @@ func (d doctorOut) get(name string) (status, detail string) {
 }
 
 func TestE2EMbp(t *testing.T) {
-	keyFile, tailnet, host, tarball := os.Getenv("TWD_E2E_API_KEY_FILE"), os.Getenv("TWD_E2E_TAILNET"), os.Getenv("TWD_E2E_SSH_HOST"), os.Getenv("TWD_E2E_TARBALL")
+	keyFile, tailnet, host, tarball := os.Getenv("TW_E2E_API_KEY_FILE"), os.Getenv("TW_E2E_TAILNET"), os.Getenv("TW_E2E_SSH_HOST"), os.Getenv("TW_E2E_TARBALL")
 	if keyFile == "" || tailnet == "" || host == "" || tarball == "" {
-		t.Skip("TWD_E2E_API_KEY_FILE / TWD_E2E_TAILNET / TWD_E2E_SSH_HOST / TWD_E2E_TARBALL not set")
+		t.Skip("TW_E2E_API_KEY_FILE / TW_E2E_TAILNET / TW_E2E_SSH_HOST / TW_E2E_TARBALL not set")
 	}
 	if !allowedTailnets[tailnet] {
 		t.Fatalf("refusing to run against tailnet %q (not in the allow list)", tailnet)
@@ -150,13 +150,16 @@ func TestE2EMbp(t *testing.T) {
 		t.Fatal(err)
 	}
 	api := &tsapi.Client{Tailnet: tailnet, APIKey: apiKey}
+	// tailworks mints with an OAuth client: this run's own, created with the
+	// harness's API key and deleted when the test ends.
+	oauthFile := cliflow.RealOAuthClient(t, keyFile, tailnet, t.TempDir(), "tw-e2e-mbp-oauth")
 	b := make([]byte, 3)
 	rand.Read(b)
 	run := hex.EncodeToString(b)
-	testPrefix, twdPrefix, _ := cliflow.RunPrefixes("m6", run) // this Mac's client + echo; every node twd creates on mbp
+	testPrefix, twPrefix, _ := cliflow.RunPrefixes("m6", run) // this Mac's client + echo; every node tw creates on mbp
 	root, _ := nettest.FindRepoRoot()
 	res := cliflow.NewResults("m6-mbp-"+run, tailnet)
-	res.Notes = append(res.Notes, "twd on "+host+" from "+filepath.Base(tarball)+"; test client + echo on this Mac")
+	res.Notes = append(res.Notes, "tw on "+host+" from "+filepath.Base(tarball)+"; test client + echo on this Mac")
 	resultsTo := filepath.Join(root, "e2e", "real", "results", "m6-mbp-"+time.Now().Format("20060102-150405")+"-"+run+".json")
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
@@ -172,19 +175,19 @@ func TestE2EMbp(t *testing.T) {
 	}
 	res.Notes = append(res.Notes, "policy has the scenario's tagOwners and grants (read only; not written)")
 
-	r := &remote{t: t, host: host, ctl: filepath.Join(os.TempDir(), "twd-m6-ssh-"+run)}
+	r := &remote{t: t, host: host, ctl: filepath.Join(os.TempDir(), "tw-m6-ssh-"+run)}
 	rhome := strings.TrimSpace(r.must(`printf %s "$HOME"`))
 	if rhome == "" || !strings.HasPrefix(rhome, "/") {
 		t.Fatalf("mbp $HOME = %q", rhome)
 	}
-	R := rhome + "/.twd-e2e"
-	rKey, rState, rWork := R+"/tailnet1_api.env", R+"/state", R+"/work"
-	rTwd := rhome + "/.twd/bin/twd"
+	R := rhome + "/.tailworks-e2e"
+	rKey, rState, rWork := R+"/oauth.env", R+"/state", R+"/work"
+	rTw := rhome + "/.tailworks/bin/tw"
 
-	// mbp must be clean of twd state (an earlier crashed run is cleaned by
+	// mbp must be clean of tailworks state (an earlier crashed run is cleaned by
 	// the Makefile trap).
-	if so := r.must(`[ -e ~/.twd/twd.json ] && echo state; [ -e ~/.twd-e2e ] && echo e2e; true`); strings.TrimSpace(so) != "" {
-		t.Fatalf("mbp is not clean (%s): remove ~/.twd-e2e and ~/.twd first", strings.TrimSpace(so))
+	if so := r.must(`[ -e ~/.tailworks/tw.json ] && echo state; [ -e ~/.tailworks-e2e ] && echo e2e; true`); strings.TrimSpace(so) != "" {
+		t.Fatalf("mbp is not clean (%s): remove ~/.tailworks-e2e and ~/.tailworks first", strings.TrimSpace(so))
 	}
 	if so := r.must(`command -v node go npm esbuild 2>/dev/null; true`); strings.TrimSpace(so) != "" {
 		res.Notes = append(res.Notes, "mbp has on PATH: "+strings.Join(strings.Fields(so), " "))
@@ -200,10 +203,10 @@ func TestE2EMbp(t *testing.T) {
 	var nodes []*nettest.Node
 	downDone := false
 
-	e := &cliflow.Env{T: t, BinDir: "(mbp)", StateDir: rState, WorkDir: rWork, Tailnet: tailnet, APIKeyFile: rKey,
-		ControlURL: prodControl, Prefix: twdPrefix, Res: res, ClientTagged: true,
+	e := &cliflow.Env{T: t, BinDir: "(mbp)", StateDir: rState, WorkDir: rWork, Tailnet: tailnet, OAuthClientFile: rKey,
+		ControlURL: prodControl, Prefix: twPrefix, Res: res, ClientTagged: true,
 		Exec: func(args []string) (string, string, time.Duration, error) {
-			return r.timed(rWork, append([]string{rTwd}, args...)...)
+			return r.timed(rWork, append([]string{rTw}, args...)...)
 		},
 		PatchFile: func(path string, edit func([]byte) []byte) error {
 			so, se, err := r.run("cat "+shq(path), nil)
@@ -237,7 +240,7 @@ func TestE2EMbp(t *testing.T) {
 		// really runs on the other Mac.
 		if lan := strings.TrimSpace(r.must(`ipconfig getifaddr en0 || ipconfig getifaddr en1; true`)); lan != "" && lastEndpoint != "" {
 			if ap, err := netip.ParseAddrPort(lastEndpoint); err == nil && ap.Addr().String() == lan {
-				res.Pass("cross_machine", "the mcp workload node's direct endpoint is mbp's LAN address (twd host "+strings.TrimSpace(r.must(`hostname -s`))+", test client on "+localHost()+")")
+				res.Pass("cross_machine", "the mcp workload node's direct endpoint is mbp's LAN address (tw host "+strings.TrimSpace(r.must(`hostname -s`))+", test client on "+localHost()+")")
 			} else {
 				res.Notes = append(res.Notes, "direct endpoint is not mbp's en0/en1 address (another interface or NAT)")
 			}
@@ -253,28 +256,28 @@ func TestE2EMbp(t *testing.T) {
 	}
 
 	t.Cleanup(func() {
-		// 1. twd down on mbp (needs the key file), unless the test did.
+		// 1. tw down on mbp (needs the key file), unless the test did.
 		if !downDone {
-			if _, se, _, err := e.Twd("down", "--purge"); err != nil {
-				t.Logf("twd down (cleanup): %v %s", err, netd.Redact(se))
+			if _, se, _, err := e.Tw("down", "--purge"); err != nil {
+				t.Logf("tw down (cleanup): %v %s", err, netd.Redact(se))
 			}
 		}
 		if t.Failed() {
-			so, _, _ := r.run(`for c in supervisor mgmt hostd; do echo "== $c"; tail -c 5000 ~/.twd-e2e/state/logs/$c.log 2>/dev/null; done`, nil)
+			so, _, _ := r.run(`for c in supervisor mgmt hostd; do echo "== $c"; tail -c 5000 ~/.tailworks-e2e/state/logs/$c.log 2>/dev/null; done`, nil)
 			t.Logf("mbp logs (tail):\n%s", netd.Redact(so))
 		}
 		for _, n := range nodes {
 			n.Close()
 		}
-		// 2. On mbp: stop anything left, uninstall, remove ~/.twd-e2e (and
+		// 2. On mbp: stop anything left, uninstall, remove ~/.tailworks-e2e (and
 		// with it the key file), then check it's all gone.
 		us := time.Now()
-		so, se, err := r.run(`pkill -TERM -f "$HOME/.twd/bin/" 2>/dev/null; sleep 0.5; pkill -KILL -f "$HOME/.twd/bin/" 2>/dev/null
-			u=$(ls -d ~/.twd-e2e/twd-*/install.sh 2>/dev/null | head -1)
+		so, se, err := r.run(`pkill -TERM -f "$HOME/.tailworks/bin/" 2>/dev/null; sleep 0.5; pkill -KILL -f "$HOME/.tailworks/bin/" 2>/dev/null
+			u=$(ls -d ~/.tailworks-e2e/tailworks-*/install.sh 2>/dev/null | head -1)
 			if [ -n "$u" ]; then "$u" --uninstall --purge --force; fi
-			rm -rf ~/.twd-e2e
-			[ -e ~/.twd ] && echo LEFT ~/.twd; [ -e ~/.twd-e2e ] && echo LEFT ~/.twd-e2e
-			pgrep -fl "$HOME/.twd/" && echo LEFT processes; true`, nil)
+			rm -rf ~/.tailworks-e2e
+			[ -e ~/.tailworks ] && echo LEFT ~/.tailworks; [ -e ~/.tailworks-e2e ] && echo LEFT ~/.tailworks-e2e
+			pgrep -fl "$HOME/.tailworks/" && echo LEFT processes; true`, nil)
 		res.Numbers["uninstall_ms"] = msOf(time.Since(us))
 		if err != nil || strings.Contains(so, "LEFT") {
 			t.Errorf("mbp cleanup: %v %s %s", err, netd.Redact(so), netd.Redact(se))
@@ -288,15 +291,15 @@ func TestE2EMbp(t *testing.T) {
 		cctx, ccancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer ccancel()
 		devs, keys := cliflow.Leftovers(cctx, api, res)
-		res.Cleanup["twd_devices_tracked"] = len(res.NodeIDs)
-		res.Cleanup["twd_keys_tracked"] = len(res.KeyIDs)
-		res.Cleanup["twd_devices_left_after_down"] = len(devs)
-		res.Cleanup["twd_keys_valid_after_down"] = len(keys)
+		res.Cleanup["tw_devices_tracked"] = len(res.NodeIDs)
+		res.Cleanup["tw_keys_tracked"] = len(res.KeyIDs)
+		res.Cleanup["tw_devices_left_after_down"] = len(devs)
+		res.Cleanup["tw_keys_valid_after_down"] = len(keys)
 		for _, id := range res.NodeIDs {
-			tracker.Track(id, "twd")
+			tracker.Track(id, "tw")
 		}
 		crep := tracker.Cleanup(cctx, testPrefix)
-		trep := tracker.Cleanup(cctx, twdPrefix) // reports untracked twd-m6-<run>-* devices
+		trep := tracker.Cleanup(cctx, twPrefix) // reports untracked tw-m6-<run>-* devices
 		for _, k := range keys {
 			api.DeleteKey(cctx, k)
 		}
@@ -316,7 +319,7 @@ func TestE2EMbp(t *testing.T) {
 		os.WriteFile(resultsTo, out, 0o644)
 		t.Logf("results: %s\n%s", resultsTo, out)
 		if len(devs) > 0 || len(keys) > 0 {
-			t.Errorf("after twd down: leftover twd devices %v, valid keys %d", devs, len(keys))
+			t.Errorf("after tw down: leftover tw devices %v, valid keys %d", devs, len(keys))
 		}
 		if crep.Left != 0 || len(crep.Untracked) > 0 || len(trep.Untracked) > 0 {
 			t.Errorf("cleanup left devices: %+v %+v", crep, trep)
@@ -325,30 +328,30 @@ func TestE2EMbp(t *testing.T) {
 
 	// (a) copy the tarball and the key file (0600, via stdin: never on a
 	// command line, never printed).
-	r.must(`umask 077; mkdir -p ~/.twd-e2e/work && chmod 700 ~/.twd-e2e`)
+	r.must(`umask 077; mkdir -p ~/.tailworks-e2e/work && chmod 700 ~/.tailworks-e2e`)
 	st := time.Now()
-	if out, err := exec.Command("scp", "-q", "-o", "BatchMode=yes", "-o", "ControlPath="+r.ctl, tarball, host+":.twd-e2e/").CombinedOutput(); err != nil {
+	if out, err := exec.Command("scp", "-q", "-o", "BatchMode=yes", "-o", "ControlPath="+r.ctl, tarball, host+":.tailworks-e2e/").CombinedOutput(); err != nil {
 		t.Fatalf("scp tarball: %v %s", err, out)
 	}
 	res.Numbers["scp_tarball_ms"] = msOf(time.Since(st))
-	kf, err := os.Open(keyFile)
+	kf, err := os.Open(oauthFile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, se, err := r.run(`umask 077; cat > ~/.twd-e2e/tailnet1_api.env && chmod 600 ~/.twd-e2e/tailnet1_api.env`, kf)
+	_, se, err := r.run(`umask 077; cat > ~/.tailworks-e2e/oauth.env && chmod 600 ~/.tailworks-e2e/oauth.env`, kf)
 	kf.Close()
 	if err != nil {
 		t.Fatalf("copy key file: %v %s", err, se)
 	}
-	if m := strings.TrimSpace(r.must(`stat -f %Lp ~/.twd-e2e/tailnet1_api.env`)); m != "600" {
+	if m := strings.TrimSpace(r.must(`stat -f %Lp ~/.tailworks-e2e/oauth.env`)); m != "600" {
 		t.Fatalf("key file mode on mbp: %s", m)
 	}
-	if q := strings.TrimSpace(r.must(`xattr ~/.twd-e2e/*.tar.gz`)); q != "" {
+	if q := strings.TrimSpace(r.must(`xattr ~/.tailworks-e2e/*.tar.gz`)); q != "" {
 		res.Notes = append(res.Notes, "scp'd tarball xattrs on mbp: "+q)
 	} else {
 		res.Notes = append(res.Notes, "scp'd tarball has no xattrs on mbp (no com.apple.quarantine)")
 	}
-	res.Checks["copy"] = "PASS tarball + key file (0600) in ~/.twd-e2e"
+	res.Checks["copy"] = "PASS tarball + key file (0600) in ~/.tailworks-e2e"
 
 	// (b) install.sh
 	tgz := filepath.Base(tarball)
@@ -369,33 +372,33 @@ func TestE2EMbp(t *testing.T) {
 	}
 	// idempotent: a second run succeeds and leaves the same install
 	so2, se, d2, err := r.timed(R, R+"/"+dirName+"/install.sh")
-	if err != nil || !strings.Contains(so2, "installed twd") {
+	if err != nil || !strings.Contains(so2, "installed tw") {
 		t.Fatalf("install.sh (again): %v\n%s\n%s", err, so2, se)
 	}
 	res.Numbers["install_again_ms"] = msOf(d2)
-	ver := strings.TrimSpace(r.must(`cat ~/.twd/VERSION; ~/.twd/bin/workerd --version; codesign -dv ~/.twd/bin/workerd 2>&1 | grep -o 'Signature=.*'; xattr -r ~/.twd/bin | head -3`))
-	res.Pass("install", fmt.Sprintf("install.sh %.1f s (again %.1f s), no sudo, ~/.twd: %s", msOf(d)/1000, msOf(d2)/1000, strings.Join(strings.Fields(ver), " ")))
+	ver := strings.TrimSpace(r.must(`cat ~/.tailworks/VERSION; ~/.tailworks/bin/workerd --version; codesign -dv ~/.tailworks/bin/workerd 2>&1 | grep -o 'Signature=.*'; xattr -r ~/.tailworks/bin | head -3`))
+	res.Pass("install", fmt.Sprintf("install.sh %.1f s (again %.1f s), no sudo, ~/.tailworks: %s", msOf(d)/1000, msOf(d2)/1000, strings.Join(strings.Fields(ver), " ")))
 
-	// twd doctor before up (no state yet: the key check uses the flags).
+	// tw doctor before up (no state yet: the key check uses the flags).
 	var doc doctorOut
-	so, se, d, err = e.Twd("doctor", "--tailnet", tailnet, "--api-key-file", rKey, "--json")
+	so, se, d, err = e.Tw("doctor", "--json")
 	if err != nil || json.Unmarshal([]byte(so), &doc) != nil || !doc.OK {
-		t.Fatalf("twd doctor on mbp: %v\n%s\n%s", err, so, netd.Redact(se))
+		t.Fatalf("tw doctor on mbp: %v\n%s\n%s", err, so, netd.Redact(se))
 	}
 	// No check may fail, and these must be ok. host_sockets is a Linux-only
-	// check (skip on macOS) and node_egress is skip until twd runs.
-	mustOK := []string{"binaries", "workerd", "bundler", "twd_home_writable", "state_dir_writable", "api_key", "sandbox", "system_tailscaled_not_used"}
+	// check (skip on macOS) and node_egress is skip until tailworks runs.
+	mustOK := []string{"binaries", "workerd", "bundler", "tw_home_writable", "state_dir_writable", "sandbox", "system_tailscaled_not_used"}
 	var summary []string
 	for _, c := range doc.Checks {
 		summary = append(summary, c.Name+"="+c.Status)
 		res.Checks["doctor_"+c.Name] = strings.ToUpper(c.Status) + " " + c.Detail
 		if c.Status == "fail" || (slices.Contains(mustOK, c.Name) && c.Status != "ok") {
-			t.Fatalf("twd doctor on mbp: %s is %s: %s", c.Name, c.Status, c.Detail)
+			t.Fatalf("tw doctor on mbp: %s is %s: %s", c.Name, c.Status, c.Detail)
 		}
 	}
 	for _, name := range mustOK {
 		if st, _ := doc.get(name); st == "" {
-			t.Fatalf("twd doctor on mbp has no %s check", name)
+			t.Fatalf("tw doctor on mbp has no %s check", name)
 		}
 	}
 	for _, c := range doc.Checks {
@@ -406,19 +409,19 @@ func TestE2EMbp(t *testing.T) {
 	// ai-agent (Vercel AI SDK + @ai-sdk/mcp) scaffolds on mbp with no npm;
 	// doctor above bundled it offline. Not deployed: its tags aren't in
 	// tailnet 1's policy, and M6 doesn't write policy.
-	if _, se, _, err := e.Twd("init", rWork+"/ai", "--template", "ai-agent", "--json"); err != nil {
-		t.Fatalf("twd init --template ai-agent on mbp: %v %s", err, se)
+	if _, se, _, err := e.Tw("init", rWork+"/ai", "--template", "ai-agent", "--json"); err != nil {
+		t.Fatalf("tw init --template ai-agent on mbp: %v %s", err, se)
 	}
-	res.Pass("init_ai_agent_offline", "twd init --template ai-agent on mbp (no npm); bundled offline by doctor")
+	res.Pass("init_ai_agent_offline", "tw init --template ai-agent on mbp (no npm); bundled offline by doctor")
 	res.Numbers["doctor_ms"] = msOf(d)
-	res.Pass("doctor", fmt.Sprintf("%d checks, none failed, in %.0f ms (workerd runs, bundler offline, ~/.twd writable, API key works, Seatbelt enforces, system tailscaled not used): %s", len(doc.Checks), msOf(d), strings.Join(summary, " ")))
+	res.Pass("doctor", fmt.Sprintf("%d checks, none failed, in %.0f ms (workerd runs, bundler offline, ~/.tailworks writable, API key works, Seatbelt enforces, system tailscaled not used): %s", len(doc.Checks), msOf(d), strings.Join(summary, " ")))
 
 	// (c)–(e) on mbp, checks (a)–(f) from this Mac.
 	e.Run()
 
 	// Seatbelt from the installed release (M7): every workerd on mbp runs
 	// under its tenant's profile, and that profile denies the API key file,
-	// twd's state (node keys, mgmt custody) and the installed ~/.twd, while
+	// tailworks' state (node keys, mgmt custody) and the installed ~/.tailworks, while
 	// the same reads work unsandboxed (control). Only exit codes are used.
 	var sbst struct {
 		Workloads []struct {
@@ -432,7 +435,7 @@ func TestE2EMbp(t *testing.T) {
 			t.Fatalf("mbp: workload %s runs with sandbox %q (want seatbelt)", w.Workload, w.Sandbox)
 		}
 		nsb++
-		for _, c := range []string{"/bin/cat " + shq(rKey), "/bin/ls " + shq(rState+"/hostd"), "/bin/ls " + shq(rhome+"/.twd/bin")} {
+		for _, c := range []string{"/bin/cat " + shq(rKey), "/bin/ls " + shq(rState+"/hostd"), "/bin/ls " + shq(rhome+"/.tailworks/bin")} {
 			if _, _, err := r.run(c+" >/dev/null 2>&1", nil); err != nil {
 				t.Fatalf("mbp control (unsandboxed) failed: %s: %v", c, err)
 			}
@@ -442,15 +445,15 @@ func TestE2EMbp(t *testing.T) {
 		}
 	}
 	if nsb == 0 {
-		t.Fatal("mbp: no workloads in twd status")
+		t.Fatal("mbp: no workloads in tw status")
 	}
-	res.Pass("seatbelt_release", fmt.Sprintf("%d workloads under seatbelt from the installed release; each profile denies the API key file, twd's hostd state and ~/.twd/bin (readable unsandboxed)", nsb))
+	res.Pass("seatbelt_release", fmt.Sprintf("%d workloads under seatbelt from the installed release; each profile denies the API key file, tailworks' hostd state and ~/.tailworks/bin (readable unsandboxed)", nsb))
 
-	// doctor again while twd runs: no twd process holds tailscaled's socket,
+	// doctor again while tailworks runs: no tailworks process holds tailscaled's socket,
 	// and the sandbox is active for every running workload.
-	so, se, _, err = e.Twd("doctor", "--json")
+	so, se, _, err = e.Tw("doctor", "--json")
 	if err != nil || json.Unmarshal([]byte(so), &doc) != nil || !doc.OK {
-		t.Fatalf("twd doctor (running) on mbp: %v\n%s\n%s", err, so, netd.Redact(se))
+		t.Fatalf("tw doctor (running) on mbp: %v\n%s\n%s", err, so, netd.Redact(se))
 	}
 	for _, c := range doc.Checks {
 		if c.Name == "sandbox" {
@@ -581,12 +584,12 @@ func derpProbe(t testing.TB, res *cliflow.Results, tracker *tsapi.Tracker, key, 
 	}
 	var env []string
 	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, "TWD_E2E_") {
+		if !strings.HasPrefix(kv, "TW_E2E_") {
 			env = append(env, kv)
 		}
 	}
-	env = append(env, "TS_DEBUG_ALWAYS_USE_DERP=1", "TWD_PROBE_KEY_FILE="+kf, "TWD_PROBE_HOSTNAME="+hostname,
-		"TWD_PROBE_TARGET="+target, "TWD_PROBE_OUT="+out, "TWD_PROBE_DIR="+dir)
+	env = append(env, "TS_DEBUG_ALWAYS_USE_DERP=1", "TW_PROBE_KEY_FILE="+kf, "TW_PROBE_HOSTNAME="+hostname,
+		"TW_PROBE_TARGET="+target, "TW_PROBE_OUT="+out, "TW_PROBE_DIR="+dir)
 	cmd := exec.Command(os.Args[0], "-test.run=^TestDERPProbe$", "-test.count=1", "-test.timeout=3m")
 	cmd.Env = env
 	b, err := cmd.CombinedOutput()
@@ -608,14 +611,14 @@ func derpProbe(t testing.TB, res *cliflow.Results, tracker *tsapi.Tracker, key, 
 
 // TestDERPProbe is derpProbe's child process (skipped otherwise).
 func TestDERPProbe(t *testing.T) {
-	kf := os.Getenv("TWD_PROBE_KEY_FILE")
+	kf := os.Getenv("TW_PROBE_KEY_FILE")
 	if kf == "" {
 		t.Skip("child of TestE2EMbp only")
 	}
 	var po probeOut
 	defer func() {
 		b, _ := json.Marshal(po)
-		os.WriteFile(os.Getenv("TWD_PROBE_OUT"), b, 0o600)
+		os.WriteFile(os.Getenv("TW_PROBE_OUT"), b, 0o600)
 	}()
 	key, err := os.ReadFile(kf)
 	if err != nil {
@@ -624,7 +627,7 @@ func TestDERPProbe(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	n, err := nettest.NewNode(ctx, prodControl, strings.TrimSpace(string(key)), os.Getenv("TWD_PROBE_HOSTNAME"), os.Getenv("TWD_PROBE_DIR"))
+	n, err := nettest.NewNode(ctx, prodControl, strings.TrimSpace(string(key)), os.Getenv("TW_PROBE_HOSTNAME"), os.Getenv("TW_PROBE_DIR"))
 	if err != nil {
 		po.Err = netd.Redact(err.Error())
 		return
@@ -633,9 +636,9 @@ func TestDERPProbe(t *testing.T) {
 	if st, err := n.LC.StatusWithoutPeers(ctx); err == nil && st.Self != nil {
 		po.NodeID = string(st.Self.ID)
 		b, _ := json.Marshal(po)
-		os.WriteFile(os.Getenv("TWD_PROBE_OUT"), b, 0o600)
+		os.WriteFile(os.Getenv("TW_PROBE_OUT"), b, 0o600)
 	}
-	target := os.Getenv("TWD_PROBE_TARGET")
+	target := os.Getenv("TW_PROBE_TARGET")
 	if err := n.WaitPeers(ctx, target); err != nil {
 		po.Err = "netmap: " + err.Error()
 		return

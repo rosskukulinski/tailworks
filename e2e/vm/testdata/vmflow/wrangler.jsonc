@@ -1,0 +1,10 @@
+{
+  // e2e/vm workflows_test.go: Workflows on the microVM tier.
+  "name": "vmflow",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-01",
+  "durable_objects": {
+    "bindings": [{ "name": "F", "class_name": "Facet" }],
+  },
+  "workflows": [{ "name": "flow", "binding": "FLOW", "class_name": "Flow" }],
+}

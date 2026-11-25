@@ -1,4 +1,4 @@
-// M5 conformance app: real Cloudflare Agents SDK (`agents`) classes on twd.
+// M5 conformance app: real Cloudflare Agents SDK (`agents`) classes on tailworks.
 // The same Agent body runs in both egress modes (ADR-019 #5):
 //   StateAgent  facet mode (default): per-object egress from its own node
 //   PlainAgent  plain-DO mode ("egress": "workload"): alarms work
@@ -7,8 +7,8 @@ import { Agent, routeAgentRequest, getAgentByName, type Connection, type Connect
 import { createMcpHandler } from "agents/mcp/server";
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import { getCaller, tailnet, isTailnetError } from "@twd/tailnet";
-import { withTailnet, caller, authorizeTool } from "@twd/mcp";
+import { getCaller, tailnet, isTailnetError } from "@tailworks/tailnet";
+import { withTailnet, caller, authorizeTool } from "@tailworks/mcp";
 
 interface Env {
   StateAgent: any;
@@ -127,7 +127,7 @@ class ConformanceAgent extends Agent<Env, State> {
         return Response.json({ ticks: Object.fromEntries(rows.map((r) => [r.kind, r.n])), schedules });
       }
       case "mcp-client": {
-        // The Agent as an MCP client (addMcpServer) to a twd MCP server over
+        // The Agent as an MCP client (addMcpServer) to a tailworks MCP server over
         // the tailnet. The server sees THIS object's node as the caller.
         const target = q("url");
         if (!target) return Response.json({ error: "url required" }, { status: 400 });
@@ -155,7 +155,7 @@ class ConformanceAgent extends Agent<Env, State> {
         return Response.json(out);
       }
       case "egress": {
-        // Plain fetch() from the agent (no twd API): attributed per egress mode.
+        // Plain fetch() from the agent (no tailworks API): attributed per egress mode.
         try {
           const r = await fetch(q("url")!);
           return Response.json({ status: r.status, body: await r.json() });
@@ -183,13 +183,9 @@ class ConformanceAgent extends Agent<Env, State> {
           exports: typeof (this.ctx as any).exports,
           facets: typeof (this.ctx as any).facets,
         };
-        try {
-          const { EmailMessage } = await import("cloudflare:email");
-          new (EmailMessage as any)("a@example.com", "b@example.com", "raw");
-          out.email = "constructed";
-        } catch (e) {
-          out.email = errOf(e);
-        }
+        // cloudflare:email: not imported here. The built-in bundler refuses
+        // the app's own import (TestCloudflareAgents/UnsupportedBindings
+        // checks that, and that the `agents` import of it is stubbed).
         try {
           await (this as any).subAgent?.(PlainAgent, "sub-1");
           out.subAgent = "ok";

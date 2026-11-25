@@ -1,22 +1,23 @@
-// @twd/node: the twd Node process tier SDK.
+// @tailworks/node: the tailworks Node process tier SDK.
 //
-// Ingress: twd-hostd forwards each tailnet request to the app with the
-// verified caller (netd WhoIs) in a signed `x-twd-caller` header:
+// Ingress: tw-hostd forwards each tailnet request to the app with the
+// verified caller (netd WhoIs) in a signed `x-tw-caller` header:
 //
-//   x-twd-caller: v1.<base64url(JSON payload)>.<base64url(HMAC-SHA256(key, "v1." + payload))>
+//   x-tw-caller: v1.<base64url(JSON payload)>.<base64url(HMAC-SHA256(key, "v1." + payload))>
 //
-// The key is per process (TWD_CALLER_KEY, base64url, fresh on every start).
-// netd strips inbound x-twd-* headers from tailnet clients, so a forged copy
+// The key is per process (TW_CALLER_KEY, base64url, fresh on every start).
+// netd strips inbound x-tw-* headers from tailnet clients, so a forged copy
 // never reaches the app through the tailnet; a request that reaches the app
 // some other way (another local process dialling its port) cannot produce a
 // valid signature. Always verify: getCaller() returns null on a missing or
 // invalid header, requireCaller() throws.
 //
 // Egress: outbound HTTP(S) must leave through hostd's attributed egress
-// proxy (TWD_EGRESS_PROXY; also exported as HTTP_PROXY/HTTPS_PROXY with
+// proxy (TW_EGRESS_PROXY; also exported as HTTP_PROXY/HTTPS_PROXY with
 // NODE_USE_ENV_PROXY=1), so the destination sees this deployment's own
 // tailnet node and ADR-019 applies (netmap-only names, no loopback, no host,
-// no metadata, no internet). enforceEgress() (called by
+// no metadata; internet only as tailnet.egress.internet allows, from the
+// host network). enforceEgress() (called by
 // installGlobalDispatcher) additionally routes raw `net`/`tls` connects
 // through the proxy as CONNECT tunnels and refuses direct DNS/UDP, so code
 // that ignores the env proxies is still attributed or fails. All of this is
@@ -32,7 +33,7 @@ import net from "node:net";
 import { Readable } from "node:stream";
 import tls from "node:tls";
 
-export const CALLER_HEADER = "x-twd-caller";
+export const CALLER_HEADER = "x-tw-caller";
 /** Signatures older (or newer) than this are rejected. */
 export const DEFAULT_MAX_SKEW_MS = 60_000;
 
@@ -47,7 +48,7 @@ export interface Caller {
   capMap: Record<string, unknown[]>;
 }
 
-/** The signed payload of x-twd-caller. */
+/** The signed payload of x-tw-caller. */
 export interface CallerClaims {
   v: 1;
   caller: Caller;
@@ -59,7 +60,7 @@ export interface CallerClaims {
   iat: number;
   /** Per-request nonce; a header seen twice within the skew window is refused (RT-05). */
   nonce?: string;
-  /** The calling twd object's ID, when the caller is a twd object with a node certificate (RT-01). */
+  /** The calling tw object's ID, when the caller is a tailworks object with a node certificate (RT-01). */
   callerObjectId?: string;
   /** The caller's spawn-time cap limit (its node certificate's lim); caller.capMap is already narrowed by it. */
   lim?: Record<string, unknown>;
@@ -73,16 +74,16 @@ export class CallerError extends Error {
     this.code = "no_identity";
   }
   toResponse(): Response {
-    return new Response(JSON.stringify({ code: this.code, message: this.message, doc_url: "https://twd.dev/errors/no_identity" }), {
+    return new Response(JSON.stringify({ code: this.code, message: this.message, doc_url: "https://github.com/rosskukulinski/tailworks/blob/master/docs/errors.md#no_identity" }), {
       status: 401,
-      headers: { "content-type": "application/json", "twd-error": this.code },
+      headers: { "content-type": "application/json", "tw-error": this.code },
     });
   }
 }
 
 function keyBytes(key?: string | Uint8Array): Buffer {
-  const k = key ?? process.env.TWD_CALLER_KEY;
-  if (!k) throw new CallerError("TWD_CALLER_KEY is not set (not running under twd-hostd?)");
+  const k = key ?? process.env.TW_CALLER_KEY;
+  if (!k) throw new CallerError("TW_CALLER_KEY is not set (not running under tw-hostd?)");
   return typeof k === "string" ? Buffer.from(k, "base64url") : Buffer.from(k);
 }
 
@@ -104,7 +105,7 @@ export interface VerifyOptions {
 
 /** verifyCaller checks a header value and returns its claims, or throws CallerError. */
 export function verifyCaller(header: string | null | undefined, opts: VerifyOptions = {}): CallerClaims {
-  if (!header) throw new CallerError("missing " + CALLER_HEADER + " (not called over the tailnet via twd)");
+  if (!header) throw new CallerError("missing " + CALLER_HEADER + " (not called over the tailnet via tw)");
   const parts = header.split(".");
   if (parts.length !== 3 || parts[0] !== "v1") throw new CallerError("malformed " + CALLER_HEADER);
   const [, payload, sig] = parts;
@@ -172,8 +173,8 @@ export function capValues<T = unknown>(c: Caller | null, cap: string): T[] {
 
 /** proxyUrl is the attributed egress proxy (with its per-process credentials). */
 export function proxyUrl(): string {
-  const p = process.env.TWD_EGRESS_PROXY;
-  if (!p) throw new Error("TWD_EGRESS_PROXY is not set (not running under twd-hostd?)");
+  const p = process.env.TW_EGRESS_PROXY;
+  if (!p) throw new Error("TW_EGRESS_PROXY is not set (not running under tw-hostd?)");
   return p;
 }
 
@@ -280,7 +281,8 @@ function isLoopbackHost(h: string): boolean {
  * bypasses the env proxies is still attributed: a TCP connect to anything
  * but the egress proxy or this app's own listener becomes a CONNECT tunnel
  * through the proxy (netd then applies ADR-019 from the deployment's node
- * and refuses loopback/LAN/metadata/internet), direct DNS resolution fails
+ * and refuses loopback/LAN/metadata, and internet that tailnet.egress.internet
+ * does not allow), direct DNS resolution fails
  * with forbidden_destination (names resolve at the proxy, from the
  * netmap), and UDP sockets fail. Idempotent.
  *
@@ -296,7 +298,7 @@ export function enforceEgress(opts: EnforceEgressOptions = {}): void {
   const own = process.env.PORT;
   if (own) for (const h of ["127.0.0.1", "localhost", "::1", "0.0.0.0"]) allow.add(`${h}:${own}`);
   for (const a of opts.allow ?? []) allow.add(a);
-  const ownSock = process.env.TWD_SOCKET;
+  const ownSock = process.env.TW_SOCKET;
 
   const origConnect = net.Socket.prototype.connect;
   const tunnel = (sock: net.Socket, host: string, port: number, cb?: () => void) => {
@@ -351,8 +353,8 @@ export function enforceEgress(opts: EnforceEgressOptions = {}): void {
           const head = buf.slice(0, i);
           const m = /^HTTP\/1\.[01] (\d{3})/.exec(head);
           if (!m || m[1] !== "200") {
-            const te = /twd-error:\s*([a-z_]+)/i.exec(head);
-            const err = new EgressError(`egress to ${hp} refused by the twd egress proxy (${te ? te[1] : "HTTP " + (m ? m[1] : "?")})`);
+            const te = /tw-error:\s*([a-z_]+)/i.exec(head);
+            const err = new EgressError(`egress to ${hp} refused by the tailworks egress proxy (${te ? te[1] : "HTTP " + (m ? m[1] : "?")})`);
             if (te) err.code = te[1] as any;
             finish(err);
             return true;
@@ -379,17 +381,17 @@ export function enforceEgress(opts: EnforceEgressOptions = {}): void {
     const { options, cb } = n;
     if (options.path) {
       if (ownSock && options.path === ownSock) return origConnect.apply(this, args as any);
-      process.nextTick(() => this.destroy(new EgressError(`unix socket ${options.path} is not reachable from a twd Node app (only this app's own socket is)`)));
+      process.nextTick(() => this.destroy(new EgressError(`unix socket ${options.path} is not reachable from a tailworks Node app (only this app's own socket is)`)));
       return this;
     }
     const host = String(options.host ?? "localhost");
     const port = Number(options.port);
     if (allow.has(`${host}:${port}`)) return origConnect.apply(this, args as any);
     if (isLoopbackHost(host)) {
-      process.nextTick(() => this.destroy(new EgressError(`loopback ${host}:${port} is not reachable from a twd Node app except its own port and the egress proxy`)));
+      process.nextTick(() => this.destroy(new EgressError(`loopback ${host}:${port} is not reachable from a tailworks Node app except its own port and the egress proxy`)));
       return this;
     }
-    (this as any)._twdTunnel = `${host}:${port}`;
+    (this as any)._twTunnel = `${host}:${port}`;
     tunnel(this, host, port, cb);
     return this;
   };
@@ -418,7 +420,7 @@ export function enforceEgress(opts: EnforceEgressOptions = {}): void {
     return origTLSConnect.apply(tls, args as any);
   };
   if (opts.dns !== false) {
-    const refuse = (what: string) => new EgressError(`${what} is not available in a twd Node app: names resolve at the egress proxy (netmap only)`);
+    const refuse = (what: string) => new EgressError(`${what} is not available in a tailworks Node app: names resolve at the egress proxy (netmap only)`);
     const origLookup = dns.lookup;
     (dns as any).lookup = function (hostname: string, ...rest: any[]) {
       const cb = rest[rest.length - 1];

@@ -1,0 +1,5 @@
+{
+  // e2e/dataplane cron loop (#419): stateless, no objects.
+  "name": "cron",
+  "tailnet": { "tags": ["tag:ttest"] },
+}

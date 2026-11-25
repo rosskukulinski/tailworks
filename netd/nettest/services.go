@@ -11,6 +11,7 @@ import (
 	"tailscale.com/client/local"
 	"tailscale.com/ipn"
 	"tailscale.com/tailcfg"
+	"tailscale.com/tailcfg/nodecap"
 	"tailscale.com/types/key"
 )
 
@@ -49,12 +50,12 @@ func (c *Control) hostService(nk key.NodePublic, name, vip string) error {
 	for k, v := range n.CapMap {
 		cm[k] = v
 	}
-	if raw, ok := cm[tailcfg.NodeAttrServiceHost]; ok && len(raw) == 1 {
+	if raw, ok := cm[nodecap.ServiceHost]; ok && len(raw) == 1 {
 		json.Unmarshal([]byte(raw[0]), &ipMap)
 	}
 	ipMap[tailcfg.ServiceName(name)] = []netip.Addr{netip.MustParseAddr(vip)}
 	b, _ := json.Marshal(ipMap)
-	cm[tailcfg.NodeAttrServiceHost] = []tailcfg.RawMessage{tailcfg.RawMessage(b)}
+	cm[nodecap.ServiceHost] = []tailcfg.RawMessage{tailcfg.RawMessage(b)}
 	c.Server.SetNodeCapMap(nk, cm)
 
 	var routes []netip.Prefix

@@ -27,13 +27,22 @@ const (
 	CodeNotPublic         = "not_public"          // 404: the path is not in public.routes
 	CodeUpgradeNotAllowed = "upgrade_not_allowed" // 403: the route is not in public.upgrade
 	CodeRequestTimeout    = "request_timeout"     // 504: public.limits.timeoutSeconds expired
+
+	// Egress to a name that is not on the tailnet (403): Workers have no
+	// internet egress.
+	CodeInternetEgressUnavailable = "internet_egress_unavailable"
+
+	// Internet egress through the host's exit node (503): the exit node is
+	// missing from the netmap, not offered, offline or not answering DNS
+	// (ADR-054).
+	CodeExitNodeUnavailable = "exit_node_unavailable"
 )
 
 // DocBase is the prefix for doc_url in error bodies.
-const DocBase = "https://github.com/rosskukulinski/twd/blob/main/docs/errors.md#"
+const DocBase = "https://github.com/rosskukulinski/tailworks/blob/master/docs/errors.md#"
 
 // Error is a typed netd refusal. It is rendered as JSON with the code also in
-// the twd-error response header.
+// the tw-error response header.
 type Error struct {
 	Code        string `json:"code"`
 	Detail      string `json:"detail"`
@@ -59,11 +68,17 @@ func (e *Error) Status() int {
 	switch e.Code {
 	case CodeForbiddenDestination, CodePeerNotVisible, CodeUnknownObject, CodeNoIdentity:
 		return http.StatusForbidden
+	case CodeInternetEgressUnavailable:
+		return http.StatusForbidden
+	case CodeInternetPortRefused:
+		return http.StatusForbidden
 	case CodeBadRequest:
 		return http.StatusBadRequest
 	case CodeKilled, CodeObjectKilled:
 		return http.StatusGone
 	case CodeIdentityPending, CodeUpstreamUnavailable:
+		return http.StatusServiceUnavailable
+	case CodeExitNodeUnavailable:
 		return http.StatusServiceUnavailable
 	case CodeRateLimited:
 		return http.StatusTooManyRequests

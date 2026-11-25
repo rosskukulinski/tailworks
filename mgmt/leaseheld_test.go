@@ -3,7 +3,6 @@ package mgmt
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -27,6 +26,7 @@ func (c *stepClock) advance(d time.Duration)                { c.mu.Lock(); c.now
 // lease frees up (with Retry-After), not just "lease held by another
 // holder"; once the lease expires the redeploy goes to a live host.
 func TestMM_F5_LeaseHeldExplains(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	st, err := OpenStore(ctx, filepath.Join(dir, "m.db"))
@@ -43,8 +43,8 @@ func TestMM_F5_LeaseHeldExplains(t *testing.T) {
 	}
 	defer m.Close()
 	kf := filepath.Join(dir, "api.env")
-	os.WriteFile(kf, []byte("TS_API_KEY=x\n"), 0o600)
-	tn, err := m.CreateTenant(ctx, TenantRequest{Tailnet: "t.ts.net", MintMode: "apikey", APIKeyFile: kf})
+	writeTestOAuthFile(t, kf)
+	tn, err := m.CreateTenant(ctx, TenantRequest{Tailnet: "t.ts.net", MintMode: MintOAuth, OAuthClientFile: kf})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestMM_F5_LeaseHeldExplains(t *testing.T) {
 	}
 	deploy := func(host string) (DeployResponse, error) {
 		return m.Deploy(ctx, DeployRequest{TenantID: tn.ID, Workload: "w", Host: host, ForceTakeover: host == "",
-			Bundle: makeBundle(t, map[string]string{"twd.jsonc": testTwdJSONC, "dist/index.js": "export default {}"})})
+			Bundle: makeBundle(t, map[string]string{"tailworks.jsonc": testTwJSONC, "dist/index.js": "export default {}"})})
 	}
 	if _, err := deploy("h1"); err != nil {
 		t.Fatal(err)

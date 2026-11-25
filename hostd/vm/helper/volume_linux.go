@@ -11,7 +11,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/rosskukulinski/twd/hostd/vm/helperapi"
+	"github.com/rosskukulinski/tailworks/hostd/vm/helperapi"
 	"golang.org/x/sys/unix"
 )
 
@@ -169,7 +169,7 @@ func (v *volumes) attach(f *os.File, req *helperapi.Volume, uid int, dmName stri
 		return a, fmt.Errorf("persist volume fence: %w", werr)
 	}
 	if a.formatted {
-		if _, err := runStdin(nil, "mkfs.ext4", "-q", "-F", "-L", "twd-do", "-m", "0",
+		if _, err := runStdin(nil, "mkfs.ext4", "-q", "-F", "-L", "tw-do", "-m", "0",
 			"-E", "lazy_itable_init=0,lazy_journal_init=0,nodiscard", a.mapper); err != nil {
 			return a, err
 		}

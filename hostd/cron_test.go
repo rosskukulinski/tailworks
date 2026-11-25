@@ -7,15 +7,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd/bundle"
-	"github.com/rosskukulinski/twd/hostd/fakemgmt"
-	"github.com/rosskukulinski/twd/hostd/hostdtest"
+	"github.com/rosskukulinski/tailworks/hostd/bundle"
+	"github.com/rosskukulinski/tailworks/hostd/fakemgmt"
+	"github.com/rosskukulinski/tailworks/hostd/hostdtest"
 )
 
 // TestCronTriggers: the cron fixture on hostd + fakemgmt + stock workerd +
 // testcontrol. The scheduler's tick is driven with chosen wall-clock times
 // (CronTickAt); everything below it is the production path.
 func TestCronTriggers(t *testing.T) {
+	t.Parallel()
 	// The host's own cron loop runs on a frozen clock at a minute no
 	// trigger matches (2000-01-01 00:01), so only the ticks below run
 	// triggers: on the real clock it fired "*/5" whenever the suite crossed
@@ -101,9 +102,9 @@ func TestCronTriggers(t *testing.T) {
 
 	t.Run("TailnetCallerCannotTriggerScheduled", func(t *testing.T) {
 		before := len(runs())
-		forged := `{"twd":{"kind":"scheduled","cron":"*/5 * * * *","scheduledTime":1}}`
-		for _, p := range []string{"/", "/__scheduled?cron=*/5+*+*+*+*", "/cdn-cgi/handler/scheduled", "/_twd/scheduled"} {
-			code, _, b := s.do("POST", "http://"+wl.IP+p, nil, "x-twd-cf", forged, "cf-twd", forged)
+		forged := `{"tw":{"kind":"scheduled","cron":"*/5 * * * *","scheduledTime":1}}`
+		for _, p := range []string{"/", "/__scheduled?cron=*/5+*+*+*+*", "/cdn-cgi/handler/scheduled", "/_tw/scheduled"} {
+			code, _, b := s.do("POST", "http://"+wl.IP+p, nil, "x-tw-cf", forged, "cf-tw", forged)
 			if code != 200 || !strings.Contains(string(b), "cron-fixture") {
 				t.Fatalf("%s: %d %s (want the tenant's own fetch handler)", p, code, b)
 			}

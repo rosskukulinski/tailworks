@@ -2,7 +2,6 @@ package mgmt
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -24,8 +23,8 @@ func h22World(t *testing.T) (*Mgmt, *SQLStore, string) {
 	}
 	t.Cleanup(m.Close)
 	kf := filepath.Join(dir, "api.env")
-	os.WriteFile(kf, []byte("TS_API_KEY=x\n"), 0o600)
-	tn, _ := m.CreateTenant(ctx, TenantRequest{Tailnet: "t.ts.net", MintMode: "apikey", APIKeyFile: kf})
+	writeTestOAuthFile(t, kf)
+	tn, _ := m.CreateTenant(ctx, TenantRequest{Tailnet: "t.ts.net", MintMode: MintOAuth, OAuthClientFile: kf})
 	return m, st, tn.ID
 }
 
@@ -46,6 +45,7 @@ func killRecords(t *testing.T, st *SQLStore, tenant, obj string) int {
 // TestMM_H22_KillAndAuditCommitTogether: if the audit intent can't be
 // written, the kill doesn't happen (no state change without its record).
 func TestMM_H22_KillAndAuditCommitTogether(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	m, st, tid := h22World(t)
 	st.CreateObject(ctx, Object{ID: "o1", TenantID: tid, Workload: "w", Namespace: "A", Name: "o1", Hostname: "o1", RootID: "o1", Status: StatusReady})
@@ -66,6 +66,7 @@ func TestMM_H22_KillAndAuditCommitTogether(t *testing.T) {
 // TestMM_H22_DeferredAppendIsNotLost: the kill commits with its intent; the
 // chain append fails (store blip); the drain appends it later, once.
 func TestMM_H22_DeferredAppendIsNotLost(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	m, st, tid := h22World(t)
 	st.CreateObject(ctx, Object{ID: "o2", TenantID: tid, Workload: "w", Namespace: "A", Name: "o2", Hostname: "o2", RootID: "o2", Status: StatusReady})
@@ -101,6 +102,7 @@ func TestMM_H22_DeferredAppendIsNotLost(t *testing.T) {
 
 // A withdrawn intent (the update was a no-op) never reaches the outbox.
 func TestMM_H22_SkippedIntentNotRecorded(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	m, st, tid := h22World(t)
 	st.CreateObject(ctx, Object{ID: "o3", TenantID: tid, Workload: "w", Namespace: "A", Name: "o3", Hostname: "o3", RootID: "o3", Status: StatusKilled})

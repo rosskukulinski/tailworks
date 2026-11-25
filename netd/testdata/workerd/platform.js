@@ -3,12 +3,12 @@
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import TENANT_SRC from "tenant.js.txt";
 
-// Entry: netd has stripped client identity headers and set cf (cfBlobHeader) + x-twd-object.
+// Entry: netd has stripped client identity headers and set cf (cfBlobHeader) + x-tw-object.
 export default {
   async fetch(request, env, ctx) {
     const object = request.cf?.objectId;
     if (!object) return new Response("no objectId in cf (not from netd?)", { status: 400 });
-    if (request.headers.get("x-twd-object") !== object) return new Response("routing header mismatch", { status: 400 });
+    if (request.headers.get("x-tw-object") !== object) return new Response("routing header mismatch", { status: 400 });
     return ctx.exports.HostDO.get(ctx.exports.HostDO.idFromName(object)).fetch(request);
   },
 };
@@ -37,8 +37,8 @@ export class HostDO extends DurableObject {
 export class Egress extends WorkerEntrypoint {
   async fetch(request) {
     const h = new Headers(request.headers);
-    for (const k of [...h.keys()]) if (k.startsWith("x-twd") || k === "proxy-authorization") h.delete(k);
-    h.set("x-twd-object", this.ctx.props.object);
+    for (const k of [...h.keys()]) if (k.startsWith("x-tw-") || k === "proxy-authorization") h.delete(k);
+    h.set("x-tw-object", this.ctx.props.object);
     // workerd's proxy-style external sends absolute-form without Host; Go's net/http rejects that.
     h.set("host", new URL(request.url).host);
     return this.env.NETD_EGRESS.fetch(new Request(request.url, { method: request.method, headers: h, body: request.body, redirect: "manual" }));

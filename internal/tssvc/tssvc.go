@@ -4,7 +4,7 @@
 //
 // tsnet's own ListenService forwards Service traffic to a host loopback
 // socket: the backend then sees 127.0.0.1 as the caller (or has to trust a
-// PROXY header that any local process could forge). twd authenticates every
+// PROXY header that any local process could forge). Tailworks authenticates every
 // request by WhoIs on the connection's source address, so that is not usable.
 //
 // Instead, a Host:
@@ -43,6 +43,7 @@ import (
 // Validate reports whether name is a valid Service name ("svc:" + a DNS label).
 func Validate(name string) error {
 	if !strings.HasPrefix(name, "svc:") {
+		//lint:ignore ST1005 "svc:" is the literal prefix, not punctuation
 		return fmt.Errorf("service name %q must start with svc:", name)
 	}
 	return tailcfg.ServiceName(name).Validate()

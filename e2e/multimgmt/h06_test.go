@@ -40,7 +40,7 @@ func TestMM_H06_KillPushAcrossReplicas(t *testing.T) {
 			got[id], via[id] = time.Now(), how
 		}
 	}
-	sock := filepath.Join(os.TempDir(), fmt.Sprintf("twd-mm-%d-push.sock", os.Getpid()))
+	sock := filepath.Join(os.TempDir(), fmt.Sprintf("tw-mm-%d-push.sock", os.Getpid()))
 	os.Remove(sock)
 	ln, err := net.Listen("unix", sock)
 	if err != nil {

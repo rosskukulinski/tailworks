@@ -13,7 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rosskukulinski/twd/internal/caps"
+	"github.com/rosskukulinski/tailworks/internal/caps"
+	"github.com/rosskukulinski/tailworks/internal/tssvc"
 	"tailscale.com/client/tailscale/apitype"
 )
 
@@ -27,9 +28,9 @@ type Caller struct {
 	Tags     []string                     `json:"tags"`
 	User     string                       `json:"user,omitempty"` // login, untagged (human) callers only
 	CapMap   map[string][]json.RawMessage `json:"capMap"`
-	// Object is set when the caller is a twd object with a node certificate
+	// Object is set when the caller is a tailworks object with a node certificate
 	// (ADR-010): CapMap has already been narrowed to CapMap ∩ Object.Lim.
-	Object *CallerObject `json:"twd,omitempty"`
+	Object *CallerObject `json:"tw,omitempty"`
 	// CapsWithheld is true when a certificate lookup failed and netd failed
 	// closed: CapMap is empty regardless of the policy (RT-01).
 	CapsWithheld bool `json:"capsWithheld,omitempty"`
@@ -44,15 +45,15 @@ type CallerObject struct {
 }
 
 // CertSource resolves a caller's node certificate (RT-01). Lookup returns
-// the verified certificate of the twd object whose node is stableNodeID,
-// ErrNoCert if that node is not a twd object of this tenant (the WhoIs
+// the verified certificate of the tailworks object whose node is stableNodeID,
+// ErrNoCert if that node is not a tailworks object of this tenant (the WhoIs
 // CapMap then applies unchanged), or any other error, on which netd FAILS
 // CLOSED: the caller's caps are withheld.
 type CertSource interface {
 	Lookup(ctx context.Context, stableNodeID string) (*CallerObject, error)
 }
 
-// ErrNoCert: the peer is not a twd object (a human, a plain tailnet node,
+// ErrNoCert: the peer is not a tailworks object (a human, a plain tailnet node,
 // an MCP server...). Its policy caps apply as WhoIs reports them.
 var ErrNoCert = errors.New("netd: no node certificate for this peer")
 
@@ -125,13 +126,16 @@ func CallerFromWhoIs(w *apitype.WhoIsResponse) Caller {
 func isIdentityHeader(k string) bool {
 	k = strings.ToLower(k)
 	switch {
-	case strings.HasPrefix(k, "x-twd"), strings.HasPrefix(k, "twd-"), strings.HasPrefix(k, "cf-"),
-		strings.HasPrefix(k, "x-forwarded-"), strings.HasPrefix(k, "x-poi"):
+	case strings.HasPrefix(k, "x-tw-"), strings.HasPrefix(k, "tw-"), strings.HasPrefix(k, "cf-"),
+		strings.HasPrefix(k, "x-forwarded-"), strings.HasPrefix(k, "x-poi"),
+		// Underscore spellings (X_TW_CF) and every Tailscale-* header
+		// (Tailscale-Ingress-Src, Tailscale-Node-Caps, …): RT3-18 / H18.
+		strings.HasPrefix(k, "x_tw_"), strings.HasPrefix(k, "tw_"),
+		strings.HasPrefix(k, "tailscale-"):
 		return true
 	}
 	switch k {
-	case "tailnet-assertion", "forwarded", "x-real-ip", "true-client-ip", "proxy-authorization",
-		"tailscale-user-login", "tailscale-user-name", "tailscale-user-profile-pic", "tailscale-app-capabilities":
+	case "tailnet-assertion", "forwarded", "x-real-ip", "true-client-ip", "proxy-authorization":
 		return true
 	}
 	return false
@@ -153,14 +157,17 @@ func (o *Object) serveIngress(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, newErr(CodeKilled, "object "+o.id+" is "+string(state)))
 		return
 	}
+	// limits.md#whois-timeout
 	ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
-	who, err := lc.WhoIs(ctx, req.RemoteAddr)
+	// Caps scoped to the address dialed: a Service VIP gets svc: grants (H22).
+	who, err := tssvc.WhoIs(ctx, lc, req.RemoteAddr)
 	cancel()
 	if err != nil {
 		WriteError(w, newErr(CodeNoIdentity, "WhoIs failed for the transport peer"))
 		return
 	}
 	stripIdentityHeaders(req.Header)
+	markTLS(req) // tailnethttps.go: arrived on :443
 	var blob CFBlob
 	blob.Tailscale.Caller = CallerFromWhoIs(who)
 	o.reg.applyCert(req.Context(), &blob.Tailscale.Caller)
@@ -180,20 +187,22 @@ func (o *Object) serveIngress(w http.ResponseWriter, req *http.Request) {
 // server on a unix socket (the workerd ingress socket, configured with
 // cfBlobHeader = HeaderCF). The original Host header is preserved.
 func UnixUpstream(path string) http.Handler {
+	// limits.md#tailnet-no-deadline
 	tr := &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			return (&net.Dialer{}).DialContext(ctx, "unix", path)
 		},
 		MaxIdleConnsPerHost: 64,
-		IdleConnTimeout:     60 * time.Second,
+		IdleConnTimeout:     UpstreamIdleTimeout, // below workerd's idle close (#287)
 	}
 	target := &url.URL{Scheme: "http", Host: "workerd"}
 	return &httputil.ReverseProxy{
-		Transport:     tr,
+		Transport:     KeepEarlyAnswer(tr), // upstream_early.go (#288)
 		FlushInterval: -1,
 		ErrorLog:      log.New(io.Discard, "", 0), // errors are reported via ErrorHandler
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
+			KeepBodyEOF(pr) // proxybody.go (#138)
 			pr.Out.Host = pr.In.Host
 			KeepForwarded(pr)
 		},

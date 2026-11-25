@@ -1,0 +1,14 @@
+{
+  // R2 binding fixture (hostd/r2_test.go): two buckets, used from the
+  // worker and from a facet-mode object (Box, a tailnet node).
+  "name": "r2probe",
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-01",
+  "r2_buckets": [
+    { "binding": "B", "bucket_name": "main" },
+    { "binding": "OTHER", "bucket_name": "other" },
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "BOX", "class_name": "Box" }],
+  },
+}

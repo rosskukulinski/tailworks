@@ -20,19 +20,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/guest/proto"
-	"github.com/rosskukulinski/twd/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/guest/proto"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
 )
 
 func snapBackend(t *testing.T, pool int) *Backend {
 	t.Helper()
 	b := func() *Backend {
-		kernel, rootfs := os.Getenv("TWD_VM_KERNEL"), os.Getenv("TWD_VM_ROOTFS")
+		kernel, rootfs := os.Getenv("TW_VM_KERNEL"), os.Getenv("TW_VM_ROOTFS")
 		if kernel == "" || rootfs == "" {
-			t.Skip("TWD_VM_KERNEL / TWD_VM_ROOTFS not set")
+			t.Skip("TW_VM_KERNEL / TW_VM_ROOTFS not set")
 		}
-		b, err := New(Config{Kernel: kernel, Rootfs: rootfs, Helper: os.Getenv("TWD_VM_HELPER"), HugePages: os.Getenv("TWD_VM_HUGEPAGES"),
-			Pool: pool, Snapshot: true, SnapshotRefill: pool >= 0})
+		b, err := New(Config{Kernel: kernel, Rootfs: rootfs, Helper: os.Getenv("TW_VM_HELPER"), HugePages: os.Getenv("TW_VM_HUGEPAGES"),
+			Pool: pool, Snapshot: true, SnapshotRefill: pool >= 0,
+			VCPUs: envInt("TW_VM_VCPUS")})
 		if err != nil {
 			t.Skip(err)
 		}
@@ -52,12 +53,12 @@ func snapBackend(t *testing.T, pool int) *Backend {
 // TestSnapshotRestore: with snapshots on and no pool, every Boot()
 // restores the base (lazy memory via userfaultfd) and claims it: the
 // workload serves, with its own gateway handler (and the first one with a
-// volume). Times N restores (TWD_VM_BENCH, default 5) without a volume:
+// volume). Times N restores (TW_VM_BENCH, default 5) without a volume:
 // restore → workerd ready.
 func TestSnapshotRestore(t *testing.T) {
 	b := snapBackend(t, -1)
 	ctx := context.Background()
-	n := max(envInt("TWD_VM_BENCH"), 5)
+	n := max(envInt("TW_VM_BENCH"), 5)
 	var infos []sandbox.Info
 	for i := 0; i < n; i++ {
 		a := newMarkerApp(t, fmt.Sprintf("rs%d", i), i == 0)
@@ -104,7 +105,7 @@ func TestSnapshotRestore(t *testing.T) {
 		lines = append(lines, fmt.Sprintf("%-75s p50 %7.1f  p95 %7.1f ms", k, stats[k]["p50"], stats[k]["p95"]))
 	}
 	t.Logf("restore → ready, %d on-demand restores (no volume):\n%s", len(infos), strings.Join(lines, "\n"))
-	if p := os.Getenv("TWD_VM_BENCH_OUT"); p != "" {
+	if p := os.Getenv("TW_VM_BENCH_OUT"); p != "" {
 		raw := make([]map[string]any, len(infos))
 		for i, in := range infos {
 			raw[i] = map[string]any{"stages": in.Stages, "guest": in.GuestStages, "breakdown": Breakdown(in)}
@@ -121,7 +122,7 @@ func TestSnapshotRestore(t *testing.T) {
 func TestSnapshotPool(t *testing.T) {
 	b := snapBackend(t, 2)
 	ctx := context.Background()
-	n := max(envInt("TWD_VM_BENCH"), 5)
+	n := max(envInt("TW_VM_BENCH"), 5)
 	var infos []sandbox.Info
 	var refill []float64
 	for i := 0; i < n; i++ {
@@ -158,7 +159,7 @@ func TestSnapshotPool(t *testing.T) {
 const identJS = `export default {
   async fetch(req) {
     const u = new URL(req.url);
-    if (u.pathname === "/_twd/admin") return new Response("ok");
+    if (u.pathname === "/_tw/admin") return new Response("ok");
     const r = new Uint8Array(16); crypto.getRandomValues(r);
     return Response.json({ now: Date.now(), rand: [...r].map(b => b.toString(16).padStart(2, "0")).join(""),
       uuid: crypto.randomUUID(), math: Math.random() });
@@ -188,7 +189,6 @@ func TestSnapshotUniqueness(t *testing.T) {
 		pre, post *proto.Ident
 		hostPre   int64
 		hostPost  int64
-		bootID    string
 		worker    map[string]any
 		egress    string
 		token     string // the copy's control-channel token after its claim
@@ -300,7 +300,7 @@ func TestSnapshotUniqueness(t *testing.T) {
 	same := bytes.Equal(out[0].pre.Random, out[1].pre.Random)
 	t.Logf("before the load: copies 0/1 boot_id equal: %v; first getrandom() equal: %v (no VMGenID on this 6.1 aarch64 guest)",
 		out[0].pre.BootID == out[1].pre.BootID, same)
-	if p := os.Getenv("TWD_VM_UNIQ_OUT"); p != "" {
+	if p := os.Getenv("TW_VM_UNIQ_OUT"); p != "" {
 		bb, _ := json.MarshalIndent(out, "", "  ")
 		os.WriteFile(p, bb, 0o644)
 	}
@@ -313,13 +313,13 @@ func TestSnapshotUniqueness(t *testing.T) {
 // refilled from the new one, and the old base's files are removed after
 // the grace period (ADR-030 decision 3).
 func TestSnapshotRotate(t *testing.T) {
-	kernel, rootfs := os.Getenv("TWD_VM_KERNEL"), os.Getenv("TWD_VM_ROOTFS")
+	kernel, rootfs := os.Getenv("TW_VM_KERNEL"), os.Getenv("TW_VM_ROOTFS")
 	if kernel == "" || rootfs == "" {
-		t.Skip("TWD_VM_KERNEL / TWD_VM_ROOTFS not set")
+		t.Skip("TW_VM_KERNEL / TW_VM_ROOTFS not set")
 	}
 	defer func(g time.Duration) { BaseGrace = g }(BaseGrace)
 	BaseGrace = time.Second
-	b, err := New(Config{Kernel: kernel, Rootfs: rootfs, Helper: os.Getenv("TWD_VM_HELPER"), HugePages: os.Getenv("TWD_VM_HUGEPAGES"),
+	b, err := New(Config{Kernel: kernel, Rootfs: rootfs, Helper: os.Getenv("TW_VM_HELPER"), HugePages: os.Getenv("TW_VM_HUGEPAGES"),
 		Pool: 1, Snapshot: true, SnapshotRefill: true, BaseRotate: 4 * time.Second})
 	if err != nil {
 		t.Skip(err)

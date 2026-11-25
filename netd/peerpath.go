@@ -7,6 +7,7 @@ import (
 
 	"tailscale.com/client/local"
 	"tailscale.com/ipn/ipnstate"
+	"tailscale.com/tailcfg"
 )
 
 // peerPathPoll is how often WaitPeerPath re-reads the node's status.
@@ -45,3 +46,36 @@ func WaitPeerPath(ctx context.Context, lc *local.Client, ip netip.Addr) error {
 		}
 	}
 }
+
+// WaitPeerReady is WaitPeerPath, then one disco pong from the peer. A path
+// in this node's view doesn't mean the peer is ready for us: a peer that
+// has just joined may not have this node in its own netmap yet, and drops
+// our first handshake initiation; WireGuard then retries only after 5 s.
+// The peer answers a disco ping only once it knows this node, so a pong
+// means the handshake that follows is answered. Each attempt has a short
+// timeout of its own (a lost ping would otherwise wait out magicsock's 5 s
+// ping timeout) and is retried until ctx ends.
+func WaitPeerReady(ctx context.Context, lc *local.Client, ip netip.Addr) error {
+	if err := WaitPeerPath(ctx, lc, ip); err != nil {
+		return err
+	}
+	attempt := peerPingAttempt
+	for {
+		actx, cancel := context.WithTimeout(ctx, attempt)
+		res, err := lc.Ping(actx, ip, tailcfg.PingDisco)
+		cancel()
+		if err == nil && res != nil && res.Err == "" {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if attempt < time.Second {
+			attempt *= 2
+		}
+	}
+}
+
+// peerPingAttempt is WaitPeerReady's first per-ping timeout; it doubles
+// on each retry, up to 1 s (a far peer reached over DERP).
+const peerPingAttempt = 250 * time.Millisecond

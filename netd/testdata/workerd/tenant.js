@@ -9,7 +9,7 @@ export class Agent extends DurableObject {
       try {
         const r = await fetch(url.searchParams.get("url"));
         const h = { "content-type": r.headers.get("content-type") || "text/plain" };
-        if (r.headers.get("twd-error")) h["twd-error"] = r.headers.get("twd-error");
+        if (r.headers.get("tw-error")) h["tw-error"] = r.headers.get("tw-error");
         return new Response(await r.text(), { status: r.status, headers: h });
       } catch (e) {
         return Response.json({ tenantCaught: String(e) }, { status: 599 });
@@ -18,7 +18,7 @@ export class Agent extends DurableObject {
     if (url.pathname === "/forge-egress") {
       const victim = url.searchParams.get("as");
       const r = await fetch(url.searchParams.get("url"), {
-        headers: { "x-twd-object": victim, "x-twd-cf": JSON.stringify({ objectId: victim }), "Proxy-Authorization": victim },
+        headers: { "x-tw-object": victim, "x-tw-cf": JSON.stringify({ objectId: victim }), "Proxy-Authorization": victim },
         cf: { objectId: victim },
       });
       return new Response(await r.text(), { status: r.status, headers: { "content-type": "application/json" } });
@@ -38,7 +38,7 @@ export class Agent extends DurableObject {
     return Response.json({
       caller: request.cf?.tailscale?.caller ?? null,
       objectId: request.cf?.objectId ?? null,
-      sawHeaders: Object.fromEntries([...request.headers].filter(([k]) => k.startsWith("x-twd") || k.startsWith("cf-") || k === "x-forwarded-for")),
+      sawHeaders: Object.fromEntries([...request.headers].filter(([k]) => k.startsWith("x-tw-") || k.startsWith("cf-") || k === "x-forwarded-for")),
     });
   }
 }

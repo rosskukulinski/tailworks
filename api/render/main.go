@@ -2,9 +2,10 @@
 //
 // The spec is the source of truth; the Markdown is generated (`make api`) and
 // never hand-edited. The renderer is deliberately small: a route table per
-// tag, then one section per operation (role, audit flag, parameters, request
-// body, responses), then every component schema as a field table. Anything
-// it does not know how to render is omitted, not invented.
+// audience (operator API, host protocol), then one section per tag with
+// one section per operation (role, audit flag, parameters, request body,
+// responses), then every component schema as a field table. Anything it
+// does not know how to render is omitted, not invented.
 package main
 
 import (
@@ -61,12 +62,25 @@ func render(b *strings.Builder, doc *openapi3.T, src string) {
 		}
 	}
 
-	b.WriteString("## Route table\n\n")
-	b.WriteString("| Method | Path | Role | Audited | Operation | Summary |\n|---|---|---|---|---|---|\n")
+	// Two audiences: the operator API (admins, tenant admins, approvers,
+	// agents) and the host protocol (x-tw-role exactly "host", which mgmt
+	// refuses to every user principal).
+	var operator, hostProto []op
 	for _, o := range ops {
-		fmt.Fprintf(b, "| `%s` | `%s` | %s | %s | `%s` | %s |\n", o.method, o.path, oneLine(role(o.op)), audited(o.op), o.op.OperationID, oneLine(o.op.Summary))
+		if isHostProtocol(o.op) {
+			hostProto = append(hostProto, o)
+		} else {
+			operator = append(operator, o)
+		}
 	}
-	b.WriteString("\n")
+	b.WriteString("## Route table\n\n")
+	b.WriteString("### Operator API\n\n")
+	b.WriteString("What `tw`, the admin UI, tenant admins and agents call.\n\n")
+	routeTable(b, operator)
+	b.WriteString("### Host protocol\n\n")
+	b.WriteString("What the host agent (tw-hostd) calls: role `host` only, refused to every user. ")
+	b.WriteString("The other direction, mgmt → hostd, is hostd's API ([hostd-api.md](hostd-api.md)).\n\n")
+	routeTable(b, hostProto)
 
 	for _, t := range doc.Tags {
 		var mine []op
@@ -99,8 +113,23 @@ func render(b *strings.Builder, doc *openapi3.T, src string) {
 	}
 }
 
+func routeTable(b *strings.Builder, ops []op) {
+	b.WriteString("| Method | Path | Role | Audited | Operation | Summary |\n|---|---|---|---|---|---|\n")
+	for _, o := range ops {
+		fmt.Fprintf(b, "| `%s` | `%s` | %s | %s | `%s` | %s |\n", o.method, o.path, oneLine(role(o.op)), audited(o.op), o.op.OperationID, summary(o.op))
+	}
+	b.WriteString("\n")
+}
+
+// isHostProtocol: the operation is for hosts only (x-tw-role "host").
+func isHostProtocol(o *openapi3.Operation) bool { return role(o) == "host" }
+
 func renderOp(b *strings.Builder, doc *openapi3.T, o op) {
-	fmt.Fprintf(b, "### `%s %s` — %s\n\n", o.method, o.path, o.op.Summary)
+	suffix := ""
+	if isHostProtocol(o.op) {
+		suffix = " (host protocol)"
+	}
+	fmt.Fprintf(b, "### `%s %s` — %s%s\n\n", o.method, o.path, o.op.Summary, suffix)
 	fmt.Fprintf(b, "`%s` · role **%s** · audited: %s\n\n", o.op.OperationID, oneLine(role(o.op)), audited(o.op))
 	if o.op.Description != "" {
 		b.WriteString(strings.TrimSpace(o.op.Description) + "\n\n")
@@ -251,8 +280,16 @@ func typeOf(ref *openapi3.SchemaRef) string {
 	return t
 }
 
+// summary is the route table's Summary cell; a deprecated operation says so.
+func summary(o *openapi3.Operation) string {
+	if o.Deprecated {
+		return "**Deprecated.** " + oneLine(o.Summary)
+	}
+	return oneLine(o.Summary)
+}
+
 func role(o *openapi3.Operation) string {
-	if v, ok := o.Extensions["x-twd-role"]; ok {
+	if v, ok := o.Extensions["x-tw-role"]; ok {
 		return fmt.Sprint(v)
 	}
 	if o.Security != nil && len(*o.Security) == 0 {
@@ -262,7 +299,7 @@ func role(o *openapi3.Operation) string {
 }
 
 func audited(o *openapi3.Operation) string {
-	if v, ok := o.Extensions["x-twd-audit"]; ok && v == true {
+	if v, ok := o.Extensions["x-tw-audit"]; ok && v == true {
 		return "yes"
 	}
 	return "no"

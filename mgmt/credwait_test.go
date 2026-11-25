@@ -2,7 +2,6 @@ package mgmt
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -13,6 +12,7 @@ import (
 // locally (m.changed is per replica), so it must notice the mint through the
 // store promptly, not after the host's whole wait (hostd asks wait=10 s).
 func TestMM_H05_CredentialWaitSeesOtherReplicasMint(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	st, _ := OpenStore(ctx, filepath.Join(dir, "m.db"))
@@ -24,8 +24,8 @@ func TestMM_H05_CredentialWaitSeesOtherReplicasMint(t *testing.T) {
 	}
 	defer b.Close()
 	kf := filepath.Join(dir, "api.env")
-	os.WriteFile(kf, []byte("TS_API_KEY=x\n"), 0o600)
-	tn, _ := b.CreateTenant(ctx, TenantRequest{Tailnet: "t.ts.net", MintMode: "apikey", APIKeyFile: kf})
+	writeTestOAuthFile(t, kf)
+	tn, _ := b.CreateTenant(ctx, TenantRequest{Tailnet: "t.ts.net", MintMode: MintOAuth, OAuthClientFile: kf})
 	l, err := st.AcquireLease(ctx, LeaseName(tn.ID, "w"), "h1", NamespaceLeaseTTL, st.Now())
 	if err != nil {
 		t.Fatal(err)

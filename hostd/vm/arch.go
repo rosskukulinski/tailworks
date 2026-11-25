@@ -16,12 +16,12 @@ import (
 // serial console (ttyS0 on both: Firecracker emulates an 8250 UART on
 // x86_64 and arm64), panic → reboot, which Firecracker turns into a VM exit
 // (reboot=k: the i8042 reset on x86_64; arm64 reboots through PSCI and
-// ignores it), twd-guestd as init, read-only root. x86_64 adds pci=off:
+// ignores it), tw-guestd as init, read-only root. x86_64 adds pci=off:
 // Firecracker's devices are virtio-mmio, and the kernel would otherwise
 // probe the PCI config ports at boot; arm64 finds no PCI host bridge in the
 // device tree anyway.
 func DefaultBootArgs(goarch string) string {
-	const common = "console=ttyS0 reboot=k panic=1 quiet ro rootfstype=ext4 init=/sbin/twd-guestd"
+	const common = "console=ttyS0 reboot=k panic=1 quiet ro rootfstype=ext4 init=/sbin/tw-guestd"
 	if goarch == "amd64" {
 		return common + " pci=off"
 	}

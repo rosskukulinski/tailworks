@@ -1,0 +1,103 @@
+{{define "content"}}
+<h1><span class="mono">{{if .Obj.NodeName}}{{.Obj.NodeName}}{{else}}{{.Obj.ObjectID}}{{end}}</span> {{template "status" .Obj.Status}}</h1>
+<p class="crumbs">
+  {{.Obj.DisplayNS}} · tenant <a class="mono" href="/ui/tenants/{{.Obj.TenantID}}">{{.Obj.TenantID}}</a>
+  {{if .Obj.DeploymentID}} · deployment <a class="mono" href="/ui/deployments/{{.Obj.DeploymentID}}">{{.Obj.DeploymentID}}</a>{{end}}
+  {{if .Obj.Workload}} · <a href="/ui/objects/{{.Obj.ObjectID}}/logs"><b>Logs</b></a>{{end}}
+</p>
+
+{{if .Killed}}
+<section class="card tomb">
+  <h2>This object was killed</h2>
+  <dl class="kv">
+    <dt>Killed at</dt><dd class="mono">{{stamp .Tombstone.KilledAt}}</dd>
+    <dt>By</dt><dd>{{.Tombstone.By}}</dd>
+    <dt>Reason</dt><dd>{{or .Tombstone.Reason "—"}}</dd>
+    <dt>Cascade</dt><dd>{{if .Tombstone.Cascade}}yes, from <a class="mono" href="/ui/objects/{{.Tombstone.Root}}">{{short .Tombstone.Root}}</a>{{else}}no (this object was the kill target){{end}}</dd>
+    <dt>Device</dt><dd>{{if .Tombstone.DeviceDeleted}}deleted{{else if .Tombstone.DeviceDeleteAt}}delete scheduled {{stamp .Tombstone.DeviceDeleteAt}}{{else}}not deleted (kept, or never joined){{end}}</dd>
+  </dl>
+</section>
+{{end}}
+
+<div class="grid">
+  <div class="card">
+    <h2>Details</h2>
+    <dl class="kv">
+      <dt>Address</dt><dd class="mono">{{if .Obj.MagicDNS}}<a href="http://{{.Obj.MagicDNS}}/" rel="noreferrer">{{.Obj.MagicDNS}}</a>{{else}}—{{end}}</dd>
+      <dt>Hostname</dt><dd class="mono">{{or .Obj.Hostname "—"}}</dd>
+      <dt>Tags</dt><dd class="mono">{{if .Obj.Tags}}{{join .Obj.Tags}}{{else}}—{{end}}</dd>
+      <dt>Acting for</dt><dd>{{or .Obj.ActingFor "—"}}</dd>
+      <dt>Time to live</dt><dd class="mono">{{if .Obj.TTL}}{{ttl .Obj.TTL}}{{else}}—{{end}}{{if .Obj.Ephemeral}} · ephemeral{{end}}</dd>
+      <dt>Created</dt><dd>{{since .Obj.CreatedAt}} <span class="muted small">({{stamp .Obj.CreatedAt}})</span></dd>
+      <dt>Updated</dt><dd class="mono">{{stamp .Obj.UpdatedAt}}</dd>
+      <dt>Object ID</dt><dd class="mono">{{.Obj.ObjectID}}</dd>
+      <dt>Node ID</dt><dd class="mono">{{or .Obj.StableNodeID "—"}}{{if .Obj.NodeID}} <span class="muted">({{.Obj.NodeID}})</span>{{end}}</dd>
+      <dt>Depth</dt><dd class="mono">{{.Obj.Depth}}</dd>
+      <dt>Lease</dt><dd class="mono">{{or .Obj.Lease "—"}}</dd>
+    </dl>
+  </div>
+  <div class="card">
+    <h2>Lineage</h2>
+    <p class="hint">Who created this object, from the top down.</p>
+    <ol class="lineage mono">
+      {{range .Up}}<li><a href="/ui/objects/{{.ObjectID}}" title="{{.ObjectID}}">{{if .NodeName}}{{.NodeName}}{{else}}{{short .ObjectID}}{{end}}</a> {{template "status" .Status}}</li>{{end}}
+      <li class="self">{{if .Obj.NodeName}}{{.Obj.NodeName}}{{else}}{{short .Obj.ObjectID}}{{end}} {{template "status" .Obj.Status}} <span class="muted small">(this object)</span></li>
+    </ol>
+    <p class="small muted">{{.Children}} descendant(s) below.</p>
+    {{if .Obj.Caps}}<h3>Capabilities</h3><pre class="mono">{{.Obj.CapsPretty}}</pre>{{end}}
+  </div>
+</div>
+
+<section data-live="subtree">
+  <div class="sect-head"><div>
+    <h2>This object and its descendants <span class="count">{{len .Down}}</span></h2>
+  </div></div>
+  <div class="tbl">
+  <table class="objects">
+    <thead>{{template "objhead"}}</thead>
+    <tbody>{{template "objrows" .Down}}</tbody>
+  </table>
+  </div>
+</section>
+
+{{if or .Cert .CertErr}}
+<section class="card">
+  <h2>Node certificate</h2>
+  {{if .Cert}}
+  <dl class="kv">
+    <dt>Status</dt><dd>{{template "status" .Cert.Status}}</dd>
+    <dt>Stable node</dt><dd class="mono">{{.Cert.StableNodeID}}</dd>
+    <dt>OBO public key</dt><dd class="mono">{{.Cert.OBOPublicKey}}</dd>
+  </dl>
+  <details class="more"><summary>Payload</summary><pre class="mono">{{anyJSON .Cert.Payload}}</pre></details>
+  {{else}}<p class="muted small">{{.CertErr}}</p>{{end}}
+</section>
+{{end}}
+
+<section data-live="audit">
+  <div class="sect-head"><div>
+    <h2>Activity <span class="count">{{len .Audit}}</span> {{if not .Verified}}<span class="badge bad">NOT VERIFIED</span>{{end}}</h2>
+    <p class="hint">Audit log entries for this object, newest first. <a href="/ui/audit?object={{.Obj.ObjectID}}">See all of them →</a></p>
+  </div></div>
+  <div class="tbl">
+  <table>
+    <thead>{{template "audithead"}}</thead>
+    <tbody>{{template "auditrows" (auditSet .Audit .Names)}}{{if not .Audit}}<tr><td colspan="6" class="empty">No records</td></tr>{{end}}</tbody>
+  </table>
+  </div>
+  {{if not .Verified}}<p class="chains">{{template "chains" .Chains}}</p>{{end}}
+</section>
+
+{{if not .Killed}}
+<section class="card act">
+  <h2>Kill this object</h2>
+  <form method="post" action="/ui/objects/{{.Obj.ObjectID}}/kill"
+        data-confirm="Kill {{.Obj.NodeName}} ({{.Obj.ObjectID}})? Its node is tombstoned and its flows dropped.">
+    <label><input type="checkbox" name="cascade" value="true" checked> Cascade: also kill the {{.Children}} descendant(s)</label>
+    <input type="text" name="reason" placeholder="Reason (recorded in the audit log)" maxlength="200">
+    <button type="submit" class="danger">Kill</button>
+  </form>
+  <p class="small muted">The node is tombstoned and its connections are dropped.</p>
+</section>
+{{end}}
+{{end}}

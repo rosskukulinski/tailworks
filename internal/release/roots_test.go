@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// The release vendors every workerd template's deps, but only @twd/* for
+// The release vendors every workerd template's deps, but only @tailworks/* for
 // Node-tier templates (their third-party deps are not in the root
 // workspace; vendoring them made `make release` fail after M9).
 func TestTemplateRoots(t *testing.T) {
@@ -19,14 +19,14 @@ func TestTemplateRoots(t *testing.T) {
 		t.Skip("needs node")
 	}
 	root, _ := filepath.Abs("../..")
-	cmd := exec.Command(node, "scripts/template-roots.mjs", "js/packages/create-twd/templates")
+	cmd := exec.Command(node, "scripts/template-roots.mjs", "js/packages/create-tailworks/templates")
 	cmd.Dir = root
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("template-roots: %v\n%s", err, out)
 	}
 	roots := strings.Fields(string(out))
-	for _, want := range []string{"@twd/tailnet", "@twd/mcp", "@twd/node", "agents", "ai", "zod", "@modelcontextprotocol/server"} {
+	for _, want := range []string{"@tailworks/tailnet", "@tailworks/mcp", "@tailworks/node", "agents", "ai", "zod", "@modelcontextprotocol/server"} {
 		if !slices.Contains(roots, want) {
 			t.Errorf("roots lack %s: %v", want, roots)
 		}

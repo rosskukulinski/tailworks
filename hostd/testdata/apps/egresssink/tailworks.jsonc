@@ -1,0 +1,10 @@
+{
+  "name": "egresssink",
+  "tailnet": {
+    "tags": ["tag:ttest"],
+    "objects": {
+      // facet mode: egress leaves from the object's own node (platform Egress)
+      "Sink": { "tags": ["tag:ttest"] },
+    },
+  },
+}

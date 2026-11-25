@@ -1,0 +1,13 @@
+{
+  // e2e fixture: the lock template's service plus Pulse, a Durable Object
+  // whose alarm makes an egress call every 250 ms (a side effect outside
+  // storage), so the test can see which host's copy is running.
+  "name": "locks",
+  "tailnet": {
+    "tags": ["tag:ttest"],
+    "objects": {
+      "Lock": { "tags": ["tag:ttest"], "egress": "workload" },
+      "Pulse": { "tags": ["tag:ttest"], "egress": "workload" },
+    },
+  },
+}

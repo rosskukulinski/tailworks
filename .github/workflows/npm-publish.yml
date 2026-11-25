@@ -1,0 +1,74 @@
+# npm publish: when a maintainer publishes a GitHub release (the draft that
+# release.yml built), publish @tailworks/tailnet, @tailworks/node, @tailworks/mcp,
+# create-tailworks and the tw CLI (@tailworks/cli-<os>-<arch>, tailworks) at
+# the same version, from the same tag (ADR-041 §9: npm follows the GitHub
+# release). The CLI's packages are made from the release's own signed
+# tarballs, downloaded below (issue #240), so npm ships the same binaries. scripts/npm-publish.sh checks that every
+# package and template is at the tag's version first, and skips packages
+# already published, so re-running it (or running it by hand for an
+# existing tag) is safe.
+#
+# Auth is npm trusted publishing (OIDC; docs/RELEASING.md "Publish npm"):
+# each package on npmjs.com trusts this workflow file in
+# rosskukulinski/tailworks, and npm exchanges the job's GitHub OIDC token
+# (id-token: write) for a short-lived publish credential. There is no npm
+# token or secret, and provenance is attached automatically (public repo,
+# public packages). Trusted publishing needs npm >= 11.5.1 and
+# Node >= 22.14, hence the pinned npm below. A package with no trusted
+# publisher configured fails to publish. release.yml's gates already ran a
+# --dry-run of the same script.
+#
+# By hand for an existing tag: gh workflow run npm-publish.yml -f tag=v0.3.0
+name: npm-publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "existing tag to publish to npm, e.g. v0.3.0"
+        required: true
+
+permissions:
+  contents: read
+  id-token: write # npm trusted publishing (OIDC) and provenance
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.event.release.tag_name }}
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      # Trusted publishing needs npm >= 11.5.1; Node 22 bundles npm 10.
+      - name: npm 11 (trusted publishing)
+        run: npm install -g npm@11.21.2 && npm --version
+      - name: Check the tag matches VERSION
+        run: |
+          v="${TAG#v}"
+          if [ "$v" != "$(cat VERSION)" ]; then
+            echo "tag $TAG does not match VERSION $(cat VERSION)"; exit 1
+          fi
+      - name: npm ci
+        run: npm ci
+      # npm-cli-packages.sh checks SHA256SUMS.sig against the pinned keys
+      # and each tarball against SHA256SUMS before packing them.
+      - name: The release's tarballs (for the tw CLI's npm packages)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/release"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/release" \
+            --pattern 'tailworks-*.tar.gz' --pattern SHA256SUMS --pattern SHA256SUMS.sig
+          ls -l "$RUNNER_TEMP/release"
+      - name: Publish
+        run: sh scripts/npm-publish.sh "$TAG" --cli-dist "$RUNNER_TEMP/release"

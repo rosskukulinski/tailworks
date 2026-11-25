@@ -1,0 +1,6 @@
+{
+  "tailnet": "example.ts.net",
+  "tenantID": "t_1",
+  "mintMode": "oauth",
+  "workerd": "/home/me/.tailworks/bin/workerd"
+}

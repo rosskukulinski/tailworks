@@ -1,0 +1,14 @@
+{
+  // e2e/dataplane routing loop (#422), Worker A: public routes, and calls
+  // to Worker B (rt-b) over a service binding. The loop rewrites the route
+  // list ("/gate/*" in or out) to change the path policy under load.
+  "name": "rt-a",
+  "public": {
+    "routes": ["/pub/*", "/gate/*"],
+    "limits": { "rps": 1000, "burst": 2000, "ipRps": 200, "ipBurst": 400 },
+  },
+  "tailnet": {
+    "tags": ["tag:ttest"],
+    "objects": { "Pin": { "tags": ["tag:ttest"], "egress": "workload" } },
+  },
+}

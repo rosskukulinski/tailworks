@@ -16,8 +16,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd/sandbox"
-	"github.com/rosskukulinski/twd/hostd/vm/helperapi"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/hostd/vm/helperapi"
 )
 
 // A DO volume on macOS (L3 on the vz backend): an AES-256 encrypted sparse

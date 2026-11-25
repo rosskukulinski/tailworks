@@ -36,10 +36,10 @@ func newCA(object string) (*ca, error) {
 		return nil, err
 	}
 	now := time.Now()
-	cn := "twd sandbox egress CA (ephemeral)"
+	cn := "tw sandbox egress CA (ephemeral)"
 	tmpl := &x509.Certificate{
 		SerialNumber:          serial(),
-		Subject:               pkix.Name{CommonName: cn, Organization: []string{"twd"}},
+		Subject:               pkix.Name{CommonName: cn, Organization: []string{"tw"}},
 		NotBefore:             now.Add(-time.Hour),
 		NotAfter:              now.Add(caLife),
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,

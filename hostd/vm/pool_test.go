@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/guest/proto"
-	"github.com/rosskukulinski/twd/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/guest/proto"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
 )
 
 // markerJS is a worker whose code and responses carry a unique marker, and
@@ -27,7 +27,7 @@ func markerJS(marker string) string {
 export default {
   async fetch(req, env) {
     const u = new URL(req.url);
-    if (u.pathname === "/_twd/admin") return new Response("ok");
+    if (u.pathname === "/_tw/admin") return new Response("ok");
     if (u.pathname === "/egress") { const r = await env.GW.fetch("http://anything/x"); return new Response("via host: " + await r.text()); }
     if (u.pathname === "/put") { const r = await env.DISK.fetch("http://disk/" + MARK, { method: "PUT", body: MARK + MARK }); return new Response("put " + r.status); }
     return new Response("hello " + MARK);
@@ -39,8 +39,8 @@ export default {
 const markerCapnp = `using Workerd = import "/workerd/workerd.capnp";
 const config :Workerd.Config = (
   services = [ (name = "main", worker = .w), (name = "gw", external = (address = "192.168.72.1:3128", http = ())),
-               (name = "disk", disk = (path = "/run/twd/do", writable = true)) ],
-  sockets = [ (name = "in", address = "*:8080", service = "main", http = (cfBlobHeader = "x-twd-cf")) ],
+               (name = "disk", disk = (path = "/run/tailworks/do", writable = true)) ],
+  sockets = [ (name = "in", address = "*:8080", service = "main", http = (cfBlobHeader = "x-tw-cf")) ],
 );
 const w :Workerd.Worker = (
   compatibilityDate = "2026-04-01",
@@ -51,13 +51,13 @@ const w :Workerd.Worker = (
 
 func poolBackend(t *testing.T, cfg Config) *Backend {
 	t.Helper()
-	kernel, rootfs := os.Getenv("TWD_VM_KERNEL"), os.Getenv("TWD_VM_ROOTFS")
+	kernel, rootfs := os.Getenv("TW_VM_KERNEL"), os.Getenv("TW_VM_ROOTFS")
 	if kernel == "" || rootfs == "" {
-		t.Skip("TWD_VM_KERNEL / TWD_VM_ROOTFS not set")
+		t.Skip("TW_VM_KERNEL / TW_VM_ROOTFS not set")
 	}
-	cfg.Kernel, cfg.Rootfs, cfg.Helper = kernel, rootfs, os.Getenv("TWD_VM_HELPER")
+	cfg.Kernel, cfg.Rootfs, cfg.Helper = kernel, rootfs, os.Getenv("TW_VM_HELPER")
 	if cfg.HugePages == "" {
-		cfg.HugePages = os.Getenv("TWD_VM_HUGEPAGES")
+		cfg.HugePages = os.Getenv("TW_VM_HUGEPAGES")
 	}
 	b, err := New(cfg)
 	if err != nil {
@@ -78,7 +78,7 @@ type markerApp struct {
 func newMarkerApp(t *testing.T, name string, volume bool) *markerApp {
 	var mb [12]byte
 	rand.Read(mb[:])
-	a := &markerApp{dir: t.TempDir(), marker: "TWDMARK" + hex.EncodeToString(mb[:])}
+	a := &markerApp{dir: t.TempDir(), marker: "TWMARK" + hex.EncodeToString(mb[:])}
 	os.WriteFile(filepath.Join(a.dir, "w.js"), []byte(markerJS(a.marker)), 0o600)
 	os.WriteFile(filepath.Join(a.dir, "config.capnp"), []byte(markerCapnp), 0o600)
 	a.spec = sandbox.Spec{ID: name, AppDir: a.dir, WorkerdArgs: []string{"serve", "config.capnp", "--experimental"}, HealthCF: `{}`, Debug: true,
@@ -213,7 +213,7 @@ func TestPoolNoCarryOver(t *testing.T) {
 	dir := t.TempDir()
 	mem, err := m.MemoryDump(ctx, dir)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("memory dump: %v (VM exit: %v)", err, m.Err())
 	}
 	if hit := scanBytes(t, mem, map[string][]byte{"workload A's marker": []byte(a.marker)}); hit != "" {
 		t.Fatalf("%s in the pooled VM's RAM", hit)

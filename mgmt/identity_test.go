@@ -17,10 +17,11 @@ import (
 // the same class + name in two workloads, or in two tenants, are distinct
 // objects (M7; M5 found two workloads sharing one node).
 func TestStoreIdentityScope(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		for _, id := range []string{"tA", "tB"} {
-			if err := s.CreateTenant(ctx, Tenant{ID: id, Tailnet: id + ".ts.net", MintMode: MintAPIKey, RegistrationsPerMinute: 200, MaxObjects: 10}); err != nil {
+			if err := s.CreateTenant(ctx, Tenant{ID: id, Tailnet: id + ".ts.net", MintMode: MintOAuth, RegistrationsPerMinute: 200, MaxObjects: 10}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -65,8 +66,9 @@ func TestStoreIdentityScope(t *testing.T) {
 // A store from before M7 (objects unique on (tenant, namespace, name), no
 // workload column) is migrated in place: rows keep their IDs and get the
 // workload of their deployment. SQLite always; Postgres with
-// TWD_TEST_POSTGRES_DSN (make test-pg).
+// TW_TEST_POSTGRES_DSN (make test-pg).
 func TestStoreMigratesLegacyObjects(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	type backend struct {
 		dsn, driver, open, blob string
@@ -74,7 +76,7 @@ func TestStoreMigratesLegacyObjects(t *testing.T) {
 	}
 	path := filepath.Join(t.TempDir(), "mgmt.db")
 	bs := map[string]backend{"sqlite": {dsn: path, driver: "sqlite", open: "file:" + path, blob: "BLOB", ph: func(q string) string { return q }}}
-	if dsn := os.Getenv("TWD_TEST_POSTGRES_DSN"); dsn != "" {
+	if dsn := os.Getenv("TW_TEST_POSTGRES_DSN"); dsn != "" {
 		bs["postgres"] = backend{dsn: dsn, driver: "pgx", open: dsn, blob: "BYTEA", ph: (&SQLStore{d: dialectPostgres}).q}
 	}
 	for name, be := range bs {
@@ -150,16 +152,17 @@ func TestStoreMigratesLegacyObjects(t *testing.T) {
 // workload is refused as ambiguous instead of guessing; spawns inherit the
 // parent's workload; and the throttles are per tenant.
 func TestAPIIdentityScope(t *testing.T) {
-	e := newTestEnv(t, nil)
+	t.Parallel()
+	e := newTestEnv(t)
 	c, h1 := e.c, e.asHost("h1")
 	h1.ok("PUT", "/v1/hosts/h1", map[string]any{"capacityNodes": 100, "tiers": []string{"process"}}, nil)
 	var ta, tb struct{ TenantID string }
-	c.ok("POST", "/v1/tenants", map[string]any{"tailnet": "a.ts.net", "mintMode": "apikey", "apiKeyFile": e.keyFile, "registrationsPerMinute": 10}, &ta)
-	c.ok("POST", "/v1/tenants", map[string]any{"tailnet": "b.ts.net", "mintMode": "apikey", "apiKeyFile": e.keyFile}, &tb)
+	c.ok("POST", "/v1/tenants", map[string]any{"tailnet": "a.ts.net", "mintMode": "oauth", "oauthClientFile": e.keyFile, "registrationsPerMinute": 10}, &ta)
+	c.ok("POST", "/v1/tenants", map[string]any{"tailnet": "b.ts.net", "mintMode": "oauth", "oauthClientFile": e.keyFile}, &tb)
 	if ta.TenantID == tb.TenantID {
 		t.Fatal("tenant IDs collide")
 	}
-	bundle := makeBundle(t, map[string]string{"twd.jsonc": testTwdJSONC, "dist/index.js": "export default {}"})
+	bundle := makeBundle(t, map[string]string{"tailworks.jsonc": testTwJSONC, "dist/index.js": "export default {}"})
 	for _, d := range []struct{ tenant, w string }{{ta.TenantID, "one"}, {ta.TenantID, "two"}, {tb.TenantID, "one"}} {
 		c.ok("POST", "/v1/deployments", map[string]any{"tenantID": d.tenant, "workload": d.w, "bundle": bundle}, nil)
 	}
@@ -255,9 +258,10 @@ func TestAPIIdentityScope(t *testing.T) {
 // row survives with its workload; nobody errors. Postgres only (make
 // test-pg); each OpenStore has its own pool, like separate processes.
 func TestStoreConcurrentLegacyMigration(t *testing.T) {
-	dsn := os.Getenv("TWD_TEST_POSTGRES_DSN")
+	t.Parallel()
+	dsn := os.Getenv("TW_TEST_POSTGRES_DSN")
 	if dsn == "" {
-		t.Skip("TWD_TEST_POSTGRES_DSN not set")
+		t.Skip("TW_TEST_POSTGRES_DSN not set")
 	}
 	ctx := context.Background()
 	db, err := sql.Open("pgx", dsn)

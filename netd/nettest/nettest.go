@@ -18,6 +18,7 @@ import (
 	"tailscale.com/client/local"
 	"tailscale.com/derp/derpserver"
 	"tailscale.com/ipn/store/mem"
+	"tailscale.com/net/netns"
 	"tailscale.com/net/stunserver"
 	"tailscale.com/tailcfg"
 	"tailscale.com/tsnet"
@@ -47,6 +48,12 @@ type Control struct {
 
 // StartControl starts testcontrol, DERP and STUN. Call Close when done.
 func StartControl() (*Control, error) {
+	// DERP and STUN are on 127.0.0.1. On Linux, netns marks magicsock's
+	// sockets (or binds them to the default-route interface), so STUN to
+	// loopback fails, netcheck reports UDP blocked after its ~3 s timeout
+	// and every new node gets a path that much later (issue #75).
+	// Tailscale's own tests with a local DERP do the same.
+	netns.SetEnabled(false)
 	d := derpserver.New(key.NewNode(), logger.Discard)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -68,13 +75,13 @@ func StartControl() (*Control, error) {
 	go stun.Serve()
 	stunPort := stun.LocalAddr().(*net.UDPAddr).Port
 	dm := &tailcfg.DERPMap{Regions: map[tailcfg.DERPRegionID]*tailcfg.DERPRegion{1: {
-		RegionID: 1, RegionCode: "twd-local",
+		RegionID: 1, RegionCode: "tw-local",
 		Nodes: []*tailcfg.DERPNode{{Name: "t1", RegionID: 1, HostName: "127.0.0.1", IPv4: "127.0.0.1", IPv6: "none",
 			STUNPort: stunPort, DERPPort: ln.Addr().(*net.TCPAddr).Port, InsecureForTests: true, STUNTestIP: "127.0.0.1"}},
 	}}}
 	// TagOwners non-nil: a node that advertises tags gets them (as the real
-	// control plane does at signup), so WhoIs sees tag:twd-host /
-	// tag:twd-mgmt / object tags in hermetic runs. Ownership itself is not
+	// control plane does at signup), so WhoIs sees tag:tw-host /
+	// tag:tw-mgmt / object tags in hermetic runs. Ownership itself is not
 	// checked here.
 	ctl := &testcontrol.Server{DERPMap: dm, MagicDNSDomain: MagicDNSDomain, Logf: logger.Discard, TagOwners: map[string][]string{},
 		DNSConfig: &tailcfg.DNSConfig{Proxied: true}}
@@ -197,7 +204,7 @@ func (n *Node) ServeEcho() error {
 		}
 		who, err := n.LC.WhoIs(r.Context(), r.RemoteAddr)
 		if err != nil {
-			http.Error(w, "whois: "+err.Error(), 403)
+			http.Error(w, "whois: "+err.Error(), http.StatusForbidden)
 			return
 		}
 		var rep EchoReply
@@ -267,9 +274,9 @@ func FindRepoRoot() (string, error) {
 }
 
 // WorkerdBinary locates the pinned workerd (npm package at the repo root), or
-// $TWD_WORKERD.
+// $TW_WORKERD.
 func WorkerdBinary() (string, error) {
-	if p := os.Getenv("TWD_WORKERD"); p != "" {
+	if p := os.Getenv("TW_WORKERD"); p != "" {
 		return p, nil
 	}
 	root, err := FindRepoRoot()

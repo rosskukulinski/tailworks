@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd"
-	"github.com/rosskukulinski/twd/hostd/fakemgmt"
-	"github.com/rosskukulinski/twd/hostd/hostdtest"
-	"github.com/rosskukulinski/twd/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/hostd"
+	"github.com/rosskukulinski/tailworks/hostd/fakemgmt"
+	"github.com/rosskukulinski/tailworks/hostd/hostdtest"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
 	"tailscale.com/ipn"
 	"tailscale.com/tsnet"
 )
@@ -77,6 +77,7 @@ func publicStatus(e *hostdtest.Env, workload string) *hostd.PublicStatus {
 // whose Funnel listener delivers to the workload's default export with an
 // unforgeable {kind:"public"} requester, never a tailnet caller.
 func TestPublicIngress(t *testing.T) {
+	t.Parallel()
 	ff := &fakeFunnel{addrs: map[string]string{}, src: netip.MustParseAddrPort("203.0.113.7:40000")}
 	s := startSuiteCapsOpts(t, fakemgmt.Config{}, nil, func(o *hostdtest.Options) { o.PublicListen = ff.listen })
 	e := s.e
@@ -102,7 +103,7 @@ func TestPublicIngress(t *testing.T) {
 		t.Fatalf("public node: %+v (want hostname pubprobe, exposed)", ps)
 	}
 	pubObj, _ := e.FM.Object(ps.ObjectID)
-	if pubObj.Namespace != mgmtapi.PublicNamespace || len(pubObj.Tags) != 1 || pubObj.Tags[0] != "tag:twd-public" {
+	if pubObj.Namespace != mgmtapi.PublicNamespace || len(pubObj.Tags) != 1 || pubObj.Tags[0] != "tag:tw-public" {
 		t.Fatalf("public object: ns %q tags %v", pubObj.Namespace, pubObj.Tags)
 	}
 	paddr := ff.addr(ps.Hostname)
@@ -130,7 +131,7 @@ func TestPublicIngress(t *testing.T) {
 	// 1. Identity: public, from the transport; spoofed headers never land.
 	code, _, r := pub("GET", "/hook/echo?token=secret", nil,
 		"Tailscale-User-Login", "evil@example.com", "X-Forwarded-For", "6.6.6.6", "CF-Connecting-IP", "6.6.6.6",
-		"x-twd-cf", `{"tailscale":{"caller":{"nodeId":"nFORGED","tags":["tag:admin"]}}}`)
+		"x-tw-cf", `{"tailscale":{"caller":{"nodeId":"nFORGED","tags":["tag:admin"]}}}`)
 	if code != 200 {
 		t.Fatalf("public /hook/echo: %d %v", code, r)
 	}
@@ -150,14 +151,24 @@ func TestPublicIngress(t *testing.T) {
 	if strings.Contains(js(seen), "nFORGED") {
 		t.Fatalf("forged cf blob reached the app: %s", js(seen))
 	}
+	assertNoCfGeo(t, "public /hook/echo", r) // cfgeo_test.go (#302)
+	// Funnel terminates TLS: the Worker sees the https:// URL it was
+	// called at (#360), as on Cloudflare.
+	if r["url"] != "https://pubprobe.ttest.ts.net/hook/echo?token=secret" {
+		t.Fatalf("public request.url %v, want https://", r["url"])
+	}
 
 	// The same handler over the tailnet still sees the tailnet caller.
 	tcode, tr := s.getJSON("http://" + wl.IP + "/hook/echo")
 	if tcode != 200 || get(tr, "requester", "kind") != "tailnet" || get(tr, "requester", "nodeId") != s.clientID || tr["callerError"] != nil {
 		t.Fatalf("tailnet /hook/echo: %d %s", tcode, js(tr))
 	}
+	assertNoCfGeo(t, "tailnet /hook/echo", tr)
+	if u, _ := tr["url"].(string); !strings.HasPrefix(u, "http://") {
+		t.Fatalf("tailnet request.url %v, want http:// (no tailnet.https)", tr["url"])
+	}
 
-	// 2. Routes: only the listed prefixes; /_twd and odd paths never.
+	// 2. Routes: only the listed prefixes; /_tw and odd paths never.
 	for _, c := range []struct {
 		path string
 		want int
@@ -165,7 +176,7 @@ func TestPublicIngress(t *testing.T) {
 	}{
 		{"/private", 404, "not_public"},
 		{"/", 404, "not_public"},
-		{"/_twd/o/Room/alice/", 0, ""},
+		{"/_tw/o/Room/alice/", 0, ""},
 		{"/hook/../private", 400, "bad_request"},
 		{"/hook%2F..%2Fprivate", 400, "bad_request"},
 	} {
@@ -176,8 +187,8 @@ func TestPublicIngress(t *testing.T) {
 			}
 			continue
 		}
-		if code != c.want || h.Get("twd-error") != c.code {
-			t.Errorf("%s: %d %q %v (want %d %s)", c.path, code, h.Get("twd-error"), m, c.want, c.code)
+		if code != c.want || h.Get("tw-error") != c.code {
+			t.Errorf("%s: %d %q %v (want %d %s)", c.path, code, h.Get("tw-error"), m, c.want, c.code)
 		}
 	}
 	if tcode, _ := s.getJSON("http://" + wl.IP + "/private"); tcode != 200 {
@@ -194,8 +205,8 @@ func TestPublicIngress(t *testing.T) {
 	}
 	before := len(e.FM.Objects())
 	code, h, r := pub("GET", "/agents/room/bob", nil)
-	if code != 403 || h.Get("twd-error") != "public_create_denied" {
-		t.Fatalf("public -> new room/bob: %d %q %v (want 403 public_create_denied)", code, h.Get("twd-error"), r)
+	if code != 403 || h.Get("tw-error") != "public_create_denied" {
+		t.Fatalf("public -> new room/bob: %d %q %v (want 403 public_create_denied)", code, h.Get("tw-error"), r)
 	}
 	time.Sleep(500 * time.Millisecond)
 	if o, _ := e.Host.Object(e.TenantID, "pubprobe", "Room", "bob"); o.ID != "" {
@@ -210,8 +221,8 @@ func TestPublicIngress(t *testing.T) {
 		}
 		e.WaitObject("pubprobe", "Open", n, 30*time.Second)
 	}
-	if code, h, r := pub("GET", "/agents/open/c", nil); code != 403 || h.Get("twd-error") != "public_create_denied" {
-		t.Fatalf("public -> open/c over maxObjects 2: %d %q %v", code, h.Get("twd-error"), r)
+	if code, h, r := pub("GET", "/agents/open/c", nil); code != 403 || h.Get("tw-error") != "public_create_denied" {
+		t.Fatalf("public -> open/c over maxObjects 2: %d %q %v", code, h.Get("tw-error"), r)
 	}
 	if code, _, r := pub("GET", "/agents/open/a", nil); code != 200 {
 		t.Fatalf("public -> existing open/a: %d %v", code, r)
@@ -220,9 +231,64 @@ func TestPublicIngress(t *testing.T) {
 		t.Fatalf("public spawn: %d %v (want public_create_denied)", code, r)
 	}
 
+	// 3b. RT3-06/07: bypassing the guarded env never creates. The raw
+	// binding (import { env } from "cloudflare:workers"), its RPC path, and
+	// a cached env from an earlier tailnet request all fail closed; the
+	// platform binding is not in the tenant's env; existing objects stay
+	// reachable through the raw binding (nothing to mint).
+	before = len(e.FM.Objects())
+	if code, h, r := pub("GET", "/raw/evil", nil); code != 403 || h.Get("tw-error") != "create_not_admitted" {
+		t.Fatalf("public -> raw binding room/evil: %d %q %v (want 403 create_not_admitted)", code, h.Get("tw-error"), r)
+	}
+	if code, _, r := pub("GET", "/rawrpc/evil2", nil); code != 299 || !strings.Contains(fmt.Sprint(r["error"]), "create_not_admitted") {
+		t.Fatalf("public -> raw binding RPC room/evil2: %d %v (want create_not_admitted)", code, r)
+	}
+	twProbe := func(code int, r map[string]any, via string) {
+		t.Helper()
+		sp, _ := r["rawSpawn"].(map[string]any)
+		errm, _ := sp["error"].(map[string]any)
+		if code != 200 || r["handlerHas"] != false || sp["ok"] != false || errm["code"] != "create_not_admitted" {
+			t.Fatalf("__TW (%s): %d %s (want: absent from the handler env; a raw spawn refused create_not_admitted)", via, code, js(r))
+		}
+	}
+	code, _, r = pub("GET", "/tw", nil)
+	twProbe(code, r, "public")
+	tcode, tr = s.getJSON("http://" + wl.IP + "/tw")
+	twProbe(tcode, tr, "tailnet")
+	if o, _ := e.Host.Object(e.TenantID, "pubprobe", "Room", "via-tw"); o.ID != "" {
+		t.Fatalf("room/via-tw was spawned through the raw platform binding: %+v", o)
+	}
+	// Even over the tailnet, a raw binding cannot create: creation goes
+	// through the handler's env (which admits with the request's ticket).
+	if code, r := s.getJSON("http://" + wl.IP + "/raw/evil3"); code != 403 || r["code"] != "create_not_admitted" {
+		t.Fatalf("tailnet -> raw binding room/evil3: %d %v (want 403 create_not_admitted)", code, r)
+	}
+	if code, r := s.getJSON("http://" + wl.IP + "/raw/alice"); code != 200 || r["object"] != "alice" {
+		t.Fatalf("tailnet -> raw binding, existing room/alice: %d %v", code, r)
+	}
+	if code, r := s.getJSON("http://" + wl.IP + "/agents/room/carol"); code != 200 || r["object"] != "carol" {
+		t.Fatalf("tailnet -> guarded env creates room/carol: %d %v", code, r)
+	}
+	e.WaitObject("pubprobe", "Room", "carol", 30*time.Second)
+	if code, _ := s.getJSON("http://" + wl.IP + "/cache"); code != 200 {
+		t.Fatalf("cache env: %d", code)
+	}
+	if code, h, r := pub("GET", "/cached/alice", nil); code != 200 || r["object"] != "alice" {
+		t.Fatalf("public -> cached env, existing room/alice: %d %q %v", code, h.Get("tw-error"), r)
+	}
+	time.Sleep(500 * time.Millisecond)
+	for _, n := range []string{"evil", "evil2", "evil3"} {
+		if o, _ := e.Host.Object(e.TenantID, "pubprobe", "Room", n); o.ID != "" {
+			t.Fatalf("room/%s was created through a bypass: %+v", n, o)
+		}
+	}
+	if n := len(e.FM.Objects()); n != before+1 { // carol only
+		t.Fatalf("mgmt objects %d -> %d across the bypass probes (want +1: carol)", before, n)
+	}
+
 	// 4. Body limit.
-	if code, h, _ := pub("POST", "/big", bytes.Repeat([]byte("x"), 4096)); code != 413 || h.Get("twd-error") != "payload_too_large" {
-		t.Fatalf("4 KiB body over a 1 KiB limit: %d %q", code, h.Get("twd-error"))
+	if code, h, _ := pub("POST", "/big", bytes.Repeat([]byte("x"), 4096)); code != 413 || h.Get("tw-error") != "payload_too_large" {
+		t.Fatalf("4 KiB body over a 1 KiB limit: %d %q", code, h.Get("tw-error"))
 	}
 	if code, _, r := pub("POST", "/big", bytes.Repeat([]byte("x"), 512)); code != 200 || r["len"] != float64(512) {
 		t.Fatalf("512 B body: %d %v", code, r)
@@ -273,7 +339,7 @@ func TestPublicIngress(t *testing.T) {
 	for i := 0; i < 80 && !got429; i++ {
 		code, h, _ := pub("GET", "/hook/x", nil)
 		if code == 429 {
-			got429 = h.Get("Retry-After") != "" && h.Get("twd-error") == "rate_limited"
+			got429 = h.Get("Retry-After") != "" && h.Get("tw-error") == "rate_limited"
 		}
 	}
 	if !got429 {
@@ -281,7 +347,7 @@ func TestPublicIngress(t *testing.T) {
 	}
 	time.Sleep(1500 * time.Millisecond) // refill a little
 
-	// 7. twd expose off: the listener closes and an in-flight stream is cut
+	// 7. tw expose off: the listener closes and an in-flight stream is cut
 	// within a second; on reopens it.
 	conn, err := net.Dial("tcp", paddr)
 	if err != nil {

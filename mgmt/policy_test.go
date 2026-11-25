@@ -11,31 +11,32 @@ import (
 // parent's limits to exercise merge semantics.
 const samplePolicy = `{
   "tagOwners": {
-    "tag:twd": ["autogroup:admin"],
-    "tag:twd-agent-support": ["tag:twd"],
-    "tag:twd-agent-support-sub": ["tag:twd", "tag:twd-agent-support"],
+    "tag:tw": ["autogroup:admin"],
+    "tag:tw-agent-support": ["tag:tw"],
+    "tag:tw-agent-support-sub": ["tag:tw", "tag:tw-agent-support"],
   },
   "grants": [
-    { "src": ["tag:twd-agent-support"], "dst": ["svc:payments-mcp"], "ip": ["tcp:443"],
+    { "src": ["tag:tw-agent-support"], "dst": ["svc:payments-mcp"], "ip": ["tcp:443"],
       "app": { "acme.com/cap/mcp": [
         { "tools": ["lookup_order", "refund"],
           "limits": { "refund": { "maxUsd": 50, "perDayUsd": 200 } },
           "groups": { "refund": ["group:support"] } } ] } },
-    { "src": ["tag:twd-agent-support"], "dst": ["tag:crm"], "ip": ["tcp:443"],
+    { "src": ["tag:tw-agent-support"], "dst": ["tag:crm"], "ip": ["tcp:443"],
       "app": { "acme.com/cap/mcp": [ { "tools": ["notes"], "limits": { "refund": { "maxUsd": 75 } } } ],
                "acme.com/cap/crm": [ { "read": true } ] } },
-    { "src": ["tag:twd-agent-support-sub"], "dst": ["svc:payments-mcp"], "ip": ["tcp:443"],
+    { "src": ["tag:tw-agent-support-sub"], "dst": ["svc:payments-mcp"], "ip": ["tcp:443"],
       "app": { "acme.com/cap/mcp": [{ "tools": ["lookup_order"] }] } },
     { "src": ["group:support"], "dst": ["svc:support"], "ip": ["tcp:443"] },
   ],
 }`
 
 func TestSpawnCapsSubset(t *testing.T) {
+	t.Parallel()
 	p, err := ParsePolicy([]byte(samplePolicy))
 	if err != nil {
 		t.Fatal(err)
 	}
-	parent := []string{"tag:twd-agent-support"}
+	parent := []string{"tag:tw-agent-support"}
 	ok := []string{
 		`{"acme.com/cap/mcp": {"tools": ["lookup_order"]}}`,
 		`{"acme.com/cap/mcp": {"tools": ["lookup_order", "refund"], "limits": {"refund": {"maxUsd": 10}}}}`,
@@ -68,14 +69,14 @@ func TestSpawnCapsSubset(t *testing.T) {
 		}
 	}
 	// The sub-agent's own tag only has lookup_order: it can't re-widen.
-	if e := p.CheckSpawnCaps([]string{"tag:twd-agent-support-sub"}, json.RawMessage(`{"acme.com/cap/mcp": {"tools": ["refund"]}}`)); e == nil {
+	if e := p.CheckSpawnCaps([]string{"tag:tw-agent-support-sub"}, json.RawMessage(`{"acme.com/cap/mcp": {"tools": ["refund"]}}`)); e == nil {
 		t.Error("grandchild widened beyond its parent")
 	}
 	if e := p.CheckSpawnCaps(parent, json.RawMessage(`[1]`)); e == nil || e.Code != "bad_request" {
 		t.Errorf("non-object caps: %v", e)
 	}
 	// Tag ownership.
-	if !p.TagOwnedBy("tag:twd-agent-support-sub", parent) || p.TagOwnedBy("tag:crm", parent) || !p.TagOwnedBy("tag:twd-agent-support", parent) {
+	if !p.TagOwnedBy("tag:tw-agent-support-sub", parent) || p.TagOwnedBy("tag:crm", parent) || !p.TagOwnedBy("tag:tw-agent-support", parent) {
 		t.Error("TagOwnedBy")
 	}
 	eff := p.EffectiveCaps(parent)
@@ -85,6 +86,7 @@ func TestSpawnCapsSubset(t *testing.T) {
 }
 
 func TestPolicyCacheETag(t *testing.T) {
+	t.Parallel()
 	c := newFakeClock()
 	fetches, notMods := 0, 0
 	pc := &PolicyCache{Clock: c, MaxAge: 10 * time.Second, Fetch: func(ctx context.Context, tn Tenant, etag string) ([]byte, string, bool, error) {

@@ -1,0 +1,15 @@
+{
+  // hostd wfcallback_test.go (#359): a Workflow started by a Durable Object
+  // calls back into that object, as the Agents SDK's AgentWorkflow does.
+  "name": "wfcallback",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-01",
+  "durable_objects": {
+    "bindings": [
+      { "name": "UNLISTED", "class_name": "Unlisted" },
+      { "name": "INTERNAL", "class_name": "Internal" },
+    ],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Unlisted", "Internal"] }],
+  "workflows": [{ "name": "callback", "binding": "CALLBACK", "class_name": "Callback" }],
+}

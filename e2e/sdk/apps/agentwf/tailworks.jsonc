@@ -1,0 +1,10 @@
+{
+  "name": "agentwf",
+  "tailnet": {
+    "tags": ["tag:ttest"],
+    // TaskAgent is not in tailnet.objects (as with e2e/compat's overlay for
+    // Cloudflare's agents examples); InternalTaskAgent is "node": false (tw
+    // deploy's default for every class of a project without this file).
+    "objects": { "InternalTaskAgent": { "node": false } }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "approvals",
+  "tailnet": {
+    "tags": ["tag:ttest"],
+    "objects": {
+      // facet mode (default)
+      "RefundAgent": { "tags": ["tag:ttest"] },
+      // plain-DO mode
+      "PlainRefundAgent": { "tags": ["tag:ttest"], "egress": "workload" }
+    }
+  }
+}

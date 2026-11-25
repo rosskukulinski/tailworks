@@ -2,13 +2,17 @@
 // Copies the runtime dependency closure of <pkg>... from the repo's
 // node_modules (exactly the versions the tests ran with; no network) into
 // out, keeping node's nested layout. Workspace packages (symlinks, e.g.
-// @twd/*) are copied as package.json + their "files". devDependencies,
+// @tailworks/*) are copied as package.json + their "files". devDependencies,
 // .bin and native/platform packages (workerd, esbuild) are left out.
 import fs from "node:fs";
 import path from "node:path";
 
 const [repo, out, ...roots] = process.argv.slice(2);
-const nm = path.join(repo, "node_modules");
+// The real path: building under a symlinked dir (macOS /tmp → /private/tmp)
+// made every package's realpath look outside nm, so each was copied as a
+// workspace package (package.json + "files" only) and the release shipped
+// empty packages.
+const nm = fs.realpathSync(path.join(repo, "node_modules"));
 const skip = (n) => n === "workerd" || n.startsWith("@cloudflare/workerd") || n === "esbuild" || n.startsWith("@esbuild/") || n === "typescript" || n.startsWith("@types/");
 const seen = new Map(); // real dir -> rel
 let bytes = 0;

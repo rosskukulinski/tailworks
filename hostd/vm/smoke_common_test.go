@@ -10,7 +10,7 @@ import (
 const smokeCapnp = `using Workerd = import "/workerd/workerd.capnp";
 const config :Workerd.Config = (
   services = [ (name = "main", worker = .w), (name = "gw", external = (address = "192.168.72.1:3128", http = ())) ],
-  sockets = [ (name = "in", address = "*:8080", service = "main", http = (cfBlobHeader = "x-twd-cf")) ],
+  sockets = [ (name = "in", address = "*:8080", service = "main", http = (cfBlobHeader = "x-tw-cf")) ],
 );
 const w :Workerd.Worker = (
   compatibilityDate = "2026-04-01",

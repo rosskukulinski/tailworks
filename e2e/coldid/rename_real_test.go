@@ -17,9 +17,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/internal/tsapi"
-	"github.com/rosskukulinski/twd/netd"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/internal/tsapi"
+	"github.com/rosskukulinski/tailworks/netd"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/ipnstate"
 )
@@ -36,9 +36,9 @@ import (
 //
 // Nodes are ttest-fi-<run>-*, ephemeral; both are deleted by ID afterwards.
 func TestRenameOnAssignmentReal(t *testing.T) {
-	keyFile, tailnet := os.Getenv("TWD_E2E_API_KEY_FILE"), os.Getenv("TWD_E2E_TAILNET")
+	keyFile, tailnet := os.Getenv("TW_E2E_API_KEY_FILE"), os.Getenv("TW_E2E_TAILNET")
 	if keyFile == "" || tailnet == "" {
-		t.Skip("TWD_E2E_API_KEY_FILE / TWD_E2E_TAILNET not set")
+		t.Skip("TW_E2E_API_KEY_FILE / TW_E2E_TAILNET not set")
 	}
 	if !allowedTailnets[tailnet] {
 		t.Fatalf("refusing to run against tailnet %q (not in the allow list)", tailnet)

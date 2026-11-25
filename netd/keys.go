@@ -42,7 +42,7 @@ func (k StaticKey) AuthKey(context.Context, KeyRequest) (string, error) {
 func (k StaticKey) String() string   { return "netd.StaticKey([REDACTED])" }
 func (k StaticKey) GoString() string { return k.String() }
 
-// MintFunc is a KeySource backed by a callback, e.g. twd-mgmt's mint broker
+// MintFunc is a KeySource backed by a callback, e.g. tw-mgmt's mint broker
 // minting a single-use, pre-authorized key per object.
 type MintFunc func(ctx context.Context, req KeyRequest) (string, error)
 

@@ -10,18 +10,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd/image"
-	"github.com/rosskukulinski/twd/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/hostd/image"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
 )
 
 const guestSeesCPUCap = true
 
-// ctrSmokeBackend is vz (TWD_VM_KERNEL, TWD_VM_ROOTFS, TWD_VZ_VMM; with
-// TWD_VM_ROSETTA the guests run linux/amd64 images under Rosetta, so
-// TWD_CTR_IMAGES must then hold the amd64 set).
+// ctrSmokeBackend is vz (TW_VM_KERNEL, TW_VM_ROOTFS, TW_VZ_VMM; with
+// TW_VM_ROSETTA the guests run linux/amd64 images under Rosetta, so
+// TW_CTR_IMAGES must then hold the amd64 set).
 func ctrSmokeBackend(t *testing.T) (sandbox.ContainerBackend, []string) {
 	t.Helper()
-	b := vzBackend(t, os.Getenv("TWD_VM_ROSETTA") != "")
+	b := vzBackend(t, os.Getenv("TW_VM_ROSETTA") != "")
 	if err := b.ContainersUsable(); err != nil {
 		t.Fatalf("vz containers: %v", err)
 	}
@@ -45,18 +45,18 @@ func checkCtrConfinement(t *testing.T, info sandbox.Info, cpuMax string) {
 // and leaves no run dir (scratch disk) behind: a missing image, and an
 // entrypoint the image doesn't have.
 func TestVZContainerStartFailures(t *testing.T) {
-	imgs := os.Getenv("TWD_CTR_IMAGES")
+	imgs := os.Getenv("TW_CTR_IMAGES")
 	if imgs == "" {
-		t.Skip("TWD_CTR_IMAGES not set")
+		t.Skip("TW_CTR_IMAGES not set")
 	}
-	b := vzBackend(t, os.Getenv("TWD_VM_ROSETTA") != "")
+	b := vzBackend(t, os.Getenv("TW_VM_ROSETTA") != "")
 	ctx := context.Background()
 	spec := sandbox.ContainerSpec{ID: "nope", Image: filepath.Join(t.TempDir(), "missing.erofs"), VCPUs: 1, MemMiB: 256, ScratchMiB: 64, Argv: []string{"true"}}
 	if _, err := b.BootContainer(ctx, spec); err == nil || !strings.Contains(err.Error(), "image") {
 		t.Fatalf("missing image: %v", err)
 	}
 	st := &image.Store{Dir: filepath.Join(t.TempDir(), "cache"), Sources: []image.Source{image.DirSource{Dir: imgs}}, Emulated: b.EmulatedArches()}
-	img, err := st.Get(ctx, "t", "twd.local/debian-trixie-python:1")
+	img, err := st.Get(ctx, "t", "tw.local/debian-trixie-python:1")
 	if err != nil {
 		t.Fatal(err)
 	}

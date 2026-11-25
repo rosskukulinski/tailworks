@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "tailnet": "example.ts.net",
+  "tenantID": "t_1",
+  "mintMode": "oauth",
+  "controlURL": "",
+  "hostID": "",
+  "workerd": "/home/me/.tailworks/bin/workerd",
+  "heartbeat": "",
+  "killTombstone": "",
+  "deviceDeleteDelay": "",
+  "createdAt": ""
+}

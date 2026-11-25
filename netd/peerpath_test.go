@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/netd"
+	"github.com/rosskukulinski/tailworks/netd"
 )
 
 // TestEgressWaitsForNewPeerPath: object a calls a node that has just
@@ -20,6 +20,16 @@ import (
 // before it has a home DERP or endpoints). Without awaitPeerPath the first
 // handshake initiation has no path, is dropped, and WireGuard retries after
 // 5 s; with it the call completes as soon as the path exists.
+//
+// The new peer can be in a's netmap, and answer a's disco ping, a moment
+// before its object opens the ingress listener (Ready). A SYN that arrives
+// then is reset: "connection was refused" (issue #139, on Linux CI and on
+// a loaded Mac). The reset came back over WireGuard, so the handshake this
+// test is about already worked; the call then waits for Ready and dials
+// again, and the time counts from the first dial. Waiting for Ready before
+// the first dial instead would give a the path first and hide the 5 s
+// penalty. The host's own routes don't matter: tsnet dials a tailnet IP
+// through netstack once the peer is in the netmap, which the call waits for.
 func TestEgressWaitsForNewPeerPath(t *testing.T) {
 	ctl := startControl(t)
 	mint := &countingMint{}
@@ -37,11 +47,10 @@ func TestEgressWaitsForNewPeerPath(t *testing.T) {
 	if err := a.Ready(ctx); err != nil {
 		t.Fatal(err)
 	}
-	lcA, err := a.Server().LocalClient()
+	lcA, err := a.Server().LocalClient() // netd set OmitAuth (don't write it again: races its watchers)
 	if err != nil {
 		t.Fatal(err)
 	}
-	lcA.OmitAuth = true
 
 	// call creates a fresh node on another registry (not a sibling) and
 	// GETs it through a's egress the moment it appears in a's netmap.
@@ -52,7 +61,8 @@ func TestEgressWaitsForNewPeerPath(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer regB.Close()
-		if _, err := regB.Create(id, netd.ObjectOptions{}); err != nil {
+		b, err := regB.Create(id, netd.ObjectOptions{})
+		if err != nil {
 			t.Fatal(err)
 		}
 		var ip string
@@ -60,7 +70,7 @@ func TestEgressWaitsForNewPeerPath(t *testing.T) {
 			st, err := lcA.Status(ctx)
 			if err == nil {
 				for _, p := range st.Peer {
-					if p.HostName == "twd-"+id && len(p.TailscaleIPs) > 0 {
+					if p.HostName == "tw-"+id && len(p.TailscaleIPs) > 0 {
 						ip = p.TailscaleIPs[0].String()
 					}
 				}
@@ -72,6 +82,13 @@ func TestEgressWaitsForNewPeerPath(t *testing.T) {
 		}
 		t0 := time.Now()
 		c, err := regA.DialEgress(ctx, "a", ip+":80")
+		if err != nil && strings.Contains(err.Error(), "refused") {
+			t.Logf("%s: refused before its listener was open; waiting for Ready", id)
+			if err := b.Ready(ctx); err != nil {
+				t.Fatal(err)
+			}
+			c, err = regA.DialEgress(ctx, "a", ip+":80")
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -115,7 +132,7 @@ func TestSetHostname(t *testing.T) {
 	t.Cleanup(func() { reg.Close() })
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	p, _ := reg.Create("pool-aaaa", netd.ObjectOptions{Hostname: "twd-pool-aaaa"})
+	p, _ := reg.Create("pool-aaaa", netd.ObjectOptions{Hostname: "tw-pool-aaaa"})
 	q, _ := reg.Create("peer", netd.ObjectOptions{})
 	if err := p.Ready(ctx); err != nil {
 		t.Fatal(err)
@@ -134,8 +151,7 @@ func TestSetHostname(t *testing.T) {
 	if !strings.HasPrefix(dns, "support-abcdef.") || after.Hostname != "support-abcdef" || after.NodeID != before.NodeID || after.IPs[0] != before.IPs[0] {
 		t.Fatalf("before %+v\nafter %+v (dns %s)", before, after, dns)
 	}
-	lc, _ := q.Server().LocalClient()
-	lc.OmitAuth = true
+	lc, _ := q.Server().LocalClient() // netd set OmitAuth
 	for dl := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
 		st, _ := lc.Status(ctx)
 		seen := false

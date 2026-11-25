@@ -1,4 +1,4 @@
-// Package publicspec is the twd.jsonc "public" schema (ADR-029): which path
+// Package publicspec is the tailworks.jsonc "public" schema (ADR-029): which path
 // prefixes of a workload are reachable from the public internet over
 // Funnel, the ingress limits netd enforces on them, and the per-class
 // opt-in for public object creation. It is shared by the bundle parser
@@ -9,6 +9,7 @@ package publicspec
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"path"
 	"sort"
@@ -16,17 +17,17 @@ import (
 	"time"
 )
 
-// Tag is the tag every public node carries, and the only twd tag the
-// funnel nodeAttr may target besides tag:twd-mgmt (ADR-029 D6).
-const Tag = "tag:twd-public"
+// Tag is the tag every public node carries, and the only tailworks tag the
+// funnel nodeAttr may target besides tag:tw-mgmt (ADR-029 D6).
+const Tag = "tag:tw-public"
 
 // Namespace is the mgmt object namespace of a workload's public node; the
 // object name is the workload name (like "_workload").
 const Namespace = "_public"
 
 // ReservedPrefix is never public, whatever the routes say: the platform's
-// own /_twd/o/<Class>/<name> addressing would bypass the app's routing.
-const ReservedPrefix = "/_twd"
+// own /_tw/o/<Class>/<name> addressing would bypass the app's routing.
+const ReservedPrefix = "/_tw"
 
 // MaxRoutes bounds len(Routes).
 const MaxRoutes = 64
@@ -39,7 +40,7 @@ const MaxObjectsCeiling = 1000
 // registration planning rate (200/min), per tenant.
 const CreatesPerMinute = 20
 
-// Spec is twd.jsonc "public".
+// Spec is tailworks.jsonc "public".
 type Spec struct {
 	// Routes are path patterns: "/x" (exact), "/x/*" ("/x" and everything
 	// under it) or "/*" (every path). Required (non-empty) when "public"
@@ -62,17 +63,33 @@ type Limits struct {
 	MaxHeaderBytes int     `json:"maxHeaderBytes,omitempty"` // request headers
 	TimeoutSeconds int     `json:"timeoutSeconds,omitempty"` // whole request
 	MaxConns       int     `json:"maxConns,omitempty"`       // concurrent connections
+
+	// MaxConnsPerIP caps one client address's concurrent connections
+	// (an IPv6 client counts per /64), below MaxConns.
+	MaxConnsPerIP int `json:"maxConnsPerIp,omitempty"`
+
+	// UpgradeLifetimeSeconds bounds an upgraded (WebSocket) connection.
+	UpgradeLifetimeSeconds int `json:"upgradeLifetimeSeconds,omitempty"`
 }
 
-// Defaults are the limits when twd.jsonc sets none (ADR-029 D5).
+// Defaults are the limits when tailworks.jsonc sets none (ADR-029 D5).
 var Defaults = Limits{RPS: 50, Burst: 100, IPRPS: 10, IPBurst: 20, MaxBodyBytes: 1 << 20,
-	MaxHeaderBytes: 32 << 10, TimeoutSeconds: 30, MaxConns: 256}
+	MaxHeaderBytes: 32 << 10, TimeoutSeconds: 30, MaxConns: 256,
+	MaxConnsPerIP:          32,
+	UpgradeLifetimeSeconds: 3600,
+}
 
 // Ceilings are the most a workload may ask for (the operator ceiling).
 var Ceilings = Limits{RPS: 1000, Burst: 2000, IPRPS: 200, IPBurst: 400, MaxBodyBytes: 32 << 20,
-	MaxHeaderBytes: 64 << 10, TimeoutSeconds: 300, MaxConns: 4096}
+	MaxHeaderBytes: 64 << 10, TimeoutSeconds: 300, MaxConns: 4096,
+	MaxConnsPerIP:          1024,
+	UpgradeLifetimeSeconds: 86400,
+}
 
-// Effective fills unset fields from Defaults.
+// Effective fills unset fields from Defaults. An unset burst (ipBurst) is
+// derived from the rate it goes with: two seconds' worth of rps (ipRps),
+// never below the default and never above the ceiling, so raising rps alone
+// doesn't leave a spike size meant for the default rate.
 func (l *Limits) Effective() Limits {
 	e := Defaults
 	if l == nil {
@@ -83,12 +100,16 @@ func (l *Limits) Effective() Limits {
 	}
 	if l.Burst > 0 {
 		e.Burst = l.Burst
+	} else {
+		e.Burst = derivedBurst(e.RPS, Defaults.Burst, Ceilings.Burst)
 	}
 	if l.IPRPS > 0 {
 		e.IPRPS = l.IPRPS
 	}
 	if l.IPBurst > 0 {
 		e.IPBurst = l.IPBurst
+	} else {
+		e.IPBurst = derivedBurst(e.IPRPS, Defaults.IPBurst, Ceilings.IPBurst)
 	}
 	if l.MaxBodyBytes > 0 {
 		e.MaxBodyBytes = l.MaxBodyBytes
@@ -102,13 +123,30 @@ func (l *Limits) Effective() Limits {
 	if l.MaxConns > 0 {
 		e.MaxConns = l.MaxConns
 	}
+	if l.MaxConnsPerIP > 0 {
+		e.MaxConnsPerIP = l.MaxConnsPerIP
+	}
+	if l.UpgradeLifetimeSeconds > 0 {
+		e.UpgradeLifetimeSeconds = l.UpgradeLifetimeSeconds
+	}
 	return e
+}
+
+// derivedBurst is min(ceiling, max(def, ceil(2*rps))): upward-only, so a
+// config that relied on the default burst never gets a smaller one.
+func derivedBurst(rps float64, def, ceiling int) int {
+	return min(ceiling, max(def, int(math.Ceil(2*rps))))
 }
 
 // Timeout is TimeoutSeconds as a duration.
 func (l Limits) Timeout() time.Duration { return time.Duration(l.TimeoutSeconds) * time.Second }
 
-// ClassSpec is twd.jsonc tailnet.objects.<Class>.public.
+// UpgradeLifetime is UpgradeLifetimeSeconds as a duration.
+func (l Limits) UpgradeLifetime() time.Duration {
+	return time.Duration(l.UpgradeLifetimeSeconds) * time.Second
+}
+
+// ClassSpec is tailworks.jsonc tailnet.objects.<Class>.public.
 type ClassSpec struct {
 	// Create lets a public request create a new object of this class
 	// (default false: public requests reach existing objects only).
@@ -185,6 +223,8 @@ func (l *Limits) validate() error {
 		check("maxHeaderBytes", float64(l.MaxHeaderBytes), float64(c.MaxHeaderBytes)),
 		check("timeoutSeconds", float64(l.TimeoutSeconds), float64(c.TimeoutSeconds)),
 		check("maxConns", float64(l.MaxConns), float64(c.MaxConns)),
+		check("maxConnsPerIp", float64(l.MaxConnsPerIP), float64(c.MaxConnsPerIP)),
+		check("upgradeLifetimeSeconds", float64(l.UpgradeLifetimeSeconds), float64(c.UpgradeLifetimeSeconds)),
 	} {
 		if e != nil {
 			return e
@@ -254,10 +294,25 @@ func MatchAny(pats []string, p string) (string, bool) {
 	return "", false
 }
 
+// hasControl reports a C0 control or DEL byte. p is the decoded path, so
+// this covers the raw %00..%1f and %7f forms (#185): no legitimate URL
+// path contains one, and NUL or CR/LF can be read differently by the app
+// (a filesystem, a storage key, a C library) than by the route match.
+func hasControl(p string) bool {
+	for i := 0; i < len(p); i++ {
+		if p[i] < 0x20 || p[i] == 0x7f {
+			return true
+		}
+	}
+	return false
+}
+
 // CanonicalPath returns the request path netd matches routes against, or
 // an error for a path that could be read differently by netd and by the
-// app (dot segments, doubled slashes, encoded slashes or backslashes), or
-// that is under ReservedPrefix. A trailing slash is kept.
+// app (dot segments, doubled slashes, encoded slashes or backslashes,
+// control characters), or that is under ReservedPrefix. A trailing slash
+// is kept. The path returned is decoded exactly once; the app receives it
+// in that form (ledger H21).
 func CanonicalPath(u *url.URL) (string, error) {
 	p := u.Path
 	if p == "" {
@@ -269,6 +324,9 @@ func CanonicalPath(u *url.URL) (string, error) {
 	raw := strings.ToLower(u.RawPath)
 	if strings.Contains(raw, "%2f") || strings.Contains(raw, "%5c") || strings.Contains(p, "\\") {
 		return "", errors.New("encoded slashes and backslashes are refused")
+	}
+	if hasControl(p) {
+		return "", errors.New("control characters (%00-%1F, %7F) are refused")
 	}
 	trimmed := p
 	if len(p) > 1 {

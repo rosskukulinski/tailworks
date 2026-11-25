@@ -9,7 +9,7 @@ import (
 )
 
 // Smart placement (ADR-033 draft, Proposed): when a workload declares what it
-// connects to (twd.jsonc tailnet.connects, or placement.targets), mgmt
+// connects to (tailworks.jsonc tailnet.connects, or placement.targets), mgmt
 // prefers the eligible host with the best measured tailnet path to those
 // targets: direct WireGuard over a peer relay over DERP, then lower RTT.
 // Capacity breaks ties. Placement only chooses; the workload lease decides
@@ -44,7 +44,7 @@ func pathRank(p string) int {
 	return 0
 }
 
-// Placement modes (twd.jsonc placement.mode).
+// Placement modes (tailworks.jsonc placement.mode).
 const (
 	PlacementSmart = "smart"
 	PlacementOff   = "off"
@@ -65,7 +65,7 @@ const (
 	pathRetention       = time.Hour       // rows older than this are deleted when the host reports again
 )
 
-// Hysteresis for an explicit re-place (`twd deploy --replace`): the
+// Hysteresis for an explicit re-place (`tw deploy --replace`): the
 // current holder is kept unless the best host is in a better path class, or
 // the same class with an RTT at least replaceMinGain lower and
 // replaceMinRatio of the holder's. Measurement noise does not move
@@ -102,6 +102,14 @@ type Candidate struct {
 	// Arch is the host's GOARCH ("" = not reported): container images run
 	// only on a host of their arch (ADR-032).
 	Arch string
+
+	// Skew is why the host is outside the version window ("" = within),
+	// and Features what it offers (ADR-041 §7). Version
+	// names it in messages.
+	Skew     string
+	Features []string
+	Version  string
+
 	// Free capacity per unit: "nodes" = capacityNodes - liveNodes; the
 	// capacity vector's units (ADR-032 D9: "vms", "vmMemMiB", "hugeMemMiB",
 	// "vcpus" with overcommit, "scratchMiB") come from the host's
@@ -116,7 +124,8 @@ func candidateOf(h Host, now time.Time) Candidate {
 	if len(tiers) == 0 {
 		tiers = []string{"process"} // hosts that predate tier reporting
 	}
-	return Candidate{ID: h.ID, Pool: h.Pool, Tiers: tiers, Live: h.Live(now), Arch: h.Arch, Free: freeUnits(h)}
+	return Candidate{ID: h.ID, Pool: h.Pool, Tiers: tiers, Live: h.Live(now), Arch: h.Arch, Free: freeUnits(h),
+		Draining: h.CordonedAt != 0, Features: h.Features, Version: h.Version}
 }
 
 // unboundedUnit stands in for a capacity-vector unit of a host that
@@ -173,6 +182,8 @@ type Requirements struct {
 	Containers bool
 	Arch       string
 	Arches     []string
+	// Features the workload needs (internal/features).
+	Features []string
 	// Pinned bypasses scoring: an explicit --host, or a sandbox that must
 	// run next to its parent DO. The pinned host must still be eligible.
 	Pinned string
@@ -180,7 +191,7 @@ type Requirements struct {
 	// (capacity aside: it already holds its share). "" = none.
 	Sticky string
 	// Replace ignores Sticky unless the best host is not clearly better
-	// (hysteresis): `twd deploy --replace`.
+	// (hysteresis): `tw deploy --replace`.
 	Replace bool
 	// Path scoring. Empty Targets (or Mode off) = capacity only.
 	Mode      string
@@ -312,7 +323,7 @@ func scoreHosts(cands []Candidate, ms []PathMeasurement, req Requirements) Place
 	case req.Sticky != "" && !req.Replace:
 		if s, ok := find(req.Sticky); ok && s.Eligible {
 			d.Host, d.Reason = s.Host, "sticky"
-			d.Summary = "kept on " + s.Host + " (current lease holder; `twd deploy --replace` re-places it)" + d.pathSuffix(s)
+			d.Summary = "kept on " + s.Host + " (current lease holder; `tw deploy --replace` re-places it)" + d.pathSuffix(s)
 			return d
 		}
 	}
@@ -351,7 +362,9 @@ func ineligible(c Candidate, req Requirements, need map[string]int, holder bool)
 	case !c.Live:
 		return "not live"
 	case c.Draining:
-		return "draining"
+		return "cordoned"
+	case c.Skew != "":
+		return "version skew: " + c.Skew
 	case req.Pool != "" && c.Pool != req.Pool:
 		return fmt.Sprintf("pool %q, want %q", c.Pool, req.Pool)
 	}
@@ -369,6 +382,9 @@ func ineligible(c Candidate, req Requirements, need map[string]int, holder bool)
 		case len(req.Arches) > 0 && !slices.Contains(req.Arches, c.Arch):
 			return fmt.Sprintf("containers for %s, the images were pinned for %s", archOrUnknown(c.Arch), strings.Join(req.Arches, ","))
 		}
+	}
+	if gap := featureGap(Host{Features: c.Features, Version: c.Version}, req.Features); gap != "" {
+		return gap
 	}
 	if holder {
 		return ""
@@ -405,6 +421,8 @@ func scoreTargets(s *HostScore, targets []string, get func(string) (PathMeasurem
 			switch {
 			case age > maxAge:
 				ts.Detail = fmt.Sprintf("stale (%v old)", age.Round(time.Second))
+			case unusableMeasurement(m, now) != "": // placement_bounds.go
+				ts.Detail, ts.AgeSeconds = unusableMeasurement(m, now), 0
 			case pathRank(m.Path) == 0:
 				ts.Detail = m.Path
 			default:
@@ -547,7 +565,7 @@ func (d PlacementDecision) others(chosen string) string {
 
 func noHostSummary(hosts []HostScore, req Requirements) string {
 	if len(hosts) == 0 {
-		return "no live host (register twd-hostd and heartbeat first)"
+		return "no live host (register tw-hostd and heartbeat first)"
 	}
 	var parts []string
 	for _, s := range hosts {
@@ -557,7 +575,7 @@ func noHostSummary(hosts []HostScore, req Requirements) string {
 	if len(req.Tiers) > 0 {
 		want = "no live host with tier " + strings.Join(req.Tiers, "+")
 		if slices.Contains(req.Tiers, "microvm") {
-			fix = "; set one up with `sudo twd host setup --microvm`, or deploy with \"tier\": \"process\""
+			fix = "; set one up with `sudo tw host setup --microvm`, or deploy with \"tier\": \"process\""
 		}
 	}
 	if req.Containers {
@@ -574,9 +592,9 @@ func noHostSummary(hosts []HostScore, req Requirements) string {
 		} else {
 			want = "no live host with " + c
 		}
-		fix = "; set up a Linux host with KVM (`sudo twd host setup --microvm`); NAS and no-KVM hosts never offer containers"
+		fix = "; set up a Linux host with KVM (`sudo tw host setup --microvm`); NAS and no-KVM hosts never offer containers"
 		if req.Arch != "" {
-			fix = fmt.Sprintf("; set up a %s Linux host with KVM (`sudo twd host setup --microvm`); NAS and no-KVM hosts never offer containers", req.Arch)
+			fix = fmt.Sprintf("; set up a %s Linux host with KVM (`sudo tw host setup --microvm`); NAS and no-KVM hosts never offer containers", req.Arch)
 		}
 	}
 	return want + " (" + strings.Join(parts, "; ") + ")" + fix
@@ -587,16 +605,16 @@ type PlacementConfig struct {
 	Mode      string   `json:"mode"`
 	Targets   []string `json:"targets,omitempty"`
 	Aggregate string   `json:"aggregate,omitempty"`
-	// Warnings are config fields twd accepts but ignores (e.g. a
+	// Warnings are config fields tailworks accepts but ignores (e.g. a
 	// Cloudflare "region" hint).
 	Warnings []string `json:"warnings,omitempty"`
 }
 
-// resolvePlacement turns twd.jsonc's placement block (or, failing that,
+// resolvePlacement turns tailworks.jsonc's placement block (or, failing that,
 // wrangler's) and tailnet.connects into the targets to score. Smart is the
 // default whenever the workload declares connects: stickiness makes it
 // safe (a running workload never moves on its own).
-func resolvePlacement(cfg *TwdConfig) PlacementConfig {
+func resolvePlacement(cfg *TwConfig) PlacementConfig {
 	pc := PlacementConfig{Mode: PlacementSmart, Aggregate: AggregateWorst}
 	if cfg == nil {
 		return pc
@@ -615,7 +633,7 @@ func resolvePlacement(cfg *TwdConfig) PlacementConfig {
 		pc.Warnings = append(pc.Warnings, fmt.Sprintf("placement.aggregate %q is not \"worst\" or \"sum\"; using worst", p.Aggregate))
 	}
 	if p.Region != "" {
-		pc.Warnings = append(pc.Warnings, "placement.region is ignored: twd places by measured tailnet path, not cloud region")
+		pc.Warnings = append(pc.Warnings, "placement.region is ignored: tw places by measured tailnet path, not cloud region")
 	}
 	var ts []string
 	switch {
@@ -633,7 +651,7 @@ func resolvePlacement(cfg *TwdConfig) PlacementConfig {
 		}
 		ts = []string{h}
 	default:
-		ts = cfg.Tailnet.Connects
+		ts = ConnectTargets(cfg.Tailnet.Connects) // connects.go: ports dropped
 	}
 	seen := map[string]bool{}
 	for _, t := range ts {

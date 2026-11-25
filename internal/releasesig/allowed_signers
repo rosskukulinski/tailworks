@@ -1,0 +1,14 @@
+# The tw release signing keys (ssh-keygen allowed_signers format), one per
+# line: tw-release namespaces="tw-release" ssh-ed25519 <base64> <comment>
+#
+# Release tarballs carry SHA256SUMS.sig, an SSH signature (ssh-keygen -Y sign
+# -n tw-release) of their SHA256SUMS, and the GitHub release carries one of
+# the release-level SHA256SUMS. scripts/get.sh, scripts/install.sh and
+# tw-hostd's self-upgrade accept only a signature by a key listed here.
+#
+# This file is the source of truth. scripts/get.sh and scripts/install.sh
+# carry copies between their "BEGIN/END tw release signers" markers:
+# `sh scripts/release-keygen.sh --sync` rewrites them, and `make test`
+# (internal/releasesig) fails if they differ. docs/RELEASING.md, "Signing",
+# has the key ceremony and rotation steps.
+tw-release namespaces="tw-release" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC8VB/53QVWaiyARbdrg6MP6F6LVuQPebi4lhMN4h0Yk tw-release 2026-11-17

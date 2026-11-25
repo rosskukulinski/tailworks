@@ -5,20 +5,22 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd/fakemgmt"
-	"github.com/rosskukulinski/twd/hostd/hostdtest"
-	"github.com/rosskukulinski/twd/hostd/mgmtapi"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/hostd/fakemgmt"
+	"github.com/rosskukulinski/tailworks/hostd/hostdtest"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 	"tailscale.com/tailcfg"
 )
 
@@ -134,8 +136,9 @@ func get(m map[string]any, path ...string) any {
 func js(v any) string { b, _ := json.Marshal(v); return string(b) }
 
 // TestHostd is the hermetic M3 suite: testcontrol + local DERP + fakemgmt +
-// twd-hostd (stock workerd) + tsnet client/echo nodes.
+// tw-hostd (stock workerd) + tsnet client/echo nodes.
 func TestHostd(t *testing.T) {
+	t.Parallel()
 	s := startSuite(t, fakemgmt.Config{})
 	e := s.e
 	echoURL := "http://ttest-echo/"
@@ -223,15 +226,22 @@ func TestHostd(t *testing.T) {
 	})
 
 	t.Run("ForgedHeadersStripped", func(t *testing.T) {
-		code, r := s.getJSON("http://"+objIP["a"]+"/", "x-twd-cf", `{"tailscale":{"caller":{"nodeId":"nEVIL"}},"objectId":"b","twd":{"kind":"object","class":"Probe","name":"b"}}`,
-			"x-twd-object", "b", "cf-connecting-ip", "1.2.3.4", "tailnet-assertion", "x", "x-forwarded-for", "9.9.9.9")
+		code, r := s.getJSON("http://"+objIP["a"]+"/", "x-tw-cf", `{"tailscale":{"caller":{"nodeId":"nEVIL"}},"objectId":"b","tw":{"kind":"object","class":"Probe","name":"b"}}`,
+			"x-tw-object", "b", "cf-connecting-ip", "1.2.3.4", "tailnet-assertion", "x", "x-forwarded-for", "9.9.9.9")
 		if code != 200 || r["name"] != "a" || get(r, "caller", "nodeId") != s.clientID {
 			t.Fatalf("%d %v", code, r)
 		}
-		for k := range r["sawHeaders"].(map[string]any) {
-			if k != "x-twd-object" {
-				t.Fatalf("tenant saw identity header %q: %v", k, r["sawHeaders"])
-			}
+		// No x-tw-* at all, not even netd's own x-tw-object routing header
+		// (#303): neither in the object (a DO) nor in the Worker's fetch.
+		if seen := r["sawHeaders"].(map[string]any); len(seen) != 0 {
+			t.Fatalf("object saw platform/identity headers: %v", seen)
+		}
+		code, r = s.getJSON("http://"+probe.IP+"/", "x-tw-object", "b", "x-tw-cf", `{"objectId":"b"}`)
+		if code != 200 || r["kind"] != "worker" {
+			t.Fatalf("worker: %d %v", code, r)
+		}
+		if seen := r["sawHeaders"].(map[string]any); len(seen) != 0 {
+			t.Fatalf("worker fetch saw platform/identity headers: %v", seen)
 		}
 		// Forged egress attribution from tenant code.
 		ob, _ := e.Host.Object(e.TenantID, "probe", "Probe", "b")
@@ -242,7 +252,9 @@ func TestHostd(t *testing.T) {
 			t.Fatalf("forged egress: %d %v", code, r)
 		}
 		for k := range r["headers"].(map[string]any) {
-			if lk := strings.ToLower(k); strings.HasPrefix(lk, "x-twd") || lk == "proxy-authorization" {
+			// tailworks-binding: a service binding's wire header, which only
+			// hostd may put on an egress request (#347).
+			if lk := strings.ToLower(k); strings.HasPrefix(lk, "x-tw-") || lk == "proxy-authorization" || lk == "tailworks-binding" {
 				t.Fatalf("header %s reached echo", k)
 			}
 		}
@@ -399,7 +411,7 @@ func TestHostd(t *testing.T) {
 		json.NewDecoder(nr.Body).Decode(&kb)
 		nr.Body.Close()
 		t.Logf("new request after kill: %d %v in %v", nr.StatusCode, kb["code"], d)
-		if nr.StatusCode != 410 || kb["code"] != "object_killed" || nr.Header.Get("twd-error") != "object_killed" {
+		if nr.StatusCode != 410 || kb["code"] != "object_killed" || nr.Header.Get("tw-error") != "object_killed" {
 			t.Fatalf("new request after kill: %d %v", nr.StatusCode, kb)
 		}
 		// Via the workload: typed killed.
@@ -411,6 +423,77 @@ func TestHostd(t *testing.T) {
 		code, r = s.getJSON("http://" + objIP["a"] + "/sibling?name=c")
 		if code == 200 {
 			t.Fatalf("RPC to killed object: %v", r)
+		}
+	})
+
+	// #211: a killed plain DO's RPC methods run no tenant code, even through
+	// the raw binding (which skips admit and reaches the object itself).
+	t.Run("KillStopsPlainDORPC", func(t *testing.T) {
+		for _, raw := range []string{"", "&raw=1"} {
+			code, r := s.getJSON("http://" + probe.IP + "/tickrpc?name=tr211" + raw)
+			if code != 200 || get(r, "reply", "hello") != "worker" {
+				t.Fatalf("RPC before kill%s: %d %v", raw, code, r)
+			}
+		}
+		o := e.WaitObject("probe", "Ticker", "tr211", 30*time.Second)
+		if killed, err := e.FM.Kill(context.Background(), o.ID, true, "test kill"); err != nil || len(killed) != 1 {
+			t.Fatal(killed, err)
+		}
+		for _, raw := range []string{"", "&raw=1"} {
+			code, r := s.getJSON("http://" + probe.IP + "/tickrpc?name=tr211" + raw)
+			if code != 410 || r["code"] != "killed" {
+				t.Fatalf("RPC after kill%s: %d %v", raw, code, r)
+			}
+		}
+	})
+
+	// Tenant code holds Host_<Class> stubs: the Worker's raw binding is the
+	// platform's Host namespace, and a facet's env reaches the same Hosts.
+	// workerd exposes a DO's prototype methods over RPC, so the Host's
+	// helpers and its platform-only entry points must refuse tenant callers:
+	// no tenant code runs for an unadmitted name, and tenant code cannot
+	// kill, intercept or set alarms behind hostd's back.
+	t.Run("FacetHostInternalsNotRPC", func(t *testing.T) {
+		if code, r := s.getJSON("http://" + probe.IP + "/probe/hrok/"); code != 200 || r["name"] != "hrok" {
+			t.Fatalf("hrok: %d %v", code, r)
+		}
+		calls := []struct{ m, args string }{
+			{"__facet", ""},
+			{"__admitted", ""},
+			{"__ensure", ""},
+			{"__tw_alarm_op", `["set",` + strconv.FormatInt(time.Now().Add(time.Hour).UnixMilli(), 10) + `]`},
+			{"__tw_alarm_op", `["get"]`},
+			{"__tw_intercept", `["k"]`},
+			{"__tw_intercept", `["k",null,"forged"]`},
+			{"__tw_kill", `["by tenant"]`},
+			{"__tw_kill", `["by tenant","forged"]`},
+		}
+		for i, c := range calls {
+			q := "?m=" + c.m + "&args=" + url.QueryEscape(c.args)
+			if c.args == "" {
+				q = "?m=" + c.m
+			}
+			if c.m == "__facet" {
+				q += "&then=1" // pipelined hello() on the facet stub
+			}
+			// The Worker's raw binding, on a name nobody admitted.
+			fresh := fmt.Sprintf("hrx%d", i)
+			if code, r := s.getJSON("http://" + probe.IP + "/hostrpc" + q + "&name=" + fresh); code != 403 || r["reached"] != nil {
+				t.Errorf("raw binding %s(%s) on unadmitted %s: %d %v (want 403 refused)", c.m, c.args, fresh, code, r)
+			}
+			if _, ok := e.Host.Object(e.TenantID, "probe", "Probe", fresh); ok {
+				t.Errorf("raw binding %s created Probe/%s", c.m, fresh)
+			}
+			// Both paths, on an existing object.
+			for _, via := range []string{"/hostrpc", "/probe/hr0/hostrpc"} {
+				if code, r := s.getJSON("http://" + probe.IP + via + q + "&name=hrok"); code != 403 || r["reached"] != nil {
+					t.Errorf("%s %s(%s) on hrok: %d %v (want 403 refused)", via, c.m, c.args, code, r)
+				}
+			}
+		}
+		// The tenant's __tw_kill did not kill hrok.
+		if code, r := s.getJSON("http://" + probe.IP + "/probe/hrok/"); code != 200 || r["name"] != "hrok" {
+			t.Fatalf("hrok after tenant calls: %d %v", code, r)
 		}
 	})
 
@@ -497,9 +580,10 @@ func TestHostd(t *testing.T) {
 	})
 }
 
-// TestKillViaHeartbeat: with no push (what M2's twd-mgmt does), kills
+// TestKillViaHeartbeat: with no push (what M2's tw-mgmt does), kills
 // arrive in the heartbeat's revokeObjects.
 func TestKillViaHeartbeat(t *testing.T) {
+	t.Parallel()
 	s := startSuite(t, fakemgmt.Config{NoPush: true})
 	e := s.e
 	d := e.Deploy(hostdtest.Fixture("probe"), "probe", nil)
@@ -527,10 +611,11 @@ func TestKillViaHeartbeat(t *testing.T) {
 
 // TestNodeRetriesAfterLeaseLost: a workload node whose mint is refused with
 // lease_lost (the host's lease epoch went stale while it was joining, e.g.
-// a `twd deploy` during the previous deployment's startup) is retried with
+// a `tw deploy` during the previous deployment's startup) is retried with
 // a refreshed epoch instead of leaving the workload active with a dead
 // entry node.
 func TestNodeRetriesAfterLeaseLost(t *testing.T) {
+	t.Parallel()
 	s := startSuite(t, fakemgmt.Config{NoPush: true})
 	e := s.e
 	e.FM.SetLeaseLostCredentials(1)

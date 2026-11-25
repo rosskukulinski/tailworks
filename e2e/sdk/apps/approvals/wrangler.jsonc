@@ -1,0 +1,14 @@
+{
+  "name": "approvals",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "durable_objects": {
+    "bindings": [
+      { "name": "RefundAgent", "class_name": "RefundAgent" },
+      { "name": "PlainRefundAgent", "class_name": "PlainRefundAgent" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RefundAgent", "PlainRefundAgent"] }],
+  // Cloudflare Workflows on workerd's built-in engine (ADR-040).
+  "workflows": [{ "name": "refund", "binding": "REFUND_WORKFLOW", "class_name": "RefundWorkflow" }]
+}

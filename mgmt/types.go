@@ -7,16 +7,15 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/rosskukulinski/twd/internal/container"
-	"github.com/rosskukulinski/twd/internal/publicspec"
+	"github.com/rosskukulinski/tailworks/internal/container"
+	"github.com/rosskukulinski/tailworks/internal/publicspec"
 )
 
-// Mint modes.
+// Mint modes (MintHeadscale is in headscale.go; the removed modes are in
+// mintmodes.go).
 const (
-	MintAPIKey = "apikey"
-	MintWIF    = "wif"
 	// MintOAuth (M12): a Tailscale OAuth client whose secret stays in a
-	// 0600 file on the mgmt host; the default for self-hosted installs.
+	// 0600 file on the mgmt host. The only mint mode for Tailscale tailnets.
 	MintOAuth = "oauth"
 )
 
@@ -52,13 +51,11 @@ const (
 
 // Tenant is one customer tailnet.
 type Tenant struct {
-	ID                   string `json:"tenantID"`
-	Tailnet              string `json:"tailnet"`
-	ControlURL           string `json:"controlURL,omitempty"`
-	MintMode             string `json:"mintMode"`
-	APIKeyFile           string `json:"apiKeyFile,omitempty"` // path only; the key is read at use and never stored
-	WIFClientID          string `json:"wifClientID,omitempty"`
-	WIFLifecycleClientID string `json:"wifLifecycleClientID,omitempty"` // optional (RFC §4.4 credential 2)
+	ID         string `json:"tenantID"`
+	Tailnet    string `json:"tailnet"`
+	ControlURL string `json:"controlURL,omitempty"`
+	MintMode   string `json:"mintMode"`
+	APIKeyFile string `json:"apiKeyFile,omitempty"` // headscale: path only; the key is read at use and never stored
 	// OAuthClientID is the OAuth client's public ID; OAuthClientFile the
 	// absolute path of its 0600 credential file (the secret is read at
 	// use and never stored).
@@ -71,16 +68,31 @@ type Tenant struct {
 	MaxContainers      int     `json:"maxContainers"`
 	MaxContainerMemMiB int     `json:"maxContainerMemMiB"`
 	MaxContainerVCPU   float64 `json:"maxContainerVCPU"`
+
+	// Storage quotas (quota.go; 0 = unlimited, the default): the bytes
+	// kept by all the tenant's platform stores (KV, D1, R2 index), by all
+	// its queues, and how many platform stores it may have.
+	MaxStoreBytes int64 `json:"maxStoreBytes,omitempty"`
+	MaxQueueBytes int64 `json:"maxQueueBytes,omitempty"`
+	MaxStores     int   `json:"maxStores,omitempty"`
+
 	// Pool places the tenant's deployments on hosts with the same pool
 	// ("" = any host). Tier is the default isolation tier.
 	Pool string `json:"pool,omitempty"`
 	Tier string `json:"tier,omitempty"`
 	// PublicIngress is the operator gate for public (Funnel) ingress
-	// (ADR-029 D1): PublicAllow lets the tenant's twd.jsonc "public" routes
+	// (ADR-029 D1): PublicAllow lets the tenant's tailworks.jsonc "public" routes
 	// take effect; "" or PublicDeny refuses them.
 	PublicIngress string `json:"publicIngress,omitempty"`
 	CreatedAt     int64  `json:"createdAt"`
 	UpdatedAt     int64  `json:"updatedAt"`
+
+	// Several tenants on one tailnet (ADR-043, teams.go):
+	// OwnerTag owns the tenant's tags and scopes its OAuth client
+	// ("" = tag:tw); NamePrefix goes in front of every tailnet name tailworks
+	// generates for it ("" = none).
+	OwnerTag   string `json:"ownerTag,omitempty"`
+	NamePrefix string `json:"namePrefix,omitempty"`
 }
 
 // Tenant.PublicIngress values.
@@ -90,16 +102,16 @@ const (
 )
 
 // PublicAllowed reports whether the tenant's gate lets public routes take effect.
-func (t Tenant) PublicAllowed() bool { return t.PublicIngress == PublicAllow }
+func (t Tenant) PublicAllowed() bool { return t.PublicIngress == PublicAllow && !t.Headscale() }
 
-// DeploymentPublic is a deployment's validated twd.jsonc "public" (ADR-029),
+// DeploymentPublic is a deployment's validated tailworks.jsonc "public" (ADR-029),
 // plus the per-class public-create settings, persisted with the deployment.
 type DeploymentPublic struct {
 	Spec    publicspec.Spec                 `json:"spec"`
 	Classes map[string]publicspec.ClassSpec `json:"classes,omitempty"`
 }
 
-// WorkloadPublic is a workload's `twd expose` setting. It outlives
+// WorkloadPublic is a workload's `tw expose` setting. It outlives
 // deployments; a workload that was never toggled is exposed.
 type WorkloadPublic struct {
 	TenantID  string `json:"tenantID"`
@@ -109,7 +121,7 @@ type WorkloadPublic struct {
 	UpdatedBy string `json:"updatedBy,omitempty"`
 }
 
-// Host is a twd-hostd instance.
+// Host is a tw-hostd instance.
 type Host struct {
 	ID            string   `json:"hostID"`
 	CapacityNodes int      `json:"capacityNodes"`
@@ -121,8 +133,12 @@ type Host struct {
 	Capacity    *HostCapacity `json:"capacity,omitempty"`
 	Usage       *HostUsage    `json:"usage,omitempty"`
 	NodeID      string        `json:"nodeID,omitempty"`      // operator-tailnet stable node ID (tsnet mode)
-	AuditPubKey string        `json:"auditPubKey,omitempty"` // base64 ed25519, verifies hostSig
-	Pool        string        `json:"pool,omitempty"`
+	AuditPubKey string        `json:"auditPubKey,omitempty"` // base64 ed25519, verifies hostSig; pinned on first bind
+	// RegistrationSecretHash is hex(SHA-256) of the one-time secret POST
+	// /v1/hosts handed out; the first tailnet PUT /v1/hosts/{id} must present
+	// the secret, after which the hash is cleared. Never serialised.
+	RegistrationSecretHash string `json:"-"`
+	Pool                   string `json:"pool,omitempty"`
 	// PushPort is hostd's push listener on its own tsnet node (0 = none;
 	// local-dev hosts register a unix:// push URL instead).
 	PushPort int `json:"pushPort,omitempty"`
@@ -132,8 +148,22 @@ type Host struct {
 	PushTarget string `json:"-"`
 	LiveNodes  int    `json:"liveNodes"`
 	LastSeen   int64  `json:"lastSeen"` // unix ms
-	CreatedAt  int64  `json:"createdAt"`
-	UpdatedAt  int64  `json:"updatedAt"`
+
+	// Version, Protocols and Features are what the host reported at its
+	// last registration (ADR-041 §7). Version "" = a
+	// hostd from before version reporting (0.1.x).
+	Version   string         `json:"version,omitempty"`
+	OS        string         `json:"os,omitempty"` // GOOS ("" = not reported)
+	Protocols map[string]int `json:"protocols,omitempty"`
+	Features  []string       `json:"features,omitempty"`
+
+	// CordonedAt (unix ms, 0 = not cordoned) and CordonedBy: a cordoned
+	// host keeps what it runs but takes no new placements (§5).
+	CordonedAt int64  `json:"cordonedAt,omitempty"`
+	CordonedBy string `json:"cordonedBy,omitempty"`
+
+	CreatedAt int64 `json:"createdAt"`
+	UpdatedAt int64 `json:"updatedAt"`
 }
 
 // HostCapacity is a host's capacity vector (api/openapi.yaml HostCapacity).
@@ -165,7 +195,7 @@ const (
 	CapContainers = "containers"
 )
 
-// Pending reports a host created by `twd host add` that never registered.
+// Pending reports a host created by `tw host add` that never registered.
 func (h Host) Pending() bool { return h.LastSeen == 0 }
 
 // Live reports whether the host heartbeated within the host lease TTL.
@@ -173,15 +203,23 @@ func (h Host) Live(now time.Time) bool {
 	return now.UnixMilli()-h.LastSeen <= HostLeaseTTL.Milliseconds()
 }
 
-// ClassConfig is one DO namespace from twd.jsonc tailnet.objects.
+// ClassConfig is one DO namespace from tailworks.jsonc tailnet.objects.
 type ClassConfig struct {
 	Class string   `json:"class"`
 	Tags  []string `json:"tags"`
-	Agent bool     `json:"agent,omitempty"`
 	TTL   string   `json:"ttl,omitempty"`
 	// Service (the _workload namespace only) is the Tailscale Service the
-	// workload entry node hosts (twd.jsonc tailnet.service).
+	// workload entry node hosts (tailworks.jsonc tailnet.service).
 	Service string `json:"service,omitempty"`
+	// ReplicaOf (the _workload namespace of replicas 2..N only) names the
+	// workload this deployment is a replica of (tailworks.jsonc "replicas");
+	// Replicas (replica 1, the workload itself) is how many there are.
+	ReplicaOf string `json:"replicaOf,omitempty"`
+	Replicas  int    `json:"replicas,omitempty"`
+
+	// PreviewOf (the _workload namespace of previews only) names the
+	// workload this deployment previews (ADR-048).
+	PreviewOf string `json:"previewOf,omitempty"`
 }
 
 // Deployment is one deploy of a workload.
@@ -196,7 +234,7 @@ type Deployment struct {
 	Epoch      int64         `json:"epoch"`
 	Bundle     []byte        `json:"-"`
 	// DeployedBy is who ran the deploy: the WhoIs login of a tailnet
-	// caller (`twd link`), or the local actor on the unix socket.
+	// caller (`tw link`), or the local actor on the unix socket.
 	DeployedBy string `json:"deployedBy,omitempty"`
 	CreatedAt  int64  `json:"createdAt"`
 	// StoppedAt is set by undeploy (DELETE /v1/deployments/{id}).
@@ -322,7 +360,7 @@ type AuditRecord struct {
 	Raw       json.RawMessage `json:"raw,omitempty"` // host records: the record exactly as submitted (hash input)
 }
 
-// Error is a typed API error (DX.md catalog shape).
+// Error is a typed API error (the typed error catalog shape, docs/errors.md).
 type Error struct {
 	Status  int            `json:"-"`
 	Code    string         `json:"code"`
@@ -333,13 +371,22 @@ type Error struct {
 	TraceID string         `json:"trace_id"`
 	// RetryAfter (seconds), when set, is sent as the Retry-After header.
 	RetryAfter int `json:"-"`
+
+	// hostNames (misdirected_request only) are mgmt's own names, for the
+	// browser error page's fix (errors_html.go). Never serialized.
+	hostNames []string
 }
 
 func (e *Error) Error() string { return e.Code + ": " + e.Message }
 
+// DocBase is the prefix of every error's doc_url: the heading of the code
+// in the typed error catalog (docs/errors.md). It equals netd.DocBase;
+// mgmt keeps its own copy so it does not import netd.
+const DocBase = "https://github.com/rosskukulinski/tailworks/blob/master/docs/errors.md#"
+
 func errf(status int, code, format string, a ...any) *Error {
 	return &Error{Status: status, Code: code, Message: fmt.Sprintf(format, a...),
-		DocURL: "https://twd.dev/errors/" + code}
+		DocURL: DocBase + code}
 }
 
 // Store errors.

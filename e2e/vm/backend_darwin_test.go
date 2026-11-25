@@ -11,12 +11,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rosskukulinski/twd/hostd/sandbox"
-	"github.com/rosskukulinski/twd/hostd/vm"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/hostd/vm"
 )
 
 // Virtualization.framework (ADR-032 D7). There is no jailer: each guest
-// runs in its own twd-vz process and its own Virtualization.framework VM
+// runs in its own tw-vz process and its own Virtualization.framework VM
 // service (Apple's sandboxed XPC process). The framework refuses to save
 // this VM's state (see vm.Machine.MemoryDump), so the no-keys scan covers
 // the disks and the guest's files, not its RAM.
@@ -54,8 +54,8 @@ func (vzBackend) poolStats() any { return nil }
 
 // newBackend: pool and snapshot are Firecracker's (ignored here).
 func newBackend(kernel, rootfs string, vcpus, _ int, _ bool) (testBackend, map[string]any, error) {
-	be, err := vm.New(vm.Config{VMM: os.Getenv("TWD_VZ_VMM"), Kernel: kernel, Rootfs: rootfs, MemMiB: 512, VCPUs: vcpus,
-		BootArgs: os.Getenv("TWD_VM_BOOTARGS"), Rosetta: os.Getenv("TWD_VM_ROSETTA") != ""})
+	be, err := vm.New(vm.Config{VMM: os.Getenv("TW_VZ_VMM"), Kernel: kernel, Rootfs: rootfs, MemMiB: 512, VCPUs: vcpus,
+		BootArgs: os.Getenv("TW_VM_BOOTARGS"), Rosetta: os.Getenv("TW_VM_ROSETTA") != ""})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -74,7 +74,7 @@ func checkIsolated(t *testing.T, w string, info *sandbox.Info) map[string]any {
 		pid  int
 		want string
 		key  string
-	}{{info.PID, "twd-vz", "vmm"}, {info.ServicePID, "com.apple.Virtualization.VirtualMachine", "vm_service"}} {
+	}{{info.PID, "tw-vz", "vmm"}, {info.ServicePID, "com.apple.Virtualization.VirtualMachine", "vm_service"}} {
 		b, _ := exec.Command("/bin/ps", "-o", "comm=", "-p", strconv.Itoa(p.pid)).Output()
 		comm := strings.TrimSpace(string(b))
 		if !strings.Contains(comm, p.want) {

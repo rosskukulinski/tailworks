@@ -1,0 +1,15 @@
+{
+  // e2e/vm cron_test.go: cron triggers on the microVM tier.
+  "name": "vmcron",
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-01",
+  "durable_objects": {
+    "bindings": [{ "name": "LOG", "class_name": "Log" }],
+  },
+  "triggers": {
+    "crons": [
+      "* * * * *", // every minute: the host's own scheduler loop
+      "0 0 1 1 *", // run on demand by the test (RunCron)
+    ],
+  },
+}

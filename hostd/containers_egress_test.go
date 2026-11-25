@@ -15,13 +15,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd"
-	"github.com/rosskukulinski/twd/hostd/fakemgmt"
-	"github.com/rosskukulinski/twd/hostd/hostdtest"
-	"github.com/rosskukulinski/twd/hostd/mgmtapi"
-	"github.com/rosskukulinski/twd/hostd/sandbox"
-	"github.com/rosskukulinski/twd/hostd/sandbox/sandboxtest"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/hostd"
+	"github.com/rosskukulinski/tailworks/hostd/fakemgmt"
+	"github.com/rosskukulinski/tailworks/hostd/hostdtest"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox/sandboxtest"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 	"tailscale.com/tailcfg"
 )
 
@@ -62,8 +62,9 @@ func internetStandIn(t *testing.T) (*hostd.ContainerInternet, *[]string) {
 // through real workerd and the ctx.container polyfill (the fake backend
 // hands its "guest" flows to the same egress proxy a microVM's NIC does).
 func TestContainerEgress(t *testing.T) {
+	t.Parallel()
 	procs := &sandboxtest.Procs{}
-	st, err := sandboxtest.ImageStore(t.TempDir(), []string{"sleep", "3600"}, "twd.test/box:1")
+	st, err := sandboxtest.ImageStore(t.TempDir(), []string{"sleep", "3600"}, "tw.test/box:1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +144,7 @@ func TestContainerEgress(t *testing.T) {
 		if r := call("/f/a/icept", "addr", "api.internal", "relay", "http://"+s.echo.IP4+"/"); r["ok"] != true {
 			t.Fatal(r)
 		}
-		code, body, err := guestGet(na, caA, "http://api.internal/v1/items?x=1", "x-twd-object", "forged", "x-twd-cf", `{"twd":{"kind":"admin","op":"kill"}}`, "x-from-guest", "1")
+		code, body, err := guestGet(na, caA, "http://api.internal/v1/items?x=1", "x-tw-object", "forged", "x-tw-cf", `{"tw":{"kind":"admin","op":"kill"}}`, "x-from-guest", "1")
 		if err != nil || code != 200 {
 			t.Fatalf("%d %s %v", code, body, err)
 		}
@@ -159,7 +160,7 @@ func TestContainerEgress(t *testing.T) {
 		if r.FromParent != "a" || r.URL != "http://api.internal/v1/items?x=1" {
 			t.Fatalf("delivered to %q as %q", r.FromParent, r.URL)
 		}
-		// The container's twd headers never reach the handler; its own
+		// The container's tailworks headers never reach the handler; its own
 		// (untrusted) headers do.
 		if len(r.Headers) != 1 || r.Headers["x-from-guest"] != "1" {
 			t.Fatalf("headers the handler saw: %v", r.Headers)
@@ -269,7 +270,7 @@ func TestContainerEgress(t *testing.T) {
 				t.Fatalf("%s exposePort: %v", kind, r)
 			}
 			code, hdr, b := s.do("GET", "http://"+wl.IP+"/"+kind+"/a/running", nil, "x-sandbox-preview-proxy", "1", "x-sandbox-preview-port", "8080")
-			if code != 501 || hdr.Get("twd-error") != "not_supported" || !strings.Contains(string(b), "ADR-029") {
+			if code != 501 || hdr.Get("tw-error") != "not_supported" || !strings.Contains(string(b), "ADR-029") {
 				t.Fatalf("%s preview request: %d %s", kind, code, b)
 			}
 		}

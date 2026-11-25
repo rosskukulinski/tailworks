@@ -14,18 +14,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd/bundle"
-	"github.com/rosskukulinski/twd/hostd/gen"
-	"github.com/rosskukulinski/twd/hostd/hostdtest"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/hostd/bundle"
+	"github.com/rosskukulinski/tailworks/hostd/gen"
+	"github.com/rosskukulinski/tailworks/hostd/hostdtest"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 )
 
-// fakeHost plays twd-hostd's side of the sockets (no tailnet): it verifies
+// fakeHost plays tw-hostd's side of the sockets (no tailnet): it verifies
 // facet egress MACs and echoes the attribution it would use.
 type fakeHost struct {
-	mu  sync.Mutex
-	ops []map[string]any
-	key string
+	mu       sync.Mutex
+	ops      []map[string]any
+	key      string
+	admitted map[string]bool // names admitted for creation (as hostd records them)
 }
 
 func (f *fakeHost) serve(t *testing.T, sock string, h http.Handler) {
@@ -46,31 +47,49 @@ func (f *fakeHost) api() http.Handler {
 		f.mu.Lock()
 		f.ops = append(f.ops, body)
 		f.mu.Unlock()
-		// ADR-029: only objects named "pub-ok*" exist (or are admitted) for
-		// public requests.
-		pubOK := strings.HasPrefix(fmtAny(body["name"]), "pub-ok")
+		// Create admission, as hostd decides it: an attested object (as) or a
+		// request with a create ticket may admit any name; a public request
+		// (no ticket) only names "pub-ok*" (they exist, or public.create
+		// allows them). ensure then creates only admitted names: "pub-adm*"
+		// stands in for a name a bypassed guard reached without admission
+		// (hostd refuses the create itself).
+		name := fmtAny(body["name"])
 		if as, ok := body["as"].(map[string]any); ok && body["op"] == "ensure" {
-			pubOK = strings.HasPrefix(fmtAny(as["name"]), "pub-ok")
+			name = fmtAny(as["name"])
 		}
-		denyPublic := func() {
+		pubOK := strings.HasPrefix(name, "pub-ok")
+		_, hasTicket := body["ticket"].(string)
+		_, hasAs := body["as"].(map[string]any)
+		deny := func(code, msg string) {
 			w.Header().Set("content-type", "application/json")
 			w.WriteHeader(403)
-			w.Write([]byte(`{"code":"public_create_denied","message":"no such object for a public request"}`))
+			w.Write([]byte(`{"code":"` + code + `","message":"` + msg + `"}`))
 		}
 		switch body["op"] {
 		case "admit":
-			// "pub-adm*" passes admit but not ensure{public}: it stands in
-			// for a tenant-side guard that was bypassed, so the Host DO's
-			// own check is what refuses it.
-			if !pubOK && !strings.HasPrefix(fmtAny(body["name"]), "pub-adm") {
-				denyPublic()
+			// "pub-adm*": the guard's admit passes but hostd never records an
+			// admission, standing in for a guard that was bypassed or lied.
+			pubAdm := strings.HasPrefix(name, "pub-adm")
+			if !hasTicket && !hasAs && !pubOK && !pubAdm {
+				deny("public_create_denied", "no such object for a public request")
 				return
 			}
-			json.NewEncoder(w).Encode(map[string]any{"ok": true, "existing": true})
+			if !pubAdm {
+				f.mu.Lock()
+				if f.admitted == nil {
+					f.admitted = map[string]bool{}
+				}
+				f.admitted[name] = true
+				f.mu.Unlock()
+			}
+			json.NewEncoder(w).Encode(map[string]any{"ok": true, "existing": pubOK})
 			return
 		case "ensure":
-			if body["public"] == true && !pubOK {
-				denyPublic()
+			f.mu.Lock()
+			adm := f.admitted[name]
+			f.mu.Unlock()
+			if !adm && !pubOK {
+				deny("create_not_admitted", "object "+name+" does not exist and no request admitted its creation")
 				return
 			}
 		}
@@ -96,11 +115,18 @@ func fmtAny(v any) string {
 
 func (f *fakeHost) egressObj() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodConnect {
+			f.connect(w, r, true) // connect_test.go
+			return
+		}
 		cls, name, ok := gen.VerifyEgress(f.key, r.Header, r.Method, r.RequestURI, time.Now())
 		if !ok {
-			w.Header().Set("twd-error", "unknown_object")
+			w.Header().Set("tw-error", "unknown_object")
 			w.WriteHeader(403)
 			json.NewEncoder(w).Encode(map[string]any{"code": "unknown_object", "uri": r.RequestURI, "h": r.Header})
+			return
+		}
+		if egressRedirect(w, r) { // egress_sink_test.go
 			return
 		}
 		json.NewEncoder(w).Encode(map[string]any{"as": cls + "/" + name, "url": r.RequestURI, "headers": r.Header})
@@ -109,6 +135,13 @@ func (f *fakeHost) egressObj() http.Handler {
 
 func (f *fakeHost) egressWL() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodConnect {
+			f.connect(w, r, false) // connect_test.go
+			return
+		}
+		if egressRedirect(w, r) { // egress_sink_test.go
+			return
+		}
 		json.NewEncoder(w).Encode(map[string]any{"as": "workload", "url": r.RequestURI, "headers": r.Header})
 	})
 }
@@ -118,6 +151,9 @@ type inst struct {
 	hc  *http.Client
 	cmd *exec.Cmd
 	f   *fakeHost
+
+	cfg string // config.capnp
+	log string // workerd's stdout and stderr
 }
 
 func start(t *testing.T, appDir string, vars map[string]string) *inst {
@@ -125,24 +161,40 @@ func start(t *testing.T, appDir string, vars map[string]string) *inst {
 	if !hostdtest.HasNode() {
 		t.Skip("node not available")
 	}
-	wdBin, err := nettest.WorkerdBinary()
-	if err != nil {
-		t.Skip(err)
-	}
 	files, err := hostdtest.Build(appDir, vars)
 	if err != nil {
 		t.Fatal(err)
+	}
+	return startFiles(t, files)
+}
+
+// startFiles runs an already-built bundle (path -> contents).
+func startFiles(t *testing.T, files map[string][]byte) *inst {
+	t.Helper()
+	return startFilesOpts(t, files, nil)
+}
+
+// startFilesOpts is startFiles with mod applied to the generator options.
+func startFilesOpts(t *testing.T, files map[string][]byte, mod func(*gen.Options)) *inst {
+	t.Helper()
+	wdBin, err := nettest.WorkerdBinary()
+	if err != nil {
+		t.Skip(err)
 	}
 	app, err := bundle.Parse(files)
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir, err := hostdtest.ShortDir("twd-gen-")
+	dir, err := hostdtest.ShortDir("tw-gen-")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
-	res, err := gen.Generate(app, gen.Options{Dir: filepath.Join(dir, "i1"), DOStorage: filepath.Join(dir, "do"), DeploymentID: "d1", Workload: app.Name})
+	opts := gen.Options{Dir: filepath.Join(dir, "i1"), DOStorage: filepath.Join(dir, "do"), DeploymentID: "d1", Workload: app.Name}
+	if mod != nil {
+		mod(&opts)
+	}
+	res, err := gen.Generate(app, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +203,7 @@ func start(t *testing.T, appDir string, vars map[string]string) *inst {
 	f.serve(t, res.Sockets.EgressObj, f.egressObj())
 	f.serve(t, res.Sockets.EgressWL, f.egressWL())
 	logf, _ := os.Create(filepath.Join(dir, "workerd.log"))
-	cmd := exec.Command(wdBin, "serve", res.Config, "--experimental")
+	cmd := exec.Command(wdBin, append([]string{"serve", res.Config, "--experimental"}, pythonArgs(t, app)...)...) // python_test.go
 	cmd.Stdout, cmd.Stderr = logf, logf
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -168,14 +220,22 @@ func start(t *testing.T, appDir string, vars map[string]string) *inst {
 		return (&net.Dialer{}).DialContext(ctx, "unix", res.Sockets.Ingress)
 	}}}
 	in := &inst{t: t, hc: hc, cmd: cmd, f: f}
-	deadline := time.Now().Add(20 * time.Second)
+	in.cfg, in.log = res.Config, filepath.Join(dir, "workerd.log")
+	// A Python Worker loads Pyodide before workerd listens: seconds on an
+	// idle machine, past 20 s on a loaded CI runner (#428).
+	wait := 20 * time.Second
+	if app.Python {
+		wait = 90 * time.Second
+	}
+	t0 := time.Now()
 	for {
 		code, _, _ := in.get("/", map[string]any{"kind": "admin", "op": "health"})
 		if code == 200 {
+			t.Logf("workerd up in %v", time.Since(t0).Round(time.Millisecond))
 			break
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("workerd did not come up")
+		if time.Since(t0) > wait {
+			t.Fatalf("workerd did not come up within %v", wait)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -184,11 +244,38 @@ func start(t *testing.T, appDir string, vars map[string]string) *inst {
 
 var testCaller = map[string]any{"nodeId": "nCLIENT", "node": "ttest-client.ttest.ts.net.", "hostname": "ttest-client", "addrs": []string{"100.64.0.9"}, "tags": []string{}, "capMap": map[string]any{}}
 
-func (in *inst) get(path string, twd map[string]any, hdr ...string) (int, http.Header, map[string]any) {
+// ticketed adds hostd's create ticket to a simulated cf.tw (tailnet
+// requests and cron runs carry one; public requests never do).
+func (in *inst) ticketed(tw map[string]any) map[string]any {
+	out := map[string]any{"ticket": gen.CreateTicket(in.f.key, "tr-test", time.Now())}
+	for k, v := range tw {
+		out[k] = v
+	}
+	return out
+}
+
+// sealed is cf.tailscale as hostd sends it for a tailnet request: netd's
+// caller plus hostd's seal (RT3-08; without it the platform drops the caller).
+func (in *inst) sealed() map[string]any {
+	cb, _ := json.Marshal(testCaller)
+	return map[string]any{"caller": testCaller, "seal": gen.SealCaller(in.f.key, cb, time.Now())}
+}
+
+func (in *inst) get(path string, tw map[string]any, hdr ...string) (int, http.Header, map[string]any) {
+	if tw["kind"] == "object" {
+		// Delivered on the object's own node: in hostd the object exists, so
+		// its ensure is a wake. The fake records it as admitted.
+		in.f.mu.Lock()
+		if in.f.admitted == nil {
+			in.f.admitted = map[string]bool{}
+		}
+		in.f.admitted[fmtAny(tw["name"])] = true
+		in.f.mu.Unlock()
+	}
 	req, _ := http.NewRequest("GET", "http://app.local"+path, nil)
-	blob := map[string]any{"tailscale": map[string]any{"caller": testCaller}, "objectId": "o1", "twd": twd}
+	blob := map[string]any{"tailscale": in.sealed(), "objectId": "o1", "tw": in.ticketed(tw)}
 	b, _ := json.Marshal(blob)
-	req.Header.Set("x-twd-cf", string(b))
+	req.Header.Set("x-tw-cf", string(b))
 	for i := 0; i+1 < len(hdr); i += 2 {
 		req.Header.Set(hdr[i], hdr[i+1])
 	}
@@ -230,6 +317,11 @@ func TestGeneratedWrapperProbe(t *testing.T) {
 		if code != 200 || r["as"] != "workload" || r["url"] != "http://echo/x" {
 			t.Fatalf("%d %v", code, r)
 		}
+		// #347: the Worker can't hand hostd a service binding's wire header.
+		code, _, r = in.get("/egress?wire=1&url=http://echo/x", wl)
+		if h, _ := r["headers"].(map[string]any); code != 200 || r["as"] != "workload" || h == nil || h["Tailworks-Binding"] != nil {
+			t.Fatalf("a tenant-set Tailworks-Binding reached hostd's workload egress: %d %v", code, r)
+		}
 	})
 	t.Run("ObjectRoute", func(t *testing.T) {
 		code, _, r := in.get("/", obj("Probe", "a"))
@@ -260,7 +352,7 @@ func TestGeneratedWrapperProbe(t *testing.T) {
 			t.Fatalf("%d %v", code, r)
 		}
 		h := r["headers"].(map[string]any)
-		if h["X-Twd-Object"] != nil || h["Proxy-Authorization"] != nil || h["X-Twd-Cf"] != nil {
+		if h["X-Tw-Object"] != nil || h["Proxy-Authorization"] != nil || h["X-Tw-Cf"] != nil || h["Tailworks-Binding"] != nil {
 			t.Fatalf("forged headers reached hostd: %v", h)
 		}
 	})
@@ -276,12 +368,12 @@ func TestGeneratedWrapperProbe(t *testing.T) {
 			}
 		}
 	})
-	t.Run("TwdObjectPathOnWorkload", func(t *testing.T) {
-		code, _, r := in.get("/_twd/o/Probe/zz/", wl)
+	t.Run("TwObjectPathOnWorkload", func(t *testing.T) {
+		code, _, r := in.get("/_tw/o/Probe/zz/", wl)
 		if code != 200 || r["name"] != "zz" {
 			t.Fatalf("%d %v", code, r)
 		}
-		code, _, r = in.get("/_twd/o/Nope/zz/", wl)
+		code, _, r = in.get("/_tw/o/Nope/zz/", wl)
 		if code != 404 {
 			t.Fatalf("unknown class: %d %v", code, r)
 		}
@@ -362,7 +454,7 @@ func TestGeneratedWrapperProbe(t *testing.T) {
 				t.Fatalf("%s kill: %d %v", c, code, r)
 			}
 			code, h, r := in.get("/", obj(c, "k1"))
-			if code != 410 || h.Get("twd-error") != "killed" {
+			if code != 410 || h.Get("tw-error") != "killed" {
 				t.Fatalf("%s after kill: %d %v", c, code, r)
 			}
 		}

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/rosskukulinski/tailworks/master/schema/tailworks.schema.json",
+  "tailnet": {
+    // the lock service's node: clients call http://locks/locks/<name>/acquire
+    "tags": ["tag:tw-wl-locks"],
+    "objects": {
+      // one object (and tailnet node) per lock name: `tw ls` lists them,
+      // `tw audit <lock>` shows who held it. `tw kill <lock>` is a kill
+      // switch: that name answers 410 for good (kill the holder to free it).
+      // Plain-DO mode: the lock's expiry alarm runs natively.
+      "Lock": { "tags": ["tag:tw-locks-lock"], "egress": "workload" }
+    }
+  }
+  // policy: let the lock's clients reach it, e.g.
+  //   { "src": ["tag:tw-wl-web"], "dst": ["tag:tw-wl-locks"], "ip": ["tcp:80"] }
+  // Don't mark Lock "fence": "never": a lock must never run on two hosts.
+}

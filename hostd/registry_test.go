@@ -14,13 +14,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd/fakemgmt"
-	"github.com/rosskukulinski/twd/hostd/hostdtest"
-	"github.com/rosskukulinski/twd/hostd/mgmtapi"
-	"github.com/rosskukulinski/twd/hostd/sandbox/sandboxtest"
-	"github.com/rosskukulinski/twd/internal/oci"
-	"github.com/rosskukulinski/twd/internal/registry"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/hostd/fakemgmt"
+	"github.com/rosskukulinski/tailworks/hostd/hostdtest"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox/sandboxtest"
+	"github.com/rosskukulinski/tailworks/internal/oci"
+	"github.com/rosskukulinski/tailworks/internal/registry"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 	"tailscale.com/tailcfg"
 )
 
@@ -58,12 +58,13 @@ func pushImage(t *testing.T, dst oci.Target, repo, tag, imageEnv string) (manife
 
 // TestContainerRegistryPull (ADR-032 D3) through hostd + workerd + the
 // polyfill: a deploy pins the upstream image's digest (mirrored into the
-// tenant's namespace) and twd deploy's own build (twd.local/<tenant>/…);
+// tenant's namespace) and tw deploy's own build (tw.local/<tenant>/…);
 // hostd pulls exactly those digests from mgmt's registry as a host and
 // starts containers from them. Retagging upstream after the deploy
 // changes nothing that runs; a tenant naming another tenant's image is
 // refused at deploy.
 func TestContainerRegistryPull(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	procs := &sandboxtest.Procs{}
 	// The upstream registry ("docker.io" in production; mgmt mirrors it).
@@ -84,7 +85,7 @@ func TestContainerRegistryPull(t *testing.T) {
 	})
 	e := s.e
 	tn := e.TenantID
-	// twd deploy's push of its build: the admin (local socket, no host ID).
+	// tw deploy's push of its build: the admin (local socket, no host ID).
 	adm := e.Mgmt.OCI()
 	built, builtCfg := pushImage(t, adm, tn+"/ctr-pbox", "", "built")
 
@@ -92,10 +93,10 @@ func TestContainerRegistryPull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files["twd.jsonc"] = []byte(strings.Replace(strings.Replace(string(files["twd.jsonc"]),
-		`"Box": { "image": "twd.test/box:1" }`, `"Box": { "image": "upstream.test/acme/box:1" }`, 1),
-		`"PBox": { "image": "twd.test/box:1" },`, ``, 1))
-	dep, err := e.DeployBuilt(files, "ctr", map[string]mgmtapi.BuiltImages{"PBox": {Image: "twd.local/" + tn + "/ctr-pbox@" + built}})
+	files["tailworks.jsonc"] = []byte(strings.Replace(strings.Replace(string(files["tailworks.jsonc"]),
+		`"Box": { "image": "tw.test/box:1" }`, `"Box": { "image": "upstream.test/acme/box:1" }`, 1),
+		`"PBox": { "image": "tw.test/box:1" },`, ``, 1))
+	dep, err := e.DeployBuilt(files, "ctr", map[string]mgmtapi.BuiltImages{"PBox": {Image: "tw.local/" + tn + "/ctr-pbox@" + built}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +138,7 @@ func TestContainerRegistryPull(t *testing.T) {
 		t.Fatalf("Box runs %s; pinned upstream v1 is %s (the retag is %s)", ran["Box"], upCfg, v2Cfg)
 	}
 	if ran["PBox"] != builtCfg {
-		t.Fatalf("PBox runs %s, want twd deploy's build %s", ran["PBox"], builtCfg)
+		t.Fatalf("PBox runs %s, want tw deploy's build %s", ran["PBox"], builtCfg)
 	}
 	// The pins recorded for the deployment are what ran.
 	var as []mgmtapi.Assignment
@@ -164,7 +165,7 @@ func TestContainerRegistryPull(t *testing.T) {
 	// Tenant B: naming tenant A's build is refused at deploy (the per-tenant
 	// cache scopes are covered by hostd/image TestPinnedScopes).
 	eb := e.AddTenant(mgmtapi.Tenant{Tailnet: "ttest.ts.net", ControlURL: s.ctl.URL, MintMode: "static"})
-	if _, err := eb.DeployBuilt(files, "ctrb", map[string]mgmtapi.BuiltImages{"PBox": {Image: "twd.local/" + tn + "/ctr-pbox@" + built}}); err == nil ||
+	if _, err := eb.DeployBuilt(files, "ctrb", map[string]mgmtapi.BuiltImages{"PBox": {Image: "tw.local/" + tn + "/ctr-pbox@" + built}}); err == nil ||
 		!strings.Contains(err.Error(), "not in this tenant's registry namespace") {
 		t.Fatalf("tenant B deployed tenant A's image: %v", err)
 	}

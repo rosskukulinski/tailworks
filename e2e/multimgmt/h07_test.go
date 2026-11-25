@@ -11,7 +11,7 @@ import (
 )
 
 // TestMM_H07_DeviceDeleteLostOnCrash probes H07: with -device-delete-delay
-// (twd up uses 8 s), a killed object's device delete waits in memory
+// (tw up uses 8 s), a killed object's device delete waits in memory
 // (time.AfterFunc, m.pending). A replica that dies inside that window never
 // deletes the device, and no other replica knows to.
 // Invariant I6: at quiescence no device is left for a killed object.

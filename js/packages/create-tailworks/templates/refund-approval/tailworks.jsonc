@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/rosskukulinski/tailworks/master/schema/tailworks.schema.json",
+  "tailnet": {
+    // Approvers reach the approval page and POST /_tw/approvals/... on this
+    // workload's node. Who may decide is a tailnet grant of
+    // github.com/rosskukulinski/tailworks/cap/approve to this tag (docs/approvals.md).
+    "tags": ["tag:tw-wl-refunds"],
+    "objects": {
+      // one node per customer's agent
+      "RefundAgent": { "tags": ["tag:tw-agent-refunds"] }
+    }
+  }
+}

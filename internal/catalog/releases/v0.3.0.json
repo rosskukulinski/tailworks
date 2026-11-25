@@ -1,0 +1,132 @@
+{
+  "version": "0.3.0",
+  "date": "2026-11-21",
+  "workerd": "1.20261118.1",
+  "schema": "202611211922_store_degraded",
+  "protocols": {
+    "cliJSON": 1,
+    "guest": 1,
+    "helper": 2,
+    "push": 1,
+    "rest": 1,
+    "vz": 1
+  },
+  "upgrade": [
+    "config-default",
+    "protocol",
+    "schema-expand",
+    "workerd"
+  ],
+  "notes": [
+    {
+      "kind": "fix",
+      "source": "deflake-140.md",
+      "text": "A host that self-fences (it lost its heartbeat to mgmt) now stops claiming\nqueue messages at once. Before, a consumer's long poll that was already\nwaiting could still claim a message sent in the first half second or so\nafter the fence. The host handed it back, since its workload was stopped,\nbut a fenced host must not claim anything."
+    },
+    {
+      "kind": "fix",
+      "source": "deflake-182.md",
+      "text": "A host restart no longer stalls an object for 2 minutes when control has expired the object's node key and its saved state is still marked logged in. That happens to a persistent object, or to an ephemeral one whose logout at shutdown didn't complete. hostd now detects the rejection within about 2 s and joins again under the same hostname with a fresh key. Before, the rejoin waited out the join timeout and held a join slot for the whole time."
+    },
+    {
+      "kind": "security",
+      "source": "deps-112-hygiene.md",
+      "text": "tw-mgmt's API request validation uses kin-openapi v0.149.0 (was v0.142.0),\nwhich fixes eight advisories that govulncheck found reachable from tw-mgmt,\namong them unauthenticated panics on a malformed request\n(GO-2026-6783, GO-2026-6112). How tailworks tracks and ships\nfixes for advisories in what it bundles (Go modules, workerd, Tailscale,\nFirecracker, the guest kernel) is now written down in\ndocs/RELEASING.md, \"Upstream advisories\"."
+    },
+    {
+      "kind": "fix",
+      "upgrade": [
+        "workerd"
+      ],
+      "source": "deps-workerd-1.20261118.1.md",
+      "text": "The pinned workerd moves from 1.20261114.1 to 1.20261118.1. That fixes two\nmemory-safety issues in workerd's Rust JSG bindings (cloudflare/workerd#8401,\n#8403) and several JSG garbage-collection issues, and fixes nested dynamic\nimports (#8517, #8541). A `DigestStream` now stays alive while its sink runs\n(#8533), and `CompressionStream` and `DecompressionStream` gain `\"brotli\"`\n(#8483). Apps don't need changes.\n\nOperator action: workerd moves to 1.20261118.1."
+    },
+    {
+      "kind": "security",
+      "source": "docs-118-security-refresh.md",
+      "text": "The security docs match the code again. `security/THREAT-MODEL.md` describes the\nprocess-tier sandboxes as they are (Seatbelt on macOS; Landlock and seccomp on\nLinux, which confine TCP only with Landlock ABI 4 or later) and adds the\nboundaries for `/mcp`, public ingress, upgrades and the hosts' push API.\n`docs/security-model.md` lists the `/mcp` and release-signature boundaries. Every\nopen item in `security/LEDGER.md` now has a GitHub issue with the `security`\nlabel, and every claim the ledger marks pinned names a test that drives the\ncode tailworks runs. No behaviour changed."
+    },
+    {
+      "kind": "fix",
+      "upgrade": [
+        "config-default"
+      ],
+      "source": "e2e-111-upgrade.md",
+      "text": "`tw up` on a state dir that is already set up now keeps the settings it\nwas set up with (host ID, hostname prefix, control and API URLs,\n`--ephemeral`, `--allow-sibling-egress`, `--local-dev`, warm keys, pool\nnodes, heartbeat, …) unless you pass the flag again. Each flag left out\nused to fall back to its default and was saved. `tw upgrade` restarts a\n`tw up` that doesn't run as a service with `tw up --yes`, so after an\nupgrade, or the rollback of a failed one, tailworks came back with those\ndefaults instead (another host ID, for example), and on a `--local-dev`\nstate the restart failed. `tw upgrade --plan` on a machine where tw isn't\nrunning no longer lists a rollback step: there is no health check then.\n\nOperator action: when upgrading **from v0.2.0**, a rollback restarts\nv0.2.0's own `tw up`, which still has this bug. If an upgrade rolls back,\nrun `tw status` afterwards and, if needed, run `tw up` again with the flags\nyou originally set it up with (for example `--host-id`,\n`--hostname-prefix`, `--ephemeral`). Installs that run as a service\n(`tw up --service`) aren't affected."
+    },
+    {
+      "kind": "fix",
+      "upgrade": [
+        "protocol"
+      ],
+      "source": "fix-106-d1-replay.md",
+      "text": "A platform store (D1 in particular) no longer skips a journal entry it can't apply when it catches up or rebuilds from the journal, and no longer reports itself synced past it. It stops before the entry and is degraded: reads answer from what it applied, writes fail with the new error code `store_degraded` (`409` from the mgmt API, `D1_ERROR: [store_degraded] …` in a Worker), and it tries the entry again on later syncs. `tw d1 export` of a degraded database exports what applied, headed by a comment naming the failing entry; docs/d1.md \"Recovery\" has the steps to rebuild it."
+    },
+    {
+      "kind": "fix",
+      "upgrade": [
+        "schema-expand",
+        "protocol"
+      ],
+      "source": "fix-107-tenant-purge.md",
+      "text": "`tw tenant rm` now deletes everything the tenant owns. Before, it left the\ntenant's KV, D1 and R2 journals, queue messages, workload secrets, store\nand queue data keys, volume keys, notification and telemetry settings and\nits files on hosts behind, where no API could reach them. Now mgmt deletes\nthe tenant's custody entries (the crypto-shred), then every row of the\ntenant in one transaction, and every host removes `tenants/\u003cid\u003e/` and the\ntenant's R2 blobs at its next heartbeat (audited `tenant_purge_host`). The\n`tenant_delete` audit record counts what was removed. If a delete fails part\nway, run `tw tenant rm` again to finish it. Deleting a tenant no longer\nreleases the leases of another tenant whose ID matches it as a `LIKE`\npattern (`_`).\n\nOperator action: hosts with an S3 R2 backend log the prefix\n(`t/\u003ctenant\u003e/`) to delete by hand; mgmt cannot list that bucket. Custody\nentries written before this release by workloads that were never deployed\n(secrets only) are not indexed, so a tenant deleted later can leave them."
+    },
+    {
+      "kind": "fix",
+      "source": "fix-110-supervise-exit.md",
+      "text": "The supervisor (`tw __supervise`) now exits 1 when mgmt or the host stops\non its own: mgmt's listener failed after start (single process), or a\ntw-mgmt or tw-hostd child kept exiting and the supervisor gave up (two\nprocesses). It used to exit 0, which systemd (`Restart=on-failure`) and\nlaunchd (`KeepAlive` on an unsuccessful exit) treat as a clean stop, so a\n`tw up --service` install stayed down. A clean stop (`tw down`,\n`systemctl --user stop`) still exits 0. The exit error (`mgmt_failed` or\n`host_failed`) is in `tw logs --component supervisor`."
+    },
+    {
+      "kind": "fix",
+      "source": "fix-117-worker-egress.md",
+      "text": "A Worker's `fetch()` to an internet name (for example `https://api.github.com/`) is now refused with 403 `internet_egress_unavailable` and a one-line detail that links the gateway recipe (docs/recipes.md \"Call an internet API\"), instead of `peer_not_visible` with a hint about grants that could never help. A tailnet name that isn't in the netmap (a bare short name, a name under a tailnet's MagicDNS suffix, or any `*.ts.net` name) is still `peer_not_visible`. Nothing that was refused is now allowed. The README and docs now say plainly that Workers have no internet egress and that no setting turns it on; `tailnet.egress.internet` applies to containers only. Code that matched `peer_not_visible` for internet URLs should match `internet_egress_unavailable` as well."
+    },
+    {
+      "kind": "security",
+      "upgrade": [
+        "config-default"
+      ],
+      "source": "fix-121-seatbelt.md",
+      "text": "macOS: the process-tier Seatbelt profile is now strict. A workerd or Node\napp can write only its own dirs, open no network except its own unix\nsockets and the TCP ports hostd gives it (a Node app: its egress proxy and\nits own port), signal only itself and its children (not tw-hostd, tw-mgmt or\nother workloads), and exec only its runtime, its own dirs and the OS dirs.\nNode-tier egress on macOS is now reported as `enforced` in `tw status`, and\n`tw doctor`'s sandbox check also probes the write and signal denials.\n\nOperator action: none. If the strict profile breaks a workload, start\ntw-hostd with `-sandbox seatbelt-legacy` (the previous files-only profile;\nkept for one release) and report it."
+    },
+    {
+      "kind": "feature",
+      "upgrade": [
+        "schema-expand",
+        "protocol"
+      ],
+      "source": "fix-147-degraded-stores.md",
+      "text": "mgmt now knows when a platform store is degraded (its object on a host stopped its replay at a journal entry it can't apply, `store_degraded`). The host reports it when it happens and when it heals; mgmt records it on the store (`degraded` on the stores API: the entry's seq, the error, the host and when), audits it (`store_replay_failed`), and shows it in `tw d1 list`, `tw kv namespace ls`, `tw r2 bucket ls`, `tw status` (a new `GET /v1/stores/degraded`) and the console's overview. New: `tw d1 repair \u003cdb\u003e --skip \u003cseq\u003e --yes` (`POST …/stores/{kind}/{name}/repair`) deletes the one entry the database is degraded at from its journal, so every host's replay goes on to the next one and the writes after it are kept; it is audited (`store_repair`) and refused with the new error `store_not_degraded` for any other entry. docs/d1.md \"Recovery\" covers both ways out (skip, or rebuild from an export).\n\nOperator action: none. The migration adds five columns to `stores`. A new tw-hostd against an older tw-mgmt logs a warning when a store is degraded (the report has nowhere to go) and otherwise works as before."
+    },
+    {
+      "kind": "security",
+      "source": "fix-149-uffd-validate.md",
+      "text": "Linux microVM hosts: `tw-vmhelper` now validates the guest memory region table that Firecracker sends when a VM is restored from a snapshot (page size, alignment, sizes, overflow, bounds against the snapshot memory file, overlap). A malformed table, which only a tenant that had already escaped its guest into Firecracker could send, used to crash the root helper and drop every VM on the host; now it fails that one VM's start. The helper also recovers from a panic in any one connection or VM session instead of exiting."
+    },
+    {
+      "kind": "security",
+      "source": "fix-150-terminal-escapes.md",
+      "text": "`tw` no longer prints tenant- or internet-controlled text raw. Before, a\npublic request path, an object name, a tenant's audit note or a line of\nconsole output could carry terminal escape sequences, CR/LF or bidi\noverrides. These could recolour or clear the operator's terminal, or forge\nrows in `tw audit`. Human-readable output (`tw ls`, `tw audit`, `tw logs`,\n`tw kill`, `tw deployments`, `tw previews`, `tw approvals`, the KV, R2,\nqueue and D1 listings, `tw status`, `tw host ls` and error messages) now\nshows control characters escaped, as `\\x1b`, `\\r`, `\\n`, `\\u202e` and so\non. `--json` output decodes to the same values as before. DEL, C1\ncontrols and bidi overrides, which encoding/json leaves raw, are now sent\nas `\\u` escapes."
+    },
+    {
+      "kind": "security",
+      "source": "fix-152-cron-overlap.md",
+      "text": "Cron triggers: a `scheduled()` run now lasts until the promises it passes to\n`ctx.waitUntil()` settle, as on Cloudflare, and is cancelled at the 15-minute\nlimit. Before, work left in `waitUntil` kept running after the run was\nreported done, so the trigger's next run could start beside it. A timed-out\nrun is logged as `cron trigger timed out` (`outcome=exceededTimeout`)."
+    },
+    {
+      "kind": "security",
+      "source": "fix-153-admit-cache.md",
+      "text": "A killed object can no longer be brought back with a new tailnet node by\ncode that was allowed to create it before the kill. A kill now ends every\npermission to create that name: the host forgets any pending create\nadmission and any public-create record for it, and refuses new admissions\nfor the name (`410 killed`) until it is purged. A tenant's deletion forgets\nall of the tenant's admissions. The runtime's per-isolate admit cache keeps\nonly \"this object exists\" answers, for at most 60 seconds, and a plain\nDurable Object's kill clears its entry."
+    },
+    {
+      "kind": "security",
+      "source": "fix-94-kill-window.md",
+      "text": "`tw kill` no longer returns while the killed object can still answer through\nits workload. When a host was already killing the object (the heartbeat had\npicked up the kill), mgmt's kill push used to return at once, before workerd\nhad stopped the object, so a request through the workload could still reach\nit for a moment. The push now waits for that kill to finish. If workerd does\nnot confirm the in-process kill, the host now reports the push as failed\ninstead of succeeded, and the next heartbeat tries again."
+    },
+    {
+      "kind": "security",
+      "source": "go-1.27.4.md",
+      "text": "Binaries are now built with Go 1.27.4, which fixes GO-2026-6859 (a header\nrace in `net/http`'s `MaxBytesReader`). Building from source needs Go 1.27.4\nor later."
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "locks",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-01",
+  "durable_objects": { "bindings": [{ "name": "LOCK", "class_name": "Lock" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Lock"] }],
+  "vars": {
+    // lease length when the client doesn't ask (ms), and the most it may ask
+    // for. Keep MAX_TTL_MS ≤ 10000: a holder's lease must run out before
+    // another host can take this workload over (docs/locks.md "Failure modes").
+    "DEFAULT_TTL_MS": "10000",
+    "MAX_TTL_MS": "10000"
+  }
+}

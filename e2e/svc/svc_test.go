@@ -1,18 +1,18 @@
 //go:build e2esvc
 
-// E2E-SVC on tailnet 1, driven only through the twd CLI: a workload with
-// twd.jsonc tailnet.service. twd up (apikey) → deploy → mgmt created the
-// Service definition (owned by twd) → a tag:ttest client reaches the
+// E2E-SVC on tailnet 1, driven only through the tailworks CLI: a workload with
+// tailworks.jsonc tailnet.service. tw up (apikey) → deploy → mgmt created the
+// Service definition (owned by tailworks) → a tag:ttest client reaches the
 // workload through the Service VIP by name, with its own identity →
-// redeploy keeps the same name and VIP → twd kill of the workload node
-// stops the Service → twd down → zero leftover devices and keys.
+// redeploy keeps the same name and VIP → tw kill of the workload node
+// stops the Service → tw down → zero leftover devices and keys.
 //
-//	TWD_E2E_API_KEY_FILE=~/.config/tailnet-agents-design/tailnet1_api.env TWD_E2E_TAILNET=tail7906d5.ts.net \
+//	TW_E2E_API_KEY_FILE=~/.config/tailnet-agents-design/tailnet1_api.env TW_E2E_TAILNET=tail7906d5.ts.net \
 //	  go test -tags e2esvc -count=1 -v -timeout 20m ./e2e/svc/
 //
-// Policy (tailnet 1, added by hand; twd never writes autoApprovers):
-// tagOwners tag:twd-wl-svc; autoApprovers.services "svc:ttest-svc-hello":
-// ["tag:twd-wl-svc"]; grant tag:ttest → svc:ttest-svc-hello, tag:twd-wl-svc
+// Policy (tailnet 1, added by hand; this test never writes the policy):
+// tagOwners tag:tw-wl-svc; autoApprovers.services "svc:ttest-svc-hello":
+// ["tag:tw-wl-svc"]; grant tag:ttest → svc:ttest-svc-hello, tag:tw-wl-svc
 // tcp:80. Cleanup deletes exactly this run's IDs and the Service.
 package svc
 
@@ -32,16 +32,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/e2e/cliflow"
-	"github.com/rosskukulinski/twd/internal/tsapi"
-	"github.com/rosskukulinski/twd/netd"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/e2e/cliflow"
+	"github.com/rosskukulinski/tailworks/internal/tsapi"
+	"github.com/rosskukulinski/tailworks/netd"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 )
 
 const (
 	prodControl = "https://controlplane.tailscale.com"
 	svcName     = "svc:ttest-svc-hello"
-	wlTag       = "tag:twd-wl-svc"
+	wlTag       = "tag:tw-wl-svc"
 )
 
 var allowedTailnets = map[string]bool{"tail7906d5.ts.net": true}
@@ -64,9 +64,9 @@ type depRes struct {
 }
 
 func TestE2EService(t *testing.T) {
-	keyFile, tailnet := os.Getenv("TWD_E2E_API_KEY_FILE"), os.Getenv("TWD_E2E_TAILNET")
+	keyFile, tailnet := os.Getenv("TW_E2E_API_KEY_FILE"), os.Getenv("TW_E2E_TAILNET")
 	if keyFile == "" || tailnet == "" {
-		t.Skip("TWD_E2E_API_KEY_FILE / TWD_E2E_TAILNET not set")
+		t.Skip("TW_E2E_API_KEY_FILE / TW_E2E_TAILNET not set")
 	}
 	if !allowedTailnets[tailnet] {
 		t.Fatalf("refusing to run against tailnet %q (not in the allow list)", tailnet)
@@ -75,12 +75,15 @@ func TestE2EService(t *testing.T) {
 	if err != nil {
 		t.Skip(err)
 	}
-	t.Setenv("TWD_WORKERD", wd)
+	t.Setenv("TW_WORKERD", wd)
 	apiKey, err := tsapi.LoadEnvFile(keyFile, "TS_API_KEY")
 	if err != nil {
 		t.Fatal(err)
 	}
 	api := &tsapi.Client{Tailnet: tailnet, APIKey: apiKey}
+	// tailworks mints with an OAuth client: this run's own, created with the
+	// harness's API key and deleted when the test ends.
+	oauthFile := cliflow.RealOAuthClientScopes(t, keyFile, tailnet, t.TempDir(), "tw-e2e-svc-oauth", []string{"services"}) // the workload has a Service
 	b := make([]byte, 3)
 	rand.Read(b)
 	run := hex.EncodeToString(b)
@@ -96,15 +99,15 @@ func TestE2EService(t *testing.T) {
 	minter := tsapi.MintSource(api, quiet)
 	tracker := tsapi.NewTracker(api)
 	bin := cliflow.BuildBinaries(t)
-	state := filepath.Join("/tmp", "twd-e2e-svc-"+run)
+	state := filepath.Join("/tmp", "tw-e2e-svc-"+run)
 	work := t.TempDir()
-	e := &cliflow.Env{T: t, BinDir: bin, StateDir: state, WorkDir: work, Tailnet: tailnet, APIKeyFile: keyFile,
+	e := &cliflow.Env{T: t, BinDir: bin, StateDir: state, WorkDir: work, Tailnet: tailnet, OAuthClientFile: oauthFile,
 		ControlURL: prodControl, Prefix: prefix, Res: res, ClientTagged: true}
 	var client *nettest.Node
 	downDone := false
 	t.Cleanup(func() {
 		if !downDone {
-			e.Twd("down", "--purge")
+			e.Tw("down", "--purge")
 		}
 		if t.Failed() {
 			for _, c := range []string{"mgmt", "hostd"} {
@@ -119,17 +122,17 @@ func TestE2EService(t *testing.T) {
 		defer cc()
 		devs, keys := cliflow.Leftovers(cctx, api, res)
 		for _, id := range res.NodeIDs {
-			tracker.Track(id, "twd")
+			tracker.Track(id, "tw")
 		}
 		for _, id := range res.InfraNodeIDs {
-			tracker.Track(id, "twd-infra")
+			tracker.Track(id, "tw-infra")
 		}
 		crep := tracker.Cleanup(cctx, testPrefix)
 		for _, k := range keys {
 			api.DeleteKey(cctx, k)
 		}
 		minter.RevokeAll(cctx)
-		// twd keeps the Service definition across undeploys (a stable VIP);
+		// tailworks keeps the Service definition across undeploys (a stable VIP);
 		// this run created it, so it removes it.
 		if err := api.DeleteService(cctx, svcName); err != nil {
 			t.Errorf("delete service: %v", err)
@@ -138,26 +141,27 @@ func TestE2EService(t *testing.T) {
 		out, _ := json.MarshalIndent(res, "", "  ")
 		t.Logf("results:\n%s", netd.Redact(string(out)))
 		if len(devs) > 0 || len(keys) > 0 {
-			t.Errorf("after twd down: leftover twd devices %v, valid keys %d", devs, len(keys))
+			t.Errorf("after tw down: leftover tw devices %v, valid keys %d", devs, len(keys))
 		}
 		if crep.Left != 0 || len(crep.Untracked) > 0 {
 			t.Errorf("cleanup left devices: %+v", crep)
 		}
 	})
 
-	// twd up (apikey mode), like E2E-MAC.
+	// tw up (apikey mode), like E2E-MAC.
 	var up struct {
 		TenantID   string `json:"tenantID"`
 		MgmtNodeID string `json:"mgmtNodeID"`
 	}
-	e.MustJSON(&up, "up", "--tailnet", tailnet, "--api-key-file", keyFile, "--yes", "--hostname-prefix", prefix,
-		"--control-url", prodControl, "--mgmt-hostname", prefix+"mgmt", "--host-id", strings.TrimSuffix(prefix, "-"), "--ephemeral")
+	e.MustJSON(&up, "up", "--oauth-client-file", oauthFile, "--tailnet", tailnet, "--yes", "--hostname-prefix", prefix,
+		"--control-url", prodControl, "--mgmt-hostname", prefix+"mgmt", "--host-id", strings.TrimSuffix(prefix, "-"), "--ephemeral",
+		"--separate-host") // the two-process layout this suite was written against (cliflow.Env.SingleProcess)
 	e.TrackInfra(up.MgmtNodeID)
 
 	// The app: hello with its own tag and a Service.
 	dir := filepath.Join(work, "svchello")
 	e.MustJSON(nil, "init", dir, "--template", "hello")
-	tj := filepath.Join(dir, "twd.jsonc")
+	tj := filepath.Join(dir, "tailworks.jsonc")
 	cfg := []byte(`{
   "name": "svchello",
   "tailnet": {
@@ -186,7 +190,7 @@ func TestE2EService(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mgmt did not create %s: %v", svcName, err)
 	}
-	if !strings.HasPrefix(def.Comment, "managed by twd: tenant=") || !slices.Contains(def.Ports, "tcp:80") || len(def.Addrs) == 0 {
+	if !strings.HasPrefix(def.Comment, "managed by tailworks: tenant=") || !slices.Contains(def.Ports, "tcp:80") || len(def.Addrs) == 0 {
 		t.Fatalf("service definition %+v", def)
 	}
 	res.Pass("service_definition", def.Comment+" "+strings.Join(def.Addrs, ","))
@@ -272,7 +276,7 @@ func TestE2EService(t *testing.T) {
 	res.Pass("redeploy_stable_vip", strings.Join(def2.Addrs, ","))
 	t.Logf("redeploy: same VIPs, served again %v after the deploy returned", wait.Round(time.Millisecond))
 
-	// 3. twd kill of the workload node: the Service stops.
+	// 3. tw kill of the workload node: the Service stops.
 	var kr map[string]any
 	e.MustJSON(&kr, "kill", dep2.Endpoint.Node, "--reason", "e2e-svc")
 	killAt := time.Now()
@@ -285,16 +289,16 @@ func TestE2EService(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 	}
 	if !stopped {
-		t.Fatalf("%s still served 60 s after twd kill of its workload node", url)
+		t.Fatalf("%s still served 60 s after tw kill of its workload node", url)
 	}
 	res.Numbers["service_stopped_after_kill_ms"] = float64(time.Since(killAt).Milliseconds())
 	res.Pass("kill_stops_service", time.Since(killAt).Round(time.Millisecond).String())
-	t.Logf("service stopped %v after twd kill", time.Since(killAt).Round(time.Millisecond))
+	t.Logf("service stopped %v after tw kill", time.Since(killAt).Round(time.Millisecond))
 
 	e.Down()
 	downDone = true
 	time.Sleep(2 * time.Second)
 	if _, err := api.GetService(ctx, svcName); err != nil {
-		t.Fatalf("service definition gone after twd down (it should be kept: stable VIP): %v", err)
+		t.Fatalf("service definition gone after tw down (it should be kept: stable VIP): %v", err)
 	}
 }

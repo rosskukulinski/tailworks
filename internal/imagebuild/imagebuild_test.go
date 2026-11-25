@@ -14,9 +14,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rosskukulinski/twd/internal/container"
-	"github.com/rosskukulinski/twd/internal/oci"
-	"github.com/rosskukulinski/twd/internal/registry"
+	"github.com/rosskukulinski/tailworks/internal/container"
+	"github.com/rosskukulinski/tailworks/internal/oci"
+	"github.com/rosskukulinski/tailworks/internal/registry"
 )
 
 func pushBase(t *testing.T, c *oci.Client, repo, tag string, arches ...string) {
@@ -52,15 +52,15 @@ func pushBase(t *testing.T, c *oci.Client, repo, tag string, arches ...string) {
 	}
 }
 
-// TestBuildAndPush runs twd deploy's builder for real (docker buildx): a
+// TestBuildAndPush runs tw deploy's builder for real (docker buildx): a
 // Dockerfile whose FROM is an alias source (written through an ARG
 // default, as the Sandbox SDK 1.0 example does) builds for both arches
-// against the alias target fetched from twd's registry, without touching
+// against the alias target fetched from tailworks' registry, without touching
 // the network, and lands in the tenant's namespace as an index whose
 // per-arch images carry the base layer plus the app's.
 func TestBuildAndPush(t *testing.T) {
-	if os.Getenv("TWD_TEST_DOCKER") == "" {
-		t.Skip("set TWD_TEST_DOCKER=1 to run docker buildx (make test-images)")
+	if os.Getenv("TW_TEST_DOCKER") == "" {
+		t.Skip("set TW_TEST_DOCKER=1 to run docker buildx (make test-images)")
 	}
 	if err := exec.Command("docker", "buildx", "version").Run(); err != nil {
 		t.Skip("docker buildx unavailable:", err)
@@ -75,11 +75,11 @@ func TestBuildAndPush(t *testing.T) {
 	srv := httptest.NewServer(g)
 	defer srv.Close()
 	reg := &oci.Client{Base: srv.URL, HTTP: srv.Client()}
-	pushBase(t, reg, "public/twdtest-base", "1", "amd64", "arm64")
+	pushBase(t, reg, "public/twtest-base", "1", "amd64", "arm64")
 
 	app := t.TempDir()
 	os.MkdirAll(filepath.Join(app, "box"), 0o755)
-	os.WriteFile(filepath.Join(app, "box", "Dockerfile"), []byte("ARG BASE=docker.io/twdtest/base:1\nFROM ${BASE}\nCOPY hello.txt /hello.txt\n"), 0o644)
+	os.WriteFile(filepath.Join(app, "box", "Dockerfile"), []byte("ARG BASE=docker.io/twtest/base:1\nFROM ${BASE}\nCOPY hello.txt /hello.txt\n"), 0o644)
 	os.WriteFile(filepath.Join(app, "box", "hello.txt"), []byte("hello from the app\n"), 0o644)
 	classes, err := container.Parse([]byte(`{"containers": [{"class_name": "Box", "image": "./box/Dockerfile"},
 		{"class_name": "Multi", "images": {"tools": {"dockerfile": "./box"}}}]}`), nil)
@@ -92,12 +92,12 @@ func TestBuildAndPush(t *testing.T) {
 	}
 	var log bytes.Buffer
 	built, results, err := BuildAndPush(ctx, jobs[:1], Options{Tenant: "tna", Workload: "w", Arches: []string{"amd64", "arm64"},
-		Aliases: []registry.Alias{{From: "docker.io/twdtest/base:1", To: "twd.local/twdtest-base:1"}}, Registry: reg, Log: &log})
+		Aliases: []registry.Alias{{From: "docker.io/twtest/base:1", To: "tw.local/twtest-base:1"}}, Registry: reg, Log: &log})
 	if err != nil {
 		t.Fatalf("%v\n%s", err, log.String())
 	}
 	ref := built["Box"].Image
-	if !strings.HasPrefix(ref, "twd.local/tna/w-box@sha256:") || len(results[0].Platforms) != 2 {
+	if !strings.HasPrefix(ref, "tw.local/tna/w-box@sha256:") || len(results[0].Platforms) != 2 {
 		t.Fatalf("built %+v %+v", built, results)
 	}
 	r, _ := oci.ParseRef(ref)
@@ -116,10 +116,10 @@ func TestBuildAndPush(t *testing.T) {
 		if err != nil || cfg.Architecture != arch || len(m.Layers) != 2 {
 			t.Fatalf("%s image: %+v layers %d %v", arch, cfg, len(m.Layers), err)
 		}
-		// The first layer is the alias target's (twd's registry), not
+		// The first layer is the alias target's (tailworks' registry), not
 		// anything fetched from Docker Hub.
-		bd, _ := oci.Resolve(ctx, reg, "public/twdtest-base", "1", arch)
-		bb, _, _, _ := reg.GetManifest(ctx, "public/twdtest-base", bd)
+		bd, _ := oci.Resolve(ctx, reg, "public/twtest-base", "1", arch)
+		bb, _, _, _ := reg.GetManifest(ctx, "public/twtest-base", bd)
 		bm, _ := oci.ParseManifest(bb, "")
 		if m.Layers[0].Digest != bm.Layers[0].Digest {
 			rc, _ := reg.GetBlob(ctx, "tna/w-box", m.Layers[0].Digest, -1)
@@ -127,7 +127,7 @@ func TestBuildAndPush(t *testing.T) {
 			t.Fatalf("%s base layer %s, want the alias target's %s (%d bytes)", arch, m.Layers[0].Digest, bm.Layers[0].Digest, len(got))
 		}
 	}
-	if !strings.Contains(log.String(), "alias      docker.io/twdtest/base:1") {
+	if !strings.Contains(log.String(), "alias      docker.io/twtest/base:1") {
 		t.Fatalf("no alias line:\n%s", log.String())
 	}
 }

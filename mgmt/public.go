@@ -6,15 +6,15 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/rosskukulinski/twd/internal/publicspec"
+	"github.com/rosskukulinski/tailworks/internal/publicspec"
 )
 
 // Public ingress (ADR-029), mgmt side:
 //   - the tenant gate (Tenant.PublicIngress, D1);
-//   - a deployment's validated twd.jsonc "public" (Deployment.Public) and
+//   - a deployment's validated tailworks.jsonc "public" (Deployment.Public) and
 //     the "_public" namespace whose single object is the workload's public
-//     node (hostname = the workload name, tags [tag:twd-public]);
-//   - the per-workload `twd expose on|off` setting (WorkloadPublic), which
+//     node (hostname = the workload name, tags [tag:tw-public]);
+//   - the per-workload `tw expose on|off` setting (WorkloadPublic), which
 //     outlives deployments;
 //   - Assignment.Public, which tells the host what its public node serves.
 
@@ -40,16 +40,16 @@ type DeploymentPublicView struct {
 	Allowed bool `json:"allowed"`
 }
 
-// publicReservedName refuses workload names that would collide with twd's
+// publicReservedName refuses workload names that would collide with tailworks'
 // own nodes once published as <workload>.<tailnet>.ts.net.
 func publicReservedName(workload string) bool {
-	return workload == "twd-mgmt" || strings.HasPrefix(workload, "twd-host")
+	return workload == "tw-mgmt" || strings.HasPrefix(workload, "tw-host")
 }
 
 // errPublicNotAllowed is the tenant-gate refusal (ADR-029 D1).
 func errPublicNotAllowed(t Tenant, workload string) *Error {
 	e := errf(403, "public_ingress_not_allowed",
-		"workload %s declares twd.jsonc \"public\" routes, but tenant %s does not allow public ingress; an operator can allow it with: twd tenant set %s --public-ingress allow",
+		"workload %s declares tailworks.jsonc \"public\" routes, but tenant %s does not allow public ingress; an operator can allow it with: tw tenant set %s --public-ingress allow",
 		workload, t.ID, t.ID)
 	e.Missing = map[string]any{"publicIngress": PublicAllow}
 	return e
@@ -62,7 +62,10 @@ func checkPublicDeploy(t Tenant, workload string, pub *DeploymentPublic) error {
 		return nil
 	}
 	if publicReservedName(workload) {
-		return errf(400, "bad_request", "workload name %q is reserved for twd's own nodes and cannot be public", workload)
+		return errf(400, "bad_request", "workload name %q is reserved for tailworks' own nodes and cannot be public", workload)
+	}
+	if t.Headscale() {
+		return errHeadscaleNoPublic()
 	}
 	if !t.PublicAllowed() {
 		return errPublicNotAllowed(t, workload)
@@ -71,13 +74,13 @@ func checkPublicDeploy(t Tenant, workload string, pub *DeploymentPublic) error {
 }
 
 // bundlePublic parses and validates the bundle's "public" (nil if none).
-func bundlePublic(cfg *TwdConfig) (*DeploymentPublic, error) {
+func bundlePublic(cfg *TwConfig) (*DeploymentPublic, error) {
 	if cfg == nil {
 		return nil, nil
 	}
 	pub, err := cfg.PublicConfig()
 	if err != nil {
-		return nil, errf(400, "bad_bundle", "twd.jsonc: %v", err)
+		return nil, errf(400, "bad_bundle", "tailworks.jsonc: %v", err)
 	}
 	return pub, nil
 }
@@ -118,7 +121,7 @@ func (m *Mgmt) publicView(ctx context.Context, d Deployment) *DeploymentPublicVi
 	}
 	t, _ := m.store.GetTenant(ctx, d.TenantID)
 	wp, _ := m.store.GetWorkloadPublic(ctx, d.TenantID, d.Workload)
-	host := d.Workload + "." + t.Tailnet
+	host := t.Name(d.Workload) + "." + t.Tailnet
 	if o, err := m.store.GetObjectByName(ctx, d.TenantID, d.Workload, PublicNamespace, d.Workload); err == nil && o.MagicDNS != "" {
 		host = strings.TrimSuffix(o.MagicDNS, ".")
 	}
@@ -137,7 +140,7 @@ func (m *Mgmt) killPublicNode(ctx context.Context, tenantID, workload, reason, b
 	}
 }
 
-// SetWorkloadExposed is `twd expose on|off` (ADR-029 D1): the setting
+// SetWorkloadExposed is `tw expose on|off` (ADR-029 D1): the setting
 // survives redeploys; the lease holder is told at once (push) and opens or
 // closes the public node's Funnel listener.
 func (m *Mgmt) SetWorkloadExposed(ctx context.Context, tenantID, workload string, exposed bool, by string) (WorkloadPublic, error) {
@@ -185,11 +188,6 @@ func (m *Mgmt) GetWorkloadPublic(ctx context.Context, tenantID, workload string)
 	return m.store.GetWorkloadPublic(ctx, tenantID, workload)
 }
 
-// PublicFunnelSnippet is the policy a public workload needs (ADR-029 D6);
-// kept in step with internal/policy.PublicSnippet.
-const PublicFunnelSnippet = `"tagOwners": { "tag:twd-public": ["autogroup:admin", "tag:twd"] },
-"nodeAttrs": [ { "target": ["tag:twd-public"], "attr": ["funnel"] } ]`
-
 // ActingForPublic is CreateObjectRequest.ActingFor for an object a public
 // (Funnel) request created (ADR-029 D5); mgmt records origin "public".
 const ActingForPublic = "public"
@@ -208,6 +206,10 @@ func (m *Mgmt) findPublicClass(ctx context.Context, t Tenant, workload string) (
 		}
 		if !t.PublicAllowed() {
 			return Deployment{}, ClassConfig{}, errPublicNotAllowed(t, workload)
+		}
+		// Only the name's owner gets a public node (publicnames.go, H10).
+		if err := m.claimPublicName(ctx, t, t.Name(workload), d.DeployedBy); err != nil { // teams.go: prefixed
+			return Deployment{}, ClassConfig{}, err
 		}
 		for _, c := range d.Namespaces {
 			if c.Class == PublicNamespace {

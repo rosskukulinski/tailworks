@@ -2,8 +2,8 @@
 // Cloudflare documents it (developers.cloudflare.com/sandbox, 1.0): a plain
 // DO starts its container with an explicit image and entrypoint, runs
 // commands with ctx.container.exec(argv).output(), and moves files with the
-// SDK's Files helper (sandbox-shim in the image). twd runs it unmodified:
-// ctx.container is twd's polyfill.
+// SDK's Files helper (sandbox-shim in the image). Tailworks runs it unmodified:
+// ctx.container is tailworks' polyfill.
 import { Files } from "@cloudflare/sandbox";
 import { DurableObject } from "cloudflare:workers";
 
@@ -12,7 +12,7 @@ interface Env {
 }
 
 // Stand-in for Cloudflare's non-public cloudflare/debian-trixie (guest/images).
-const IMAGE = "twd.local/debian-trixie-python:1";
+const IMAGE = "tw.local/debian-trixie-python:1";
 
 export class Sandbox extends DurableObject<Env> {
   private ensure(): Container {

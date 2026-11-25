@@ -1,4 +1,4 @@
-// Package fakemgmt is an in-memory twd-mgmt implementing the subset of the
+// Package fakemgmt is an in-memory tw-mgmt implementing the subset of the
 // mgmt /v1 contract (api/openapi.yaml) that hostd uses, for hostd tests
 // and the e2e-real suite. Tests wrap it with the spec validator
 // (mgmt/api/v1.Validator), so its shapes must match the spec. It is not production code: no persistence, no peer-cred
@@ -6,8 +6,9 @@
 //
 // Mint modes per tenant:
 //   - "static": every credential is Config.StaticKey (testcontrol accepts any key);
-//   - "apikey": single-use, pre-authorized, 5-minute tagged keys minted via
-//     the Tailscale API (internal/tsapi) with the key in Tenant.APIKeyFile.
+//   - "oauth": single-use, pre-authorized, 5-minute tagged keys minted via
+//     the Tailscale API (internal/tsapi) with the OAuth client in
+//     Tenant.OAuthClientFile.
 package fakemgmt
 
 import (
@@ -31,16 +32,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd/bundle"
-	"github.com/rosskukulinski/twd/hostd/mgmtapi"
-	"github.com/rosskukulinski/twd/internal/container"
-	"github.com/rosskukulinski/twd/internal/nodecert"
-	"github.com/rosskukulinski/twd/internal/oci"
-	"github.com/rosskukulinski/twd/internal/publicspec"
-	"github.com/rosskukulinski/twd/internal/registry"
-	"github.com/rosskukulinski/twd/internal/tsapi"
-	"github.com/rosskukulinski/twd/mgmt"
-	"github.com/rosskukulinski/twd/netd"
+	"github.com/rosskukulinski/tailworks/hostd/bundle"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/internal/container"
+	"github.com/rosskukulinski/tailworks/internal/nodecert"
+	"github.com/rosskukulinski/tailworks/internal/oci"
+	"github.com/rosskukulinski/tailworks/internal/publicspec"
+	"github.com/rosskukulinski/tailworks/internal/registry"
+	"github.com/rosskukulinski/tailworks/internal/tsapi"
+	"github.com/rosskukulinski/tailworks/mgmt"
+	"github.com/rosskukulinski/tailworks/netd"
 )
 
 // Config configures a Server.
@@ -60,14 +61,14 @@ type Config struct {
 	// APIBaseURL overrides the Tailscale API base (tests).
 	APIBaseURL string
 	// NoPush disables the v0.1 push extension, so kills reach hosts only via
-	// heartbeat revokeObjects (what M2's twd-mgmt does).
+	// heartbeat revokeObjects (what M2's tw-mgmt does).
 	NoPush bool
 	// MaxContainers is every tenant's container quota (default 10).
 	MaxContainers int
-	// RegistryDir, if set, serves twd's OCI registry at /v2/ (internal/registry
+	// RegistryDir, if set, serves tailworks' OCI registry at /v2/ (internal/registry
 	// with in-memory metadata) and pins container images at deploy the way
-	// twd-mgmt does (registry.Resolver), so hostd pulls by digest. Callers
-	// with Twd-Host-ID get the host rules (pull only, own tenants + public).
+	// tw-mgmt does (registry.Resolver), so hostd pulls by digest. Callers
+	// with Tw-Host-ID get the host rules (pull only, own tenants + public).
 	RegistryDir      string
 	RegistryUpstream func(host string) *oci.Client
 	ImageAliases     []registry.Alias
@@ -88,7 +89,7 @@ type Server struct {
 	objects     map[string]*object
 	byName      map[string]string // tenant|workload|ns|name -> objectID
 	audit       map[string][]mgmtapi.AuditRecord
-	exposed     map[string]bool   // tenantID/workload -> `twd expose` (default on)
+	exposed     map[string]bool   // tenantID/workload -> `tw expose` (default on)
 	nodeIDs     map[string]string // stable node ID -> objectID (every node that reported ready)
 	remints     int               // POST /remint calls (rejoins rejected by control)
 	pushes      []string
@@ -102,9 +103,41 @@ type Server struct {
 	reservations         map[string]*mgmtapi.ContainerReservation // container reservations by ID
 	reservationsDown     bool
 	heartbeatsDown       bool
+	heartbeatDelay       time.Duration // the next heartbeat's delay (DelayHeartbeat)
 	reg                  *registry.Registry
 	resolver             *registry.Resolver
 	services             map[string]string // workload -> Tailscale Service (SetService)
+
+	// Worker secrets (secrets.go): tenant/workload -> name -> secret.
+	secrets      map[string]map[string]*fakeSecret
+	secretGrants int
+
+	// Platform stores (stores.go): tenant/workload|kind|name -> store.
+	stores       map[string]*fakeStore
+	storeAppends int
+
+	// storesDown: the store journal answers 503 (storesdown.go).
+	storesDown bool
+
+	// loseAppendAnswers: appends that commit and then answer 503, as if
+	// the answer were lost (storelose.go).
+	loseAppendAnswers int
+
+	// storeReadHold: hosts' journal reads hang (storeshold.go).
+	storeReadHold storeReadHold
+
+	// readyCalls: object ID -> ready PATCHes (readycalls.go).
+	readyCalls map[string]int
+	// leaseLostReady: the next N ready PATCHes fail with lease_lost (readycalls.go).
+	leaseLostReady int
+
+	// readyFault: every ready PATCH is answered late, or 503 (SetReadyFault).
+	readyFault ReadyFault
+
+	// Queues (queues.go): tenant|queue -> queue.
+	queues map[string]*fakeQueue
+	// OTLP export (telemetry.go): tenantID -> config.
+	telemetry map[string]*mgmtapi.OTLPExport
 }
 
 // SetHeartbeatsDown makes host heartbeats fail with 503 (tests: a host
@@ -115,10 +148,18 @@ func (s *Server) SetHeartbeatsDown(down bool) {
 	s.heartbeatsDown = down
 }
 
+// DelayHeartbeat answers the next host heartbeat only after d (tests: a
+// slow mgmt or a loaded host; the heartbeat succeeds, late).
+func (s *Server) DelayHeartbeat(d time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.heartbeatDelay = d
+}
+
 // SetLeaseLostCredentials makes the next n credential calls fail with
 // lease_lost (tests: a host whose lease epoch went stale mid-join).
 // SetService makes every assignment of workload carry the Tailscale
-// Service name ("" clears it), as mgmt does from twd.jsonc tailnet.service.
+// Service name ("" clears it), as mgmt does from tailworks.jsonc tailnet.service.
 func (s *Server) SetService(workload, name string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -172,7 +213,7 @@ type deployment struct {
 	created    time.Time
 	fence      bool              // stateful (ADR-028 §3): mgmt.BundleStateful
 	containers []container.Class // pinned (RegistryDir)
-	public     *publicspec.Spec  // twd.jsonc "public" (ADR-029)
+	public     *publicspec.Spec  // tailworks.jsonc "public" (ADR-029)
 }
 
 type lease struct {
@@ -211,9 +252,33 @@ func New(cfg Config) *Server {
 	m.HandleFunc("POST /v1/tenants", s.createTenant)
 	m.HandleFunc("GET /v1/tenants", s.listTenants)
 	m.HandleFunc("GET /v1/tenants/{id}", s.getTenant)
+	m.HandleFunc("GET /v1/tenants/{id}/workloads/{workload}/secrets", s.listSecrets)
+	m.HandleFunc("PUT /v1/tenants/{id}/workloads/{workload}/secrets/{name}", s.putSecret)
+	m.HandleFunc("DELETE /v1/tenants/{id}/workloads/{workload}/secrets/{name}", s.deleteSecret)
+	m.HandleFunc("POST /v1/tenants/{id}/workloads/{workload}/secret-grants", s.secretGrant)
+	m.HandleFunc("GET /v1/tenants/{id}/workloads/{workload}/stores", s.listStores)
+	m.HandleFunc("GET /v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name}", s.getStore)
+	m.HandleFunc("PUT /v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name}", s.putStore)
+	m.HandleFunc("DELETE /v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name}", s.deleteStore)
+	m.HandleFunc("GET /v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name}/journal", s.readJournal)
+	m.HandleFunc("POST /v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name}/journal", s.appendJournal)
+	m.HandleFunc("POST /v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name}/repair", s.repairStore)
+	m.HandleFunc("POST /v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name}/status", s.reportStoreStatus)
+	m.HandleFunc("GET /v1/tenants/{id}/queues", s.listQueues)
+	m.HandleFunc("GET /v1/tenants/{id}/queues/{queue}", s.getQueue)
+	m.HandleFunc("PUT /v1/tenants/{id}/queues/{queue}", s.putQueue)
+	m.HandleFunc("DELETE /v1/tenants/{id}/queues/{queue}", s.deleteQueue)
+	m.HandleFunc("POST /v1/tenants/{id}/queues/{queue}/purge", s.purgeQueue)
+	m.HandleFunc("GET /v1/tenants/{id}/queues/{queue}/messages", s.peekQueue)
+	m.HandleFunc("POST /v1/tenants/{id}/queues/{queue}/messages", s.sendQueue)
+	m.HandleFunc("POST /v1/tenants/{id}/queues/{queue}/messages/pull", s.pullQueue)
+	m.HandleFunc("POST /v1/tenants/{id}/queues/{queue}/messages/ack", s.ackQueue)
+	m.HandleFunc("POST /v1/tenants/{id}/workloads/{workload}/telemetry-grants", s.telemetryGrant)
+	m.HandleFunc("GET /v1/tenants/{id}/workloads/{workload}/service-bindings/{binding}", s.serviceBinding) // servicebind.go
 	m.HandleFunc("PUT /v1/hosts/{id}", s.register)
 	m.HandleFunc("PUT /v1/hosts/{id}/status", s.heartbeat)
 	m.HandleFunc("GET /v1/hosts/{id}/assignments", s.assignments)
+	m.HandleFunc("GET /v1/hosts/{id}/sandbox-deny", s.sandboxDeny)
 	m.HandleFunc("POST /v1/deployments", s.deploy)
 	m.HandleFunc("GET /v1/deployments", s.listDeployments)
 	m.HandleFunc("GET /v1/deployments/{id}", s.getDeployment)
@@ -267,7 +332,7 @@ func page[T any](items []T) mgmtapi.Page[T] {
 func ms(t time.Time) int64 { return t.UnixMilli() }
 
 func writeErr(w http.ResponseWriter, status int, code, msg string) {
-	w.Header().Set("Twd-Error", code)
+	w.Header().Set("Tw-Error", code)
 	writeJSON(w, status, map[string]any{"code": code, "message": netd.Redact(msg), "trace_id": newID(""),
 		"doc_url": netd.DocBase + code})
 }
@@ -291,17 +356,18 @@ func (s *Server) createTenant(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, "bad_request", "static mint mode needs Config.StaticKey")
 			return
 		}
-	case "apikey":
-		if t.APIKeyFile == "" {
-			writeErr(w, 400, "bad_request", "apikey mode needs apiKeyFile")
+	case "oauth":
+		if t.OAuthClientFile == "" {
+			writeErr(w, 400, "bad_request", "mintMode oauth needs oauthClientFile")
 			return
 		}
-		key, err := tsapi.LoadEnvFile(t.APIKeyFile, "TS_API_KEY")
-		if err != nil {
-			writeErr(w, 400, "bad_request", "apiKeyFile: "+err.Error())
+		file := t.OAuthClientFile
+		if _, err := tsapi.LoadOAuthFile(file); err != nil {
+			writeErr(w, 400, "bad_request", "oauthClientFile: "+err.Error())
 			return
 		}
-		tn.api = &tsapi.Client{Tailnet: t.Tailnet, APIKey: key, BaseURL: s.cfg.APIBaseURL}
+		src := &tsapi.OAuthSource{BaseURL: s.cfg.APIBaseURL, Load: func() (tsapi.OAuthCredentials, error) { return tsapi.LoadOAuthFile(file) }}
+		tn.api = &tsapi.Client{Tailnet: t.Tailnet, Tokens: src, BaseURL: s.cfg.APIBaseURL}
 		tn.minter = tsapi.MintSource(tn.api, s.log)
 	default:
 		writeErr(w, 400, "bad_request", "mintMode "+t.MintMode+" is not supported by fakemgmt")
@@ -326,7 +392,7 @@ func (s *Server) createTenant(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) public(t *tenant) mgmtapi.Tenant {
 	p := t.Tenant
-	p.APIKeyFile = ""
+	p.APIKeyFile, p.OAuthClientFile = "", ""
 	p.OBOPublicKey = base64.StdEncoding.EncodeToString(s.oboKey.Public().(ed25519.PublicKey))
 	return p
 }
@@ -361,7 +427,11 @@ func (s *Server) hostView(h *host) map[string]any {
 	if time.Since(h.lastSeen) > 10*time.Second {
 		st = "stale"
 	}
-	v := map[string]any{"hostID": h.HostID, "status": st, "capacityNodes": h.CapacityNodes, "tiers": h.Tiers,
+	tiers := h.Tiers
+	if tiers == nil {
+		tiers = []string{} // the spec's Host.tiers is an array, never null (TestRouteDrift)
+	}
+	v := map[string]any{"hostID": h.HostID, "status": st, "capacityNodes": h.CapacityNodes, "tiers": tiers,
 		"liveNodes": h.liveNodes, "lastSeen": ms(h.lastSeen), "createdAt": ms(h.created), "updatedAt": ms(h.lastSeen)}
 	if h.AuditPubKey != "" {
 		v["auditPubKey"] = h.AuditPubKey
@@ -404,6 +474,9 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	h.RegisterRequest, h.lastSeen = req.RegisterRequest, time.Now()
 	v := s.hostView(h)
+	if recs := s.audit["host:"+req.HostID]; len(recs) > 0 {
+		v["auditHead"] = recs[len(recs)-1].Hash // like mgmt (#377)
+	}
 	s.mu.Unlock()
 	writeJSON(w, status, v)
 }
@@ -414,6 +487,13 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 	if err := decode(r, &req); err != nil {
 		writeErr(w, 400, "bad_request", err.Error())
 		return
+	}
+	s.mu.Lock()
+	delay := s.heartbeatDelay
+	s.heartbeatDelay = 0
+	s.mu.Unlock()
+	if delay > 0 {
+		time.Sleep(delay)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -476,7 +556,7 @@ func (s *Server) assignments(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, page(out))
 }
 
-// SetExposed is `twd expose on|off` (ADR-029): it changes the workload's
+// SetExposed is `tw expose on|off` (ADR-029): it changes the workload's
 // Assignment.Public.Exposed and pushes the assignments to its host.
 func (s *Server) SetExposed(tenantID, workload string, on bool) {
 	s.mu.Lock()
@@ -555,7 +635,7 @@ func (s *Server) deploy(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 503, "no_host", "no host registered")
 		return
 	}
-	// Pin container images (twd-mgmt's Resolver) for the host's arch, outside
+	// Pin container images (tw-mgmt's Resolver) for the host's arch, outside
 	// the lock (mirroring may reach an upstream).
 	arch := s.hosts[hostID].Arch
 	s.mu.Unlock()
@@ -584,7 +664,7 @@ func (s *Server) deploy(w http.ResponseWriter, r *http.Request) {
 		if tags == nil {
 			tags = []string{}
 		}
-		nss = append(nss, mgmtapi.NamespaceSpec{Class: c, Tags: tags, Agent: cl.Agent})
+		nss = append(nss, mgmtapi.NamespaceSpec{Class: c, Tags: tags})
 	}
 	if app.Public != nil {
 		nss = append(nss, mgmtapi.NamespaceSpec{Class: publicspec.Namespace, Tags: []string{publicspec.Tag}})
@@ -724,6 +804,12 @@ func (s *Server) createObject(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "unknown_namespace", "no deployment of this tenant declares namespace "+req.Namespace)
 		return
 	}
+	// Like mgmt (RT3-01): the caller must hold the workload's lease, at the
+	// epoch it names. hostd always sends its epoch.
+	if hid := r.Header.Get("Tw-Host-ID"); (hid != "" && hid != l.host) || (req.Epoch != 0 && req.Epoch != l.epoch) {
+		writeErr(w, 409, mgmtapi.CodeLeaseLost, fmt.Sprintf("lease %s is held by %s at epoch %d (caller %q asked for epoch %d)", mgmtapi.LeaseName(req.TenantID, workload), l.host, l.epoch, hid, req.Epoch))
+		return
+	}
 	live := 0
 	for _, o := range s.objects {
 		if o.TenantID == req.TenantID && o.Status != "killed" {
@@ -822,7 +908,7 @@ func (s *Server) writeGone(w http.ResponseWriter, o *object) {
 	if len(o.Lineage) > 0 {
 		root = o.Lineage[0]
 	}
-	w.Header().Set("Twd-Error", mgmtapi.CodeKilled)
+	w.Header().Set("Tw-Error", mgmtapi.CodeKilled)
 	writeJSON(w, 410, map[string]any{"code": mgmtapi.CodeKilled, "message": "object " + o.ObjectID + " was killed", "trace_id": newID(""),
 		"doc_url": netd.DocBase + mgmtapi.CodeKilled,
 		"tombstone": map[string]any{"objectID": o.ObjectID, "tenantID": o.TenantID, "workload": o.workload, "namespace": o.Namespace,
@@ -1022,7 +1108,7 @@ func (s *Server) reserveContainer(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "bad_request", "tenantID, workload, class and object are required")
 		return
 	}
-	host := r.Header.Get("Twd-Host-ID")
+	host := r.Header.Get("Tw-Host-ID")
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.reservationsDown {
@@ -1049,9 +1135,9 @@ func (s *Server) reserveContainer(w http.ResponseWriter, r *http.Request) {
 		max = 10
 	}
 	if n+1 > max {
-		w.Header().Set("Twd-Error", "container_quota_exceeded")
+		w.Header().Set("Tw-Error", "container_quota_exceeded")
 		writeJSON(w, 429, map[string]any{"code": "container_quota_exceeded", "message": fmt.Sprintf("tenant %s runs %d containers (maxContainers %d)", req.TenantID, n, max),
-			"missing": map[string]any{"quota": "maxContainers", "limit": max, "used": n, "requested": 1}, "doc_url": "https://twd.dev/errors/container_quota_exceeded", "trace_id": "fake"})
+			"missing": map[string]any{"quota": "maxContainers", "limit": max, "used": n, "requested": 1}, "doc_url": "https://github.com/rosskukulinski/tailworks/blob/master/docs/errors.md#container_quota_exceeded", "trace_id": "fake"})
 		return
 	}
 	b := make([]byte, 6)
@@ -1075,7 +1161,7 @@ func (s *Server) releaseContainer(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, mgmtapi.CodeNotFound, "no such reservation")
 		return
 	}
-	if host := r.Header.Get("Twd-Host-ID"); host != "" && host != x.Host {
+	if host := r.Header.Get("Tw-Host-ID"); host != "" && host != x.Host {
 		writeErr(w, 403, "forbidden", "held by another host")
 		return
 	}
@@ -1099,7 +1185,7 @@ func (s *Server) volumeKey(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 409, mgmtapi.CodeLeaseLost, fmt.Sprintf("lease %s is not held at epoch %d", name, epoch))
 		return
 	}
-	if hid := r.Header.Get("Twd-Host-ID"); hid != "" && hid != l.host {
+	if hid := r.Header.Get("Tw-Host-ID"); hid != "" && hid != l.host {
 		writeErr(w, 409, mgmtapi.CodeLeaseLost, "host "+hid+" does not hold the lease")
 		return
 	}
@@ -1153,7 +1239,7 @@ func (s *Server) credential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	l := s.leases[mgmtapi.LeaseName(o.TenantID, o.workload)]
-	if hid := r.Header.Get("Twd-Host-ID"); l != nil && hid != "" && hid != l.host {
+	if hid := r.Header.Get("Tw-Host-ID"); l != nil && hid != "" && hid != l.host {
 		s.mu.Unlock()
 		writeErr(w, 409, mgmtapi.CodeLeaseLost, "host "+hid+" does not hold the lease")
 		return
@@ -1179,7 +1265,7 @@ func (s *Server) credential(w http.ResponseWriter, r *http.Request) {
 	switch t.MintMode {
 	case "static":
 		cred.AuthKey = s.cfg.StaticKey
-	case "apikey":
+	case "oauth":
 		k, err := t.minter.AuthKey(r.Context(), netd.KeyRequest{ObjectID: id, Tags: tags, Ephemeral: !s.cfg.NonEphemeral})
 		if err != nil {
 			writeErr(w, 502, "bootstrap_failed", "mint: "+err.Error())
@@ -1194,12 +1280,16 @@ func (s *Server) credential(w http.ResponseWriter, r *http.Request) {
 // ready is PATCH /v1/objects/{id} {"status":"ready", …} (the host's
 // merge patch; the admin's {ttl} is not modelled by the fake).
 func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
+	if s.readyFaulted(w) { // readycalls.go
+		return
+	}
 	var req struct {
 		Status string `json:"status"`
 		mgmtapi.ReadyRequest
 	}
-	if err := decode(r, &req); err != nil || req.Status != "ready" {
-		writeErr(w, 400, "bad_request", "fakemgmt: the patch must be {status: ready, nodeID, stableNodeID, magicDNS, epoch}")
+	if err := decode(r, &req); err != nil || req.Status != "ready" || req.Epoch <= 0 {
+		// Like mgmt (H2): epoch is required; the real server fences on it.
+		writeErr(w, 400, "bad_request", "fakemgmt: the patch must be {status: ready, nodeID, stableNodeID, magicDNS, epoch ≥ 1}")
 		return
 	}
 	s.mu.Lock()
@@ -1213,6 +1303,11 @@ func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 		s.writeGone(w, o)
 		return
 	}
+	if s.refuseReadyLocked() { // readycalls.go
+		writeErr(w, 409, mgmtapi.CodeLeaseLost, "the caller does not hold the namespace lease at this epoch (test knob)")
+		return
+	}
+	s.countReadyLocked(o.ObjectID)
 	o.Status, o.NodeID, o.StableNodeID, o.MagicDNS, o.UpdatedAt = "ready", req.StableNodeID, req.StableNodeID, req.MagicDNS, ms(time.Now())
 	if req.StableNodeID != "" {
 		s.nodeIDs[req.StableNodeID] = o.ObjectID
@@ -1329,14 +1424,14 @@ func (s *Server) postAudit(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "bad_request", err.Error())
 		return
 	}
-	// RT-02 provenance contract, as twd-mgmt enforces it.
+	// RT-02 provenance contract, as tw-mgmt enforces it.
 	for i, rec := range b.Records {
 		if (rec.Source == "tenant") != (rec.Kind == "tenant_note") || rec.Source == "mgmt" {
 			writeErr(w, 400, "bad_request", fmt.Sprintf("record %d: source %q with kind %q violates the audit provenance contract", i, rec.Source, rec.Kind))
 			return
 		}
 	}
-	host := "host:" + r.Header.Get("Twd-Host-ID")
+	host := "host:" + r.Header.Get("Tw-Host-ID")
 	s.mu.Lock()
 	s.audit[host] = append(s.audit[host], b.Records...)
 	n := len(s.audit[host])

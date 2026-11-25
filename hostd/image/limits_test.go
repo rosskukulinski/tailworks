@@ -160,10 +160,10 @@ func TestStoreConvertOverLimitCleansUp(t *testing.T) {
 	m, _ := json.Marshal([]map[string]any{{"Config": "config.json", "Layers": []string{"layer.tar.gz"}}})
 	files["manifest.json"] = m
 	os.WriteFile(filepath.Join(src, "bomb.tar"), tarFiles(t, files), 0o600)
-	os.WriteFile(filepath.Join(src, "images.json"), []byte(`{"twd.local/bomb:1":"bomb.tar"}`), 0o600)
+	os.WriteFile(filepath.Join(src, "images.json"), []byte(`{"tw.local/bomb:1":"bomb.tar"}`), 0o600)
 	cache := filepath.Join(t.TempDir(), "cache")
 	st := &Store{Dir: cache, Arch: "arm64", Mkfs: "/bin/true", Sources: []Source{DirSource{Dir: src}}, Limits: Limits{MaxBytes: 4 << 20}}
-	_, err := st.Get(t.Context(), "t1", "twd.local/bomb:1")
+	_, err := st.Get(t.Context(), "t1", "tw.local/bomb:1")
 	wantLimit(t, err, "uncompressed bytes")
 	left, _ := filepath.Glob(filepath.Join(tmp, "*"))
 	entries, _ := os.ReadDir(filepath.Join(cache, "t1"))
@@ -179,7 +179,7 @@ func TestFlattenCapsStreamBytes(t *testing.T) {
 	tw := tar.NewWriter(&b)
 	for i := 0; i < 10; i++ {
 		tw.WriteHeader(&tar.Header{Name: "f" + strings.Repeat("x", i), Typeflag: tar.TypeReg, Format: tar.FormatPAX,
-			PAXRecords: map[string]string{"twd.pad": strings.Repeat("p", 900<<10)}})
+			PAXRecords: map[string]string{"tw.pad": strings.Repeat("p", 900<<10)}})
 	}
 	tw.Close()
 	if b.Len() < 8<<20 {

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd/hostdtest"
+	"github.com/rosskukulinski/tailworks/hostd/hostdtest"
 )
 
 // uiStream is a parsed AI SDK UI message stream (SSE).
@@ -73,8 +73,8 @@ func (s *suite) agentStream(t *testing.T, u string) *uiStream {
 	return out
 }
 
-// TestVercelAI: an AI SDK ToolLoopAgent (create-twd `ai-agent` template, mock
-// model) whose tools are twd MCP servers' tools over the tailnet: Vercel's
+// TestVercelAI: an AI SDK ToolLoopAgent (create-tailworks `ai-agent` template, mock
+// model) whose tools are tailworks MCP servers' tools over the tailnet: Vercel's
 // mcp-handler and the Cloudflare createMcpHandler (`mcp` template).
 func TestVercelAI(t *testing.T) {
 	s := startSuite(t)
@@ -190,7 +190,7 @@ func TestVercelAI(t *testing.T) {
 
 	t.Run("EgressRefusalIsTyped", func(t *testing.T) {
 		// An MCP server URL that is not a visible peer: mcpFetch surfaces
-		// twd's typed error instead of an opaque HTTP failure.
+		// tailworks' typed error instead of an opaque HTTP failure.
 		d := s.a.Deploy(hostdtest.Template("ai-agent"), "ai-bad", map[string]string{"MCP_URL": "http://no-such-peer/mcp"})
 		o := s.a.WaitActive("ai-bad", d, 60*time.Second)
 		s.waitPeer(o.IP)

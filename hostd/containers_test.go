@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd"
-	"github.com/rosskukulinski/twd/hostd/fakemgmt"
-	"github.com/rosskukulinski/twd/hostd/hostdtest"
-	"github.com/rosskukulinski/twd/hostd/sandbox/sandboxtest"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/hostd"
+	"github.com/rosskukulinski/tailworks/hostd/fakemgmt"
+	"github.com/rosskukulinski/tailworks/hostd/hostdtest"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox/sandboxtest"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 	"tailscale.com/tailcfg"
 )
 
@@ -23,13 +23,14 @@ import (
 // isolation; the microVM backend is e2e/container in Lima). Facet and
 // plain-DO classes both.
 func TestContainerPolyfill(t *testing.T) {
+	t.Parallel()
 	procs := &sandboxtest.Procs{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "port server: %s %s?%s as=%q probe=%q", r.Method, r.URL.Path, r.URL.RawQuery, r.Header.Get("x-twd-as"), r.Header.Get("x-probe"))
+		fmt.Fprintf(w, "port server: %s %s?%s as=%q probe=%q", r.Method, r.URL.Path, r.URL.RawQuery, r.Header.Get("x-tw-as"), r.Header.Get("x-probe"))
 	}))
 	defer srv.Close()
 	procs.Ports = map[uint16]string{8080: srv.Listener.Addr().String()}
-	st, err := sandboxtest.ImageStore(t.TempDir(), []string{"sleep", "3600"}, "twd.test/box:1")
+	st, err := sandboxtest.ImageStore(t.TempDir(), []string{"sleep", "3600"}, "tw.test/box:1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,10 +107,10 @@ func TestContainerPolyfill(t *testing.T) {
 		if r["exitCode"] != float64(0) || !strings.Contains(r["stdout"].(string), "y\n") || !strings.Contains(r["stdout"].(string), "e\n") || r["hasStderr"] != false {
 			t.Fatalf("combined/env: %v", r)
 		}
-		if r := call("/f/a/exec", "argv", `["no-such-binary-twd"]`); r["error"] == nil {
+		if r := call("/f/a/exec", "argv", `["no-such-binary-tw"]`); r["error"] == nil {
 			t.Fatalf("a missing binary must fail: %v", r)
 		}
-		if c := ctrOf("Box", "a"); c.State != "running" || c.Image != "twd.test/box:1" {
+		if c := ctrOf("Box", "a"); c.State != "running" || c.Image != "tw.test/box:1" {
 			t.Fatalf("hostd view: %+v", c)
 		}
 	})
@@ -143,15 +144,16 @@ func TestContainerPolyfill(t *testing.T) {
 		if r := call("/f/b/exec", "argv", `["true"]`); r["error"] == nil {
 			t.Fatalf("b exec ran: %v", r)
 		}
-		// The facet keeps no platform binding in env, and a plain-DO object
-		// (the workload's trust domain) can't claim a facet object.
-		if r := call("/f/a/envtwd"); r["hasTWD"] != false {
-			t.Fatalf("facet env leaks __TWD: %v", r)
+		// No tenant env keeps the platform binding (create admission,
+		// docs/create-admission.md): a plain-DO object cannot even reach for
+		// a facet object's container through it, let alone be refused.
+		if r := call("/f/a/envtw"); r["hasTW"] != false {
+			t.Fatalf("facet env leaks __TW: %v", r)
 		}
 		for _, op := range []string{"destroy", "status", "signal"} {
 			r := call("/p/z/forge", "target", "a", "op", op)
-			if r["ok"] != false {
-				t.Fatalf("plain object drove facet a's container (%s): %v", op, r)
+			if r["noBinding"] != true {
+				t.Fatalf("plain object reached the platform binding for facet a's container (%s): %v", op, r)
 			}
 		}
 		if c := ctrOf("Box", "a"); c.State != "running" {
@@ -175,7 +177,7 @@ func TestContainerPolyfill(t *testing.T) {
 				t.Fatalf("fetch with an AbortSignal, port %s: %v", p, r)
 			}
 		}
-		if r := call("/f/a/inspect"); fmt.Sprint(get(r, "info", "image")) != "twd.test/box:1" {
+		if r := call("/f/a/inspect"); fmt.Sprint(get(r, "info", "image")) != "tw.test/box:1" {
 			t.Fatalf("inspect: %v", r)
 		}
 		if r := call("/f/a/intercept"); r["ok"] != true {
@@ -260,7 +262,13 @@ func TestContainerPolyfill(t *testing.T) {
 
 	t.Run("SurvivesRedeploy", func(t *testing.T) {
 		call("/f/r/start")
-		gen := ctrOf("Box", "r").Gen
+		// start() returns before hostd has started the container: read its
+		// generation once it runs, or a slow machine reads 0 (issue #75).
+		c := waitState("Box", "r", "running")
+		if c.State != "running" {
+			t.Fatal(c)
+		}
+		gen := c.Gen
 		dep2 := e.Deploy(hostdtest.Fixture("ctr"), "ctr", nil)
 		e.WaitActive("ctr", dep2, 60*time.Second)
 		// The new code sees the same container (Cloudflare's durable_object

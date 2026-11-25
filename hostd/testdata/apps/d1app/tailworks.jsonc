@@ -1,0 +1,7 @@
+{
+  "name": "d1app",
+  "tailnet": {
+    "tags": ["tag:ttest"],
+    "objects": { "Box": { "tags": ["tag:ttest"] } },
+  },
+}

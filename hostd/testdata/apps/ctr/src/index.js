@@ -105,7 +105,7 @@ async function handle(self, req) {
       return J({ ok: true });
     case "port": {
       try {
-        const r = await c.getTcpPort(Number(q.get("p"))).fetch("http://container/hello?x=1", { headers: { "x-twd-as": "forged", "x-probe": "1" } });
+        const r = await c.getTcpPort(Number(q.get("p"))).fetch("http://container/hello?x=1", { headers: { "x-tw-as": "forged", "x-probe": "1" } });
         return J({ status: r.status, body: await r.text() });
       } catch (e) {
         return J({ error: String(e.message) });
@@ -140,7 +140,7 @@ async function handle(self, req) {
             echo = await e.json();
           }
           const seen = {};
-          for (const [k, v] of r.headers) if (k.startsWith("x-twd") || k.startsWith("twd-") || k === "x-from-guest") seen[k] = v;
+          for (const [k, v] of r.headers) if (k.startsWith("x-tw-") || k.startsWith("tw-") || k === "x-from-guest") seen[k] = v;
           return J({ fromParent: name, url: r.url, method: r.method, body, headers: seen, echo });
         },
       };
@@ -178,19 +178,19 @@ async function handle(self, req) {
       // A plain-DO object reaching for a facet object's container through
       // the raw platform binding (the workload's trust domain may claim
       // plain objects, never facet ones).
-      const tw = self.env.__TWD;
+      const tw = self.env.__TW;
       if (!tw) return J({ noBinding: true });
       const r = await tw.ctr(q.get("op") ?? "destroy", { as: { class: q.get("class") ?? "Box", name: q.get("target") } });
       return J(r);
     }
-    case "envtwd":
-      return J({ hasTWD: "__TWD" in self.env });
+    case "envtw":
+      return J({ hasTW: "__TW" in self.env });
   }
   return J({ error: "unknown op " + op }, 404);
 }
 
 class Base extends DurableObject {
-  // What the Sandbox SDK 0.x's exposePort does: mint a preview URL (twd
+  // What the Sandbox SDK 0.x's exposePort does: mint a preview URL (tailworks
   // must refuse it: no public ingress, ADR-029).
   async exposePort(port, opts) {
     return { url: "https://" + port + "-" + this.ctx.id.name + "-tok." + opts.hostname };

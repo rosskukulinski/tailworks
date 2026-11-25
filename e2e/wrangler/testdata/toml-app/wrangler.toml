@@ -1,0 +1,43 @@
+# A Workers project as wrangler expects it: wrangler.toml only, no
+# tailworks.jsonc. `tw deploy` / `tw dev` run it unchanged (docs/wrangler.md).
+name = "wtoml"
+main = "src/index.ts"
+compatibility_date = "2026-04-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Cloudflare routing: tailworks ignores these, one warning line each.
+workers_dev = true
+routes = [{ pattern = "example.com/*", zone_name = "example.com" }]
+
+[define]
+BUILD_ID = '"top"'
+
+[alias]
+"greeting-lib" = "./src/lib.ts"
+
+# Markdown as a Text module; wrangler's default rules (.txt, .wasm) still apply.
+[[rules]]
+type = "Text"
+globs = ["**/*.md"]
+fallthrough = true
+
+[vars]
+GREETING = "hello from wrangler.toml"
+
+[[durable_objects.bindings]]
+name = "COUNTER"
+class_name = "Counter"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Counter"]
+
+# No Vectorize on tailworks: env.CACHE is undefined (warned).
+[[vectorize]]
+binding = "CACHE"
+index_name = "cache"
+
+[env.staging]
+vars = { GREETING = "hello from staging" }
+define = { BUILD_ID = '"staging"' }
+durable_objects.bindings = [{ name = "COUNTER", class_name = "Counter" }]

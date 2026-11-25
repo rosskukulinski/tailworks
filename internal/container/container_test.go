@@ -10,8 +10,8 @@ func TestParse(t *testing.T) {
 		{"class_name": "Sandbox", "image": "./Dockerfile", "instance_type": "basic", "max_instances": 3},
 		{"class_name": "Big", "image": "docker.io/cloudflare/sandbox:0.12.14", "instance_type": {"vcpu": 2, "memory_mib": 3072, "disk_mb": 9000}}
 	]}`)
-	twd := []byte(`{"containers": [{"class": "Sandbox", "arch": "amd64", "max_instances": 1}, {"class": "Lite", "image": "img"}]}`)
-	cs, err := Parse(wr, twd)
+	tw := []byte(`{"containers": [{"class": "Sandbox", "arch": "amd64", "max_instances": 1}, {"class": "Lite", "image": "img"}]}`)
+	cs, err := Parse(wr, tw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +26,7 @@ func TestParse(t *testing.T) {
 	}
 	s := cs[2]
 	if s.Source != "./Dockerfile" || s.Image != "" || s.MaxInstances != 1 || s.Arch != "amd64" || s.Resources() != InstanceTypes["basic"] {
-		t.Fatalf("twd.jsonc override: %+v", s)
+		t.Fatalf("tailworks.jsonc override: %+v", s)
 	}
 	if a, err := Arch(cs); err != nil || a != "amd64" {
 		t.Fatalf("arch %q %v", a, err)

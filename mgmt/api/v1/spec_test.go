@@ -55,19 +55,19 @@ func TestSpecConventions(t *testing.T) {
 			if op.OperationID == "" {
 				t.Errorf("%s: no operationId", name)
 			}
-			role, hasRole := op.Extensions["x-twd-role"]
+			role, hasRole := op.Extensions["x-tw-role"]
 			public := op.Security != nil && len(*op.Security) == 0
 			if !public && !hasRole {
-				t.Errorf("%s: no x-twd-role", name)
+				t.Errorf("%s: no x-tw-role", name)
 			}
 			if public && !strings.HasPrefix(path, "/.well-known") && !strings.HasPrefix(path, "/jwks") && !strings.HasPrefix(path, "/t/") {
 				t.Errorf("%s: public but not an OIDC path", name)
 			}
 			mutating := method == "POST" || method == "PUT" || method == "PATCH" || method == "DELETE"
-			audited, _ := op.Extensions["x-twd-audit"].(bool)
+			audited, _ := op.Extensions["x-tw-audit"].(bool)
 			switch {
 			case mutating && !audited && !unauditedOK[op.OperationID]:
-				t.Errorf("%s: mutating but not x-twd-audit: true", name)
+				t.Errorf("%s: mutating but not x-tw-audit: true", name)
 			case !mutating && audited:
 				t.Errorf("%s: GET marked audited", name)
 			}
@@ -107,7 +107,14 @@ func TestSpecConventions(t *testing.T) {
 var unauditedOK = map[string]bool{
 	"ReportHostStatus": true, // 3 s heartbeat
 	"ReportHostPaths":  true, // placement telemetry (≤ 1/min); decisions are audited with the deploy
-	"CheckTenantWIF":   true, // diagnostic; creates nothing
+	// Platform store writes are high volume (one per KV put); creating a
+	// store and deleting one are audited.
+	"AppendStoreJournal": true,
+	// Queue traffic is high volume (one per send, claim and settle);
+	// creating, purging and deleting a queue are audited.
+	"SendQueueMessages": true,
+	"PullQueueMessages": true,
+	"AckQueueMessages":  true,
 }
 
 func assertPaged(t *testing.T, name string, op *openapi3.Operation) {
@@ -146,9 +153,9 @@ func TestValidatorRejectsAndAccepts(t *testing.T) {
 		{"GET", "/v1/tenants/tn_abc123", "", false},
 		{"POST", "/v1/objects/agent-k3j5m7p9qa/credentials", "", true}, // epoch required
 		{"POST", "/v1/objects/agent-k3j5m7p9qa/credentials?epoch=3", "", false},
-		{"POST", "/v1/tenants", `{"tailnet":"x.ts.net","mintMode":"wif"}`, false},
+		{"POST", "/v1/tenants", `{"tailnet":"x.ts.net","mintMode":"oauth"}`, false},
 		{"POST", "/v1/tenants", `{"tailnet":"x.ts.net","mintMode":"magic"}`, true}, // enum
-		{"POST", "/v1/tenants", `{"tailnet":"x.ts.net","mintMode":"wif","bogus":1}`, true},
+		{"POST", "/v1/tenants", `{"tailnet":"x.ts.net","mintMode":"oauth","bogus":1}`, true},
 		{"PATCH", "/v1/tenants/tn_abc123", `{"maxObjects":10}`, false},
 		{"PATCH", "/v1/tenants/tn_abc123", `{"tailnet":"y"}`, true}, // additionalProperties: false
 		{"DELETE", "/v1/objects/agent-k3j5m7p9qa?cascade=true&reason=test", "", false},
@@ -185,7 +192,7 @@ func TestValidatorRejectsAndAccepts(t *testing.T) {
 	}{
 		{"tenant ok", 200, good, false},
 		{"tenant missing required", 200, map[string]any{"tenantID": "tn_abc123"}, true},
-		{"error ok", 404, Error{Code: ErrorCodeNotFound, Message: "no", DocURL: "https://twd.dev/errors/not_found", TraceID: "t"}, false},
+		{"error ok", 404, Error{Code: ErrorCodeNotFound, Message: "no", DocURL: "https://github.com/rosskukulinski/tailworks/blob/master/docs/errors.md#not_found", TraceID: "t"}, false},
 		{"error bad code", 404, map[string]any{"code": "nope", "message": "m", "doc_url": "u", "trace_id": "t"}, true},
 		{"undocumented status", 418, good, true},
 	} {
@@ -221,8 +228,8 @@ func TestPageTypes(t *testing.T) {
 	}
 	// Merge-patch semantics: absent vs null are distinguishable.
 	var tp TenantPatch
-	_ = json.Unmarshal([]byte(`{"wifLifecycleClientID":null,"maxObjects":5}`), &tp)
-	if !tp.WifLifecycleClientID.IsNull() || tp.WifClientID.IsSpecified() || tp.MaxObjects == nil {
-		t.Fatalf("merge patch: lifecycle null=%v clientID specified=%v", tp.WifLifecycleClientID.IsNull(), tp.WifClientID.IsSpecified())
+	_ = json.Unmarshal([]byte(`{"pool":null,"maxObjects":5}`), &tp)
+	if !tp.Pool.IsNull() || tp.OauthClientID.IsSpecified() || tp.MaxObjects == nil {
+		t.Fatalf("merge patch: pool null=%v clientID specified=%v", tp.Pool.IsNull(), tp.OauthClientID.IsSpecified())
 	}
 }

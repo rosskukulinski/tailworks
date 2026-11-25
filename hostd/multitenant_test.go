@@ -16,12 +16,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd"
-	"github.com/rosskukulinski/twd/hostd/fakemgmt"
-	"github.com/rosskukulinski/twd/hostd/hostdtest"
-	"github.com/rosskukulinski/twd/hostd/mgmtapi"
-	"github.com/rosskukulinski/twd/internal/procsb"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/hostd"
+	"github.com/rosskukulinski/tailworks/hostd/fakemgmt"
+	"github.com/rosskukulinski/tailworks/hostd/hostdtest"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/internal/procsb"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 	"tailscale.com/tailcfg"
 )
 
@@ -32,6 +32,7 @@ import (
 // workerd can't read tenant B's state (Seatbelt, on macOS); killing A's
 // object leaves B's untouched.
 func TestMultiTenant(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("short")
 	}
@@ -45,9 +46,26 @@ func TestMultiTenant(t *testing.T) {
 		c.Server.SetGlobalAppCaps(tailcfg.PeerCapMap{nettest.TestCap: []tailcfg.RawMessage{nettest.TestCapValue}})
 		ctl[k] = c
 	}
-	ea := hostdtest.Start(t, hostdtest.Options{Fake: fakemgmt.Config{StaticKey: nettest.DummyKey}, Ephemeral: true,
+	// hostd refuses a second tenant's process-tier workloads when this user
+	// can reach a container engine, is in its group, or can reach the system
+	// tailscaled (procsb.ScanHostSockets; the sandbox_unavailable control,
+	// tested by TestSharedHost* below). On such a dev box this test lifts
+	// the refusal, as `tw up --insecure-shared-host` would; every isolation
+	// assertion below (distinct identities, 0700 dirs, netmap, sandbox
+	// probes, kill) is unchanged by that flag.
+	opts := hostdtest.Options{Fake: fakemgmt.Config{StaticKey: nettest.DummyKey}, Ephemeral: true,
 		KillTombstone: 3 * time.Second, Sandbox: hostd.SandboxAuto,
-		Tenant: mgmtapi.Tenant{Tailnet: "a.ts.net", ControlURL: ctl["a"].URL, MintMode: "static"}})
+		Tenant: mgmtapi.Tenant{Tailnet: "a.ts.net", ControlURL: ctl["a"].URL, MintMode: "static"}}
+	if hs := procsb.ScanHostSockets(); !hs.Empty() {
+		opts.InsecureSharedHost = true
+		reach := append([]string{}, hs.Hard...)
+		if hs.Tailscaled != "" {
+			reach = append(reach, hs.Tailscaled)
+		}
+		t.Logf("this user can reach %s: hostd would refuse the second tenant (sandbox_unavailable), so running with InsecureSharedHost; to exercise the refusal here, run the tests as a user outside the docker/podman/lxd/incus groups without access to those sockets",
+			strings.Join(reach, ", "))
+	}
+	ea := hostdtest.Start(t, opts)
 	eb := ea.AddTenant(mgmtapi.Tenant{Tailnet: "b.ts.net", ControlURL: ctl["b"].URL, MintMode: "static"})
 	if ea.TenantID == eb.TenantID {
 		t.Fatal("tenant IDs collide")
@@ -161,7 +179,8 @@ func TestMultiTenant(t *testing.T) {
 		if err := probe("/bin/ls", ws["a"].DOStorage); err != nil {
 			t.Fatalf("tenant A's sandbox can't list its own DO storage: %v", err)
 		}
-		t.Logf("seatbelt: tenant A's workerd profile denies tenant B's state dir, node state and DO storage")
+		seatbeltLiveEscapes(t, ws["a"].SandboxProfile)
+		t.Logf("seatbelt: tenant A's workerd profile denies tenant B's state dir, node state and DO storage, TCP, signals to hostd and writes to /tmp")
 	} else if sb == hostd.SandboxLandlock {
 		landlockCrossTenant(t, ea, ws["a"], ws["b"], filepath.Join(data, "tenants", eb.TenantID), objs["b"].NetdID)
 	} else {
@@ -322,12 +341,14 @@ func landlockCrossTenant(t *testing.T, ea *hostdtest.Env, a, b hostd.WorkloadSta
 // tenant's deploy fails typed sandbox_unavailable. -insecure-shared-host
 // would allow it.
 func TestSharedHostWithoutSandbox(t *testing.T) {
+	t.Parallel()
 	sharedHost(t, hostdtest.Options{Sandbox: hostd.SandboxNone}, "", "-insecure-shared-host")
 }
 
 // With a sandbox, but a container engine reachable (stubbed), the second
 // tenant is refused too (root-equivalent for hostd itself).
 func TestSharedHostRiskySockets(t *testing.T) {
+	t.Parallel()
 	sharedHost(t, hostdtest.Options{Sandbox: hostd.SandboxAuto,
 		HostSockets: func() procsb.HostSockets { return procsb.HostSockets{Hard: []string{"/var/run/docker.sock"}} }},
 		"", "/var/run/docker.sock")
@@ -341,6 +362,7 @@ var tailscaledOnly = func() procsb.HostSockets {
 // (no AF_UNIX): the host may be shared, and the second tenant's workerd
 // still can't connect to that socket.
 func TestSharedHostTailscaledSandboxed(t *testing.T) {
+	t.Parallel()
 	if sb, _ := hostd.ResolveSandbox(hostd.SandboxAuto); sb != hostd.SandboxLandlock {
 		t.Skip("needs Landlock")
 	}
@@ -349,12 +371,14 @@ func TestSharedHostTailscaledSandboxed(t *testing.T) {
 
 // tailscaled's socket reachable and no sandbox: refused.
 func TestSharedHostTailscaledNoSandbox(t *testing.T) {
+	t.Parallel()
 	sharedHost(t, hostdtest.Options{Sandbox: hostd.SandboxNone, HostSockets: tailscaledOnly}, "", "no process sandbox")
 }
 
 // tailscaled's socket reachable, sandbox on, but tenant A's Node app
 // listens on a unix socket (keeps AF_UNIX): refused, naming the reason.
 func TestSharedHostTailscaledUnixListen(t *testing.T) {
+	t.Parallel()
 	if sb, _ := hostd.ResolveSandbox(hostd.SandboxAuto); sb != hostd.SandboxLandlock {
 		t.Skip("needs Landlock")
 	}
@@ -387,7 +411,7 @@ func sharedHost(t *testing.T, o hostdtest.Options, aListen, mention string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		files["twd.jsonc"] = []byte(strings.Replace(string(files["twd.jsonc"]), `"node": {`, `"node": { "listen": "`+aListen+`",`, 1))
+		files["tailworks.jsonc"] = []byte(strings.Replace(string(files["tailworks.jsonc"]), `"node": {`, `"node": { "listen": "`+aListen+`",`, 1))
 		ea.WaitActive("nodeprobe", ea.DeployFiles(files, "nodeprobe"), 60*time.Second)
 	} else {
 		ea.WaitActive("agent", ea.Deploy(hostdtest.Template("agent"), "agent", nil), 60*time.Second)
@@ -433,6 +457,7 @@ func sharedHost(t *testing.T, o hostdtest.Options, aListen, mention string) {
 // tailscaled and docker socket paths when they exist (the VM run puts fake
 // listeners there) and a temp listener.
 func TestLandlockHostSockets(t *testing.T) {
+	t.Parallel()
 	if sb, _ := hostd.ResolveSandbox(hostd.SandboxAuto); sb != hostd.SandboxLandlock {
 		t.Skip("no Landlock")
 	}

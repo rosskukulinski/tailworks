@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd"
-	"github.com/rosskukulinski/twd/hostd/fakemgmt"
-	"github.com/rosskukulinski/twd/hostd/hostdtest"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/hostd"
+	"github.com/rosskukulinski/tailworks/hostd/fakemgmt"
+	"github.com/rosskukulinski/tailworks/hostd/hostdtest"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 )
 
 // TestWorkloadService: a deployment with a Tailscale Service. hostd
@@ -22,6 +22,7 @@ import (
 // "stalled backend" case) and comes back when it recovers; a redeploy
 // without a Service withdraws it.
 func TestWorkloadService(t *testing.T) {
+	t.Parallel()
 	s := startSuite(t, fakemgmt.Config{})
 	e := s.e
 	ctx := context.Background()

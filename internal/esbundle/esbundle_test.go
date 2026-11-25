@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rosskukulinski/twd/hostd/bundle"
+	"github.com/rosskukulinski/tailworks/hostd/bundle"
 )
 
 func repoRoot(t *testing.T) string {
@@ -19,19 +19,19 @@ func repoRoot(t *testing.T) string {
 }
 
 // TestMatchesBuildMJS: the Go bundler produces the same module as
-// create-twd's build.mjs for every template (and works with no node).
+// create-tailworks's build.mjs for every template (and works with no node).
 func TestMatchesBuildMJS(t *testing.T) {
 	root := repoRoot(t)
 	node, nodeErr := exec.LookPath("node")
-	ents, _ := os.ReadDir(filepath.Join(root, "js", "packages", "create-twd", "templates"))
+	ents, _ := os.ReadDir(filepath.Join(root, "js", "packages", "create-tailworks", "templates"))
 	if len(ents) < 3 {
 		t.Fatalf("templates: %d", len(ents))
 	}
 	for _, en := range ents {
 		tmpl := en.Name()
 		t.Run(tmpl, func(t *testing.T) {
-			dir := filepath.Join(root, "js", "packages", "create-twd", "templates", tmpl)
-			if tb, err := os.ReadFile(filepath.Join(dir, "twd.jsonc")); err == nil {
+			dir := filepath.Join(root, "js", "packages", "create-tailworks", "templates", tmpl)
+			if tb, err := os.ReadFile(filepath.Join(dir, "tailworks.jsonc")); err == nil {
 				var c struct {
 					Runtime string `json:"runtime"`
 				}
@@ -39,19 +39,23 @@ func TestMatchesBuildMJS(t *testing.T) {
 					t.Skip("runtime \"node\" template: bundled by build-node.mjs, not esbundle")
 				}
 			}
+			if _, err := os.Stat(filepath.Join(dir, "src", "entry.py")); err == nil {
+				t.Skip("Python template: packed as it is, not bundled (cmd/tw/python.go)")
+			}
 			wb, err := os.ReadFile(filepath.Join(dir, "wrangler.jsonc"))
 			if err != nil {
 				t.Fatal(err)
 			}
 			var w struct {
-				Main string `json:"main"`
+				Main  string   `json:"main"`
+				Flags []string `json:"compatibility_flags"`
 			}
 			if err := bundle.UnmarshalJSONC(wb, &w); err != nil {
 				t.Fatal(err)
 			}
 			out := t.TempDir()
 			goOut := filepath.Join(out, "go.js")
-			n, err := Build(Options{Dir: dir, Main: w.Main, Outfile: goOut})
+			n, err := Build(Options{Dir: dir, Main: w.Main, Outfile: goOut, NodeCompat: NodeCompat(w.Flags)})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -67,7 +71,7 @@ func TestMatchesBuildMJS(t *testing.T) {
 				return
 			}
 			jsOut := filepath.Join(out, "js.js")
-			cmd := exec.Command(node, filepath.Join(root, "js", "packages", "create-twd", "lib", "build.mjs"), dir, jsOut)
+			cmd := exec.Command(node, filepath.Join(root, "js", "packages", "create-tailworks", "lib", "build.mjs"), dir, jsOut)
 			if b, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("build.mjs: %v %s", err, b)
 			}

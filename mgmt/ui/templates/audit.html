@@ -1,0 +1,50 @@
+{{define "content"}}
+<h1>Audit log</h1>
+<p class="hint">Who did what, when and why: every deploy, kill, approval and change tailworks made, newest first.</p>
+
+{{if .Who.Admin}}<div data-live="verification">{{if not .Verification.OK}}{{template "integrity" .Verification}}{{end}}</div>{{end}}
+
+<section class="card toolbar">
+  <form method="get" action="/ui/audit" class="filters">
+    <label>Tenant
+      <select name="tenant">
+        <option value="">every tenant</option>
+        {{range .Tenants}}<option value="{{.TenantID}}"{{if eq .TenantID $.Tenant}} selected{{end}}>{{.Tailnet}}</option>{{end}}
+      </select>
+    </label>
+    <label>App (workload) <input type="text" name="workload" class="mono" value="{{.Workload}}" placeholder="any"></label>
+    <label>Event <input type="text" name="kind" class="mono" value="{{.Kind}}" list="audit-kinds" placeholder="any (e.g. deploy)"></label>
+    <datalist id="audit-kinds">{{range .AuditKinds}}<option value="{{.}}">{{end}}</datalist>
+    <label>Caller <input type="text" name="human" value="{{.Human}}" placeholder="login the records act for"></label>
+    <label>Object <input type="text" name="object" class="mono" value="{{.Object}}" placeholder="object ID"></label>
+    <label>Trace <input type="text" name="trace" class="mono" value="{{.Trace}}" placeholder="trace ID"></label>
+    <label>Per page <input type="number" name="limit" min="1" max="500" value="{{.Limit}}"></label>
+    <button type="submit">Filter</button>
+    <a href="/ui/audit">Clear</a>
+  </form>
+  <p class="small muted">Filters combine. They are applied by the API (<span class="mono">GET /v1/audit</span>).</p>
+</section>
+
+<section>
+  <div class="sect-head"><div>
+    <h2>Records <span class="count">{{len .Records}}</span> {{if not .Verified}}<span class="badge bad">page NOT VERIFIED</span>{{end}}</h2>
+    <p class="hint">{{if .Filtered}}Matching records{{else}}Every record{{end}}, newest first, {{.Limit}} per page.</p>
+  </div></div>
+  <div class="tbl">
+  <table>
+    <thead>{{template "audithead"}}</thead>
+    <tbody>{{template "auditrows" (auditSet .Records .Names)}}{{if not .Records}}<tr><td colspan="6" class="empty">No records</td></tr>{{end}}</tbody>
+  </table>
+  </div>
+  <p class="pager">{{if .Paged}}<a href="{{.FirstURL}}">← Newest</a>{{end}}{{if .NextURL}}<a href="{{.NextURL}}">Older →</a>{{else}}<span class="muted">Oldest record reached</span>{{end}}</p>
+  {{if not .Verified}}<p class="chains">{{template "chains" .Chains}}</p>{{end}}
+</section>
+
+{{if .Who.Admin}}<div data-live="integrity">{{if .Verification.OK}}{{template "integrity" .Verification}}{{end}}</div>{{end}}
+{{end}}
+
+{{define "integrity"}}{{/* . is verification: shown on top when it fails, at the bottom otherwise (#406) */}}<section class="card">
+  <h2>Integrity {{if .OK}}<span class="badge ok">all chains verified</span>{{else}}<span class="badge bad">NOT VERIFIED</span>{{end}}</h2>
+  <p class="hint">Each record is hash-chained to the one before it, so an edit or deletion shows up as a broken chain.{{if .VerifiedAt}} Last checked {{since .VerifiedAt}} ({{stamp .VerifiedAt}}).{{end}}</p>
+  <p class="chains">{{template "chains" .Chains}}</p>
+</section>{{end}}

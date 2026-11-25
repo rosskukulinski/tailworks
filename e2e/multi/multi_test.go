@@ -1,9 +1,9 @@
 //go:build e2emulti
 
-// E2E-MULTI (BUILD-PLAN definition of done 2) on this machine: one twd host
-// (process tier) serves tenant A on tailnet 1 (`twd up`) and tenant B on
-// tailnet-2 (`twd tenant add`), with the same agent app deployed to both;
-// e2e/cliflow MultiEnv checks (a)–(f), then `twd down` and zero leftovers
+// E2E-MULTI (the multi-tenant acceptance test) on this machine: one tailworks host
+// (process tier) serves tenant A on tailnet 1 (`tw up`) and tenant B on
+// tailnet-2 (`tw tenant add`), with the same agent app deployed to both;
+// e2e/cliflow MultiEnv checks (a)–(f), then `tw down` and zero leftovers
 // in both tailnets.
 //
 // Safety: only tailnet 1 and tailnet-2 (allow list; tailnet-2's name is
@@ -26,16 +26,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/e2e/cliflow"
-	"github.com/rosskukulinski/twd/internal/policy"
-	"github.com/rosskukulinski/twd/internal/tsapi"
-	"github.com/rosskukulinski/twd/netd"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/e2e/cliflow"
+	"github.com/rosskukulinski/tailworks/internal/policy"
+	"github.com/rosskukulinski/tailworks/internal/tsapi"
+	"github.com/rosskukulinski/tailworks/netd"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 )
 
 const prodControl = "https://controlplane.tailscale.com"
 
-// The two test tailnets. Tailnets listed in TWD_E2E_FORBIDDEN_TAILNETS
+// The two test tailnets. Tailnets listed in TW_E2E_FORBIDDEN_TAILNETS
 // (comma-separated substrings, e.g. your personal tailnet) are never touched.
 var (
 	allowedA  = map[string]bool{"tail7906d5.ts.net": true}
@@ -45,7 +45,7 @@ var (
 
 func forbiddenTailnets() []string {
 	var out []string
-	for _, f := range strings.Split(os.Getenv("TWD_E2E_FORBIDDEN_TAILNETS"), ",") {
+	for _, f := range strings.Split(os.Getenv("TW_E2E_FORBIDDEN_TAILNETS"), ",") {
 		if f = strings.TrimSpace(f); f != "" {
 			out = append(out, f)
 		}
@@ -64,10 +64,10 @@ type side struct {
 }
 
 func TestE2EMulti(t *testing.T) {
-	kfA, kfB := os.Getenv("TWD_E2E_API_KEY_FILE"), os.Getenv("TWD_E2E_API_KEY_FILE_B")
-	tailnetA := os.Getenv("TWD_E2E_TAILNET")
+	kfA, kfB := os.Getenv("TW_E2E_API_KEY_FILE"), os.Getenv("TW_E2E_API_KEY_FILE_B")
+	tailnetA := os.Getenv("TW_E2E_TAILNET")
 	if kfA == "" || kfB == "" || tailnetA == "" {
-		t.Skip("TWD_E2E_API_KEY_FILE / TWD_E2E_API_KEY_FILE_B / TWD_E2E_TAILNET not set")
+		t.Skip("TW_E2E_API_KEY_FILE / TW_E2E_API_KEY_FILE_B / TW_E2E_TAILNET not set")
 	}
 	if !allowedA[tailnetA] {
 		t.Fatalf("refusing to run against tailnet %q (not in the allow list)", tailnetA)
@@ -76,18 +76,18 @@ func TestE2EMulti(t *testing.T) {
 	if err != nil {
 		t.Skip(err)
 	}
-	t.Setenv("TWD_WORKERD", wd)
+	t.Setenv("TW_WORKERD", wd)
 	b := make([]byte, 3)
 	rand.Read(b)
 	run := hex.EncodeToString(b)
-	// TWD_E2E_PREFIX names this run's test nodes (default ttest-m7-; L2 runs
+	// TW_E2E_PREFIX names this run's test nodes (default ttest-m7-; L2 runs
 	// use ttest-l2-), so concurrent streams clean up only their own IDs.
-	pfx := os.Getenv("TWD_E2E_PREFIX")
+	pfx := os.Getenv("TW_E2E_PREFIX")
 	if pfx == "" {
 		pfx = "ttest-m7-"
 	}
 	if !strings.HasPrefix(pfx, "ttest-") {
-		t.Fatalf("TWD_E2E_PREFIX %q must start with ttest-", pfx)
+		t.Fatalf("TW_E2E_PREFIX %q must start with ttest-", pfx)
 	}
 	prefix := pfx + run + "-"
 	root, _ := nettest.FindRepoRoot()
@@ -129,11 +129,11 @@ func TestE2EMulti(t *testing.T) {
 	var notes []string
 	var downDone bool
 	var m *cliflow.MultiEnv
-	state := filepath.Join("/tmp", "twd-e2e-m7-"+run)
+	state := filepath.Join("/tmp", "tw-e2e-m7-"+run)
 	cleanup := func() {
 		if m != nil && !downDone {
-			if _, se, _, err := m.Twd("down", "--purge"); err != nil {
-				t.Logf("twd down (cleanup): %v %s", err, netd.Redact(se))
+			if _, se, _, err := m.Tw("down", "--purge"); err != nil {
+				t.Logf("tw down (cleanup): %v %s", err, netd.Redact(se))
 			}
 		}
 		if t.Failed() {
@@ -154,13 +154,13 @@ func TestE2EMulti(t *testing.T) {
 			}
 			devs, keys := cliflow.Leftovers(cctx, s.api, s.res)
 			c := s.res.Cleanup
-			c["twd_devices_tracked"], c["twd_keys_tracked"] = len(s.res.NodeIDs), len(s.res.KeyIDs)
-			c["twd_devices_left_after_down"], c["twd_keys_valid_after_down"] = len(devs), len(keys)
+			c["tw_devices_tracked"], c["tw_keys_tracked"] = len(s.res.NodeIDs), len(s.res.KeyIDs)
+			c["tw_devices_left_after_down"], c["tw_keys_valid_after_down"] = len(devs), len(keys)
 			for _, id := range s.res.NodeIDs {
-				s.tracker.Track(id, "twd")
+				s.tracker.Track(id, "tw")
 			}
 			for _, id := range s.res.InfraNodeIDs {
-				s.tracker.Track(id, "twd-infra")
+				s.tracker.Track(id, "tw-infra")
 			}
 			crep := s.tracker.Cleanup(cctx, prefix)
 			for _, k := range keys {
@@ -174,7 +174,7 @@ func TestE2EMulti(t *testing.T) {
 			c["untracked_run_devices"], c["test_keys_minted"], c["test_keys_revoke_errors"] = crep.Untracked, len(s.minter.KeyIDs()), revErrs
 			summary[s.tailnet] = s.res
 			if len(devs) > 0 || len(keys) > 0 {
-				t.Errorf("%s after twd down: leftover twd devices %v, valid keys %d", s.tailnet, devs, len(keys))
+				t.Errorf("%s after tw down: leftover tw devices %v, valid keys %d", s.tailnet, devs, len(keys))
 			}
 			if crep.Left != 0 || len(crep.Untracked) > 0 {
 				t.Errorf("%s cleanup left devices: %+v", s.tailnet, crep)
@@ -213,7 +213,7 @@ func TestE2EMulti(t *testing.T) {
 	tailnetB = joined
 	for _, f := range forbidden {
 		if strings.Contains(tailnetB, f) {
-			t.Fatalf("tailnet-2 resolved to %s: refusing (in TWD_E2E_FORBIDDEN_TAILNETS)", tailnetB)
+			t.Fatalf("tailnet-2 resolved to %s: refusing (in TW_E2E_FORBIDDEN_TAILNETS)", tailnetB)
 		}
 	}
 	if !allowedB[tailnetB] || tailnetB == tailnetA {
@@ -226,7 +226,7 @@ func TestE2EMulti(t *testing.T) {
 
 	// Policy: add what the scenario needs to each tailnet (no-op if present).
 	for _, s := range []*side{A, B} {
-		if os.Getenv("TWD_E2E_NO_POLICY_WRITE") != "" {
+		if os.Getenv("TW_E2E_NO_POLICY_WRITE") != "" {
 			// Read-only: the scenario's rules must already be there.
 			cur, _, err := s.api.GetPolicyHuJSON(ctx)
 			if err != nil {
@@ -234,7 +234,7 @@ func TestE2EMulti(t *testing.T) {
 			}
 			miss, err := policy.Missing(cur, cliflow.MultiPolicy())
 			if err != nil || !miss.Empty() {
-				t.Fatalf("policy %s lacks the scenario's rules (TWD_E2E_NO_POLICY_WRITE set, so not writing): %v %s", s.tailnet, err, miss.HuJSON())
+				t.Fatalf("policy %s lacks the scenario's rules (TW_E2E_NO_POLICY_WRITE set, so not writing): %v %s", s.tailnet, err, miss.HuJSON())
 			}
 			notes = append(notes, s.tailnet+": policy already had the scenario's rules (read-only check, not written)")
 			continue
@@ -257,7 +257,10 @@ func TestE2EMulti(t *testing.T) {
 
 	bin := cliflow.BuildBinaries(t)
 	mk := func(s *side) *cliflow.Tenant {
-		return &cliflow.Tenant{Tailnet: s.tailnet, APIKeyFile: s.keyFile, ControlURL: prodControl, Res: s.res,
+		// Each tailnet's OAuth client, created for this run with that
+		// tailnet's API key (tailworks itself never sees the key).
+		oauthFile := cliflow.RealOAuthClient(t, s.keyFile, s.tailnet, t.TempDir(), "tw-e2e-multi-"+s.key+"-oauth")
+		return &cliflow.Tenant{Tailnet: s.tailnet, OAuthClientFile: oauthFile, ControlURL: prodControl, Res: s.res,
 			NewNode: func(role string) *nettest.Node {
 				if n := s.pre[role]; n != nil {
 					return n

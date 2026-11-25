@@ -1,10 +1,10 @@
 //go:build e2ereal
 
-// Package mgmtreal runs twd-mgmt against tailnet 1 (production control):
+// Package mgmtreal runs tw-mgmt against tailnet 1 (production control):
 // mgmt mints a single-use tag:ttest key → a tsnet node joins with it → a
 // cascade kill deletes the device via the API → the device is verified gone.
 //
-// Safety (BUILD-PLAN): tailnet allow-list; policy is only READ (spawn check);
+// Safety (docs/install-testing.md): tailnet allow-list; policy is only READ (spawn check);
 // node names are ttest-m2-<runid>-*; keys are never printed; cleanup deletes
 // only the device and key IDs this run created (never a prefix/tag sweep —
 // another engineer runs e2e on the same tailnet).
@@ -27,10 +27,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/internal/tsapi"
-	"github.com/rosskukulinski/twd/mgmt"
-	"github.com/rosskukulinski/twd/netd"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/e2e/cliflow"
+	"github.com/rosskukulinski/tailworks/internal/tsapi"
+	"github.com/rosskukulinski/tailworks/mgmt"
+	"github.com/rosskukulinski/tailworks/netd"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 	"tailscale.com/tsnet"
 )
 
@@ -64,9 +65,9 @@ func (r *results) check(t *testing.T, name string, ok bool, detail string) bool 
 func ms(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }
 
 func TestMgmtRealMintJoinKill(t *testing.T) {
-	keyFile, tailnet := os.Getenv("TWD_E2E_API_KEY_FILE"), os.Getenv("TWD_E2E_TAILNET")
+	keyFile, tailnet := os.Getenv("TW_E2E_API_KEY_FILE"), os.Getenv("TW_E2E_TAILNET")
 	if keyFile == "" || tailnet == "" {
-		t.Skip("TWD_E2E_API_KEY_FILE / TWD_E2E_TAILNET not set")
+		t.Skip("TW_E2E_API_KEY_FILE / TW_E2E_TAILNET not set")
 	}
 	if !allowedTailnets[tailnet] {
 		t.Fatalf("refusing to run against tailnet %q (not in the allow list)", tailnet)
@@ -87,7 +88,7 @@ func TestMgmtRealMintJoinKill(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	defer cancel()
-	dir, err := os.MkdirTemp("/tmp", "twd-m2-real-")
+	dir, err := os.MkdirTemp("/tmp", "tw-m2-real-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,6 +96,11 @@ func TestMgmtRealMintJoinKill(t *testing.T) {
 
 	var logBuf bytes.Buffer
 	log := slog.New(netd.NewRedactingHandler(slog.NewTextHandler(&logBuf, nil)))
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("mgmt log (redacted):\n%s", logBuf.String())
+		}
+	})
 	store, err := mgmt.OpenStore(ctx, filepath.Join(dir, "mgmt.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -192,7 +198,7 @@ func TestMgmtRealMintJoinKill(t *testing.T) {
 			bb, _ := json.Marshal(body)
 			rd = bytes.NewReader(bb)
 		}
-		req, _ := http.NewRequestWithContext(ctx, method, "http://twd-mgmt"+path, rd)
+		req, _ := http.NewRequestWithContext(ctx, method, "http://tw-mgmt"+path, rd)
 		if rd != nil {
 			ct := "application/json"
 			if method == "PATCH" {
@@ -200,7 +206,7 @@ func TestMgmtRealMintJoinKill(t *testing.T) {
 			}
 			req.Header.Set("Content-Type", ct)
 		}
-		req.Header.Set("Twd-Host-ID", hostID)
+		req.Header.Set("Tw-Host-ID", hostID)
 		req.Header.Set(mgmt.HostTokenHeader, hostToken)
 		resp, err := hc.Do(req)
 		if err != nil {
@@ -219,13 +225,15 @@ func TestMgmtRealMintJoinKill(t *testing.T) {
 		return resp.StatusCode
 	}
 	var tn struct{ TenantID string }
-	if call("POST", "/v1/tenants", map[string]any{"tailnet": tailnet, "controlURL": prodControl, "mintMode": "apikey", "apiKeyFile": keyFile}, &tn) != 200 {
+	// mgmt mints with this run's OAuth client (it may tag tag:ttest).
+	oauthFile := cliflow.RealOAuthClient(t, keyFile, tailnet, t.TempDir(), prefix+"oauth", "tag:ttest")
+	if call("POST", "/v1/tenants", map[string]any{"tailnet": tailnet, "controlURL": prodControl, "mintMode": "oauth", "oauthClientFile": oauthFile}, &tn) != 200 {
 		t.Fatal("tenant")
 	}
 	call("PUT", "/v1/hosts/"+hostID, map[string]any{"capacityNodes": 4, "tiers": []string{"process"}}, nil)
 	var dep mgmt.DeployResponse
 	if call("POST", "/v1/deployments", map[string]any{"tenantID": tn.TenantID, "workload": prefix,
-		"namespaces": []mgmt.ClassConfig{{Class: prefix, Tags: []string{"tag:ttest"}, Agent: true}}}, &dep) != 200 {
+		"namespaces": []mgmt.ClassConfig{{Class: prefix, Tags: []string{"tag:ttest"}}}}, &dep) != 200 {
 		t.Fatal("deploy")
 	}
 

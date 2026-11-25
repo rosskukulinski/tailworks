@@ -2,6 +2,9 @@ package mgmt
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	v1 "github.com/rosskukulinski/twd/mgmt/api/v1"
+	v1 "github.com/rosskukulinski/tailworks/mgmt/api/v1"
 )
 
 // /v1 conventions (api/openapi.yaml): cursor pagination, JSON Merge Patch,
@@ -20,7 +23,7 @@ import (
 
 func v1Tenant(t *testing.T, e *testEnv, tailnet string, extra map[string]any) string {
 	t.Helper()
-	body := map[string]any{"tailnet": tailnet, "mintMode": "apikey", "apiKeyFile": e.keyFile}
+	body := map[string]any{"tailnet": tailnet, "mintMode": "oauth", "oauthClientFile": e.keyFile}
 	for k, v := range extra {
 		body[k] = v
 	}
@@ -39,7 +42,8 @@ func v1Host(t *testing.T, e *testEnv, id string) *apiClient {
 }
 
 func TestV1Pagination(t *testing.T) {
-	e := newTestEnv(t, nil)
+	t.Parallel()
+	e := newTestEnv(t)
 	c := e.c
 	var ids []string
 	for i := range 5 {
@@ -151,7 +155,8 @@ func TestV1Pagination(t *testing.T) {
 }
 
 func TestV1TenantPatchAndETag(t *testing.T) {
-	e := newTestEnv(t, nil)
+	t.Parallel()
+	e := newTestEnv(t)
 	c := e.c
 	tn := v1Tenant(t, e, "t.ts.net", map[string]any{"maxObjects": 10})
 	// GET carries an ETag; If-None-Match answers 304.
@@ -168,13 +173,13 @@ func TestV1TenantPatchAndETag(t *testing.T) {
 	c.hdr = nil
 	// Merge patch: absent fields untouched, null clears, immutables refused.
 	var after Tenant
-	c.ok("PATCH", "/v1/tenants/"+tn, map[string]any{"registrationsPerMinute": 7, "wifLifecycleClientID": "life"}, &after)
-	if after.RegistrationsPerMinute != 7 || after.MaxObjects != 10 || after.WIFLifecycleClientID != "life" || after.MintMode != MintAPIKey {
+	c.ok("PATCH", "/v1/tenants/"+tn, map[string]any{"registrationsPerMinute": 7, "pool": "p1"}, &after)
+	if after.RegistrationsPerMinute != 7 || after.MaxObjects != 10 || after.Pool != "p1" || after.MintMode != MintOAuth {
 		t.Fatalf("after patch: %+v", after)
 	}
 	var cleared Tenant // a fresh value: omitted fields must not linger from a previous decode
-	c.ok("PATCH", "/v1/tenants/"+tn, map[string]any{"wifLifecycleClientID": nil}, &cleared)
-	if cleared.WIFLifecycleClientID != "" || cleared.RegistrationsPerMinute != 7 || cleared.MaxObjects != 10 {
+	c.ok("PATCH", "/v1/tenants/"+tn, map[string]any{"pool": nil}, &cleared)
+	if cleared.Pool != "" || cleared.RegistrationsPerMinute != 7 || cleared.MaxObjects != 10 {
 		t.Fatalf("null did not clear: %+v", cleared)
 	}
 	// Inputs the spec itself forbids (so the validator would flag the
@@ -208,7 +213,8 @@ func TestV1TenantPatchAndETag(t *testing.T) {
 }
 
 func TestV1DeleteSemantics(t *testing.T) {
-	e := newTestEnv(t, nil)
+	t.Parallel()
+	e := newTestEnv(t)
 	c := e.c
 	tn := v1Tenant(t, e, "t.ts.net", nil)
 	h1 := v1Host(t, e, "h1")
@@ -237,7 +243,7 @@ func TestV1DeleteSemantics(t *testing.T) {
 	}
 
 	// Kill: 202, then 410 with the kill record (by, cascade, root).
-	c.hdr = map[string]string{"Twd-Actor": "ross@example.com"}
+	c.hdr = map[string]string{"Tw-Actor": "ross@example.com"}
 	var kr KillResult
 	if st := c.okStatus("DELETE", "/v1/objects/"+root.ObjectID+killQuery(true, "test kill"), nil, &kr); st != 202 || len(kr.Killed) != 2 {
 		t.Fatalf("kill: %d %+v", st, kr)
@@ -245,7 +251,7 @@ func TestV1DeleteSemantics(t *testing.T) {
 	c.hdr = nil
 	for _, id := range []string{root.ObjectID, kid.ObjectID} {
 		st, eb, hdr := c.doRaw("GET", "/v1/objects/"+id, nil, nil)
-		if st != 410 || eb["code"] != "killed" || hdr.Get("Twd-Error") != "killed" {
+		if st != 410 || eb["code"] != "killed" || hdr.Get("Tw-Error") != "killed" {
 			t.Fatalf("GET killed %s: %d %v", id, st, eb)
 		}
 		ts := eb["tombstone"].(map[string]any)
@@ -320,10 +326,11 @@ func TestV1DeleteSemantics(t *testing.T) {
 
 // TestV1RoleMatrix drives every operation in the spec through the WhoIs
 // gate as a host, an admin and a non-admin, so a route can't be added
-// without its x-twd-role being enforced.
+// without its x-tw-role being enforced.
 func TestV1RoleMatrix(t *testing.T) {
-	e := newTestEnv(t, nil)
-	srv := &Server{M: e.m, Self: SelfInfo{DNSName: "twd-mgmt.t.ts.net", Tailnet: "t.ts.net"}}
+	t.Parallel()
+	e := newTestEnv(t)
+	srv := &Server{M: e.m, Self: SelfInfo{DNSName: "tw-mgmt.t.ts.net", Tailnet: "t.ts.net"}}
 	whois := func(ctx context.Context, addr string) (WhoIsInfo, error) {
 		switch addr {
 		case "100.64.0.1:1":
@@ -350,7 +357,26 @@ func TestV1RoleMatrix(t *testing.T) {
 		json.Unmarshal(w.Body.Bytes(), &out)
 		return w.Code, out.Code
 	}
-	if c, _ := call("100.64.0.1:1", "PUT", "/v1/hosts/h1", `{"capacityNodes":1,"tiers":["process"]}`); c != 201 {
+	matrixPub, _, _ := ed25519.GenerateKey(rand.Reader)
+	// Hosts register an audit key, as hostd does (RT3-05: audit ingest
+	// refuses hosts without one).
+	auditKey := base64.StdEncoding.EncodeToString(matrixPub)
+	// M1: over the tailnet a host binds a record the admin added (POST
+	// /v1/hosts) with its one-time registration secret; once bound it
+	// re-registers without one. The matrix's DELETE /v1/hosts/{id} removes
+	// h1, so this adds it again whenever it is gone.
+	tn := v1Tenant(t, e, "op.ts.net", nil)
+	ensureHost := func() int {
+		var hj struct{ RegistrationSecret string }
+		st, _ := e.c.do("POST", "/v1/hosts", map[string]any{"hostID": "h1", "tenantID": tn}, &hj)
+		body := `{"capacityNodes":1,"tiers":["process"],"auditPubKey":"` + auditKey + `"}`
+		if st/100 == 2 {
+			body = `{"capacityNodes":1,"tiers":["process"],"auditPubKey":"` + auditKey + `","registrationSecret":"` + hj.RegistrationSecret + `"}`
+		}
+		c, _ := call("100.64.0.1:1", "PUT", "/v1/hosts/h1", body)
+		return c
+	}
+	if c := ensureHost(); c != 201 {
 		t.Fatalf("register host: %d", c)
 	}
 	roles, err := v1.OperationRoles()
@@ -364,7 +390,7 @@ func TestV1RoleMatrix(t *testing.T) {
 	for key, role := range roles {
 		// DELETE /v1/hosts/{id} (as admin) removes h1: re-register it so
 		// the host principal stays bound for every operation.
-		if c, _ := call("100.64.0.1:1", "PUT", "/v1/hosts/h1", `{"capacityNodes":1,"tiers":["process"]}`); c/100 != 2 {
+		if c := ensureHost(); c/100 != 2 {
 			t.Fatalf("re-register host: %d", c)
 		}
 		method, tmpl, _ := strings.Cut(key, " ")
@@ -398,7 +424,7 @@ func TestV1RoleMatrix(t *testing.T) {
 		}
 	}
 	// A host may not read or write another host's record.
-	call("100.64.0.1:1", "PUT", "/v1/hosts/h1", `{"capacityNodes":1,"tiers":["process"]}`)
+	ensureHost()
 	for _, m := range []string{"GET", "PUT"} {
 		if c, code := call("100.64.0.1:1", m, "/v1/hosts/h2", `{"capacityNodes":1,"tiers":["process"]}`); c != 403 || code != "forbidden" {
 			t.Errorf("%s other host: %d %s", m, c, code)
@@ -407,7 +433,8 @@ func TestV1RoleMatrix(t *testing.T) {
 }
 
 func TestV1HostJoinKey(t *testing.T) {
-	e := newTestEnv(t, nil)
+	t.Parallel()
+	e := newTestEnv(t)
 	c := e.c
 	tn := v1Tenant(t, e, "op.ts.net", nil)
 	var hj struct {
@@ -424,12 +451,12 @@ func TestV1HostJoinKey(t *testing.T) {
 	if st != 201 || hdr.Get("Location") != "/v1/hosts/h-mbp" || hdr.Get("Cache-Control") != "no-store" {
 		t.Fatalf("create host: %d %v", st, hdr)
 	}
-	if !strings.HasPrefix(hj.AuthKey, "tskey-auth-") || fmt.Sprint(hj.Tags) != "[tag:twd-host]" || hj.Hostname != "twd-host-h-mbp" || hj.Host.Status != "pending" || hj.Tailnet != "op.ts.net" {
+	if !strings.HasPrefix(hj.AuthKey, "tskey-auth-") || fmt.Sprint(hj.Tags) != "[tag:tw-host]" || hj.Hostname != "tw-host-h-mbp" || hj.Host.Status != "pending" || hj.Tailnet != "op.ts.net" {
 		t.Fatalf("join: %+v", hj)
 	}
 	kb := e.ts.createdKey(1)
 	create := kb["capabilities"].(map[string]any)["devices"].(map[string]any)["create"].(map[string]any)
-	if create["reusable"] != false || create["preauthorized"] != true || fmt.Sprint(create["tags"]) != "[tag:twd-host]" || kb["expirySeconds"].(float64) != 600 {
+	if create["reusable"] != false || create["preauthorized"] != true || fmt.Sprint(create["tags"]) != "[tag:tw-host]" || kb["expirySeconds"].(float64) != 600 {
 		t.Fatalf("minted host key options %v", kb)
 	}
 	// Pending again: a fresh key, 200.
@@ -462,7 +489,8 @@ func TestV1HostJoinKey(t *testing.T) {
 
 // TestV1Status: the operational counters and the transport label.
 func TestV1Status(t *testing.T) {
-	e := newTestEnv(t, nil)
+	t.Parallel()
+	e := newTestEnv(t)
 	v1Tenant(t, e, "t.ts.net", nil)
 	v1Host(t, e, "h1")
 	var st struct {

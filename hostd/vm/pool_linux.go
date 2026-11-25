@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rosskukulinski/twd/guest/proto"
+	"github.com/rosskukulinski/tailworks/guest/proto"
 )
 
 // pool keeps pre-booted, warm microVMs that hold no tenant code (see
@@ -25,7 +25,7 @@ import (
 //     workload or tenant. A pooled VM that fails its claim is destroyed too.
 //   - budget: the pool only refills while all of this backend's VMs
 //     (pooled, claimed and cold-booted) plus the next one fit in the
-//     huge-page reservation (`twd host setup --microvm`: vm.nr_hugepages,
+//     huge-page reservation (`tw host setup --microvm`: vm.nr_hugepages,
 //     default 4 VMs' worth, ≤ ¼ of RAM), and only if that many 2 MiB pages
 //     are actually free right now (other users of huge pages, including
 //     other hostds, count). Pool VMs are booted with huge pages "on": a

@@ -12,30 +12,31 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/internal/nodecert"
+	"github.com/rosskukulinski/tailworks/internal/nodecert"
 )
 
 // RT-01: mgmt signs a node certificate at ready, carrying the spawn lim,
 // and serves it by stable node ID for receivers; the tenant's OBO public
 // key verifies it.
 func TestNodeCertificates(t *testing.T) {
-	e := newTestEnv(t, nil)
+	t.Parallel()
+	e := newTestEnv(t)
 	c, h1 := e.c, e.asHost("h1")
 	var tn struct{ TenantID string }
-	c.ok("POST", "/v1/tenants", map[string]any{"tailnet": "t.ts.net", "mintMode": "apikey", "apiKeyFile": e.keyFile}, &tn)
+	c.ok("POST", "/v1/tenants", map[string]any{"tailnet": "t.ts.net", "mintMode": "oauth", "oauthClientFile": e.keyFile}, &tn)
 	h1.ok("PUT", "/v1/hosts/h1", map[string]any{"capacityNodes": 100, "tiers": []string{"process"}}, nil)
-	bundle := makeBundle(t, map[string]string{"twd.jsonc": testTwdJSONC, "dist/index.js": "export default {}"})
+	bundle := makeBundle(t, map[string]string{"tailworks.jsonc": testTwJSONC, "dist/index.js": "export default {}"})
 	c.ok("POST", "/v1/deployments", map[string]any{"tenantID": tn.TenantID, "workload": "support", "bundle": bundle}, nil)
 
 	var root, child CreateObjectResponse
 	h1.ok("POST", "/v1/objects", map[string]any{"tenantID": tn.TenantID, "namespace": "SupportAgent", "objectName": "alice"}, &root)
 	h1.ok("POST", "/v1/objects/"+root.ObjectID+"/credentials?epoch=1", nil, &Credential{})
-	h1.ok("PATCH", "/v1/objects/"+root.ObjectID, map[string]any{"status": "ready", "nodeID": "1", "stableNodeID": "nROOT", "magicDNS": root.ObjectID + ".t.ts.net"}, nil)
+	h1.ok("PATCH", "/v1/objects/"+root.ObjectID, map[string]any{"status": "ready", "epoch": 1, "nodeID": "1", "stableNodeID": "nROOT", "magicDNS": root.ObjectID + ".t.ts.net"}, nil)
 	lim := map[string]any{"acme.com/cap/mcp": map[string]any{"tools": []string{"lookup_order"}}}
 	h1.ok("POST", "/v1/objects", map[string]any{"tenantID": tn.TenantID, "namespace": "LookupAgent", "objectName": "c1",
 		"parent": map[string]string{"objectID": root.ObjectID}, "caps": lim}, &child)
 	h1.ok("POST", "/v1/objects/"+child.ObjectID+"/credentials?epoch=1", nil, &Credential{})
-	h1.ok("PATCH", "/v1/objects/"+child.ObjectID, map[string]any{"status": "ready", "nodeID": "2", "stableNodeID": "nCHILD"}, nil)
+	h1.ok("PATCH", "/v1/objects/"+child.ObjectID, map[string]any{"status": "ready", "epoch": 1, "nodeID": "2", "stableNodeID": "nCHILD"}, nil)
 
 	var tv struct {
 		OBOPublicKey string `json:"oboPublicKey"`
@@ -49,7 +50,7 @@ func TestNodeCertificates(t *testing.T) {
 	var cert NodeCertView
 	h1.ok("GET", "/v1/certificates/nCHILD?tenant="+tn.TenantID, nil, &cert)
 	if cert.ObjectID != child.ObjectID || cert.Payload == nil || cert.Payload.ParentID != root.ObjectID || cert.Payload.RootID != root.ObjectID ||
-		cert.Payload.Tags[0] != "tag:twd-agent-support-sub" || !strings.Contains(string(cert.Payload.Lim), "lookup_order") {
+		cert.Payload.Tags[0] != "tag:tw-agent-support-sub" || !strings.Contains(string(cert.Payload.Lim), "lookup_order") {
 		t.Fatalf("cert view: %+v payload %+v", cert, cert.Payload)
 	}
 	p, err := nodecert.Verify(ed25519.PublicKey(pub), cert.Cert, "nCHILD", time.Now())
@@ -66,7 +67,7 @@ func TestNodeCertificates(t *testing.T) {
 		t.Fatalf("root cert: %+v", rc.Payload)
 	}
 	// Unknown node / wrong tenant: 404 (the receiver then applies the plain
-	// WhoIs caps: not a twd object). Killed: 410.
+	// WhoIs caps: not a tailworks object). Killed: 410.
 	h1.fail("GET", "/v1/certificates/nNOBODY?tenant="+tn.TenantID, nil, 404, "not_found")
 	h1.fail("GET", "/v1/certificates/nCHILD?tenant=tn_other", nil, 404, "not_found")
 	c.ok("DELETE", "/v1/objects/"+child.ObjectID+killQuery(false, "test"), nil, nil)
@@ -90,12 +91,13 @@ func TestNodeCertificates(t *testing.T) {
 // RT-03: the unix socket admits nobody without the per-host token, not even
 // for /v1/healthz, and the token file is minted 0600 and rotatable.
 func TestHostTokenOnUnixSocket(t *testing.T) {
-	e := newTestEnv(t, nil)
+	t.Parallel()
+	e := newTestEnv(t)
 	hc := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", e.sock)
 	}}}
 	get := func(path, token string) (int, string) {
-		req, _ := http.NewRequest("GET", "http://twd-mgmt"+path, nil)
+		req, _ := http.NewRequest("GET", "http://tw-mgmt"+path, nil)
 		if token != "" {
 			req.Header.Set(HostTokenHeader, token)
 		}
@@ -141,9 +143,10 @@ func TestHostTokenOnUnixSocket(t *testing.T) {
 // RT-02: host-submitted records carry their provenance; a tenant source
 // may only be a tenant_note and is reported as such.
 func TestAuditIngestProvenance(t *testing.T) {
-	e := newTestEnv(t, nil)
+	t.Parallel()
+	e := newTestEnv(t)
 	h1 := e.asHost("h1")
-	e.c.ok("POST", "/v1/tenants", map[string]any{"tailnet": "t.ts.net", "mintMode": "apikey", "apiKeyFile": e.keyFile}, nil) // a mgmt-chain record
+	e.c.ok("POST", "/v1/tenants", map[string]any{"tailnet": "t.ts.net", "mintMode": "oauth", "oauthClientFile": e.keyFile}, nil) // a mgmt-chain record
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	h1.ok("PUT", "/v1/hosts/h1", map[string]any{"capacityNodes": 10, "tiers": []string{"process"}, "auditPubKey": base64.StdEncoding.EncodeToString(pub)}, nil)
 	prev := ""

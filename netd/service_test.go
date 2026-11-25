@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/internal/tssvc"
-	"github.com/rosskukulinski/twd/netd"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/internal/tssvc"
+	"github.com/rosskukulinski/tailworks/netd"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 )
 
 // TestService: an object node hosts a Tailscale Service. Flows to the VIP
@@ -27,13 +27,13 @@ func TestService(t *testing.T) {
 	const svc, vip = "svc:hello", "100.99.0.10"
 	const echoSvc, echoVIP = "svc:echo-svc", "100.99.0.11"
 
+	// netd already set OmitAuth on these clients (writing it here again
+	// races with its own watchers).
 	alc, err := e.reg.Get("a").Server().LocalClient()
 	if err != nil {
 		t.Fatal(err)
 	}
-	alc.OmitAuth = true
 	blc, _ := e.reg.Get("b").Server().LocalClient()
-	blc.OmitAuth = true
 	for _, n := range []*nettest.Node{e.client} {
 		if err := nettest.AcceptRoutes(ctx, n.LC); err != nil {
 			t.Fatal(err)
@@ -91,15 +91,17 @@ func TestService(t *testing.T) {
 		}
 	})
 
-	t.Run("EgressToSiblingServiceRefused", func(t *testing.T) {
+	t.Run("EgressToSiblingServiceHop", func(t *testing.T) {
 		if err := nettest.WaitDNSRecord(ctx, blc, vip); err != nil {
 			t.Fatal(err)
 		}
-		// b's only route to svc:hello is a, a sibling on this host: refused
-		// like a direct call to a (same-host calls go through the platform).
+		// b's only route to svc:hello is a, a sibling on this host: the flow
+		// is delivered in process to a's Service ingress (samehost.go), and
+		// a sees b as the caller.
 		eventually(t, 20*time.Second, func() error {
-			code, h, b := e.get("http://"+e.objIP["b"]+"/egress?url="+fqdn, nil)
-			if code == 403 && h.Get(netd.HeaderError) == "forbidden_destination" {
+			code, _, b := e.get("http://"+e.objIP["b"]+"/egress?url="+fqdn, nil)
+			var r objResp
+			if code == 200 && json.Unmarshal(b, &r) == nil && r.ObjectID == "a" && r.Caller != nil && r.Caller.Hostname == "tw-b" {
 				return nil
 			}
 			return errString(string(b))

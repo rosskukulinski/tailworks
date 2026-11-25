@@ -4,8 +4,8 @@
 // Tailscale Service with in-process delivery, and the backend sees the
 // caller's real tailnet identity (WhoIs on RemoteAddr).
 //
-//	TWD_E2E_API_KEY_FILE=~/.config/tailnet-agents-design/tailnet1_api.env \
-//	TWD_E2E_TAILNET=tail7906d5.ts.net go test -tags e2ereal -run TestRealService -v ./internal/tssvc/
+//	TW_E2E_API_KEY_FILE=~/.config/tailnet-agents-design/tailnet1_api.env \
+//	TW_E2E_TAILNET=tail7906d5.ts.net go test -tags e2ereal -run TestRealService -v ./internal/tssvc/
 //
 // The tailnet policy needs autoApprovers.services "svc:ttest-tssvc":
 // ["tag:ttest"] and a grant tag:ttest → svc:ttest-tssvc tcp:80.
@@ -24,8 +24,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/internal/tsapi"
-	"github.com/rosskukulinski/twd/internal/tssvc"
+	"github.com/rosskukulinski/tailworks/internal/tsapi"
+	"github.com/rosskukulinski/tailworks/internal/tssvc"
 	"tailscale.com/tsnet"
 )
 
@@ -34,9 +34,9 @@ var allowedTailnets = map[string]bool{"tail7906d5.ts.net": true}
 const svcName = "svc:ttest-tssvc"
 
 func TestRealService(t *testing.T) {
-	keyFile, tailnet := os.Getenv("TWD_E2E_API_KEY_FILE"), os.Getenv("TWD_E2E_TAILNET")
+	keyFile, tailnet := os.Getenv("TW_E2E_API_KEY_FILE"), os.Getenv("TW_E2E_TAILNET")
 	if keyFile == "" || tailnet == "" {
-		t.Skip("TWD_E2E_API_KEY_FILE / TWD_E2E_TAILNET not set")
+		t.Skip("TW_E2E_API_KEY_FILE / TW_E2E_TAILNET not set")
 	}
 	if !allowedTailnets[tailnet] {
 		t.Fatalf("refusing to run against tailnet %q", tailnet)
@@ -53,7 +53,7 @@ func TestRealService(t *testing.T) {
 	rand.Read(b)
 	run := hex.EncodeToString(b)
 
-	if _, err := api.PutService(ctx, tsapi.Service{Name: svcName, Comment: "twd tssvc e2e " + run, Ports: []string{"tcp:80"}}); err != nil {
+	if _, err := api.PutService(ctx, tsapi.Service{Name: svcName, Comment: "tw tssvc e2e " + run, Ports: []string{"tcp:80"}}); err != nil {
 		t.Fatalf("put service: %v", err)
 	}
 	t.Cleanup(func() {
@@ -67,7 +67,7 @@ func TestRealService(t *testing.T) {
 	})
 
 	node := func(name string) *tsnet.Server {
-		k, err := api.CreateKey(ctx, tsapi.KeyOptions{Tags: []string{"tag:ttest"}, Ephemeral: true, Preauthorized: true, ExpirySeconds: 600, Description: "twd tssvc e2e"})
+		k, err := api.CreateKey(ctx, tsapi.KeyOptions{Tags: []string{"tag:ttest"}, Ephemeral: true, Preauthorized: true, ExpirySeconds: 600, Description: "tw tssvc e2e"})
 		if err != nil {
 			t.Fatalf("mint: %v", err)
 		}

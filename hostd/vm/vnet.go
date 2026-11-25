@@ -7,7 +7,7 @@
 // Adapted from tailscale/tailvisor netd (stack.go, proxy.go; BSD-3-Clause,
 // Copyright (c) 2026 Tailscale Inc & contributors; see
 // .refs/tailvisor/LICENSE in the design repo). Differences: tailvisor
-// proxies *every* guest flow to one tsnet.Server.Dial; twd demultiplexes at
+// proxies *every* guest flow to one tsnet.Server.Dial; tailworks demultiplexes at
 // L7 instead. The guest may open TCP only to the gateway's platform ports
 // (attributed egress, workload egress, host API); netd maps each request to
 // the right object's tsnet.Server and applies the ADR-019 egress guard.
@@ -34,7 +34,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/transport/udp"
 	"gvisor.dev/gvisor/pkg/waiter"
 
-	"github.com/rosskukulinski/twd/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
 )
 
 const nicID = 1

@@ -10,15 +10,15 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/internal/container"
-	"github.com/rosskukulinski/twd/internal/oci"
-	"github.com/rosskukulinski/twd/internal/registry"
+	"github.com/rosskukulinski/tailworks/internal/container"
+	"github.com/rosskukulinski/tailworks/internal/oci"
+	"github.com/rosskukulinski/tailworks/internal/registry"
 )
 
 // handlerRT serves requests with h directly, as if from remote addr (so a
@@ -40,17 +40,18 @@ func (rt handlerRT) RoundTrip(r *http.Request) (*http.Response, error) {
 	return w.Result(), nil
 }
 
-var imgN int
+// imgN makes each test image unique. Atomic: the tests run in parallel.
+var imgN atomic.Int64
 
 // pushTestImage writes a one-layer linux/arch image into dst repo (tag
 // optional) and returns its manifest digest.
 func pushTestImage(t *testing.T, dst oci.Target, repo, arch, tag string) string {
 	t.Helper()
 	ctx := context.Background()
-	imgN++
+	n := imgN.Add(1)
 	var layer bytes.Buffer
 	tw := tar.NewWriter(&layer)
-	body := fmt.Sprintf("image %d %s", imgN, arch)
+	body := fmt.Sprintf("image %d %s", n, arch)
 	tw.WriteHeader(&tar.Header{Name: "id", Mode: 0o644, Size: int64(len(body)), Typeflag: tar.TypeReg})
 	tw.Write([]byte(body))
 	tw.Close()
@@ -107,22 +108,26 @@ func newRegEnv(t *testing.T) *regEnv {
 	m, err := New(Config{Store: st, Custody: cust, Broker: &Broker{}, IDSecret: []byte("0123456789abcdef"), ReapInterval: time.Hour,
 		RegistryDir:      filepath.Join(dir, "registry"),
 		RegistryUpstream: func(string) *oci.Client { return &oci.Client{Base: upSrv.URL, HTTP: upSrv.Client()} },
-		ImageAliases:     []registry.Alias{{From: "upstream.test/sandbox:1", To: "twd.local/sandbox:1-arm64", Arch: "arm64"}}})
+		ImageAliases:     []registry.Alias{{From: "upstream.test/sandbox:1", To: "tw.local/sandbox:1-arm64", Arch: "arm64"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { m.Close() })
 	kf := filepath.Join(dir, "api.env")
-	os.WriteFile(kf, []byte("TS_API_KEY=x\n"), 0o600)
+	writeTestOAuthFile(t, kf)
 	e := &regEnv{m: m, upstream: up}
-	if e.a, err = m.CreateTenant(ctx, TenantRequest{ID: "tna", Tailnet: "a.ts.net", MintMode: "apikey", APIKeyFile: kf}); err != nil {
+	if e.a, err = m.CreateTenant(ctx, TenantRequest{ID: "tna", Tailnet: "a.ts.net", MintMode: MintOAuth, OAuthClientFile: kf}); err != nil {
 		t.Fatal(err)
 	}
-	if e.b, err = m.CreateTenant(ctx, TenantRequest{ID: "tnb", Tailnet: "b.ts.net", MintMode: "apikey", APIKeyFile: kf}); err != nil {
+	if e.b, err = m.CreateTenant(ctx, TenantRequest{ID: "tnb", Tailnet: "b.ts.net", MintMode: MintOAuth, OAuthClientFile: kf}); err != nil {
 		t.Fatal(err)
 	}
 	for id, node := range map[string]string{"h1": "nH1", "h2": "nH2"} {
-		if _, _, err := m.RegisterHost(ctx, RegisterRequest{HostID: id, CapacityNodes: 10, Tiers: []string{"process", "microvm", "containers"}, Arch: "arm64"}, node, ""); err != nil {
+		// A tailnet host registers only against an admin-created record,
+		// presenting its one-time registration secret (M1).
+		secret := addPendingHost(t, m, id)
+		if _, _, err := m.RegisterHost(ctx, RegisterRequest{HostID: id, CapacityNodes: 10, Tiers: []string{"process", "microvm", "containers"}, Arch: "arm64",
+			RegistrationSecret: secret}, node, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -145,13 +150,13 @@ func newRegEnv(t *testing.T) *regEnv {
 }
 
 func (e *regEnv) client(addr string) *oci.Client {
-	return &oci.Client{Base: "http://twd-mgmt", HTTP: &http.Client{Transport: handlerRT{e.h, addr}}}
+	return &oci.Client{Base: "http://tw-mgmt", HTTP: &http.Client{Transport: handlerRT{e.h, addr}}}
 }
 
 // deploy deploys a container bundle for tenant t on host (pinned).
 func (e *regEnv) deploy(t *testing.T, tn Tenant, host, image string, built map[string]BuiltImages) (DeployResponse, error) {
 	t.Helper()
-	files := map[string]string{"twd.jsonc": `{"tailnet": {"tags": ["tag:twd-web"]}}`, "index.js": "export default {}",
+	files := map[string]string{"tailworks.jsonc": `{"tailnet": {"tags": ["tag:tw-web"]}}`, "index.js": "export default {}",
 		"wrangler.jsonc": `{"name": "w", "main": "index.js", "containers": [{"class_name": "Sandbox", "image": "` + image + `"}],
 			"durable_objects": {"bindings": [{"name": "SANDBOX", "class_name": "Sandbox"}]}}`}
 	return e.m.Deploy(context.Background(), DeployRequest{TenantID: tn.ID, Workload: "w", Host: host, Bundle: makeBundle(t, files), ContainerImages: built, By: "alice@example.com"})
@@ -162,6 +167,7 @@ func (e *regEnv) deploy(t *testing.T, tn Tenant, host, image string, built map[s
 // tenant, never pushes, and always reads "public"; non-admins get nothing;
 // a namespace that is not a tenant can't be pushed to.
 func TestRegistryAccess(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRegEnv(t)
 	adm := e.client(addrAdmin)
@@ -174,15 +180,15 @@ func TestRegistryAccess(t *testing.T) {
 		t.Fatalf("h1 before deploy: %v", err)
 	}
 	pushTestImage(t, adm, "tna/box", "arm64", "1")
-	depA, err := e.deploy(t, e.a, "h1", "twd.local/tna/box:1", nil)
+	depA, err := e.deploy(t, e.a, "h1", "tw.local/tna/box:1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.deploy(t, e.b, "h2", "twd.local/sandbox:1-arm64", nil); err == nil {
+	if _, err := e.deploy(t, e.b, "h2", "tw.local/sandbox:1-arm64", nil); err == nil {
 		t.Fatal("tenant B deployed an image absent from public/")
 	}
 	pushTestImage(t, adm, "public/sandbox", "arm64", "1-arm64")
-	if _, err := e.deploy(t, e.b, "h2", "twd.local/sandbox:1-arm64", nil); err != nil {
+	if _, err := e.deploy(t, e.b, "h2", "tw.local/sandbox:1-arm64", nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, _, err := h1.GetManifest(ctx, "tna/app", dA); err != nil {
@@ -233,6 +239,7 @@ func TestRegistryAccess(t *testing.T) {
 // assignment nor what the registry serves; a redeploy picks up the new
 // digest. A built image must be in the deploying tenant's namespace.
 func TestDeployPinsDigests(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRegEnv(t)
 	d1 := pushTestImage(t, e.upstream, "app", "arm64", "v1")
@@ -271,15 +278,15 @@ func TestDeployPinsDigests(t *testing.T) {
 		t.Fatalf("redeploy pinned %s, want the new %s", got.Digest, d2)
 	}
 
-	// Built images (twd deploy): only the tenant's own namespace.
+	// Built images (tw deploy): only the tenant's own namespace.
 	built := pushTestImage(t, e.client(addrAdmin), "tna/w-sandbox", "arm64", "")
-	if _, err := e.deploy(t, e.a, "", "./Dockerfile", map[string]BuiltImages{"Sandbox": {Image: "twd.local/tna/w-sandbox@" + built}}); err != nil {
+	if _, err := e.deploy(t, e.a, "", "./Dockerfile", map[string]BuiltImages{"Sandbox": {Image: "tw.local/tna/w-sandbox@" + built}}); err != nil {
 		t.Fatal(err)
 	}
 	if got := pin(); got.Repository != "tna/w-sandbox" || got.Digest != built {
 		t.Fatalf("built pin %+v", got)
 	}
-	_, err = e.deploy(t, e.b, "", "./Dockerfile", map[string]BuiltImages{"Sandbox": {Image: "twd.local/tna/w-sandbox@" + built}})
+	_, err = e.deploy(t, e.b, "", "./Dockerfile", map[string]BuiltImages{"Sandbox": {Image: "tw.local/tna/w-sandbox@" + built}})
 	if err == nil || !strings.Contains(err.Error(), "not in this tenant's registry namespace") {
 		t.Fatalf("tenant B deployed tenant A's built image: %v", err)
 	}
@@ -292,11 +299,13 @@ func TestDeployPinsDigests(t *testing.T) {
 // TestDeployPlacesByPinnedArch: an image that exists only for amd64 is
 // placed on the amd64 host of a mixed pool (never handed to the arm64
 // host); the arm64 alias makes the stock ref placeable on arm64 too, with
-// twd's rebuild.
+// tailworks' rebuild.
 func TestDeployPlacesByPinnedArch(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRegEnv(t)
-	if _, _, err := e.m.RegisterHost(ctx, RegisterRequest{HostID: "hx", CapacityNodes: 1, Tiers: []string{"process", "microvm", "containers"}, Arch: "amd64"}, "nHX", ""); err != nil {
+	if _, _, err := e.m.RegisterHost(ctx, RegisterRequest{HostID: "hx", CapacityNodes: 1, Tiers: []string{"process", "microvm", "containers"}, Arch: "amd64",
+		RegistrationSecret: addPendingHost(t, e.m, "hx")}, "nHX", ""); err != nil {
 		t.Fatal(err)
 	}
 	pushTestImage(t, e.upstream, "sandbox", "amd64", "1")
@@ -310,7 +319,7 @@ func TestDeployPlacesByPinnedArch(t *testing.T) {
 	if _, err := e.deploy(t, e.b, "h1", "upstream.test/sandbox:1", nil); err == nil || !strings.Contains(err.Error(), "tier_unavailable") {
 		t.Fatalf("pinned to an arm64 host with an amd64-only image: %v", err)
 	}
-	// With twd's arm64 rebuild in public/, the alias applies on arm64.
+	// With tailworks' arm64 rebuild in public/, the alias applies on arm64.
 	rb := pushTestImage(t, e.client(addrAdmin), "public/sandbox", "arm64", "1-arm64")
 	dep, err = e.deploy(t, e.b, "h1", "upstream.test/sandbox:1", nil)
 	if err != nil {
@@ -332,6 +341,7 @@ func TestDeployPlacesByPinnedArch(t *testing.T) {
 // public/ and every tenant's deploy pins that same digest (so hosts cache
 // it once); unmarked, the next deploy mirrors it into the tenant.
 func TestPublicImages(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRegEnv(t)
 	d := pushTestImage(t, e.upstream, "base", "arm64", "3")
@@ -410,4 +420,17 @@ func memUpstream(m *oci.MemTarget) http.Handler {
 		}
 		w.WriteHeader(200)
 	})
+}
+
+// addPendingHost stands in for `tw host add`: it records the host ID with
+// the hash of a one-time registration secret (as POST /v1/hosts does,
+// minus the join key) and returns the secret the host must present.
+func addPendingHost(t *testing.T, m *Mgmt, id string) string {
+	t.Helper()
+	secret := "reg-secret-" + id
+	now := m.now().UnixMilli()
+	if err := m.store.UpsertHost(context.Background(), Host{ID: id, RegistrationSecretHash: hashRegistrationSecret(secret), CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	return secret
 }

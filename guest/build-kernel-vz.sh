@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Build the twd microVM guest kernel for the macOS (Virtualization.framework)
-# backend: arm64 only, Linux build host only (run it in Lima twd-dev), no root.
+# Build the tailworks microVM guest kernel for the macOS (Virtualization.framework)
+# backend: arm64 only, Linux build host only (run it in Lima tw-dev), no root.
 #
 #   guest/build-kernel-vz.sh [OUT_DIR]      (default: bin/vz)
 #
@@ -25,8 +25,8 @@ KERNEL_SHA256=${KERNEL_SHA256:-2818053c07976ba4ed5f44deb0f5dc7ae7b0975d7918c313d
 FC_REF=${FC_REF:-v1.17.0}
 FC_CONFIG_SHA256=${FC_CONFIG_SHA256:-5c73202d00b5591ad987d9f808208a318e317fd32dbc17de613c5a93fabe2939}
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-1762560000} # 2025-11-08T00:00:00Z
-CACHE=${CACHE:-$HOME/.cache/twd-kernel}
-BUILD=/tmp/twd-kernel-build # fixed path: it ends up in debug strings
+CACHE=${CACHE:-$HOME/.cache/tw-kernel}
+BUILD=/tmp/tw-kernel-build # fixed path: it ends up in debug strings
 JOBS=${JOBS:-$(nproc)}
 
 [ "$(uname -s)" = Linux ] || { echo "build-kernel: Linux only (run it in Lima)" >&2; exit 1; }
@@ -56,7 +56,7 @@ tar -C "$BUILD" -xf "$TARBALL"
 SRC=$BUILD/linux-$KERNEL_VERSION
 cp "$FCCONF" "$SRC/.config"
 cat "$ROOT/guest/kernel/vz.config" >>"$SRC/.config"
-export KBUILD_BUILD_TIMESTAMP="@$SOURCE_DATE_EPOCH" KBUILD_BUILD_USER=twd KBUILD_BUILD_HOST=twd KBUILD_BUILD_VERSION=1
+export KBUILD_BUILD_TIMESTAMP="@$SOURCE_DATE_EPOCH" KBUILD_BUILD_USER=tw KBUILD_BUILD_HOST=tw KBUILD_BUILD_VERSION=1
 make -C "$SRC" -s olddefconfig
 # The fragment must have survived olddefconfig (a dropped dependency would
 # silently turn an option off).

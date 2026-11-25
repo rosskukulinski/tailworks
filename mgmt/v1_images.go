@@ -5,8 +5,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/rosskukulinski/twd/internal/registry"
-	v1 "github.com/rosskukulinski/twd/mgmt/api/v1"
+	"github.com/rosskukulinski/tailworks/internal/registry"
+	v1 "github.com/rosskukulinski/tailworks/mgmt/api/v1"
 )
 
 // ---- images (ADR-032 D3) ----

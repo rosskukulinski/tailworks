@@ -1,0 +1,73 @@
+# Dependency updates (issue #112). Every ecosystem runs weekly, on Monday,
+# and folds its minor and patch bumps into one grouped PR, so a week of
+# upstream releases is a handful of PRs, not dozens. Major bumps still come
+# one per PR. Each PR has to pass `make lint test` (ci.yml) like any other.
+#
+# Pins that need more than CI get their own group so they never ride along
+# in the grouped PR:
+#   - tailscale.com and github.com/tailscale/*: netd uses upstream internals
+#     (go.mod explains the pin); run `make e2e-placement` and `make e2e-real`
+#     before merging.
+#   - workerd: changes the platform runtime; needs a `workerd` release-note
+#     fragment and a compat check (docs/RELEASING.md).
+# Security updates (Dependabot alerts) are separate PRs and ignore the
+# schedule; see "Upstream advisories" in docs/RELEASING.md.
+version: 2
+updates:
+  # The SHA-pinned actions in .github/workflows: Dependabot bumps the SHA and
+  # its "# vX.Y.Z" comment together.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Go: the main module, and tools/ (staticcheck and govulncheck for make lint).
+  - package-ecosystem: gomod
+    directories:
+      - /
+      - /tools
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      tailscale:
+        patterns:
+          - tailscale.com
+          - github.com/tailscale/*
+      go-minor-patch:
+        update-types: [minor, patch]
+        exclude-patterns:
+          - tailscale.com
+          - github.com/tailscale/*
+
+  # npm: the root package-lock.json covers every js/packages/* workspace;
+  # e2e/node and e2e/vitest have their own lockfiles.
+  - package-ecosystem: npm
+    directories:
+      - /
+      - /e2e/node
+      - /e2e/vitest
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    # @types/node's major tracks a Node.js major. CI and releases run
+    # Node 22 (setup-node) and package.json says node >=20, so a newer
+    # major would type-check APIs the supported Nodes don't have. Move it
+    # by hand when the supported Node moves.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+    groups:
+      workerd:
+        patterns:
+          - workerd
+      npm-minor-patch:
+        update-types: [minor, patch]
+        exclude-patterns:
+          - workerd

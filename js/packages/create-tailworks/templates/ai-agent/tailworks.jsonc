@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/rosskukulinski/tailworks/master/schema/tailworks.schema.json",
+  "tailnet": {
+    "tags": ["tag:tw-wl-ai-agent"],
+    "objects": {
+      // one agent per caller; each is its own node, so the MCP server
+      // authorizes (and audits) the agent itself, not the whole app
+      "AiAgent": { "tags": ["tag:tw-ai-agent"] }
+    },
+    // the MCP server(s) the agent's tools call
+    "connects": ["tag:tw-wl-mcp"]
+  }
+  // policy: grant the agents (and the Worker, for /worker) the tools they
+  // may call. Add this to your tailnet policy's "grants" (README.md):
+  //   { "src": ["tag:tw-ai-agent", "tag:tw-wl-ai-agent"], "dst": ["tag:tw-wl-mcp"], "ip": ["tcp:80"],
+  //     "app": { "example.com/cap/mcp": [{ "tools": ["lookup_order"] }] } }
+}

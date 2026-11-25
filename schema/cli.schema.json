@@ -1,0 +1,4008 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/rosskukulinski/tailworks/master/schema/cli.schema.json",
+  "title": "tw CLI --json output",
+  "description": "The shape of every tailworks command's --json output (docs/cli-json.md). $defs are named after the command ('deploy', 'tenant ls'); 'dev.event', 'deploy.event', 'logs.record' and 'logs.line' are NDJSON lines; 'error' is the error line on stderr. Objects may gain properties; the required ones and every listed type are stable. cmd/tw TestAgentEval and TestCLIJSONContract check real output against this file.",
+  "$defs": {
+    "policy": {
+      "type": "object",
+      "description": "tw policy [dir]: everything the app needs in the tailnet policy, before it is deployed (exits acl_denied, as an error, when a checked part is missing)",
+      "properties": {
+        "workload": {
+          "type": "string"
+        },
+        "tenant": {
+          "type": "string"
+        },
+        "tenantID": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean",
+          "description": "checked and nothing missing"
+        },
+        "checked": {
+          "type": "boolean",
+          "description": "false when mgmt can't read the tailnet policy (no Policy File › Read scope)"
+        },
+        "preflight": {
+          "type": "object",
+          "description": "the dry-run preflight, as in deploy"
+        },
+        "callerGrant": {
+          "type": "string",
+          "description": "the grant that lets tailnet members call the app (not checked)"
+        },
+        "serviceCallerGrant": {
+          "type": "string",
+          "description": "for an app behind a Tailscale Service: the grant to its svc: name; callers' app capabilities go on this grant (not checked)"
+        },
+        "snippet": {
+          "type": "string",
+          "description": "everything to add to the policy, in one block"
+        },
+        "applied": {
+          "type": "object",
+          "description": "--apply: what mgmt wrote to the tailnet policy (changed, added, manual, oldETag, newETag, and the preflight after it)"
+        },
+        "nodes": {
+          "$ref": "#/$defs/nodeBudget"
+        }
+      },
+      "required": [
+        "workload",
+        "tenant",
+        "tenantID",
+        "ok",
+        "checked",
+        "preflight"
+      ]
+    },
+    "timings": {
+      "type": "object",
+      "description": "wall times in milliseconds, by phase",
+      "additionalProperties": {
+        "type": "number"
+      }
+    },
+    "nodeBudget": {
+      "type": "object",
+      "description": "tailnet nodes (docs/limits.md#tailnet-node-budget): what an app costs (tw policy and tw deploy), the tenant's live nodes, and warnings when that count is within 80% of the tenant's maxObjects or of its hosts' node capacity. Every node is a device on the tailnet",
+      "properties": {
+        "app": {
+          "type": "object",
+          "description": "tw policy and tw deploy: the app's cost, from its tailworks.jsonc",
+          "properties": {
+            "workload": {
+              "type": "integer",
+              "description": "workload nodes: one per copy (replicas)"
+            },
+            "public": {
+              "type": "integer",
+              "description": "public-ingress nodes: one per copy of an app with public routes"
+            },
+            "fixed": {
+              "type": "integer",
+              "description": "workload + public: the nodes the deploy itself joins"
+            },
+            "perObjectClasses": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Durable Object classes whose every object gets a node of its own"
+            },
+            "sharedClasses": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "classes with \"node\": false: their objects add no node"
+            }
+          },
+          "required": [
+            "workload",
+            "public",
+            "fixed",
+            "perObjectClasses",
+            "sharedClasses"
+          ]
+        },
+        "tenant": {
+          "type": "object",
+          "description": "the tenant's live nodes, by what they are; absent when mgmt couldn't be asked",
+          "properties": {
+            "total": {
+              "type": "integer"
+            },
+            "workloads": {
+              "type": "integer",
+              "description": "workload nodes (replicas and previews included)"
+            },
+            "objects": {
+              "type": "integer",
+              "description": "Durable Objects with a node of their own, sub-agents included"
+            },
+            "pool": {
+              "type": "integer",
+              "description": "pre-joined pool nodes waiting for a new object"
+            },
+            "public": {
+              "type": "integer",
+              "description": "public-ingress nodes"
+            },
+            "maxObjects": {
+              "type": "integer",
+              "description": "the tenant's quota of live nodes (tw tenant set --max-objects)"
+            }
+          },
+          "required": [
+            "total",
+            "workloads",
+            "objects",
+            "pool",
+            "public"
+          ]
+        },
+        "capacity": {
+          "type": "object",
+          "description": "the live hosts' node capacity (tw-hostd -capacity-nodes) and the nodes they run for every tenant; absent when the caller may not list hosts",
+          "properties": {
+            "hosts": {
+              "type": "integer"
+            },
+            "capacityNodes": {
+              "type": "integer"
+            },
+            "liveNodes": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "hosts",
+            "capacityNodes",
+            "liveNodes"
+          ]
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "warnings"
+      ]
+    },
+    "errorObject": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "a code from docs/errors.md; act on it, not on message"
+        },
+        "message": {
+          "type": "string"
+        },
+        "hint": {
+          "type": "string",
+          "description": "what to do next: the fix lines joined with newlines, a usage line, or where to read about the code"
+        },
+        "doc_url": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "fix": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "trace_id": {
+          "type": "string",
+          "description": "correlates with `tw audit --trace <id>`"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "hint",
+        "doc_url"
+      ]
+    },
+    "error": {
+      "type": "object",
+      "description": "one line on stderr when a command fails (exit 1, or 2 for an unknown command); stdout is then empty",
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/errorObject"
+        }
+      },
+      "required": [
+        "error"
+      ]
+    },
+    "object": {
+      "type": "object",
+      "description": "one object: a workload node or a Durable Object instance with its own node",
+      "properties": {
+        "objectID": {
+          "type": "string"
+        },
+        "tenantID": {
+          "type": "string"
+        },
+        "workload": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "objectName": {
+          "type": "string"
+        },
+        "hostname": {
+          "type": "string"
+        },
+        "deploymentID": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "parent": {
+          "type": "string",
+          "description": "the object that spawned this one"
+        },
+        "root": {
+          "type": "string"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        },
+        "nodeID": {
+          "type": "string"
+        },
+        "magicDNS": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "integer"
+        },
+        "updatedAt": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "objectID",
+        "tenantID",
+        "workload",
+        "namespace",
+        "status",
+        "tags"
+      ]
+    },
+    "deployment": {
+      "type": "object",
+      "description": "one deployment (the /v1 DeploymentView)",
+      "properties": {
+        "deploymentID": {
+          "type": "string"
+        },
+        "tenantID": {
+          "type": "string"
+        },
+        "workload": {
+          "type": "string"
+        },
+        "host": {
+          "type": "string"
+        },
+        "epoch": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        },
+        "deployedBy": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "integer"
+        },
+        "placement": {
+          "type": "object"
+        },
+        "endpoint": {
+          "type": "object"
+        },
+        "public": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "deploymentID",
+        "tenantID",
+        "workload",
+        "host",
+        "status"
+      ]
+    },
+    "auditRecords": {
+      "type": "object",
+      "properties": {
+        "tenant": {
+          "type": "string"
+        },
+        "tenantID": {
+          "type": "string"
+        },
+        "chain": {
+          "type": "string"
+        },
+        "records": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "ts": {
+                "type": "string"
+              },
+              "tenantID": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "object": {
+                "type": "string"
+              },
+              "node": {
+                "type": "string"
+              },
+              "chain": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "detail": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "ts",
+              "kind"
+            ]
+          }
+        },
+        "verified": {
+          "type": "boolean",
+          "description": "every chain's hashes and host signatures verify"
+        },
+        "truncated": {
+          "type": "boolean",
+          "description": "bare tw audit stopped at -n; older records exist (tw audit --all)"
+        },
+        "chains": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "chain": {
+                "type": "string"
+              },
+              "ok": {
+                "type": "boolean"
+              },
+              "records": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "chain",
+              "ok"
+            ]
+          }
+        }
+      },
+      "required": [
+        "tenantID",
+        "records",
+        "verified",
+        "chains"
+      ]
+    },
+    "skill": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string",
+          "description": "the skill's Markdown (tw agent show)"
+        }
+      },
+      "required": [
+        "name",
+        "description"
+      ]
+    },
+    "agentDetection": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "codex",
+            "cursor",
+            "gemini",
+            "opencode"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "claude-skill",
+            "cursor-rule",
+            "block"
+          ]
+        },
+        "detected": {
+          "type": "boolean"
+        },
+        "found": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "format",
+        "detected"
+      ]
+    },
+    "agentPlan": {
+      "type": "object",
+      "description": "what tw agent setup or remove did, or would do",
+      "properties": {
+        "scope": {
+          "type": "string",
+          "enum": [
+            "user",
+            "project"
+          ]
+        },
+        "version": {
+          "type": "string"
+        },
+        "root": {
+          "type": "string"
+        },
+        "dryRun": {
+          "type": "boolean"
+        },
+        "applied": {
+          "type": "boolean",
+          "description": "false with --dry-run or when nothing needed doing"
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "create",
+                  "update",
+                  "unchanged",
+                  "remove",
+                  "skip"
+                ]
+              },
+              "path": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "file",
+                  "block"
+                ]
+              },
+              "agents": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "skill": {
+                "type": "string"
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "action",
+              "path",
+              "kind",
+              "agents"
+            ]
+          }
+        },
+        "skipped": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "agents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/agentDetection"
+          }
+        }
+      },
+      "required": [
+        "scope",
+        "version",
+        "root",
+        "changes",
+        "dryRun",
+        "applied",
+        "agents"
+      ]
+    },
+    "secret": {
+      "type": "object",
+      "description": "a secret's metadata; no command returns a value",
+      "properties": {
+        "tenantID": {
+          "type": "string"
+        },
+        "workload": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "integer"
+        },
+        "updatedAt": {
+          "type": "integer"
+        },
+        "updatedBy": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tenantID",
+        "workload",
+        "name",
+        "updatedAt"
+      ]
+    },
+    "publicImage": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "ref": {
+          "type": "string"
+        },
+        "arch": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "createdBy": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "ref",
+        "arch",
+        "digest"
+      ]
+    },
+    "mcp": {
+      "type": "object",
+      "description": "tw mcp --config (and tw mcp --json, or tw mcp on a terminal): how to register tailworks' MCP server (tw mcp with stdin a pipe is the MCP stdio protocol itself)",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "mgmt's /mcp, for an agent on a tailnet machine"
+        },
+        "stdio": {
+          "type": "array",
+          "description": "the command an agent runs (the stdio bridge)",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tools": {
+          "type": "array",
+          "description": "the tools this caller may call",
+          "items": {
+            "type": "string"
+          }
+        },
+        "commands": {
+          "type": "object",
+          "description": "by agent ID (claude, codex, cursor, gemini, opencode): the command, or the config JSON; json: the generic mcpServers entry",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "agents": {
+          "type": "array",
+          "description": "how to register the server with each supported agent, the ones installed here first",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "command": {
+                "type": "string",
+                "description": "a shell command that registers it (absent when the agent takes config instead)"
+              },
+              "config": {
+                "type": "string",
+                "description": "JSON to merge into file"
+              },
+              "file": {
+                "type": "string"
+              },
+              "detected": {
+                "type": "boolean",
+                "description": "the agent looks installed on this machine"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "detected"
+            ]
+          }
+        },
+        "grant": {
+          "type": "string",
+          "description": "the github.com/rosskukulinski/tailworks/cap/mcp grant that adds the missing tools"
+        },
+        "grantNote": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "stdio",
+        "tools",
+        "commands"
+      ]
+    },
+    "telemetry": {
+      "type": "object",
+      "description": "tw telemetry [show], set and rm: the tenant's OTLP export (header values are never shown; rm prints only tenantID)",
+      "properties": {
+        "tenantID": {
+          "type": "string"
+        },
+        "otlp": {
+          "type": "object",
+          "properties": {
+            "endpoint": {
+              "type": "string"
+            },
+            "headerNames": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "signals": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "endpoint",
+            "signals"
+          ]
+        },
+        "updatedAt": {
+          "type": "integer"
+        },
+        "updatedBy": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tenantID"
+      ]
+    },
+    "version": {
+      "type": "object",
+      "properties": {
+        "tw": {
+          "type": "string"
+        },
+        "go": {
+          "type": "string"
+        },
+        "os": {
+          "type": "string"
+        },
+        "workerdPin": {
+          "type": "string"
+        },
+        "esbuild": {
+          "type": "string"
+        },
+        "updateCheck": {
+          "type": "boolean",
+          "description": "the once-a-day update check (api.github.com, after interactive commands other than tw dev and tw init) is on: a release build without CI or TW_NO_UPDATE_CHECK set"
+        },
+        "latest": {
+          "type": "string",
+          "description": "--check: the latest published release"
+        },
+        "url": {
+          "type": "string",
+          "description": "--check: its release page"
+        },
+        "updateAvailable": {
+          "type": "boolean",
+          "description": "--check: latest is newer than this tailworks (false for a development build)"
+        },
+        "upgrade": {
+          "type": "string",
+          "description": "--check, when updateAvailable: the command that installs it"
+        },
+        "securityRelease": {
+          "type": "boolean",
+          "description": "--check: the latest release's notes have a Security section (it shipped a `security` release-note fragment), so an upgrade is urgent"
+        },
+        "daemons": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "--check: what the running tw up on this machine reports; null when none runs here",
+          "properties": {
+            "version": {
+              "type": "string"
+            },
+            "restartNeeded": {
+              "type": "boolean"
+            },
+            "restartCommand": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "version",
+            "restartNeeded"
+          ]
+        }
+      },
+      "required": [
+        "tw",
+        "go",
+        "os",
+        "workerdPin",
+        "esbuild"
+      ]
+    },
+    "whoami": {
+      "type": "object",
+      "description": "who this CLI acts as and what that identity may do (GET /v1/whoami)",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "user",
+            "node",
+            "host",
+            "local"
+          ]
+        },
+        "actor": {
+          "type": "string"
+        },
+        "login": {
+          "type": "string"
+        },
+        "nodeID": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "linked": {
+          "type": "boolean",
+          "description": "through tw link (WhoIs); false: this machine's tw up"
+        },
+        "transport": {
+          "type": "string"
+        },
+        "mgmt": {
+          "type": "object",
+          "properties": {
+            "endpoint": {
+              "type": "string"
+            },
+            "dnsName": {
+              "type": "string"
+            },
+            "tailnet": {
+              "type": "string"
+            },
+            "https": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "endpoint",
+            "https"
+          ]
+        },
+        "tenant": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "the default tenant; null when this identity can't list tenants (not an admin) or there is none",
+          "properties": {
+            "tailnet": {
+              "type": "string"
+            },
+            "tenantID": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "tailnet",
+            "tenantID"
+          ]
+        },
+        "tenants": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "caps": {
+          "type": "array",
+          "description": "the github.com/rosskukulinski/tailworks/cap/* capabilities held toward mgmt",
+          "items": {
+            "type": "string"
+          }
+        },
+        "console": {
+          "type": "string",
+          "description": "the admin console URL this identity may open (<endpoint>/ui/, or <endpoint>/ui/approvals for an approver who isn't an admin); only through tw link, not --tsnet"
+        },
+        "can": {
+          "type": "object",
+          "properties": {
+            "admin": {
+              "type": "boolean"
+            },
+            "approve": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "may decide Workflow approvals (github.com/rosskukulinski/tailworks/cap/approve); null when mgmt is too old to say"
+            },
+            "mcpTools": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "description": "the MCP tools mgmt's /mcp allows; null when mgmt is too old to say",
+              "items": {
+                "type": "string"
+              }
+            },
+            "tenantAdmin": {
+              "type": "array",
+              "description": "tenant admin (github.com/rosskukulinski/tailworks/cap/tenant-admin): each valid grant value's tenants and actions; empty when none",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "tenants": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "actions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "tenants",
+                  "actions"
+                ]
+              }
+            },
+            "invalidTenantAdmin": {
+              "type": "array",
+              "description": "github.com/rosskukulinski/tailworks/cap/tenant-admin values that grant nothing, each with the reason",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "admin",
+            "approve",
+            "mcpTools",
+            "tenantAdmin"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "actor",
+        "tags",
+        "linked",
+        "transport",
+        "mgmt",
+        "tenant",
+        "tenants",
+        "caps",
+        "can"
+      ]
+    },
+    "completion": {
+      "type": "object",
+      "description": "tw completion <shell>: the script (without --json it is printed as is)",
+      "properties": {
+        "shell": {
+          "type": "string",
+          "enum": [
+            "bash",
+            "zsh",
+            "fish"
+          ]
+        },
+        "script": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "shell",
+        "script"
+      ]
+    },
+    "status": {
+      "type": "object",
+      "description": "health of mgmt, the host(s), the tenant and deployments. On the host (no linked): supervisor, mgmt, host, workloads, objectsByStatus, ...; on a linked machine (linked present): linked, whoami, hosts and tenants[].deployments",
+      "properties": {
+        "healthy": {
+          "type": "boolean"
+        },
+        "linked": {
+          "type": "object",
+          "description": "the tw link this machine uses; present only on a linked machine, and it selects that field set"
+        },
+        "whoami": {
+          "type": "object",
+          "description": "linked machine: mgmt's GET /v1/whoami answer as is (not the tw whoami result)"
+        },
+        "hosts": {
+          "type": "array",
+          "description": "linked machine: every host mgmt knows",
+          "items": {
+            "type": "object"
+          }
+        },
+        "mode": {
+          "type": "string"
+        },
+        "transport": {
+          "type": "string"
+        },
+        "stateDir": {
+          "type": "string"
+        },
+        "tailnet": {
+          "type": "string"
+        },
+        "mintMode": {
+          "type": "string"
+        },
+        "tenantID": {
+          "type": "string"
+        },
+        "supervisor": {
+          "type": "boolean"
+        },
+        "mgmt": {
+          "type": "boolean"
+        },
+        "host": {
+          "type": "boolean"
+        },
+        "hostStatus": {
+          "type": "string"
+        },
+        "warmKeys": {
+          "type": "integer",
+          "description": "the operator tenant's pooled preauthorized join keys in mgmt custody (per tenant: tenants[].warmKeys); tw down revokes them"
+        },
+        "workerInternet": {
+          "type": "string",
+          "enum": [
+            "direct",
+            "off"
+          ],
+          "description": "this host's Worker internet egress (tw up --worker-internet): what the running host reports, else tw.json's"
+        },
+        "tenants": {
+          "type": "array",
+          "description": "each tenant this machine serves; on a linked machine each has deployments (the latest per workload)",
+          "items": {
+            "type": "object",
+            "properties": {
+              "deployments": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/deployment"
+                }
+              }
+            }
+          }
+        },
+        "unsafeFlags": {
+          "type": "array",
+          "description": "host: the unsafe tw up flags saved in tw.json and re-applied on every tw up (insecure-shared-host, allow-experimental-flags, local-dev); [] when none",
+          "items": {
+            "type": "string"
+          }
+        },
+        "containers": {
+          "type": "array",
+          "description": "host: this host's containers (Go field names)",
+          "items": {
+            "type": "object"
+          }
+        },
+        "hostCapacity": {
+          "type": "array",
+          "description": "every host's container capacity and usage",
+          "items": {
+            "type": "object"
+          }
+        },
+        "containerReservations": {
+          "type": "array",
+          "description": "mgmt's container reservations",
+          "items": {
+            "type": "object"
+          }
+        },
+        "degradedStores": {
+          "type": "array",
+          "description": "stores whose replay stopped at a journal entry they can't apply; absent when none",
+          "items": {
+            "type": "object"
+          }
+        },
+        "workloads": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "the host's workloads as tw-hostd reports them (Go field names: TenantID, Workload, DeploymentID, Status, Error, ...)"
+          }
+        },
+        "objectsByStatus": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        }
+      },
+      "required": [
+        "healthy",
+        "stateDir"
+      ]
+    },
+    "up": {
+      "type": "object",
+      "properties": {
+        "stateDir": {
+          "type": "string"
+        },
+        "tailnet": {
+          "type": "string"
+        },
+        "mintMode": {
+          "type": "string"
+        },
+        "tenantID": {
+          "type": "string"
+        },
+        "hostID": {
+          "type": "string"
+        },
+        "started": {
+          "type": "boolean"
+        },
+        "mgmtNode": {
+          "type": "string"
+        },
+        "mgmtNodeID": {
+          "type": "string"
+        },
+        "mgmtIP": {
+          "type": "string"
+        },
+        "https": {
+          "type": "boolean"
+        },
+        "policyOK": {
+          "type": "boolean"
+        },
+        "policyApplied": {
+          "type": "boolean"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "unsafeFlags": {
+          "type": "array",
+          "description": "the unsafe tw up flags saved in tw.json and re-applied on every later tw up (insecure-shared-host, allow-experimental-flags, local-dev); [] when none",
+          "items": {
+            "type": "string"
+          }
+        },
+        "timingsMs": {
+          "$ref": "#/$defs/timings"
+        }
+      },
+      "required": [
+        "stateDir",
+        "tenantID",
+        "hostID",
+        "mintMode",
+        "timingsMs"
+      ]
+    },
+    "down": {
+      "type": "object",
+      "properties": {
+        "objectsPurged": {
+          "type": "integer"
+        },
+        "killed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "devicesDeleted": {
+          "type": "integer"
+        },
+        "timingsMs": {
+          "$ref": "#/$defs/timings"
+        }
+      },
+      "required": [
+        "timingsMs"
+      ]
+    },
+    "uninstall": {
+      "type": "object",
+      "description": "tw uninstall: the plan (with --dry-run) or what it did",
+      "properties": {
+        "stateDir": {
+          "type": "string"
+        },
+        "prefix": {
+          "type": "string"
+        },
+        "keepState": {
+          "type": "boolean"
+        },
+        "dryRun": {
+          "type": "boolean"
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "remove": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "kept": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "manual": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "killed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "devicesDeleted": {
+          "type": "integer"
+        },
+        "done": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "stateDir",
+        "keepState",
+        "dryRun",
+        "steps",
+        "remove",
+        "skills",
+        "kept",
+        "manual",
+        "done"
+      ]
+    },
+    "link": {
+      "type": "object",
+      "description": "tw link (with --unlink: unlinked is true)",
+      "properties": {
+        "endpoint": {
+          "type": "string"
+        },
+        "scheme": {
+          "type": "string"
+        },
+        "tailnet": {
+          "type": "string"
+        },
+        "mgmtNode": {
+          "type": "string"
+        },
+        "login": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string"
+        },
+        "nodeID": {
+          "type": "string"
+        },
+        "admin": {
+          "type": "boolean"
+        },
+        "tenants": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "path": {
+          "type": "string"
+        },
+        "unlinked": {
+          "type": "boolean"
+        },
+        "console": {
+          "type": "string",
+          "description": "the admin console URL (<endpoint>/ui/); omitted under --tsnet"
+        }
+      },
+      "required": [
+        "endpoint",
+        "path"
+      ]
+    },
+    "tenant add": {
+      "type": "object",
+      "properties": {
+        "tailnet": {
+          "type": "string"
+        },
+        "tenantID": {
+          "type": "string"
+        },
+        "controlURL": {
+          "type": "string"
+        },
+        "existing": {
+          "type": "boolean"
+        },
+        "policyOK": {
+          "type": "boolean"
+        },
+        "policySnippet": {
+          "type": "string"
+        },
+        "policyApplied": {
+          "type": "boolean"
+        },
+        "timingsMs": {
+          "$ref": "#/$defs/timings"
+        }
+      },
+      "required": [
+        "tailnet",
+        "tenantID",
+        "existing",
+        "policyOK",
+        "timingsMs"
+      ]
+    },
+    "tenant ls": {
+      "type": "array",
+      "description": "every tenant this tailworks serves",
+      "items": {
+        "type": "object",
+        "properties": {
+          "tailnet": {
+            "type": "string"
+          },
+          "tenantID": {
+            "type": "string"
+          },
+          "mintMode": {
+            "type": "string"
+          },
+          "controlURL": {
+            "type": "string"
+          },
+          "operator": {
+            "type": "boolean"
+          },
+          "objectsByStatus": {
+            "type": "object"
+          },
+          "registrationsPerMinute": {
+            "type": "integer"
+          },
+          "mintQueue": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tailnet",
+          "tenantID"
+        ]
+      }
+    },
+    "tenant set": {
+      "type": "object",
+      "description": "the tenant after the update (the /v1 Tenant)",
+      "properties": {
+        "tenantID": {
+          "type": "string"
+        },
+        "tailnet": {
+          "type": "string"
+        },
+        "controlURL": {
+          "type": "string"
+        },
+        "mintMode": {
+          "type": "string"
+        },
+        "registrationsPerMinute": {
+          "type": "integer"
+        },
+        "maxObjects": {
+          "type": "integer"
+        },
+        "publicIngress": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "integer"
+        },
+        "updatedAt": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "tenantID",
+        "tailnet"
+      ]
+    },
+    "tenant rm": {
+      "type": "object",
+      "properties": {
+        "tenantID": {
+          "type": "string"
+        },
+        "killed": {
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "purged": {
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "deploymentsStopped": {
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "tenantID"
+      ]
+    },
+    "init": {
+      "type": "object",
+      "properties": {
+        "dir": {
+          "type": "string"
+        },
+        "template": {
+          "type": "string"
+        },
+        "workload": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "dir",
+        "template",
+        "workload"
+      ]
+    },
+    "init list": {
+      "type": "object",
+      "properties": {
+        "templates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "purpose": {
+                "type": "string"
+              },
+              "needs": {
+                "type": "string"
+              },
+              "guide": {
+                "type": "string"
+              },
+              "starting_point": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "name",
+              "purpose",
+              "starting_point"
+            ]
+          }
+        }
+      },
+      "required": [
+        "templates"
+      ]
+    },
+    "types": {
+      "type": "object",
+      "description": "tw types: the declaration file written (or with --check, compared)",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "absolute path of the .d.ts"
+        },
+        "runtime": {
+          "type": "string",
+          "description": "workerd (an Env interface) or node (NodeJS.ProcessEnv)"
+        },
+        "names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "every declared name, sorted"
+        },
+        "changed": {
+          "type": "boolean",
+          "description": "the file was written (or, with --check, would be: then the command fails with types_stale)"
+        },
+        "checked": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "file",
+        "runtime",
+        "names",
+        "changed"
+      ]
+    },
+    "dev": {
+      "type": "object",
+      "description": "tw dev --once (the smoke test); without --once, see dev.event",
+      "properties": {
+        "url": {
+          "type": "string"
+        },
+        "serves": {
+          "type": "string",
+          "description": "url plus the MCP route for an MCP app"
+        },
+        "workload": {
+          "type": "string"
+        },
+        "node": {
+          "type": "string"
+        },
+        "as": {
+          "type": "string"
+        },
+        "callers": {
+          "type": "array",
+          "description": "tw dev --caller: one extra identity each, with its own local URL",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "as": {
+                "type": "string",
+                "description": "the login of an untagged caller"
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "nodeId": {
+                "type": "string"
+              },
+              "node": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "url"
+            ]
+          }
+        },
+        "smoke": {
+          "type": "object",
+          "description": "the one request --once made",
+          "properties": {
+            "status": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "status"
+          ]
+        },
+        "timingsMs": {
+          "$ref": "#/$defs/timings"
+        }
+      },
+      "required": [
+        "url",
+        "serves",
+        "workload",
+        "node",
+        "timingsMs"
+      ]
+    },
+    "dev.event": {
+      "type": "object",
+      "description": "tw dev --json without --once: one per line on stdout. ready (first, with url, serves, workload, node, as, tags), inspector (with --inspector-port: addr, ws), console (url of the read-only data console, unless --console-port -1), then reload or error on each change, request (record) for each request the app serves, stopping on Ctrl-C",
+      "properties": {
+        "event": {
+          "type": "string",
+          "enum": [
+            "ready",
+            "inspector",
+            "console",
+            "reload",
+            "request",
+            "error",
+            "stopping"
+          ]
+        },
+        "ts": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "serves": {
+          "type": "string"
+        },
+        "workload": {
+          "type": "string"
+        },
+        "node": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "callers": {
+          "type": "array",
+          "description": "tw dev --caller: one extra identity each, with its own local URL",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "as": {
+                "type": "string",
+                "description": "the login of an untagged caller"
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "nodeId": {
+                "type": "string"
+              },
+              "node": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "url"
+            ]
+          }
+        },
+        "ms": {
+          "type": "number"
+        },
+        "addr": {
+          "type": "string"
+        },
+        "ws": {
+          "type": "string"
+        },
+        "record": {
+          "$ref": "#/$defs/logs.record"
+        },
+        "error": {
+          "$ref": "#/$defs/errorObject"
+        }
+      },
+      "required": [
+        "event",
+        "ts"
+      ]
+    },
+    "deployImage": {
+      "type": "object",
+      "description": "one image of a container class, pinned by mgmt at deploy (ADR-032 D3): hosts pull repository@digest",
+      "properties": {
+        "class": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "description": "the class's wrangler images key (absent: the default image)"
+        },
+        "ref": {
+          "type": "string",
+          "description": "the image as the bundle names it"
+        },
+        "arch": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string",
+          "description": "in tailworks' registry"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "from": {
+          "type": "string",
+          "description": "what ref resolved through: \"alias <target>\", \"public <ref>\", or the upstream ref and its digest"
+        }
+      },
+      "required": [
+        "class",
+        "ref",
+        "arch",
+        "repository",
+        "digest"
+      ]
+    },
+    "deploy": {
+      "type": "object",
+      "description": "the result, on stdout; progress is deploy.event lines on stderr",
+      "properties": {
+        "workload": {
+          "type": "string"
+        },
+        "tenant": {
+          "type": "string"
+        },
+        "tenantID": {
+          "type": "string"
+        },
+        "deploymentID": {
+          "type": "string"
+        },
+        "host": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "description": "active, or assigned with --no-wait"
+        },
+        "endpoint": {
+          "type": "object",
+          "description": "the workload node",
+          "properties": {
+            "objectID": {
+              "type": "string"
+            },
+            "node": {
+              "type": "string"
+            },
+            "magicDNS": {
+              "type": "string",
+              "description": "it answers at http://<magicDNS>/"
+            },
+            "status": {
+              "type": "string"
+            },
+            "service": {
+              "type": "object"
+            }
+          }
+        },
+        "preflight": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "srcTags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "missing": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "missingTagOwners": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "tagOwnersSnippet": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok"
+          ]
+        },
+        "placement": {
+          "type": "object",
+          "description": "which host and why"
+        },
+        "public": {
+          "type": "object",
+          "description": "the public URL and state, if the app has public routes"
+        },
+        "replicas": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "images": {
+          "type": "array",
+          "description": "container classes: what each image was pinned to",
+          "items": {
+            "$ref": "#/$defs/deployImage"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "description": "wrangler config tailworks ignores, one line per key",
+          "items": {
+            "type": "string"
+          }
+        },
+        "preview": {
+          "type": "string",
+          "description": "--preview: the preview's own workload name (<workload>--preview-<alias>); workload is the workload it previews"
+        },
+        "policyApplied": {
+          "type": "object",
+          "description": "--apply-policy: what mgmt wrote to the tailnet policy before the deploy (as tw policy --apply's applied)"
+        },
+        "nodes": {
+          "$ref": "#/$defs/nodeBudget"
+        },
+        "bundleBytes": {
+          "type": "integer"
+        },
+        "timingsMs": {
+          "$ref": "#/$defs/timings"
+        }
+      },
+      "required": [
+        "workload",
+        "tenant",
+        "tenantID",
+        "deploymentID",
+        "host",
+        "status",
+        "endpoint",
+        "preflight",
+        "bundleBytes",
+        "timingsMs"
+      ]
+    },
+    "deploy.event": {
+      "type": "object",
+      "description": "tw deploy --json: one per line on stderr: start, preflight, policy (--apply-policy), build, log (container image builds), placed, status (each change), ready, then public_wait and public with --wait-public. A failure ends with an error line ({\"error\": ...}) instead. tw rollback --json prints the same lines without build, log and public",
+      "properties": {
+        "event": {
+          "type": "string",
+          "enum": [
+            "start",
+            "preflight",
+            "policy",
+            "build",
+            "log",
+            "placed",
+            "status",
+            "ready",
+            "public_wait",
+            "public"
+          ]
+        },
+        "ts": {
+          "type": "string"
+        },
+        "error": {
+          "$ref": "#/$defs/errorObject"
+        },
+        "workload": {
+          "type": "string"
+        },
+        "deploymentID": {
+          "type": "string"
+        },
+        "host": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "node": {
+          "type": "string"
+        },
+        "magicDNS": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "images": {
+          "type": "array",
+          "description": "ready: the container images' pins, as the result's images",
+          "items": {
+            "$ref": "#/$defs/deployImage"
+          }
+        },
+        "line": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ts"
+      ]
+    },
+    "deploymentRecord": {
+      "type": "object",
+      "description": "one entry of a workload's deployment history (the /v1 DeploymentRecord, ADR-046)",
+      "properties": {
+        "deploymentID": {
+          "type": "string"
+        },
+        "workload": {
+          "type": "string"
+        },
+        "host": {
+          "type": "string"
+        },
+        "epoch": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string",
+          "description": "the current deployment's status (assigned, starting, active, failed); older ones are superseded or stopped"
+        },
+        "error": {
+          "type": "string"
+        },
+        "hostStatus": {
+          "type": "string",
+          "description": "the host's last report, kept after the deployment is superseded: active means it was serving"
+        },
+        "deployedBy": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "integer"
+        },
+        "activeAt": {
+          "type": "integer"
+        },
+        "bundleSHA256": {
+          "type": "string",
+          "description": "hex SHA-256 of the bundle; empty for a deployment without one"
+        },
+        "bundleBytes": {
+          "type": "integer"
+        },
+        "bundleRetained": {
+          "type": "boolean",
+          "description": "false once retention pruned the bundle: it can no longer be rolled back to"
+        },
+        "rollbackOf": {
+          "type": "string",
+          "description": "set on a rollback: the deployment whose bundle it redeployed"
+        }
+      },
+      "required": [
+        "deploymentID",
+        "workload",
+        "host",
+        "status",
+        "createdAt",
+        "bundleSHA256",
+        "bundleRetained"
+      ]
+    },
+    "deployments": {
+      "type": "object",
+      "description": "tw deployments <workload>: its history, newest first",
+      "properties": {
+        "workload": {
+          "type": "string"
+        },
+        "tenant": {
+          "type": "string"
+        },
+        "tenantID": {
+          "type": "string"
+        },
+        "bundleRetention": {
+          "type": "integer",
+          "description": "how many of the newest bundles per workload mgmt keeps (0 = every bundle)"
+        },
+        "deployments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/deploymentRecord"
+          }
+        }
+      },
+      "required": [
+        "workload",
+        "tenant",
+        "tenantID",
+        "bundleRetention",
+        "deployments"
+      ]
+    },
+    "rollback": {
+      "type": "object",
+      "description": "the result, on stdout; progress is deploy.event lines on stderr (start, preflight, placed, status, ready)",
+      "properties": {
+        "workload": {
+          "type": "string"
+        },
+        "tenant": {
+          "type": "string"
+        },
+        "tenantID": {
+          "type": "string"
+        },
+        "rollbackOf": {
+          "type": "string",
+          "description": "the deployment whose bundle was redeployed"
+        },
+        "target": {
+          "$ref": "#/$defs/deploymentRecord"
+        },
+        "deploymentID": {
+          "type": "string",
+          "description": "the new deployment"
+        },
+        "host": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "description": "active, or assigned with --no-wait"
+        },
+        "preflight": {
+          "type": "object"
+        },
+        "endpoint": {
+          "type": "object"
+        },
+        "placement": {
+          "type": "object"
+        },
+        "public": {
+          "type": "object"
+        },
+        "timingsMs": {
+          "$ref": "#/$defs/timings"
+        }
+      },
+      "required": [
+        "workload",
+        "tenant",
+        "tenantID",
+        "rollbackOf",
+        "target",
+        "deploymentID",
+        "host",
+        "status",
+        "timingsMs"
+      ]
+    },
+    "previews": {
+      "type": "object",
+      "properties": {
+        "workload": {
+          "type": "string"
+        },
+        "tenant": {
+          "type": "string"
+        },
+        "tenantID": {
+          "type": "string"
+        },
+        "previews": {
+          "type": "array",
+          "description": "the running previews, newest first",
+          "items": {
+            "type": "object",
+            "properties": {
+              "workload": {
+                "type": "string",
+                "description": "the preview's own workload name"
+              },
+              "alias": {
+                "type": "string"
+              },
+              "previewOf": {
+                "type": "string"
+              },
+              "bundleSHA256": {
+                "type": "string"
+              },
+              "deployment": {
+                "$ref": "#/$defs/deployment"
+              }
+            },
+            "required": [
+              "workload",
+              "alias",
+              "previewOf",
+              "deployment"
+            ]
+          }
+        }
+      },
+      "required": [
+        "workload",
+        "tenant",
+        "tenantID",
+        "previews"
+      ]
+    },
+    "promote": {
+      "type": "object",
+      "description": "the result, on stdout; progress is deploy.event lines on stderr (start, preflight, placed, status, ready)",
+      "properties": {
+        "workload": {
+          "type": "string"
+        },
+        "tenant": {
+          "type": "string"
+        },
+        "tenantID": {
+          "type": "string"
+        },
+        "preview": {
+          "type": "string",
+          "description": "the preview's workload name"
+        },
+        "promotedFrom": {
+          "type": "string",
+          "description": "the preview deployment whose bundle was deployed"
+        },
+        "previewStopped": {
+          "type": "boolean",
+          "description": "the preview was undeployed (false with --keep-preview)"
+        },
+        "deploymentID": {
+          "type": "string",
+          "description": "the workload's new deployment"
+        },
+        "host": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "description": "active, or assigned with --no-wait"
+        },
+        "preflight": {
+          "type": "object"
+        },
+        "endpoint": {
+          "type": "object"
+        },
+        "placement": {
+          "type": "object"
+        },
+        "public": {
+          "type": "object"
+        },
+        "timingsMs": {
+          "$ref": "#/$defs/timings"
+        }
+      },
+      "required": [
+        "workload",
+        "tenant",
+        "tenantID",
+        "preview",
+        "promotedFrom",
+        "previewStopped",
+        "deploymentID",
+        "host",
+        "status",
+        "timingsMs"
+      ]
+    },
+    "ls": {
+      "type": "object",
+      "properties": {
+        "tenant": {
+          "type": "string"
+        },
+        "tenantID": {
+          "type": "string"
+        },
+        "deployments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/deployment"
+          }
+        },
+        "objects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/object"
+          }
+        },
+        "nodes": {
+          "$ref": "#/$defs/nodeBudget"
+        },
+        "truncated": {
+          "type": "boolean",
+          "description": "More objects matched than the ceiling (--limit, default 5000) let through."
+        }
+      },
+      "required": [
+        "tenant",
+        "tenantID",
+        "deployments",
+        "objects",
+        "truncated"
+      ]
+    },
+    "undeploy": {
+      "type": "object",
+      "properties": {
+        "workload": {
+          "type": "string"
+        },
+        "deploymentID": {
+          "type": "string"
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "killed": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "devicesDeleted": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "killed"
+          ]
+        },
+        "timingsMs": {
+          "$ref": "#/$defs/timings"
+        }
+      },
+      "required": [
+        "workload",
+        "deploymentID",
+        "result",
+        "timingsMs"
+      ]
+    },
+    "expose": {
+      "type": "object",
+      "properties": {
+        "workload": {
+          "type": "string"
+        },
+        "tenantID": {
+          "type": "string"
+        },
+        "exposed": {
+          "type": "boolean"
+        },
+        "setting": {
+          "type": "object"
+        },
+        "timingsMs": {
+          "$ref": "#/$defs/timings"
+        }
+      },
+      "required": [
+        "workload",
+        "tenantID",
+        "exposed"
+      ]
+    },
+    "expose names": {
+      "type": "object",
+      "description": "the public names the tenant owns (ADR-029)",
+      "properties": {
+        "tenantID": {
+          "type": "string"
+        },
+        "names": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "tailnet": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "tenantID": {
+                "type": "string"
+              },
+              "claimedAt": {
+                "type": "integer"
+              },
+              "claimedBy": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "tailnet",
+              "name",
+              "tenantID",
+              "claimedAt"
+            ]
+          }
+        }
+      },
+      "required": [
+        "tenantID",
+        "names"
+      ]
+    },
+    "expose release": {
+      "type": "object",
+      "properties": {
+        "tenantID": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "released": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "tenantID",
+        "name",
+        "released"
+      ]
+    },
+    "secret put": {
+      "type": "object",
+      "description": "never contains the value",
+      "properties": {
+        "workload": {
+          "type": "string"
+        },
+        "tenantID": {
+          "type": "string"
+        },
+        "secret": {
+          "$ref": "#/$defs/secret"
+        },
+        "created": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "workload",
+        "tenantID",
+        "secret",
+        "created"
+      ]
+    },
+    "secret bulk": {
+      "type": "object",
+      "description": "the names set, in input order; never values (a failure is an error naming set, failed and not attempted)",
+      "properties": {
+        "workload": {
+          "type": "string"
+        },
+        "tenantID": {
+          "type": "string"
+        },
+        "set": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "failed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "notAttempted": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "workload",
+        "tenantID",
+        "set",
+        "failed",
+        "notAttempted"
+      ]
+    },
+    "secret ls": {
+      "type": "object",
+      "description": "names only, never values",
+      "properties": {
+        "workload": {
+          "type": "string"
+        },
+        "tenantID": {
+          "type": "string"
+        },
+        "secrets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/secret"
+          }
+        }
+      },
+      "required": [
+        "workload",
+        "tenantID",
+        "secrets"
+      ]
+    },
+    "secret rm": {
+      "type": "object",
+      "properties": {
+        "workload": {
+          "type": "string"
+        },
+        "tenantID": {
+          "type": "string"
+        },
+        "deleted": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workload",
+        "tenantID",
+        "deleted"
+      ]
+    },
+    "kvKey": {
+      "type": "object",
+      "description": "a Workers KV key as list() returns it",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "expiration": {
+          "type": "integer",
+          "description": "Unix seconds"
+        },
+        "metadata": {
+          "description": "any JSON"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "kv namespace create": {
+      "type": "object",
+      "properties": {
+        "workload": {
+          "type": "string"
+        },
+        "tenantID": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string",
+          "description": "the KV namespace (its kv_namespaces id, or the binding name)"
+        },
+        "created": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "workload",
+        "tenantID",
+        "namespace",
+        "created"
+      ]
+    },
+    "kv namespace list": {
+      "type": "object",
+      "properties": {
+        "workload": {
+          "type": "string"
+        },
+        "tenantID": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string",
+          "description": "the KV namespace (its kv_namespaces id, or the binding name)"
+        },
+        "namespaces": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "entries": {
+                "type": "integer"
+              },
+              "bytes": {
+                "type": "integer"
+              },
+              "updatedAt": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        }
+      },
+      "required": [
+        "workload",
+        "tenantID",
+        "namespaces"
+      ]
+    },
+    "kv namespace delete": {
+      "type": "object",
+      "properties": {
+        "workload": {
+          "type": "string"
+        },
+        "tenantID": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string",
+          "description": "the KV namespace (its kv_namespaces id, or the binding name)"
+        },
+        "deleted": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workload",
+        "tenantID",
+        "namespace",
+        "deleted"
+      ]
+    },
+    "kv key put": {
+      "type": "object",
+      "description": "never contains the value",
+      "properties": {
+        "workload": {
+          "type": "string"
+        },
+        "tenantID": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string",
+          "description": "the KV namespace (its kv_namespaces id, or the binding name)"
+        },
+        "key": {
+          "$ref": "#/$defs/kvKey"
+        }
+      },
+      "required": [
+        "workload",
+        "tenantID",
+        "namespace",
+        "key"
+      ]
+    },
+    "kv key get": {
+      "type": "object",
+      "description": "the value base64-encoded (without --json, the raw bytes on stdout)",
+      "properties": {
+        "workload": {
+          "type": "string"
+        },
+        "tenantID": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string",
+          "description": "the KV namespace (its kv_namespaces id, or the binding name)"
+        },
+        "value": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string",
+              "contentEncoding": "base64"
+            },
+            "expiration": {
+              "type": "integer"
+            },
+            "metadata": {}
+          },
+          "required": [
+            "name",
+            "value"
+          ]
+        }
+      },
+      "required": [
+        "workload",
+        "tenantID",
+        "namespace",
+        "value"
+      ]
+    },
+    "kv key delete": {
+      "type": "object",
+      "properties": {
+        "workload": {
+          "type": "string"
+        },
+        "tenantID": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string",
+          "description": "the KV namespace (its kv_namespaces id, or the binding name)"
+        },
+        "deleted": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workload",
+        "tenantID",
+        "namespace",
+        "deleted"
+      ]
+    },
+    "kv key list": {
+      "type": "object",
+      "description": "names, expirations and metadata; never values",
+      "properties": {
+        "workload": {
+          "type": "string"
+        },
+        "tenantID": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string",
+          "description": "the KV namespace (its kv_namespaces id, or the binding name)"
+        },
+        "keys": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/kvKey"
+          }
+        }
+      },
+      "required": [
+        "workload",
+        "tenantID",
+        "namespace",
+        "keys"
+      ]
+    },
+    "queueInfo": {
+      "type": "object",
+      "description": "a tenant queue and its counters (ADR-039)",
+      "properties": {
+        "tenantID": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "incarnation": {
+          "type": "string"
+        },
+        "backlog": {
+          "type": "integer",
+          "description": "messages kept: in flight and delayed included"
+        },
+        "bytes": {
+          "type": "integer"
+        },
+        "inFlight": {
+          "type": "integer"
+        },
+        "delayed": {
+          "type": "integer"
+        },
+        "oldestAt": {
+          "type": "integer",
+          "description": "unix ms of the oldest message"
+        },
+        "consumer": {
+          "type": "string"
+        },
+        "consumedAt": {
+          "type": "integer",
+          "description": "unix ms"
+        },
+        "createdAt": {
+          "type": "integer",
+          "description": "unix ms"
+        },
+        "updatedAt": {
+          "type": "integer",
+          "description": "unix ms"
+        }
+      },
+      "required": [
+        "tenantID",
+        "name",
+        "incarnation",
+        "backlog",
+        "bytes",
+        "inFlight",
+        "delayed",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "queueMessage": {
+      "type": "object",
+      "description": "a queue message as peeked (body base64)",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string",
+          "description": "base64"
+        },
+        "contentType": {
+          "type": "string",
+          "enum": [
+            "json",
+            "text",
+            "bytes",
+            "v8"
+          ]
+        },
+        "attempts": {
+          "type": "integer"
+        },
+        "timestamp": {
+          "type": "integer",
+          "description": "unix ms"
+        },
+        "visibleAt": {
+          "type": "integer",
+          "description": "unix ms"
+        }
+      },
+      "required": [
+        "id",
+        "body",
+        "contentType",
+        "attempts",
+        "timestamp"
+      ]
+    },
+    "queues create": {
+      "type": "object",
+      "properties": {
+        "tenantID": {
+          "type": "string"
+        },
+        "queue": {
+          "$ref": "#/$defs/queueInfo"
+        }
+      },
+      "required": [
+        "tenantID",
+        "queue"
+      ]
+    },
+    "queues ls": {
+      "type": "object",
+      "properties": {
+        "tenantID": {
+          "type": "string"
+        },
+        "queues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/queueInfo"
+          }
+        }
+      },
+      "required": [
+        "tenantID",
+        "queues"
+      ]
+    },
+    "queues info": {
+      "type": "object",
+      "properties": {
+        "tenantID": {
+          "type": "string"
+        },
+        "queue": {
+          "$ref": "#/$defs/queueInfo"
+        }
+      },
+      "required": [
+        "tenantID",
+        "queue"
+      ]
+    },
+    "queues rm": {
+      "type": "object",
+      "properties": {
+        "tenantID": {
+          "type": "string"
+        },
+        "deleted": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tenantID",
+        "deleted"
+      ]
+    },
+    "queues purge": {
+      "type": "object",
+      "properties": {
+        "tenantID": {
+          "type": "string"
+        },
+        "purged": {
+          "type": "integer",
+          "description": "messages deleted"
+        }
+      },
+      "required": [
+        "tenantID",
+        "purged"
+      ]
+    },
+    "queues messages": {
+      "type": "object",
+      "properties": {
+        "tenantID": {
+          "type": "string"
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/queueMessage"
+          }
+        }
+      },
+      "required": [
+        "tenantID",
+        "messages"
+      ]
+    },
+    "queues send": {
+      "type": "object",
+      "properties": {
+        "tenantID": {
+          "type": "string"
+        },
+        "sent": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "the new messages' IDs"
+        }
+      },
+      "required": [
+        "tenantID",
+        "sent"
+      ]
+    },
+    "kill": {
+      "type": "object",
+      "properties": {
+        "object": {
+          "type": "string"
+        },
+        "chain": {
+          "type": "string"
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "killed": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "killed"
+          ]
+        },
+        "descendants": {
+          "type": "integer"
+        },
+        "timingsMs": {
+          "$ref": "#/$defs/timings"
+        }
+      },
+      "required": [
+        "object",
+        "chain",
+        "result",
+        "descendants",
+        "timingsMs"
+      ]
+    },
+    "approvalWait": {
+      "description": "One approval wait of one Workflow instance (docs/approvals.md; mgmt's Approval).",
+      "type": "object",
+      "properties": {
+        "tenantID": {
+          "type": "string"
+        },
+        "workload": {
+          "type": "string"
+        },
+        "workflow": {
+          "type": "string"
+        },
+        "instance": {
+          "type": "string"
+        },
+        "step": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "timeout": {
+          "type": "string"
+        },
+        "facts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number"
+          }
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "approved",
+            "rejected",
+            "timeout"
+          ]
+        },
+        "requestedAt": {
+          "type": "string"
+        },
+        "decidedAt": {
+          "type": "string"
+        },
+        "approver": {
+          "type": "object",
+          "properties": {
+            "user": {
+              "type": "string"
+            },
+            "node": {
+              "type": "string"
+            },
+            "nodeId": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "via": {
+              "enum": [
+                "tailnet",
+                "mgmt"
+              ]
+            }
+          },
+          "required": [
+            "node",
+            "nodeId",
+            "tags",
+            "via"
+          ]
+        },
+        "comment": {
+          "type": "string"
+        },
+        "host": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tenantID",
+        "workload",
+        "workflow",
+        "instance",
+        "step",
+        "type",
+        "status",
+        "requestedAt"
+      ]
+    },
+    "approvals": {
+      "description": "tw approvals: what waits for a decision (with --all, decided ones too).",
+      "type": "object",
+      "properties": {
+        "approvals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/approvalWait"
+          }
+        },
+        "unreachable": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "approvals"
+      ]
+    },
+    "approve": {
+      "description": "tw approve: the approval as decided, with the approver's verified identity.",
+      "type": "object",
+      "properties": {
+        "approval": {
+          "$ref": "#/$defs/approvalWait"
+        }
+      },
+      "required": [
+        "approval"
+      ]
+    },
+    "notify": {
+      "description": "tw notify [show], set, test and rm: the tenant's notification webhook (only its origin and header names are shown; test adds the delivery outcome; rm prints only tenantID)",
+      "type": "object",
+      "properties": {
+        "tenantID": {
+          "type": "string"
+        },
+        "webhook": {
+          "type": "object",
+          "properties": {
+            "origin": {
+              "type": "string"
+            },
+            "headerNames": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "events": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "origin",
+            "headerNames",
+            "events"
+          ]
+        },
+        "updatedAt": {
+          "type": "integer"
+        },
+        "updatedBy": {
+          "type": "string"
+        },
+        "delivered": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "integer"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tenantID"
+      ]
+    },
+    "audit": {
+      "$ref": "#/$defs/auditRecords"
+    },
+    "logs.line": {
+      "type": "object",
+      "description": "tw logs --json for raw output (--console, --component, or a workload without request records): one per log line on stdout (with -f, until stopped)",
+      "properties": {
+        "event": {
+          "type": "string",
+          "enum": [
+            "log"
+          ]
+        },
+        "ts": {
+          "type": "string"
+        },
+        "line": {
+          "type": "string"
+        },
+        "workload": {
+          "type": "string",
+          "description": "tw logs <workload>"
+        },
+        "component": {
+          "type": "string",
+          "enum": [
+            "mgmt",
+            "hostd",
+            "supervisor"
+          ]
+        },
+        "host": {
+          "type": "string",
+          "description": "the replica's host (from a linked machine)"
+        }
+      },
+      "required": [
+        "event",
+        "ts",
+        "line"
+      ]
+    },
+    "logs.record": {
+      "type": "object",
+      "description": "tw logs <workload> --json (the default, without --console): one structured request record per line on stdout (ADR-045)",
+      "properties": {
+        "time": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "host": {
+          "type": "string"
+        },
+        "tenant": {
+          "type": "string"
+        },
+        "workload": {
+          "type": "string"
+        },
+        "deployment": {
+          "type": "string"
+        },
+        "object": {
+          "type": "string"
+        },
+        "class": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "caller": {
+          "type": "object"
+        },
+        "method": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "status": {
+          "type": "integer"
+        },
+        "durationMs": {
+          "type": "number"
+        },
+        "event": {
+          "type": "string"
+        },
+        "entrypoint": {
+          "type": "string"
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "traceId": {
+          "type": "string"
+        },
+        "spanId": {
+          "type": "string"
+        },
+        "auditTraceId": {
+          "type": "string"
+        },
+        "logs": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "exceptions": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "dropped": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "time",
+        "kind"
+      ]
+    },
+    "doctor": {
+      "type": "object",
+      "description": "printed also when a check fails; then doctor_failed follows on stderr",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "version": {
+          "type": "string"
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ok",
+                  "warn",
+                  "fail",
+                  "skip",
+                  "info"
+                ]
+              },
+              "detail": {
+                "type": "string"
+              },
+              "fix": {
+                "type": "string"
+              },
+              "ms": {
+                "type": "number"
+              },
+              "group": {
+                "type": "string",
+                "description": "the section the human output lists the check under: Install, Tailnet, Storage, Isolation, Linux host or Other"
+              }
+            },
+            "required": [
+              "name",
+              "status"
+            ]
+          }
+        }
+      },
+      "required": [
+        "ok",
+        "version",
+        "checks"
+      ]
+    },
+    "host add": {
+      "type": "object",
+      "description": "the join key is written to joinFile (0600), never printed",
+      "properties": {
+        "hostID": {
+          "type": "string"
+        },
+        "hostname": {
+          "type": "string"
+        },
+        "joinFile": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "integer"
+        },
+        "mgmt": {
+          "type": "string"
+        },
+        "controlURL": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tailnet": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "hostID",
+        "joinFile",
+        "expiresAt"
+      ]
+    },
+    "host ls": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "hostID": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tiers": {
+            "type": "array",
+            "description": "what the host offers: its isolation tiers (process, microvm) and containers",
+            "items": {
+              "type": "string"
+            }
+          },
+          "arch": {
+            "type": "string",
+            "description": "the host's GOARCH (amd64, arm64); absent for a host that never reported it"
+          },
+          "features": {
+            "type": "array",
+            "description": "host features it offers (kv, r2, d1, telemetry, ...)",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pool": {
+            "type": "string"
+          },
+          "nodeID": {
+            "type": "string"
+          },
+          "dnsName": {
+            "type": "string"
+          },
+          "liveNodes": {
+            "type": "integer"
+          },
+          "lastSeen": {
+            "type": "integer"
+          },
+          "leases": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "hostID",
+          "status"
+        ]
+      }
+    },
+    "host rm": {
+      "type": "object",
+      "properties": {
+        "hostID": {
+          "type": "string"
+        },
+        "killed": {
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "leasesReleased": {
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "devicesLeft": {
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "hostID"
+      ]
+    },
+    "host cordon": {
+      "type": "object",
+      "properties": {
+        "hostID": {
+          "type": "string"
+        },
+        "cordonedAt": {
+          "type": "integer"
+        },
+        "cordonedBy": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "hostID"
+      ]
+    },
+    "host uncordon": {
+      "type": "object",
+      "properties": {
+        "hostID": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "hostID"
+      ]
+    },
+    "host drain": {
+      "type": "object",
+      "properties": {
+        "hostID": {
+          "type": "string"
+        },
+        "cordoned": {
+          "type": "boolean"
+        },
+        "dryRun": {
+          "type": "boolean"
+        },
+        "moved": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "tenantID": {
+                "type": "string"
+              },
+              "workload": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "tenantID",
+              "workload",
+              "to"
+            ]
+          }
+        },
+        "refused": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "tenantID": {
+                "type": "string"
+              },
+              "workload": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "tenantID",
+              "workload",
+              "code",
+              "message"
+            ]
+          }
+        }
+      },
+      "required": [
+        "hostID",
+        "cordoned",
+        "moved",
+        "refused"
+      ]
+    },
+    "upgrade releases": {
+      "type": "object",
+      "properties": {
+        "current": {
+          "type": "string"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "version": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "version"
+            ]
+          }
+        }
+      },
+      "required": [
+        "current",
+        "items"
+      ]
+    },
+    "upgrade import": {
+      "type": "object",
+      "properties": {
+        "versions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "versions",
+        "artifacts"
+      ]
+    },
+    "backup": {
+      "type": "object",
+      "description": "tw backup: the new backup directory and its backup.json",
+      "properties": {
+        "backup": { "type": "string" },
+        "bytes": { "type": "integer" },
+        "manifest": {
+          "type": "object",
+          "properties": {
+            "v": { "type": "integer" },
+            "version": { "type": "string" },
+            "createdAt": { "type": "string" },
+            "stateDir": { "type": "string" },
+            "store": { "enum": ["sqlite", "postgres"] },
+            "custody": { "enum": ["file", "setec"] },
+            "schema": { "type": "object" },
+            "notIncluded": { "type": "array", "items": { "type": "string" } }
+          },
+          "required": ["v", "version", "createdAt", "store", "custody", "notIncluded"]
+        }
+      },
+      "required": ["backup", "manifest", "bytes"]
+    },
+    "restore": {
+      "type": "object",
+      "description": "tw restore: what was restored, where the replaced state was kept, and the restore generation after the fence (SQLite stores)",
+      "properties": {
+        "restored": { "type": "string" },
+        "safetyBackup": { "type": "string" },
+        "store": { "enum": ["sqlite", "postgres"] },
+        "restoreGeneration": { "type": "integer" }
+      },
+      "required": ["restored", "store"]
+    },
+    "custody migrate": {
+      "type": "object",
+      "description": "tw custody migrate: every file custody entry mapped to its name, copied to setec and read back (--dry-run: what would be copied), the names indexed in custody_names, the state kept before tw.json was switched",
+      "properties": {
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "dryRun": { "type": "boolean" },
+        "files": { "type": "integer" },
+        "names": { "type": "array", "items": { "type": "string" } },
+        "backfilled": { "type": "array", "items": { "type": "string" } },
+        "unmapped": { "type": "array", "items": { "type": "string" } },
+        "partial": { "type": "array", "items": { "type": "string" } },
+        "conflicts": { "type": "array", "items": { "type": "string" } },
+        "copied": { "type": "integer" },
+        "present": { "type": "integer" },
+        "verified": { "type": "integer" },
+        "safetyBackup": { "type": "string" },
+        "switched": { "type": "boolean" }
+      },
+      "required": ["from", "to", "dryRun", "files", "names", "backfilled", "copied", "present", "verified", "switched"]
+    },
+    "upgrade": {
+      "type": "object",
+      "description": "tw upgrade: on a tw up machine {plan, upgraded, backup?, rolledBack?, health?, notActiveBefore?, agentSkills?}; tw upgrade fleet (or tw upgrade on a linked machine): the plan (--plan: {from, to, steps, breaking, blockers, warnings}) or the upgrade run {id, to, state, steps}; tw upgrade fleet status|pause|resume|abort print the run ({runs: []} when there is none).",
+      "properties": {
+        "plan": {
+          "type": "object"
+        },
+        "upgraded": {
+          "type": "boolean"
+        },
+        "backup": {
+          "type": "string"
+        },
+        "rolledBack": {
+          "type": "boolean"
+        },
+        "health": {
+          "type": "string"
+        },
+        "notActiveBefore": {
+          "type": "array",
+          "description": "deployments that weren't active before the upgrade; the health check didn't count them",
+          "items": {
+            "type": "string"
+          }
+        },
+        "agentSkills": {
+          "type": "string",
+          "description": "what the new tw's agent setup --refresh did to the user-scope agent skills tw wrote"
+        },
+        "id": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "steps": {
+          "type": "array"
+        },
+        "blockers": {
+          "type": "array"
+        },
+        "runs": {
+          "type": "array"
+        }
+      }
+    },
+    "upgrade rollback": {
+      "type": "object",
+      "description": "tw upgrade rollback: the release it went back from and to, whether the store went back too (mode restore: the backup restored, the restore generation after the fence on SQLite), the state kept before the rollback, and what is left to do by hand (a Postgres store)",
+      "properties": {
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "prefix": { "type": "string" },
+        "mode": { "enum": ["binary", "restore"] },
+        "restored": { "type": "string" },
+        "store": { "enum": ["sqlite", "postgres"] },
+        "safetyBackup": { "type": "string" },
+        "restoreGeneration": { "type": "integer" },
+        "health": { "type": "string" },
+        "next": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["from", "to", "prefix", "mode"]
+    },
+    "host setup": {
+      "type": "object",
+      "description": "Linux, with sudo",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "setup",
+            "undo"
+          ]
+        },
+        "user": {
+          "type": "string"
+        },
+        "uid": {
+          "type": "integer"
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "socket": {
+          "type": "string"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "hugePages": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "action",
+        "steps"
+      ]
+    },
+    "host vmcheck": {
+      "type": "object",
+      "description": "a microVM's report (workload, pid, rssKB, stats, fsbench, keyscan); with --container, Go field names (Workload, Class, Object, PID, RSSKB, KeyScan)",
+      "properties": {
+        "workload": {
+          "type": "string"
+        },
+        "pid": {
+          "type": "integer"
+        },
+        "rssKB": {
+          "type": "integer"
+        }
+      }
+    },
+    "image public add": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/publicImage"
+          }
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "image public ls": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/publicImage"
+      }
+    },
+    "image public rm": {
+      "type": "object",
+      "properties": {
+        "removed": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "removed"
+      ]
+    },
+    "image push": {
+      "type": "object",
+      "description": "the copied image (Go field names)",
+      "properties": {
+        "Digest": {
+          "type": "string"
+        },
+        "MediaType": {
+          "type": "string"
+        },
+        "Platforms": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "Digest",
+        "Platforms"
+      ]
+    },
+    "docs ls": {
+      "type": "object",
+      "properties": {
+        "docs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "title"
+            ]
+          }
+        }
+      },
+      "required": [
+        "docs"
+      ]
+    },
+    "docs show": {
+      "type": "object",
+      "properties": {
+        "ref": {
+          "type": "string"
+        },
+        "markdown": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref",
+        "markdown"
+      ]
+    },
+    "docs search": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "ref": {
+                "type": "string",
+                "description": "pass it to tw docs show"
+              },
+              "doc": {
+                "type": "string"
+              },
+              "heading": {
+                "type": "string"
+              },
+              "excerpt": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "score": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ref",
+              "doc",
+              "heading",
+              "excerpt",
+              "url"
+            ]
+          }
+        }
+      },
+      "required": [
+        "query",
+        "results"
+      ]
+    },
+    "agent setup": {
+      "$ref": "#/$defs/agentPlan"
+    },
+    "agent remove": {
+      "$ref": "#/$defs/agentPlan"
+    },
+    "agent ls": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "string"
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/skill"
+          }
+        },
+        "agents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/agentDetection"
+          }
+        }
+      },
+      "required": [
+        "version",
+        "skills",
+        "agents"
+      ]
+    },
+    "agent show": {
+      "$ref": "#/$defs/skill"
+    }
+  }
+}

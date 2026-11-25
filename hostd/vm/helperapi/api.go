@@ -1,5 +1,5 @@
-// Package helperapi is the contract between twd-hostd (running as a normal
-// user) and twd-vmhelper, the small privileged service that does the parts
+// Package helperapi is the contract between tw-hostd (running as a normal
+// user) and tw-vmhelper, the small privileged service that does the parts
 // of the microVM tier that need root: network namespaces and TAP devices,
 // the Firecracker jailer (chroot, per-VM uid/gid, cgroups v2), and the
 // dm-crypt volumes that hold Durable Object storage.
@@ -35,12 +35,45 @@ import (
 	"time"
 )
 
-// DefaultSocket is where `twd host setup --microvm` puts the helper.
-const DefaultSocket = "/run/twd/vmhelper.sock"
+// DefaultSocket is where `tw host setup --microvm` puts the helper.
+const DefaultSocket = "/run/tailworks/vmhelper.sock"
 
 // Version is bumped when the protocol changes incompatibly.
 // 2: VolumeSlot + the attach op (warm pool); snapshot-base + Restore.
 const Version = 2
+
+// MinVersion is the oldest protocol this side still serves. A helper and
+// a hostd work together when their [MinVersion, Version] ranges overlap
+// (Compatible), so the root-owned helper can be upgraded first and keep
+// serving the previous hostd (ADR-041 §2, §5).
+const MinVersion = 2
+
+// Compatible reports whether a peer speaking [peerMin, peerMax] can talk
+// to this side ([MinVersion, Version]). A peer that reports no minimum
+// (peerMin 0, a helper from before ranges) speaks only peerMax.
+func Compatible(peerMin, peerMax int) bool {
+	return rangesOverlap(MinVersion, Version, peerMin, peerMax)
+}
+
+func rangesOverlap(min, max, peerMin, peerMax int) bool {
+	if peerMin <= 0 || peerMin > peerMax {
+		peerMin = peerMax
+	}
+	return peerMin <= max && min <= peerMax
+}
+
+// Check returns nil when the ping response r is from a compatible helper,
+// else an error naming both ranges.
+func Check(r Response) error {
+	if Compatible(r.MinVersion, r.Version) {
+		return nil
+	}
+	min := r.MinVersion
+	if min <= 0 {
+		min = r.Version
+	}
+	return fmt.Errorf("tw-vmhelper speaks protocol %d-%d, this tailworks %d-%d", min, r.Version, MinVersion, Version)
+}
 
 // Error codes.
 const (
@@ -66,8 +99,8 @@ type Request struct {
 	// VolumeSlot and swaps it in behind the guest's /dev/vdc (Firecracker
 	// PATCH /drives, post-boot). At most once per VM.
 	Attach *Volume `json:"attach,omitempty"`
-	// Snapshot (op snapshot-base) turns another of this uid's VMs — a
-	// pooled one, warm and holding no tenant code — into a base snapshot:
+	// Snapshot (op snapshot-base) turns another of this uid's VMs — one
+	// started with StartRequest.Base, warm and holding no tenant code — into a base snapshot:
 	// the helper pauses it, writes a full snapshot (VM state + guest
 	// memory) into its own root-only directory, and kills it (the original
 	// never runs again). The base lives as long as the connection that
@@ -114,6 +147,15 @@ type StartRequest struct {
 	// placeholder as the DO drive, so that the workload's volume can be
 	// attached later (the attach op) without a reboot.
 	VolumeSlot bool `json:"volumeSlot,omitempty"`
+	// Base (with VolumeSlot; not with Image or Restore): this VM is booted
+	// to become a base snapshot. The helper remembers it: snapshot-base is
+	// refused on any VM started without Base, and attach on one started
+	// with it, so a VM that has had a workload's volume (or was claimed)
+	// is never snapshotted. A helper from before this field ignores it and
+	// keeps its older check; an older hostd never sets it, so this helper
+	// refuses its snapshot-base and that hostd boots cold instead of
+	// restoring until it is upgraded too.
+	Base bool `json:"base,omitempty"`
 	// Restore (a base ID from snapshot-base, same uid): restore that base
 	// instead of booting — a fresh jail, netns and VMM, snapshot load with
 	// the guest memory served lazily by the helper (userfaultfd). The VM
@@ -154,11 +196,12 @@ type Response struct {
 	Error string `json:"error,omitempty"`
 
 	// ping
-	Version  int      `json:"version,omitempty"`
-	UID      int      `json:"uid,omitempty"` // the caller's uid, as the helper sees it
-	Jailer   string   `json:"jailer,omitempty"`
-	Crypt    string   `json:"crypt,omitempty"`
-	Features []string `json:"features,omitempty"`
+	Version    int      `json:"version,omitempty"`
+	MinVersion int      `json:"minVersion,omitempty"` // oldest protocol served (0: only Version)
+	UID        int      `json:"uid,omitempty"`        // the caller's uid, as the helper sees it
+	Jailer     string   `json:"jailer,omitempty"`
+	Crypt      string   `json:"crypt,omitempty"`
+	Features   []string `json:"features,omitempty"`
 
 	// start
 	PID       int                `json:"pid,omitempty"`       // firecracker (in the jail)

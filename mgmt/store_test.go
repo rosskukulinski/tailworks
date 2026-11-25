@@ -13,7 +13,7 @@ import (
 )
 
 // storesUnderTest returns SQLite always, plus Postgres when
-// TWD_TEST_POSTGRES_DSN is set (`make test-pg` starts one in OrbStack).
+// TW_TEST_POSTGRES_DSN is set (`make test-pg` starts one in OrbStack).
 func storesUnderTest(t *testing.T) map[string]*SQLStore {
 	t.Helper()
 	ctx := context.Background()
@@ -24,14 +24,16 @@ func storesUnderTest(t *testing.T) map[string]*SQLStore {
 	}
 	t.Cleanup(func() { s.Close() })
 	out["sqlite"] = s
-	if dsn := os.Getenv("TWD_TEST_POSTGRES_DSN"); dsn != "" {
+	if dsn := os.Getenv("TW_TEST_POSTGRES_DSN"); dsn != "" {
 		p, err := OpenStore(ctx, dsn)
 		if err != nil {
 			t.Fatalf("postgres: %v", err)
 		}
-		// Fresh schema per test: drop everything and migrate again.
-		for _, tbl := range []string{"tenants", "hosts", "deployments", "objects", "leases", "audit", "audit_heads", "revocations", "container_reservations", "registry_links", "registry_tags", "public_images", "host_paths", "warm_keys"} {
-			if err := p.rawExec(ctx, "DROP TABLE IF EXISTS "+tbl+" CASCADE"); err != nil {
+		// Fresh schema per test: drop everything and migrate again. The
+		// whole schema, not a table list: schema_migrations must go too,
+		// or the numbered migrations (migrations/) never run again.
+		for _, stmt := range []string{"DROP SCHEMA public CASCADE", "CREATE SCHEMA public"} {
+			if err := p.rawExec(ctx, stmt); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -51,6 +53,7 @@ func forEachStore(t *testing.T, fn func(t *testing.T, s *SQLStore)) {
 }
 
 func TestLeaseFencing(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		now := time.UnixMilli(1_000_000)
@@ -118,6 +121,7 @@ func TestLeaseFencing(t *testing.T) {
 }
 
 func TestLeaseAcquireRace(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		now := time.Now()
@@ -145,6 +149,7 @@ func TestLeaseAcquireRace(t *testing.T) {
 }
 
 func TestAuditChainTamper(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		for i := range 5 {
@@ -176,6 +181,7 @@ func TestAuditChainTamper(t *testing.T) {
 }
 
 func TestAuditChainTruncateAndRelink(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		for i := range 4 {
@@ -201,7 +207,7 @@ func dropGuards(t *testing.T, s *SQLStore) {
 	if s.d == dialectPostgres {
 		err = s.rawExec(ctx, "DROP TRIGGER audit_append_only ON audit")
 	} else {
-		err = errors.Join(s.rawExec(ctx, "DROP TRIGGER audit_no_update"), s.rawExec(ctx, "DROP TRIGGER audit_no_delete"))
+		err = errors.Join(s.rawExec(ctx, "DROP TRIGGER audit_no_update"), s.rawExec(ctx, "DROP TRIGGER audit_no_delete_kept"))
 	}
 	if err != nil {
 		t.Fatal(err)
@@ -209,12 +215,13 @@ func dropGuards(t *testing.T, s *SQLStore) {
 }
 
 func TestStoreObjectsAndDeployments(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
-		if err := s.CreateTenant(ctx, Tenant{ID: "tn", Tailnet: "t.ts.net", MintMode: MintAPIKey, RegistrationsPerMinute: 200, MaxObjects: 10}); err != nil {
+		if err := s.CreateTenant(ctx, Tenant{ID: "tn", Tailnet: "t.ts.net", MintMode: MintOAuth, RegistrationsPerMinute: 200, MaxObjects: 10}); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.CreateTenant(ctx, Tenant{ID: "tn", Tailnet: "x", MintMode: MintAPIKey}); !errors.Is(err, ErrExists) {
+		if err := s.CreateTenant(ctx, Tenant{ID: "tn", Tailnet: "x", MintMode: MintOAuth}); !errors.Is(err, ErrExists) {
 			t.Fatalf("dup tenant: %v", err)
 		}
 		for i, ns := range [][]ClassConfig{{{Class: "A", Tags: []string{"tag:a"}}}, {{Class: "A", Tags: []string{"tag:a2"}}, {Class: "B", Tags: []string{"tag:b"}}}} {

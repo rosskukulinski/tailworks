@@ -44,7 +44,7 @@ func newH10World(t *testing.T, skewB time.Duration) *h10World {
 	ctx := context.Background()
 	dir := t.TempDir()
 	dsn := filepath.Join(dir, "mgmt.db")
-	if pg := os.Getenv("TWD_TEST_POSTGRES_DSN"); pg != "" {
+	if pg := os.Getenv("TW_TEST_POSTGRES_DSN"); pg != "" {
 		dsn = pg
 	}
 	st, err := OpenStore(ctx, dsn)
@@ -72,8 +72,8 @@ func newH10World(t *testing.T, skewB time.Duration) *h10World {
 	}
 	w := &h10World{a: mk(0), b: mk(skewB), base: base}
 	keyFile := filepath.Join(dir, "api.env")
-	os.WriteFile(keyFile, []byte("TS_API_KEY=x\n"), 0o600)
-	tn, err := w.a.CreateTenant(ctx, TenantRequest{Tailnet: fmt.Sprintf("t%d.ts.net", time.Now().UnixNano()), MintMode: "apikey", APIKeyFile: keyFile})
+	writeTestOAuthFile(t, keyFile)
+	tn, err := w.a.CreateTenant(ctx, TenantRequest{Tailnet: fmt.Sprintf("t%d.ts.net", time.Now().UnixNano()), MintMode: MintOAuth, OAuthClientFile: keyFile})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func newH10World(t *testing.T, skewB time.Duration) *h10World {
 func (w *h10World) deploy(t *testing.T, m *Mgmt, host string) (DeployResponse, error) {
 	t.Helper()
 	return m.Deploy(context.Background(), DeployRequest{TenantID: w.tenant, Workload: "w", Host: host,
-		Bundle: makeBundle(t, map[string]string{"twd.jsonc": testTwdJSONC, "dist/index.js": "export default {}"})})
+		Bundle: makeBundle(t, map[string]string{"tailworks.jsonc": testTwJSONC, "dist/index.js": "export default {}"})})
 }
 
 // TestMM_H10_LeaseClockSkew probes H10: lease expiry and host liveness are
@@ -100,6 +100,7 @@ func (w *h10World) deploy(t *testing.T, m *Mgmt, host string) (DeployResponse, e
 // by skew (so it writes early lease expiries and old last_seen values).
 // A redeploy is served by A. Expected: the workload stays on h1.
 func TestMM_H10_LeaseClockSkew(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	skews := []time.Duration{0, 1 * time.Second, 2 * time.Second, 5 * time.Second, 7 * time.Second, 8 * time.Second,
 		9 * time.Second, 10 * time.Second, 12 * time.Second, 15 * time.Second, 20 * time.Second}

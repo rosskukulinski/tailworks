@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/netd"
+	"github.com/rosskukulinski/tailworks/netd"
 )
 
 // secretFor builds a client secret at runtime (no key-shaped literal is
@@ -32,7 +32,7 @@ func writeCreds(t *testing.T, body string, perm os.FileMode) string {
 
 func TestLoadOAuthFile(t *testing.T) {
 	sec := secretFor("kAbc123CNTRL")
-	ok := writeCreds(t, "# twd\nTS_OAUTH_CLIENT_ID=kAbc123CNTRL\nexport TS_OAUTH_CLIENT_SECRET=\""+sec+"\"\n", 0o600)
+	ok := writeCreds(t, "# tw\nTS_OAUTH_CLIENT_ID=kAbc123CNTRL\nexport TS_OAUTH_CLIENT_SECRET=\""+sec+"\"\n", 0o600)
 	c, err := LoadOAuthFile(ok)
 	if err != nil || c.ClientID != "kAbc123CNTRL" || c.Secret != sec {
 		t.Fatalf("load: %v %v", c, err)
@@ -128,7 +128,7 @@ func TestOAuthSourceCacheRefreshRetry(t *testing.T) {
 	ctx := context.Background()
 	mint := func() {
 		t.Helper()
-		if _, err := c.CreateKey(ctx, KeyOptions{Tags: []string{"tag:twd"}}); err != nil {
+		if _, err := c.CreateKey(ctx, KeyOptions{Tags: []string{"tag:tw"}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -157,7 +157,7 @@ func TestOAuthSourceCacheRefreshRetry(t *testing.T) {
 	f.mu.Lock()
 	f.alwaysBad = true
 	f.mu.Unlock()
-	_, err := c.CreateKey(ctx, KeyOptions{Tags: []string{"tag:twd"}})
+	_, err := c.CreateKey(ctx, KeyOptions{Tags: []string{"tag:tw"}})
 	if !IsUnauthorized(err) || f.exchanges != 4 {
 		t.Fatalf("persistent 401: %v after %d exchanges (want 4)", err, f.exchanges)
 	}
@@ -179,9 +179,9 @@ func TestOAuthSourceCacheRefreshRetry(t *testing.T) {
 
 func TestIsTagsNotPermitted(t *testing.T) {
 	for msg, want := range map[string]bool{
-		"tailscale api: 400 requested tags [tag:twd-mgmt] are invalid or not permitted": true,
-		"tailscale api: 403 insufficient scope":                                         false,
-		"tailscale api: 429 rate limited":                                               false,
+		"tailscale api: 400 requested tags [tag:tw-mgmt] are invalid or not permitted": true,
+		"tailscale api: 403 insufficient scope":                                        false,
+		"tailscale api: 429 rate limited":                                              false,
 	} {
 		if got := IsTagsNotPermitted(fmt.Errorf("%s", msg)); got != want {
 			t.Fatalf("%q: %v", msg, got)

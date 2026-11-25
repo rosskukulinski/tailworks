@@ -15,7 +15,7 @@ import (
 	"github.com/tailscale/hujson"
 )
 
-// Policy is the subset of a tailnet policy file twd evaluates.
+// Policy is the subset of a tailnet policy file tailworks evaluates.
 type Policy struct {
 	TagOwners map[string][]string `json:"tagOwners"`
 	Grants    []Grant             `json:"grants"`
@@ -25,10 +25,21 @@ type Policy struct {
 		Services map[string][]string `json:"services"`
 	} `json:"autoApprovers"`
 	NodeAttrs []NodeAttr `json:"nodeAttrs"`
+
+	// ACLs are the legacy "acls" rules, read only to tell whether people
+	// already reach a node (callergrant.go).
+	ACLs []ACL `json:"acls"`
+}
+
+// ACL is one legacy acls entry; Dst entries are "host:ports".
+type ACL struct {
+	Action string   `json:"action"`
+	Src    []string `json:"src"`
+	Dst    []string `json:"dst"`
 }
 
 // NodeAttr is one nodeAttrs entry. Attr values may be strings or objects
-// (e.g. ipPool); only the string ones matter to twd.
+// (e.g. ipPool); only the string ones matter to tailworks.
 type NodeAttr struct {
 	Target []string `json:"target"`
 	Attr   []any    `json:"attr"`

@@ -1,27 +1,29 @@
 {
-  "name": "twd-monorepo",
+  "name": "tailworks-monorepo",
   "private": true,
   "workspaces": [
     "js/packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w @twd/tailnet && npm run build -w @twd/mcp",
+    "build": "npm run build -w @tailworks/tailnet && npm run build -w @tailworks/mcp",
     "test": "npm run build && npm test --workspaces --if-present"
   },
   "devDependencies": {
-    "@ai-sdk/mcp": "2.0.93",
-    "@ai-sdk/provider": "4.0.37",
-    "@ai-sdk/provider-utils": "5.0.76",
+    "@ai-sdk/mcp": "2.0.101",
+    "@ai-sdk/provider": "4.0.39",
+    "@ai-sdk/provider-utils": "5.0.82",
+    "@cloudflare/workers-oauth-provider": "1.2.4",
     "@modelcontextprotocol/client": "2.4.0",
     "@modelcontextprotocol/sdk": "1.32.2",
     "@modelcontextprotocol/server": "2.4.0",
     "@types/node": "^24",
     "agents": "0.33.0",
-    "ai": "7.0.165",
+    "ai": "7.0.177",
     "esbuild": "0.28.2",
-    "mcp-handler": "2.3.1",
+    "mcp-handler": "2.4.0",
+    "postgres": "4.1.1",
     "typescript": "7.0.2",
-    "workerd": "1.20261108.1",
+    "workerd": "1.20261121.1",
     "zod": "4.6.7"
   },
   "engines": {

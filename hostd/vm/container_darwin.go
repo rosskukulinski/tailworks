@@ -11,14 +11,14 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/rosskukulinski/twd/guest/proto"
-	"github.com/rosskukulinski/twd/hostd/sandbox"
-	"github.com/rosskukulinski/twd/hostd/vm/vzapi"
+	"github.com/rosskukulinski/tailworks/guest/proto"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/hostd/vm/vzapi"
 )
 
 // ContainersUsable reports whether BootContainer can work on this Mac: the
 // guest kernel has erofs (the image format; guest/build-kernel-vz.sh
-// builds it in). twd-hostd offers containers only then.
+// builds it in). tw-hostd offers containers only then.
 func (b *Backend) ContainersUsable() error {
 	return KernelHasErofs(b.cfg.Kernel)
 }
@@ -36,7 +36,7 @@ func (b *Backend) EmulatedArches() []string {
 }
 
 // BootContainer implements sandbox.ContainerBackend on vz: one VM (one
-// twd-vz process) per container, booting the same guest image and
+// tw-vz process) per container, booting the same guest image and
 // container mode as Firecracker (guestd: erofs image read-only on
 // /dev/vdc, a fresh scratch disk on /dev/vdd as the overlay upper, exec
 // stdio on its own vsock connections). Differences from Firecracker, all

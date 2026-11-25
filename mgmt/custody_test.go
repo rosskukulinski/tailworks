@@ -16,28 +16,29 @@ import (
 func testCustody(t *testing.T, c Custody) {
 	ctx := context.Background()
 	secret := []byte("value-" + "kFAKEsecret")
-	if err := c.Put(ctx, "twd/tn/o1/authkey", secret); err != nil {
+	if err := c.Put(ctx, "tw/tn/o1/authkey", secret); err != nil {
 		t.Fatal(err)
 	}
-	got, err := c.Get(ctx, "twd/tn/o1/authkey")
+	got, err := c.Get(ctx, "tw/tn/o1/authkey")
 	if err != nil || !bytes.Equal(got, secret) {
 		t.Fatalf("get %q %v", got, err)
 	}
-	if _, err := c.Get(ctx, "twd/tn/nope"); !errors.Is(err, ErrNotFound) {
+	if _, err := c.Get(ctx, "tw/tn/nope"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing: %v", err)
 	}
-	if err := c.Delete(ctx, "twd/tn/o1/authkey"); err != nil {
+	if err := c.Delete(ctx, "tw/tn/o1/authkey"); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Delete(ctx, "twd/tn/o1/authkey"); err != nil {
+	if err := c.Delete(ctx, "tw/tn/o1/authkey"); err != nil {
 		t.Fatal("double delete:", err)
 	}
-	if _, err := c.Get(ctx, "twd/tn/o1/authkey"); !errors.Is(err, ErrNotFound) {
+	if _, err := c.Get(ctx, "tw/tn/o1/authkey"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("after delete: %v", err)
 	}
 }
 
 func TestFileCustody(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "custody")
 	c, err := OpenFileCustody(dir)
 	if err != nil {
@@ -122,6 +123,7 @@ func fakeSetec(t *testing.T) *httptest.Server {
 }
 
 func TestSetecCustody(t *testing.T) {
+	t.Parallel()
 	srv := fakeSetec(t)
 	defer srv.Close()
 	testCustody(t, &SetecCustody{BaseURL: srv.URL})

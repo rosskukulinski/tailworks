@@ -15,8 +15,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rosskukulinski/twd/internal/container"
-	"github.com/rosskukulinski/twd/internal/oci"
+	"github.com/rosskukulinski/tailworks/internal/container"
+	"github.com/rosskukulinski/tailworks/internal/oci"
 )
 
 // testImage builds a one-layer linux/arch image in mem (repo "src").
@@ -202,7 +202,7 @@ func TestUploadProtocol(t *testing.T) {
 		t.Fatalf("POST: %d", resp.StatusCode)
 	}
 	loc := resp.Header.Get("Location")
-	data := bytes.Repeat([]byte("twd"), 1000)
+	data := bytes.Repeat([]byte("tw"), 1000)
 	if r := do("PATCH", loc, data[:1000], "Content-Range", "0-999"); r.StatusCode != 202 || r.Header.Get("Range") != "0-999" {
 		t.Fatalf("PATCH 1: %d %s", r.StatusCode, r.Header.Get("Range"))
 	}
@@ -281,7 +281,7 @@ func TestPinDigestStable(t *testing.T) {
 // TestPinAliasAndArches: the arm64 alias swaps the upstream ref for the
 // public rebuild on arm64 only; an arch with no image is dropped from the
 // placement arches (not silently given another arch's image); a tenant's
-// twd.local ref never reaches another tenant's namespace.
+// tw.local ref never reaches another tenant's namespace.
 func TestPinAliasAndArches(t *testing.T) {
 	ctx := context.Background()
 	g, srv := testRegistry(t)
@@ -295,7 +295,7 @@ func TestPinAliasAndArches(t *testing.T) {
 	if _, err := oci.Copy(ctx, rebuild, "src", "x", adm, "public/cloudflare-sandbox", nil, "0.12.14-arm64"); err != nil {
 		t.Fatal(err)
 	}
-	rs := &Resolver{Reg: g, Aliases: []Alias{{From: "upstream.test/cloudflare/sandbox:0.12.14", To: "twd.local/cloudflare-sandbox:0.12.14-arm64", Arch: "arm64"}},
+	rs := &Resolver{Reg: g, Aliases: []Alias{{From: "upstream.test/cloudflare/sandbox:0.12.14", To: "tw.local/cloudflare-sandbox:0.12.14-arm64", Arch: "arm64"}},
 		Upstream: func(string) *oci.Client { return &oci.Client{Base: upSrv.URL, HTTP: upSrv.Client()} }}
 	// The upstream repo is "src" in the fake; map the ref accordingly.
 	rs.Aliases[0].From = "upstream.test/src:0.12.14"
@@ -321,12 +321,12 @@ func TestPinAliasAndArches(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "no linux/arm64") {
 		t.Fatalf("arm64-only pool: %v", err)
 	}
-	// Tenant A pushed twd.local/tna/own:1; tenant B naming it gets
+	// Tenant A pushed tw.local/tna/own:1; tenant B naming it gets
 	// public/tna/own (absent), never A's image.
 	if _, err := oci.Copy(ctx, rebuild, "src", "x", adm, "tna/own", nil, "1"); err != nil {
 		t.Fatal(err)
 	}
-	own := []container.Class{{Class: "S", Image: "twd.local/tna/own:1"}}
+	own := []container.Class{{Class: "S", Image: "tw.local/tna/own:1"}}
 	if p, _, err := rs.Pin(ctx, "tna", own, []string{"arm64"}); err != nil || p[0].Pins[0].Repository != "tna/own" {
 		t.Fatalf("own image: %+v %v", p, err)
 	}
@@ -371,14 +371,14 @@ func memRegistry(m *oci.MemTarget) http.Handler {
 }
 
 // TestCraneConformance pushes and pulls with crane (go-containerregistry),
-// an independent client, when it is on PATH (or $TWD_CRANE).
+// an independent client, when it is on PATH (or $TW_CRANE).
 func TestCraneConformance(t *testing.T) {
-	crane := os.Getenv("TWD_CRANE")
+	crane := os.Getenv("TW_CRANE")
 	if crane == "" {
 		crane, _ = exec.LookPath("crane")
 	}
 	if crane == "" {
-		t.Skip("crane not found (go install github.com/google/go-containerregistry/cmd/crane@v0.20.6, or set TWD_CRANE)")
+		t.Skip("crane not found (go install github.com/google/go-containerregistry/cmd/crane@v0.20.6, or set TW_CRANE)")
 	}
 	g := &Registry{Dir: t.TempDir(), Meta: &MemMeta{}, Authorize: func(r *http.Request, ns string, push bool) error {
 		if ns != "" && ns != "tna" {
@@ -400,7 +400,7 @@ func TestCraneConformance(t *testing.T) {
 	// (POST/PATCH/PUT uploads, PUT manifest by tag).
 	var layer bytes.Buffer
 	tw := tar.NewWriter(&layer)
-	tw.WriteHeader(&tar.Header{Name: "etc/twd", Mode: 0o644, Size: 3, Typeflag: tar.TypeReg})
+	tw.WriteHeader(&tar.Header{Name: "etc/tailworks", Mode: 0o644, Size: 3, Typeflag: tar.TypeReg})
 	tw.Write([]byte("hi\n"))
 	tw.Close()
 	lp := filepath.Join(dir, "layer.tar")

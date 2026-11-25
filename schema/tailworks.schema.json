@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/rosskukulinski/tailworks/master/schema/tailworks.schema.json",
+  "title": "tailworks.jsonc",
+  "description": "tailworks' per-app config: tailnet identity, tier, placement and public routes. Worker settings (main, bindings, vars, crons) stay in wrangler.jsonc. Reference: docs/tailworks-jsonc.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Path or URL of this schema, for editor completion."
+    },
+    "name": {
+      "type": "string",
+      "description": "Workload name (a DNS label). Default: wrangler.jsonc name, then the directory name."
+    },
+    "runtime": {
+      "type": "string",
+      "enum": ["workerd", "node"],
+      "description": "\"workerd\" (default) or \"node\" for the Node process tier (docs/node-tier.md)."
+    },
+    "main": {
+      "type": "string",
+      "description": "runtime \"node\" only: the entry file."
+    },
+    "node": {
+      "type": "object",
+      "description": "runtime \"node\" only: how the Node app is started.",
+      "additionalProperties": false,
+      "properties": {
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Extra environment variables."
+        },
+        "listen": { "type": "string", "description": "Where the app listens: \"tcp\" (default: PORT on 127.0.0.1) or \"unix\" (TW_SOCKET). \"unix\" keeps AF_UNIX open to the app, so a host with a reachable system tailscaled socket can't be shared with other tenants (docs/node-tier.md); prefer the default." },
+        "health": { "type": "string", "description": "Health check path. Default \"/\": any HTTP answer there counts as up, so most apps don't need it." },
+        "args": { "type": "array", "items": { "type": "string" }, "description": "Extra node arguments." }
+      }
+    },
+    "tier": {
+      "type": "string",
+      "enum": ["process", "microvm"],
+      "description": "Isolation tier. Default: the tenant's. \"microvm\" needs a Linux host with KVM (docs/INSTALL.md)."
+    },
+    "replicas": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Run a stateless workload on this many distinct hosts (docs/services.md). Default 1."
+    },
+    "placement": {
+      "type": "object",
+      "description": "Smart placement: which host runs the workload.",
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "type": "string", "enum": ["smart", "off"], "description": "Default \"smart\" when tailnet.connects or targets are set." },
+        "targets": { "type": "array", "items": { "type": "string" }, "description": "Peers (tags or names) to place close to. Default: tailnet.connects." },
+        "aggregate": { "type": "string", "enum": ["worst", "sum"], "description": "Advanced: how several targets combine (default \"worst\")." },
+        "region": { "type": "string", "deprecated": true, "description": "Cloudflare hint, accepted and ignored." },
+        "host": { "type": "string", "deprecated": true, "description": "Cloudflare hint: the same as targets: [host]." },
+        "hostname": { "type": "string", "deprecated": true, "description": "Cloudflare hint: the same as targets: [hostname]." }
+      }
+    },
+    "public": { "$ref": "#/$defs/public" },
+    "containers": {
+      "type": ["array", "object"],
+      "description": "Container classes (docs/containers.md): wrangler's array form, or per-class image refs you pin; mgmt records the digests it resolves in the deployment."
+    },
+    "tailnet": {
+      "type": "object",
+      "description": "The workload's tailnet identity.",
+      "additionalProperties": false,
+      "properties": {
+        "tags": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^tag:" },
+          "description": "Tags of the workload's own node. Your policy must let tag:tw own them."
+        },
+        "service": {
+          "type": ["boolean", "string"],
+          "description": "true (\"svc:<workload>\") or a Tailscale Service name: a stable name and VIP (docs/services.md)."
+        },
+        "https": {
+          "type": "boolean",
+          "description": "Also serve the workload node on https://<name>.<tailnet>.ts.net (port 443, its ts.net certificate); requests that arrive that way see an https:// request.url. Needs HTTPS certificates on the tailnet. Plain http:// on port 80 keeps working (docs/tailworks-jsonc.md#tailnethttps)."
+        },
+        "connects": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Declared dependencies (tags or names), optionally with the TCP port the workload dials (\"tag:db:5432\"; default tcp:80). tw deploy preflights these grants."
+        },
+        "egress": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "internet": { "type": ["boolean", "array"], "items": { "type": "string" }, "description": "Internet egress for Worker code and containers (docs/tailworks-jsonc.md#tailnetegressinternet). Absent: Workers may reach any public host, containers none. true: both may reach any public host. false or []: neither. A list of hosts (\"*.suffix\", IPs, CIDRs, each with an optional :port): both only those; an entry with a port covers that port only. TCP port 25 is refused unless an entry names it (\"smtp.example.com:25\"). Private, link-local, loopback and tailnet addresses are always refused." },
+            "via": { "type": "string", "enum": ["exit-node"], "description": "\"exit-node\": run only on a host whose internet egress leaves through a tailnet exit node (docs/tailworks-jsonc.md#tailnetegressvia). Absent: whatever the host offers." }
+          }
+        },
+        "spawn": {
+          "type": "object",
+          "description": "Limits on ctx.tailnet.spawn().",
+          "additionalProperties": false,
+          "properties": {
+            "maxLive": { "type": "integer", "minimum": 0, "default": 64, "description": "The most live sub-agents (ctx.tailnet.spawn) under one root object. Default and ceiling 64: a deployment may only lower it; a larger value is lowered to 64, and 0 or absent means 64." },
+            "maxDepth": { "type": "integer", "minimum": 0, "default": 3, "description": "The deepest spawn chain. Default and ceiling 3: a deployment may only lower it; a larger value is lowered to 3, and 0 or absent means 3." }
+          }
+        },
+        "objects": {
+          "type": "object",
+          "description": "Durable Object classes that get a tailnet node per instance, by class name (must match wrangler.jsonc durable_objects).",
+          "additionalProperties": { "$ref": "#/$defs/object" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "object": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tags": { "type": "array", "items": { "type": "string", "pattern": "^tag:" }, "description": "Tags of each instance's node." },
+        "agent": { "type": "boolean", "deprecated": true, "description": "Accepted and ignored (it used to mark Agents SDK classes)." },
+        "ttl": { "type": "string", "description": "Lifetime from creation, e.g. \"10m\"; the default for spawn()." },
+        "node": { "type": "boolean", "description": "false: an internal class with no tailnet node; its egress leaves as the workload node." },
+        "egress": { "type": "string", "enum": ["object", "workload"], "description": "\"object\" (default, facet mode): egress leaves from each instance's own node. \"workload\": plain-DO mode, egress leaves as the workload node. \"node\": false implies \"workload\"; don't set both." },
+        "fence": { "type": "string", "enum": ["never"], "description": "\"never\": instances tolerate running on two hosts, so mgmt may move it without --force-takeover." },
+        "public": {
+          "type": "object",
+          "description": "Let public requests create objects of this class (docs/public-ingress.md).",
+          "additionalProperties": false,
+          "properties": {
+            "create": { "type": "boolean" },
+            "maxObjects": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "public": {
+      "type": "object",
+      "description": "Paths reachable from the public internet over Funnel (docs/public-ingress.md).",
+      "additionalProperties": false,
+      "required": ["routes"],
+      "properties": {
+        "routes": { "type": "array", "items": { "type": "string" }, "description": "\"/x\", \"/x/*\" or \"/*\"." },
+        "upgrade": { "type": "array", "items": { "type": "string" }, "description": "Routes (also in routes) that may upgrade to WebSocket/SSE." },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "rps": { "type": "number" },
+            "burst": { "type": "integer" },
+            "ipRps": { "type": "number" },
+            "ipBurst": { "type": "integer" },
+            "maxBodyBytes": { "type": "integer" },
+            "maxHeaderBytes": { "type": "integer" },
+            "timeoutSeconds": { "type": "integer" },
+            "maxConns": { "type": "integer" },
+            "maxConnsPerIp": { "type": "integer", "description": "Concurrent connections per client address (IPv6: per /64)." },
+            "upgradeLifetimeSeconds": { "type": "integer", "description": "Longest an upgraded (WebSocket) connection stays open." }
+          }
+        }
+      }
+    }
+  }
+}

@@ -4,8 +4,8 @@
 #   OUT/v1min   sandbox-sdk examples/minimal at @cloudflare/sandbox@1.0.1
 #   OUT/raw10   e2e/container/apps/raw10 (raw ctx.container + Files, SDK 1.0.1)
 # Every upstream example file is copied byte for byte and checked against
-# its git blob (OUT/unmodified.txt). twd adds only what `twd deploy` would:
-# a twd.jsonc pinning each class's image to the ref the images were built
+# its git blob (OUT/unmodified.txt). Tailworks adds only what `tw deploy` would:
+# a tailworks.jsonc pinning each class's image to the ref the images were built
 # as (guest/images/build-sandbox-images.sh), plus node_modules.
 set -euo pipefail
 OUT=${1:?usage: e2e-container-prep.sh OUT_DIR}
@@ -16,7 +16,7 @@ V101_COMMIT=8a535b3ce8d29ffd321a625da02594ba449c1b51        # tag @cloudflare/sa
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
-SRC=$(mktemp -d /tmp/twd-sbx-src.XXXXXX)
+SRC=$(mktemp -d /tmp/tw-sbx-src.XXXXXX)
 trap 'rm -rf "$SRC"' EXIT
 git clone -q --filter=blob:none "$REPO" "$SRC"
 git -C "$SRC" fetch -q origin "$V0_EXAMPLES_COMMIT"
@@ -36,21 +36,21 @@ copy_example "$V0_EXAMPLES_COMMIT" "$OUT/v0min"
 copy_example "$V101_COMMIT" "$OUT/v1min"
 cp -R "$ROOT/e2e/container/apps/raw10" "$OUT/raw10"
 
-# Pins (what twd deploy writes after building ./Dockerfile). The 0.x app
+# Per-class image pins (the refs the images were prebuilt as). The 0.x app
 # runs its Sandbox class in facet mode (the default); the 1.0 example in
 # plain-DO mode, so both modes run the SDKs.
-cat >"$OUT/v0min/twd.jsonc" <<'EOF'
-{ "containers": { "Sandbox": { "image": "twd.local/e2e/sandbox-minimal-v0:1" } } }
+cat >"$OUT/v0min/tailworks.jsonc" <<'EOF'
+{ "containers": { "Sandbox": { "image": "tw.local/e2e/sandbox-minimal-v0:1" } } }
 EOF
-cat >"$OUT/v1min/twd.jsonc" <<'EOF'
-{ "containers": { "Sandbox": { "images": { "sandbox": "twd.local/e2e/sandbox-minimal-v1:1" } } },
+cat >"$OUT/v1min/tailworks.jsonc" <<'EOF'
+{ "containers": { "Sandbox": { "images": { "sandbox": "tw.local/e2e/sandbox-minimal-v1:1" } } },
   "tailnet": { "objects": { "Sandbox": { "egress": "workload" } } } }
 EOF
 
 # Dependencies, without lifecycle scripts, installed next to (not into)
 # each example and linked as node_modules, so no example file changes.
 # The v0 example lists the SDK under devDependencies (beside wrangler and
-# typescript, which a twd build doesn't need): its pinned 0.12.14.
+# typescript, which a tailworks build doesn't need): its pinned 0.12.14.
 deps() { # app spec...
   local app=$1
   shift

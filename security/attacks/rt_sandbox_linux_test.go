@@ -3,7 +3,7 @@
 package attacks
 
 // Pass 2 (live), Linux process tier — the sandbox-escape battery the first
-// pass could not run (it worked from macOS). It drives twd's real Landlock +
+// pass could not run (it worked from macOS). It drives tailworks' real Landlock +
 // seccomp profile (internal/procsb, the exact rules, filter and
 // no_new_privs a tenant workerd/Node app gets) and attempts every escape the
 // brief lists: read/list/write outside the instance dir, raw TCP to the
@@ -20,6 +20,7 @@ package attacks
 // meaningful only on Linux; run it in the rt2 VM.
 
 import (
+	"errors"
 	"net"
 	"os"
 	"os/exec"
@@ -28,7 +29,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rosskukulinski/twd/internal/procsb"
+	"github.com/rosskukulinski/tailworks/hostd"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/internal/procsb"
 )
 
 func sbSelf(t *testing.T) string {
@@ -200,10 +203,133 @@ func TestRT08_LinuxSandboxEscapeBattery(t *testing.T) {
 	}
 }
 
+// TestRT_H342_LandlockDenyLayout (ledger H-342-landlock-deny, issue #342):
+// Landlock has no deny rules, so hostd's deny list (Profile.Deny) protects
+// the state dir and credential files only while they are outside the trees
+// every profile allows reading (/usr, /etc, /opt, …). Before the fix, a
+// state dir or credential file placed under such a tree was readable by
+// every tenant's workload, and nothing refused the layout.
+//
+// Part 1 drives the real launcher: a temp dir stands in for /opt (added to
+// the profile the way systemRO's entries are: a read-only tree), with the
+// state dir's custody key and a tenant's OAuth client file below it and both
+// in Deny. ProbeRead on each must be refused: the launcher refuses to apply
+// a profile whose deny list it can't honour (before the fix both read "ok").
+// Part 2: hostd.New refuses a data dir under a real system tree and a
+// -sandbox-deny path under /etc with sandbox_layout_unsafe, before it
+// creates anything.
+func TestRT_H342_LandlockDenyLayout(t *testing.T) {
+	abi, err := procsb.ABI()
+	if err != nil || abi < 1 {
+		t.Skipf("H-342: no Landlock on this kernel (%v)", err)
+	}
+	root := t.TempDir()
+	optLike := filepath.Join(root, "opt")
+	stateDir := filepath.Join(optLike, "tailworks", ".tailworks")
+	custody := filepath.Join(stateDir, "mgmt", "custody")
+	cred := filepath.Join(optLike, "tailworks", "etc", "oauth.env")
+	own := filepath.Join(root, "own")
+	for _, d := range []string{custody, filepath.Dir(cred), own} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	custodyKey := filepath.Join(custody, "custody.key")
+	for p, v := range map[string]string{custodyKey: "CUSTODY-KEY", cred: "TS_OAUTH_CLIENT_SECRET=tskey-client-SECRET\n"} {
+		if err := os.WriteFile(p, []byte(v), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	prof := filepath.Join(own, "sandbox.json")
+	p := &procsb.Profile{
+		Launcher:      sbSelf(t),
+		Exec:          []string{findWorkerdOrSkip(t)},
+		ReadOnly:      []string{optLike}, // the /opt stand-in: read and execute below, as systemRO
+		Own:           []string{own},
+		NoUnixSockets: true,
+		Deny:          []string{stateDir, cred}, // what hostd.sandboxDeny would list
+	}
+	if err := p.Write(prof); err != nil {
+		t.Fatal(err)
+	}
+	for name, path := range map[string]string{"the custody key": custodyKey, "a tenant's OAuth client file": cred} {
+		cmd, err := procsb.ProbeCommand(prof, procsb.ProbeRead, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := cmd.CombinedOutput()
+		res := strings.TrimSpace(string(out))
+		if err == nil || res == "ok" {
+			t.Errorf("H-342 BROKEN: %s (%s) under a sandbox-readable tree was READ by a sandboxed workload despite being in the deny list", name, path)
+			continue
+		}
+		if !strings.Contains(res, procsb.LayoutErrorCode) {
+			t.Errorf("%s: refused, but not by the layout check: %v %q", name, err, res)
+		}
+		t.Logf("%-28s -> refused: %s", name, firstLineOf(res))
+	}
+
+	// Part 2: hostd refuses the layout at start, before creating anything.
+	mc, err := mgmtapi.NewClient("unix://" + filepath.Join(root, "no-mgmt.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	optState := filepath.Join("/opt", "tw-test-h342-"+strconv.Itoa(os.Getpid()), "state")
+	t.Cleanup(func() { os.RemoveAll(filepath.Dir(optState)) }) // only an unfixed hostd running as root creates it
+	for name, cfg := range map[string]hostd.Config{
+		"state dir under /opt":          {DataDir: optState},
+		"credential file under /etc":    {DataDir: filepath.Join(root, "data"), SandboxDeny: []string{"/etc/tailworks/oauth.env"}},
+		"run dir under /usr/local":      {DataDir: filepath.Join(root, "data2"), RunDir: "/usr/local/tailworks/run"},
+		"state dir symlinked into /opt": {DataDir: linkInto(t, root, optState)},
+	} {
+		cfg.HostID, cfg.Mgmt, cfg.WorkerdBin, cfg.Sandbox = "h1", mc, sbSelf(t), hostd.SandboxLandlock
+		h, err := hostd.New(cfg)
+		if h != nil {
+			h.Close()
+		}
+		var le *procsb.LayoutError
+		if !errors.As(err, &le) {
+			t.Errorf("H-342 BROKEN: hostd.New with %s: got %v, want %s", name, err, procsb.LayoutErrorCode)
+			continue
+		}
+		t.Logf("%-30s -> hostd refused: %v", name, err)
+	}
+	if _, err := os.Stat(filepath.Dir(optState)); err == nil {
+		t.Errorf("hostd created %s before refusing the layout", filepath.Dir(optState))
+	}
+	// The same config outside the trees is accepted (the check is about
+	// location, not about Landlock being on).
+	okCfg := hostd.Config{HostID: "h1", Mgmt: mc, WorkerdBin: sbSelf(t), Sandbox: hostd.SandboxLandlock,
+		DataDir: filepath.Join(root, "ok-data"), RunDir: filepath.Join(root, "ok-run")}
+	h, err := hostd.New(okCfg)
+	if err != nil {
+		t.Fatalf("hostd.New with a state dir outside the system trees: %v", err)
+	}
+	h.Close()
+}
+
+// linkInto returns a symlink under root that points at target (which need
+// not exist): a state dir "outside /opt" that really lives there.
+func linkInto(t *testing.T, root, target string) string {
+	t.Helper()
+	l := filepath.Join(root, "var-lib-tailworks")
+	if err := os.Symlink(target, l); err != nil {
+		t.Fatal(err)
+	}
+	return l
+}
+
+func firstLineOf(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
+
 func findWorkerdOrSkip(t *testing.T) string {
 	t.Helper()
 	for _, c := range []string{
-		filepath.Join(os.Getenv("HOME"), ".twd/bin/workerd"),
+		filepath.Join(os.Getenv("HOME"), ".tailworks/bin/workerd"),
 		"/usr/local/bin/workerd",
 	} {
 		if _, err := os.Stat(c); err == nil {

@@ -19,9 +19,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/guest/proto"
-	"github.com/rosskukulinski/twd/hostd/sandbox"
-	"github.com/rosskukulinski/twd/hostd/vm/helperapi"
+	"github.com/rosskukulinski/tailworks/guest/proto"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/hostd/vm/helperapi"
 )
 
 // A worker that reads and writes files on the DO volume through a
@@ -29,7 +29,7 @@ import (
 const volJS = `export default {
   async fetch(req, env) {
     const u = new URL(req.url);
-    if (u.pathname === "/_twd/admin") return new Response("ok");
+    if (u.pathname === "/_tw/admin") return new Response("ok");
     const k = u.searchParams.get("k");
     if (u.pathname === "/put") { const r = await env.DISK.fetch("http://disk/" + k, { method: "PUT", body: u.searchParams.get("v") }); return new Response("put " + r.status); }
     if (u.pathname === "/get") { const r = await env.DISK.fetch("http://disk/" + k); return new Response(r.status === 200 ? await r.text() : "missing " + r.status); }
@@ -40,8 +40,8 @@ const volJS = `export default {
 
 const volCapnp = `using Workerd = import "/workerd/workerd.capnp";
 const config :Workerd.Config = (
-  services = [ (name = "main", worker = .w), (name = "disk", disk = (path = "/run/twd/do", writable = true)) ],
-  sockets = [ (name = "in", address = "*:8080", service = "main", http = (cfBlobHeader = "x-twd-cf")) ],
+  services = [ (name = "main", worker = .w), (name = "disk", disk = (path = "/run/tailworks/do", writable = true)) ],
+  sockets = [ (name = "in", address = "*:8080", service = "main", http = (cfBlobHeader = "x-tw-cf")) ],
 );
 const w :Workerd.Worker = (
   compatibilityDate = "2026-04-01",
@@ -54,11 +54,11 @@ const w :Workerd.Worker = (
 // a VM restart; one volume is never attached to two VMs; an older epoch is
 // fenced; a wrong key doesn't open it; the key is in no guest memory.
 func TestVolume(t *testing.T) {
-	kernel, rootfs := os.Getenv("TWD_VM_KERNEL"), os.Getenv("TWD_VM_ROOTFS")
+	kernel, rootfs := os.Getenv("TW_VM_KERNEL"), os.Getenv("TW_VM_ROOTFS")
 	if kernel == "" || rootfs == "" {
-		t.Skip("TWD_VM_KERNEL / TWD_VM_ROOTFS not set")
+		t.Skip("TW_VM_KERNEL / TW_VM_ROOTFS not set")
 	}
-	b, err := New(Config{Kernel: kernel, Rootfs: rootfs, HugePages: os.Getenv("TWD_VM_HUGEPAGES"), Helper: os.Getenv("TWD_VM_HELPER")})
+	b, err := New(Config{Kernel: kernel, Rootfs: rootfs, HugePages: os.Getenv("TW_VM_HUGEPAGES"), Helper: os.Getenv("TW_VM_HELPER")})
 	if err != nil {
 		t.Skip(err)
 	}

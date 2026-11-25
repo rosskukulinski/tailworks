@@ -15,7 +15,7 @@ v=$FIRECRACKER_VERSION
 eval "tgz_sha=\$FIRECRACKER_TGZ_SHA256_$GARCH fc_sha=\$FIRECRACKER_SHA256_$GARCH jl_sha=\$JAILER_SHA256_$GARCH"
 tgz=$(fetch "$FIRECRACKER_URL/firecracker-v$v-$FCARCH.tgz" "$tgz_sha")
 
-WORK=$(mktemp -d /tmp/twd-fc-$GARCH.XXXXXX)
+WORK=$(mktemp -d /tmp/tw-fc-$GARCH.XXXXXX)
 trap 'rm -rf "$WORK"' EXIT
 d=release-v$v-$FCARCH
 tar -xzf "$tgz" -C "$WORK" "$d/firecracker-v$v-$FCARCH" "$d/jailer-v$v-$FCARCH"

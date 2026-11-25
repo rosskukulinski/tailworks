@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rosskukulinski/twd/hostd/bundle"
-	"github.com/rosskukulinski/twd/hostd/image"
-	"github.com/rosskukulinski/twd/hostd/mgmtapi"
-	"github.com/rosskukulinski/twd/hostd/sandbox"
-	"github.com/rosskukulinski/twd/hostd/sandbox/sandboxtest"
+	"github.com/rosskukulinski/tailworks/hostd/bundle"
+	"github.com/rosskukulinski/tailworks/hostd/image"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox/sandboxtest"
 )
 
 type fakeBackend struct{}
@@ -19,34 +19,33 @@ type fakeBackend struct{}
 func (fakeBackend) Boot(context.Context, sandbox.Spec) (sandbox.VM, error) { return nil, nil }
 func (fakeBackend) Name() string                                           { return "fake" }
 
-// TestTierFor: deployment tier > tenant tier > host default. A microvm
+// TestTierFor: deployment tier > tenant tier > process. A microvm
 // deployment on a host without a microVM backend is refused with
 // tier_unavailable; it is never downgraded to the process tier (ADR-032
-// D5b). Only ForceProcessTier (twd dev) runs it in the process tier.
+// D5b). Only ForceProcessTier (tw dev) runs it in the process tier.
 func TestTierFor(t *testing.T) {
+	t.Parallel()
 	ten := func(tier string) *tenant { return &tenant{info: mgmtapi.Tenant{Tier: tier}} }
 	const refused = "refused"
 	cases := []struct {
-		vm, force        bool
-		def, tenant, app string
-		want             string
+		vm, force   bool
+		tenant, app string
+		want        string
 	}{
-		{false, false, "", "", "", "process"},
-		{false, false, "", "", "microvm", refused}, // no backend: refused, not downgraded
-		{false, false, "", "microvm", "", refused}, // the tenant's default too
-		{false, false, "", "microvm", "process", "process"},
-		{false, true, "", "", "microvm", "process"}, // twd dev: explicit
-		{false, true, "microvm", "microvm", "microvm", "process"},
-		{true, false, "", "", "", "process"},
-		{true, false, "", "", "microvm", "microvm"},
-		{true, false, "", "microvm", "", "microvm"},
-		{true, false, "", "microvm", "process", "process"}, // deployment overrides tenant
-		{true, false, "microvm", "", "", "microvm"},
-		{true, false, "microvm", "process", "", "process"},
-		{true, true, "", "", "microvm", "process"},
+		{false, false, "", "", "process"},
+		{false, false, "", "microvm", refused}, // no backend: refused, not downgraded
+		{false, false, "microvm", "", refused}, // the tenant's default too
+		{false, false, "microvm", "process", "process"},
+		{false, true, "", "microvm", "process"}, // tw dev: explicit
+		{false, true, "microvm", "microvm", "process"},
+		{true, false, "", "", "process"},
+		{true, false, "", "microvm", "microvm"},
+		{true, false, "microvm", "", "microvm"},
+		{true, false, "microvm", "process", "process"}, // deployment overrides tenant
+		{true, true, "", "microvm", "process"},
 	}
 	for _, c := range cases {
-		h := &Host{log: slog.New(slog.DiscardHandler), cfg: Config{DefaultTier: c.def, ForceProcessTier: c.force}}
+		h := &Host{log: slog.New(slog.DiscardHandler), cfg: Config{ForceProcessTier: c.force}}
 		if c.vm {
 			h.cfg.VM = fakeBackend{}
 		}
@@ -69,20 +68,11 @@ func TestTierFor(t *testing.T) {
 	}
 }
 
-// A host whose default tier is microvm but has no backend can't start (it
-// would refuse every deployment that names no tier).
-func TestDefaultMicroVMNeedsBackend(t *testing.T) {
-	mc, _ := mgmtapi.NewClient("unix:///nonexistent")
-	_, err := New(Config{HostID: "h", Mgmt: mc, DataDir: t.TempDir(), WorkerdBin: "/bin/true", DefaultTier: "microvm"})
-	if err == nil || !strings.Contains(err.Error(), "microVM backend") {
-		t.Fatalf("New: %v", err)
-	}
-}
-
 // The registered and reported tiers follow the backends: "containers" only
 // with a usable container backend and image store (they run in microVMs);
 // ForceProcessTier advertises neither.
 func TestHostTiers(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		vm, ctr, force bool
 		want           string

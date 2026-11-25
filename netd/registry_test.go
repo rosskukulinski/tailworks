@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/netd"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/netd"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 )
 
 func startControl(t *testing.T) *nettest.Control {

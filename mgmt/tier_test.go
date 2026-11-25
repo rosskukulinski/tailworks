@@ -3,22 +3,22 @@ package mgmt
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
 
 // TestPlacementTier: placement sends a workload only to hosts that offer its
-// tier (twd.jsonc "tier", else the tenant's default). Before this, pickHost
+// tier (tailworks.jsonc "tier", else the tenant's default). Before this, pickHost
 // ignored Host.Tiers, so a "microvm" workload could land on a process-only
 // host, where hostd fell back to the process tier with only a log warning.
 func TestPlacementTier(t *testing.T) {
+	t.Parallel()
 	const (
-		microvm = `{ "tier": "microvm", "tailnet": { "tags": ["tag:twd-web"] } }`
-		process = `{ "tier": "process", "tailnet": { "tags": ["tag:twd-web"] } }`
-		unset   = `{ "tailnet": { "tags": ["tag:twd-web"] } }`
-		node    = `{ "runtime": "node", "tailnet": { "tags": ["tag:twd-web"] } }`
+		microvm = `{ "tier": "microvm", "tailnet": { "tags": ["tag:tw-web"] } }`
+		process = `{ "tier": "process", "tailnet": { "tags": ["tag:tw-web"] } }`
+		unset   = `{ "tailnet": { "tags": ["tag:tw-web"] } }`
+		node    = `{ "runtime": "node", "tailnet": { "tags": ["tag:tw-web"] } }`
 	)
 	type host struct {
 		id    string
@@ -61,9 +61,9 @@ func TestPlacementTier(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			files := map[string]string{"twd.jsonc": tc.jsonc, "dist/index.js": "export default {}"}
+			files := map[string]string{"tailworks.jsonc": tc.jsonc, "dist/index.js": "export default {}"}
 			if tc.jsonc == node {
-				files = map[string]string{"twd.jsonc": tc.jsonc, "package.json": `{"name":"w"}`, "index.js": ""}
+				files = map[string]string{"tailworks.jsonc": tc.jsonc, "package.json": `{"name":"w"}`, "index.js": ""}
 			}
 			dep, err := m.Deploy(ctx, DeployRequest{TenantID: tn.ID, Workload: "w", Host: tc.pin, Bundle: makeBundle(t, files)})
 			if tc.wantErr != "" {
@@ -86,19 +86,20 @@ func TestPlacementTier(t *testing.T) {
 // A workload whose live host lacks the tier it now asks for is refused with
 // a fix, not left on the wrong tier (stickiness would otherwise keep it).
 func TestPlacementTierStickyHolder(t *testing.T) {
+	t.Parallel()
 	m, tn := tierTestMgmt(t)
 	ctx := context.Background()
 	m.RegisterHost(ctx, RegisterRequest{HostID: "hp", CapacityNodes: 1000, Tiers: []string{"process"}}, "", "")
 	m.RegisterHost(ctx, RegisterRequest{HostID: "hv", CapacityNodes: 10, Tiers: []string{"process", "microvm"}}, "", "")
 	deploy := func(jsonc string) (DeployResponse, error) {
 		return m.Deploy(ctx, DeployRequest{TenantID: tn.ID, Workload: "w",
-			Bundle: makeBundle(t, map[string]string{"twd.jsonc": jsonc, "dist/index.js": "export default {}"})})
+			Bundle: makeBundle(t, map[string]string{"tailworks.jsonc": jsonc, "dist/index.js": "export default {}"})})
 	}
-	dep, err := deploy(`{ "tailnet": { "tags": ["tag:twd-web"] } }`)
+	dep, err := deploy(`{ "tailnet": { "tags": ["tag:tw-web"] } }`)
 	if err != nil || dep.Host != "hp" {
 		t.Fatalf("first deploy: %+v %v", dep, err)
 	}
-	_, err = deploy(`{ "tier": "microvm", "tailnet": { "tags": ["tag:twd-web"] } }`)
+	_, err = deploy(`{ "tier": "microvm", "tailnet": { "tags": ["tag:tw-web"] } }`)
 	var e *Error
 	if !errors.As(err, &e) || e.Code != "tier_unavailable" {
 		t.Fatalf("redeploy as microvm on a process holder: err = %v, want tier_unavailable", err)
@@ -121,8 +122,8 @@ func tierTestMgmt(t *testing.T) (*Mgmt, Tenant) {
 	}
 	t.Cleanup(func() { m.Close() })
 	kf := filepath.Join(dir, "api.env")
-	os.WriteFile(kf, []byte("TS_API_KEY=x\n"), 0o600)
-	tn, err := m.CreateTenant(ctx, TenantRequest{Tailnet: "t.ts.net", MintMode: "apikey", APIKeyFile: kf})
+	writeTestOAuthFile(t, kf)
+	tn, err := m.CreateTenant(ctx, TenantRequest{Tailnet: "t.ts.net", MintMode: MintOAuth, OAuthClientFile: kf})
 	if err != nil {
 		t.Fatal(err)
 	}

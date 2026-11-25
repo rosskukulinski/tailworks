@@ -11,15 +11,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd"
-	"github.com/rosskukulinski/twd/hostd/fakemgmt"
-	"github.com/rosskukulinski/twd/hostd/image"
-	"github.com/rosskukulinski/twd/hostd/mgmtapi"
-	"github.com/rosskukulinski/twd/hostd/sandbox"
-	"github.com/rosskukulinski/twd/internal/procsb"
-	v1 "github.com/rosskukulinski/twd/mgmt/api/v1"
-	"github.com/rosskukulinski/twd/netd"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/hostd"
+	"github.com/rosskukulinski/tailworks/hostd/fakemgmt"
+	"github.com/rosskukulinski/tailworks/hostd/image"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/hostd/r2"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/internal/procsb"
+	"github.com/rosskukulinski/tailworks/mgmt"
+	v1 "github.com/rosskukulinski/tailworks/mgmt/api/v1"
+	"github.com/rosskukulinski/tailworks/netd"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 	"tailscale.com/tsnet"
 )
 
@@ -33,12 +35,11 @@ type Options struct {
 	KillTombstone  time.Duration
 	HeartbeatEvery time.Duration
 	Verbose        bool
-	// VM, DefaultTier and VMDebug are passed to hostd (microVM tier).
-	VM          sandbox.Backend
-	DefaultTier string
-	VMDebug     bool
+	// VM and VMDebug are passed to hostd (microVM tier).
+	VM      sandbox.Backend
+	VMDebug bool
 	// Sandbox is hostd's process-tier sandbox ("" = none unless
-	// $TWD_TEST_SANDBOX is set, "auto", "seatbelt", "landlock", "none").
+	// $TW_TEST_SANDBOX is set, "auto", "seatbelt", "landlock", "none").
 	Sandbox string
 	// InsecureSharedHost: see hostd.Config.
 	InsecureSharedHost bool
@@ -56,26 +57,67 @@ type Options struct {
 	ContainerQuota    hostd.ContainerQuota
 	ContainerMaxLife  time.Duration
 	ContainerInternet *hostd.ContainerInternet
+
+	// WorkerInternet is passed to hostd (nil: Workers have no internet
+	// path, so tests never reach the real internet).
+	WorkerInternet *hostd.ContainerInternet
+
 	// FenceAfter is passed to hostd (0: its default).
 	FenceAfter time.Duration
 	// PublicListen is passed to hostd (ADR-029 public nodes; tests inject a
 	// listener of *ipn.FunnelConn because testcontrol has no certificates).
 	PublicListen func(srv *tsnet.Server) (net.Listener, error)
+	// TailnetHTTPSCert is passed to hostd (tailnet.https; testcontrol
+	// issues no real certificates).
+	TailnetHTTPSCert netd.HTTPSCertFunc
 	// CronTimeout is passed to hostd (cron trigger run limit).
 	CronTimeout time.Duration
 	// CronClock is passed to hostd (the cron loop's clock; tests that tick
 	// the scheduler themselves).
 	CronClock func() time.Time
+
+	// QueueVisibility is passed to hostd (how long a claimed queue batch
+	// stays hidden; short in tests of crash recovery).
+	QueueVisibility time.Duration
+
+	// PyodideDir is passed to hostd (Python Workers' Pyodide bundles).
+	PyodideDir string
+	// Telemetry is passed to hostd (ADR-045).
+	Telemetry hostd.TelemetryOptions
+
+	// R2 is passed to hostd (R2 bucket blobs; nil: its default, files
+	// under its data dir).
+	R2 r2.Backend
+
+	// Backend is the mgmt hostd talks to: BackendFake ("" too) or
+	// BackendReal (realmgmt.go). Fake is ignored with BackendReal.
+	Backend string
+
+	// MgmtClock is the real mgmt's clock and its store's (BackendReal
+	// only; nil: the real time). Tests that age leases move it forward.
+	MgmtClock mgmt.Clock
+
+	// Workerd is the workerd binary hostd runs ("": nettest.WorkerdBinary).
+	// A test can wrap the real one (kvclock_test.go skews its clock).
+	Workerd string
 }
 
-// Env is fakemgmt (on a unix socket) plus one running twd-hostd.
+// Env is fakemgmt (on a unix socket) plus one running tw-hostd.
 type Env struct {
 	T        testing.TB
-	FM       *fakemgmt.Server
-	Mgmt     *mgmtapi.Client // CLI-side client
+	FM       *fakemgmt.Server // nil with BackendReal
+	Mgmt     *mgmtapi.Client  // CLI-side client
 	Host     *hostd.Host
 	TenantID string
 	Dir      string
+
+	// cfg is the hostd config (hosts.go: Restart, StartHost).
+	cfg hostd.Config
+
+	// Hooks are the backend's test controls (fakemgmt's, or realmgmt.go's
+	// for the real mgmt); RealMgmt is the real mgmt (nil with fakemgmt).
+	Hooks    Hooks
+	RealMgmt *mgmt.Mgmt
 }
 
 // Start starts fakemgmt, creates the tenant and starts hostd.
@@ -85,22 +127,28 @@ func Start(t testing.TB, o Options) *Env {
 	if err != nil {
 		t.Skip(err)
 	}
+	if o.Workerd != "" {
+		wd = o.Workerd
+	}
 	if !HasNode() {
 		t.Skip("node not available (needed to bundle apps)")
 	}
-	dir, err := ShortDir("twd-hd-")
+	dir, err := ShortDir("tw-hd-")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if os.Getenv("TWD_KEEP_INSTANCES") == "" {
+		if os.Getenv("TW_KEEP_INSTANCES") == "" {
 			os.RemoveAll(dir)
 		}
 	})
 	var log *slog.Logger
-	if o.Verbose || os.Getenv("TWD_TEST_LOG") != "" {
+	if o.Verbose || os.Getenv("TW_TEST_LOG") != "" {
 		log = slog.New(netd.NewRedactingHandler(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})))
 		o.Fake.Logger = log
+	}
+	if o.Backend == BackendReal {
+		return startReal(t, o, dir, wd, log)
 	}
 	fm := fakemgmt.New(o.Fake)
 	sock := filepath.Join(dir, "mgmt.sock")
@@ -133,20 +181,8 @@ func Start(t testing.TB, o Options) *Env {
 		pc.HostID = "h1"
 		o.Images.Puller = image.RegistryPuller{Client: pc.OCI()}
 	}
-	if o.HeartbeatEvery == 0 {
-		o.HeartbeatEvery = 200 * time.Millisecond
-	}
-	h, err := hostd.New(hostd.Config{
-		HostID: "h1", Mgmt: hc, DataDir: filepath.Join(dir, "data"), RunDir: filepath.Join(dir, "run"),
-		WorkerdBin: wd, HeartbeatEvery: o.HeartbeatEvery, Ephemeral: o.Ephemeral, ControlURL: o.ControlURL,
-		KillTombstone: o.KillTombstone, HostnamePrefix: o.HostnamePrefix, Logger: log,
-		VM: o.VM, DefaultTier: o.DefaultTier, VMDebug: o.VMDebug, Sandbox: testSandbox(o.Sandbox), InsecureSharedHost: o.InsecureSharedHost, HostSockets: o.HostSockets, AllowSiblingEgress: o.AllowSiblingEgress,
-		Containers: o.Containers, Images: o.Images, ContainerIdle: o.ContainerIdle, ContainerGrace: o.ContainerGrace,
-		ContainerCapacity: o.ContainerCapacity, ContainerQuota: o.ContainerQuota, ContainerMaxLife: o.ContainerMaxLife,
-		ContainerInternet: o.ContainerInternet, FenceAfter: o.FenceAfter,
-		PublicListen: o.PublicListen,
-		CronTimeout:  o.CronTimeout, CronClock: o.CronClock,
-	})
+	cfg := hostConfig(o, dir, wd, log, hc)
+	h, err := hostd.New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,13 +190,39 @@ func Start(t testing.TB, o Options) *Env {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { h.Close() })
-	return &Env{T: t, FM: fm, Mgmt: cli, Host: h, TenantID: tr.TenantID, Dir: dir}
+	return &Env{T: t, FM: fm, Mgmt: cli, Host: h, TenantID: tr.TenantID, Dir: dir, cfg: cfg, Hooks: fm}
+}
+
+// hostConfig is the hostd config for o, talking to mgmt through hc.
+func hostConfig(o Options, dir, wd string, log *slog.Logger, hc *mgmtapi.Client) hostd.Config {
+	if o.HeartbeatEvery == 0 {
+		o.HeartbeatEvery = 200 * time.Millisecond
+	}
+	return hostd.Config{
+		HostID: "h1", Mgmt: hc, DataDir: filepath.Join(dir, "data"), RunDir: filepath.Join(dir, "run"),
+		WorkerdBin: wd, HeartbeatEvery: o.HeartbeatEvery, Ephemeral: o.Ephemeral, ControlURL: o.ControlURL,
+		KillTombstone: o.KillTombstone, HostnamePrefix: o.HostnamePrefix, Logger: log,
+		VM: o.VM, VMDebug: o.VMDebug, Sandbox: testSandbox(o.Sandbox), InsecureSharedHost: o.InsecureSharedHost, HostSockets: o.HostSockets, AllowSiblingEgress: o.AllowSiblingEgress,
+		Containers: o.Containers, Images: o.Images, ContainerIdle: o.ContainerIdle, ContainerGrace: o.ContainerGrace,
+		ContainerCapacity: o.ContainerCapacity, ContainerQuota: o.ContainerQuota, ContainerMaxLife: o.ContainerMaxLife,
+		ContainerInternet: o.ContainerInternet, FenceAfter: o.FenceAfter, WorkerInternet: o.WorkerInternet,
+		PublicListen: o.PublicListen,
+		CronTimeout:  o.CronTimeout, CronClock: o.CronClock,
+		Telemetry: o.Telemetry,
+		R2:        o.R2,
+
+		QueueVisibility: o.QueueVisibility,
+
+		PyodideDir: o.PyodideDir,
+
+		TailnetHTTPSCert: o.TailnetHTTPSCert,
+	}
 }
 
 // tenantCreate is the spec's TenantCreate body (no read-only fields).
 func tenantCreate(t mgmtapi.Tenant) map[string]any {
 	m := map[string]any{"tailnet": t.Tailnet, "mintMode": t.MintMode}
-	for k, v := range map[string]string{"controlURL": t.ControlURL, "apiKeyFile": t.APIKeyFile, "wifClientID": t.WIFClientID, "tier": t.Tier, "tenantID": t.TenantID} {
+	for k, v := range map[string]string{"controlURL": t.ControlURL, "apiKeyFile": t.APIKeyFile, "oauthClientFile": t.OAuthClientFile, "tier": t.Tier, "tenantID": t.TenantID} {
 		if v != "" {
 			m[k] = v
 		}
@@ -228,7 +290,7 @@ func (e *Env) DeployNode(appDir, workload string, vars map[string]string) string
 	return e.DeployFiles(files, workload)
 }
 
-// DeployBuilt deploys bundle files with images twd deploy built and pushed
+// DeployBuilt deploys bundle files with images tw deploy built and pushed
 // (DeployRequest.ContainerImages); mgmt's refusal is returned.
 func (e *Env) DeployBuilt(files map[string][]byte, workload string, built map[string]mgmtapi.BuiltImages) (string, error) {
 	var resp mgmtapi.DeployResponse
@@ -300,11 +362,11 @@ func (e *Env) WaitObjectErr(workload, class, name string, timeout time.Duration)
 	}
 }
 
-// testSandbox applies $TWD_TEST_SANDBOX (e.g. "auto": run a whole test
+// testSandbox applies $TW_TEST_SANDBOX (e.g. "auto": run a whole test
 // suite with hostd's default sandbox) when a test doesn't pick one.
 func testSandbox(s string) string {
 	if s == "" {
-		return os.Getenv("TWD_TEST_SANDBOX")
+		return os.Getenv("TW_TEST_SANDBOX")
 	}
 	return s
 }

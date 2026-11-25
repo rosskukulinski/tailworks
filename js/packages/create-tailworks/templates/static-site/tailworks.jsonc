@@ -1,0 +1,6 @@
+{
+  "$schema": "https://raw.githubusercontent.com/rosskukulinski/tailworks/master/schema/tailworks.schema.json"
+  // "tailnet": { "tags": [...] } (the workload node's) defaults to
+  // ["tag:tw-wl-<workload>"]; your policy must let tag:tw own it
+  // (tw policy prints the line)
+}

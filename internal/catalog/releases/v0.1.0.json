@@ -1,0 +1,20 @@
+{
+  "version": "0.1.0",
+  "date": "2026-11-15",
+  "workerd": "1.20261108.1",
+  "protocols": {
+    "cliJSON": 1,
+    "guest": 1,
+    "helper": 2,
+    "push": 1,
+    "rest": 1,
+    "vz": 1
+  },
+  "notes": [
+    {
+      "kind": "feature",
+      "source": "initial.md",
+      "text": "First release. It includes `twd up` (the all-in-one homelab mode),\n`twd dev`, and twd-mgmt and twd-hostd on the process and microVM tiers,\nrunning the pinned workerd."
+    }
+  ]
+}

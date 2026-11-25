@@ -1,5 +1,5 @@
 // Package nodecert is the node certificate of ADR-010 / RFC §4.5–4.6: at
-// `ready`, twd-mgmt signs {tenant, objectID, stableNodeID, tags, lim,
+// `ready`, tw-mgmt signs {tenant, objectID, stableNodeID, tags, lim,
 // parent, root, iat, exp} with the tenant's OBO root key (Ed25519). A
 // receiving netd fetches the sender's certificate from mgmt (keyed by the
 // WhoIs stable node ID), verifies it against the tenant's pinned OBO public
@@ -7,7 +7,7 @@
 // sees request.cf.tailscale.caller.
 //
 // Wire form: "<base64url(payload JSON)>.<base64url(ed25519 sig)>". The
-// signature covers "twd-nodecert-v1\n" + payload bytes.
+// signature covers "tw-nodecert-v1\n" + payload bytes.
 package nodecert
 
 import (
@@ -22,7 +22,7 @@ import (
 // TTL is how long a certificate is valid after it is issued.
 const TTL = 24 * time.Hour
 
-const domain = "twd-nodecert-v1\n"
+const domain = "tw-nodecert-v1\n"
 
 // Payload is the signed content.
 type Payload struct {

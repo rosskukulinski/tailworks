@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/rosskukulinski/twd/hostd/hostdtest"
+	"github.com/rosskukulinski/tailworks/hostd/hostdtest"
 )
 
-// TestAgentTemplate: the create-twd `agent` template uses the patterns this
+// TestAgentTemplate: the create-tailworks `agent` template uses the patterns this
 // suite verified: routeAgentRequest (HTTP + WebSocket with getCaller in
 // onConnect) and facet-mode schedule().
 func TestAgentTemplate(t *testing.T) {

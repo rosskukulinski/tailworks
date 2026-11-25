@@ -3,7 +3,7 @@
 // Package vm is E2E-VM (M8): the same apps as the process tier, run in a
 // microVM, with host-side netd (one tsnet.Server per object, outside the
 // guest) as the guest's only network. Hermetic: testcontrol + local
-// DERP/STUN, fakemgmt, real twd-hostd, a real hypervisor: Firecracker in
+// DERP/STUN, fakemgmt, real tw-hostd, a real hypervisor: Firecracker in
 // Lima (backend_linux_test.go) or Virtualization.framework on macOS
 // (backend_darwin_test.go, ADR-032 D7).
 //
@@ -34,15 +34,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/guest/proto"
-	"github.com/rosskukulinski/twd/hostd/bundle"
-	"github.com/rosskukulinski/twd/hostd/fakemgmt"
-	"github.com/rosskukulinski/twd/hostd/hostdtest"
-	"github.com/rosskukulinski/twd/hostd/mgmtapi"
-	"github.com/rosskukulinski/twd/hostd/sandbox"
-	"github.com/rosskukulinski/twd/hostd/vm"
-	"github.com/rosskukulinski/twd/hostd/vm/helperapi"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/guest/proto"
+	"github.com/rosskukulinski/tailworks/hostd/bundle"
+	"github.com/rosskukulinski/tailworks/hostd/fakemgmt"
+	"github.com/rosskukulinski/tailworks/hostd/hostdtest"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/hostd/vm"
+	"github.com/rosskukulinski/tailworks/hostd/vm/helperapi"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 )
 
 type results struct {
@@ -56,12 +56,12 @@ func (r *results) set(k string, v any) {
 	r.mu.Unlock()
 }
 
-// TestE2EVM runs the product default (twd-hostd -vm-pool auto,
+// TestE2EVM runs the product default (tw-hostd -vm-pool auto,
 // -vm-snapshot on): a boot-filled warm pool, with the base snapshot for
 // pool misses. Every workload VM here is a claimed pool VM (the suite waits
-// for the pool); NoKeysInGuest also scans the base. TWD_VM_E2E_SNAPSHOT=0:
-// snapshots off; TWD_VM_E2E_SNAPSHOT_REFILL=1: the pool refilled by restore.
-func TestE2EVM(t *testing.T) { runE2EVM(t, os.Getenv("TWD_VM_E2E_SNAPSHOT") != "0", 0) }
+// for the pool); NoKeysInGuest also scans the base. TW_VM_E2E_SNAPSHOT=0:
+// snapshots off; TW_VM_E2E_SNAPSHOT_REFILL=1: the pool refilled by restore.
+func TestE2EVM(t *testing.T) { runE2EVM(t, os.Getenv("TW_VM_E2E_SNAPSHOT") != "0", 0) }
 
 // TestE2EVMSnapshot is the same suite with the pool off: every workload VM
 // (first deploys, redeploys, crash restarts) is restored on demand.
@@ -71,12 +71,12 @@ func TestE2EVMSnapshot(t *testing.T) { runE2EVM(t, true, -1) }
 // runE2EVM: snapshot on/off; pool as vm.Config.Pool. With snapshots on,
 // NoKeysInGuest also scans the base snapshot's files.
 func runE2EVM(t *testing.T, snapshot bool, pool int) {
-	kernel, rootfs := os.Getenv("TWD_VM_KERNEL"), os.Getenv("TWD_VM_ROOTFS")
+	kernel, rootfs := os.Getenv("TW_VM_KERNEL"), os.Getenv("TW_VM_ROOTFS")
 	if kernel == "" || rootfs == "" {
-		t.Skip("TWD_VM_KERNEL and TWD_VM_ROOTFS must be set (make e2e-vm)")
+		t.Skip("TW_VM_KERNEL and TW_VM_ROOTFS must be set (make e2e-vm)")
 	}
 	vcpus := 2
-	if v := os.Getenv("TWD_VM_VCPUS"); v != "" {
+	if v := os.Getenv("TW_VM_VCPUS"); v != "" {
 		fmt.Sscan(v, &vcpus)
 	}
 	if pool < 0 && !fastVMSupported {
@@ -85,7 +85,7 @@ func runE2EVM(t *testing.T, snapshot bool, pool int) {
 	be, binfo, err := newBackend(kernel, rootfs, vcpus, pool, snapshot)
 	snapshot = snapshot && fastVMSupported
 	wantSource := "pool"
-	if snapshot && (pool < 0 || os.Getenv("TWD_VM_E2E_SNAPSHOT_REFILL") == "1") {
+	if snapshot && (pool < 0 || os.Getenv("TW_VM_E2E_SNAPSHOT_REFILL") == "1") {
 		wantSource = "restore"
 	}
 	if err != nil {
@@ -189,7 +189,7 @@ func runE2EVM(t *testing.T, snapshot bool, pool int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pfiles["twd.jsonc"] = withTier(t, pfiles["twd.jsonc"], bundle.TierProcess)
+	pfiles["tailworks.jsonc"] = withTier(t, pfiles["tailworks.jsonc"], bundle.TierProcess)
 	dProc := e.DeployFiles(pfiles, "probep")
 	hello := e.WaitActive("hello", dHello, 90*time.Second)
 	probe := e.WaitActive("probe", dProbe, 90*time.Second)
@@ -571,8 +571,8 @@ func runE2EVM(t *testing.T, snapshot bool, pool int) {
 		how := "error"
 		if err == nil {
 			resp.Body.Close()
-			if resp.StatusCode != 410 || resp.Header.Get("twd-error") != "object_killed" {
-				t.Fatalf("new request after kill: %d %q after %v", resp.StatusCode, resp.Header.Get("twd-error"), d)
+			if resp.StatusCode != 410 || resp.Header.Get("tw-error") != "object_killed" {
+				t.Fatalf("new request after kill: %d %q after %v", resp.StatusCode, resp.Header.Get("tw-error"), d)
 			}
 			how = "410 object_killed"
 		}
@@ -673,7 +673,7 @@ func runE2EVM(t *testing.T, snapshot bool, pool int) {
 	// breakdown of each new VM (the fast-VM work's before/after numbers).
 	t.Run("DeployReadyBench", func(t *testing.T) {
 		n := 5
-		if v := os.Getenv("TWD_VM_BENCH_DEPLOYS"); v != "" {
+		if v := os.Getenv("TW_VM_BENCH_DEPLOYS"); v != "" {
 			fmt.Sscan(v, &n)
 		}
 		var deployMS, servingMS, restartMS []float64
@@ -790,9 +790,9 @@ func get(m map[string]any, path ...string) any {
 	return v
 }
 
-func withTier(t *testing.T, twd []byte, tier string) []byte {
+func withTier(t *testing.T, tw []byte, tier string) []byte {
 	var m map[string]any
-	if err := bundle.UnmarshalJSONC(twd, &m); err != nil {
+	if err := bundle.UnmarshalJSONC(tw, &m); err != nil {
 		t.Fatal(err)
 	}
 	m["tier"] = tier

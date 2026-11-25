@@ -15,11 +15,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rosskukulinski/twd/guest/proto"
-	"github.com/rosskukulinski/twd/hostd/gen"
+	"github.com/rosskukulinski/tailworks/guest/proto"
+	"github.com/rosskukulinski/tailworks/hostd/gen"
 )
 
-// ContainerCheckReport is `twd host vmcheck <workload> --container
+// ContainerCheckReport is `tw host vmcheck <workload> --container
 // <Class>/<name> --keyscan`: the strict no-keys scan of one object's
 // container guest (ADR-032 D5). Only needle names, never key material.
 type ContainerCheckReport struct {
@@ -164,7 +164,7 @@ func (h *Host) ContainerCheck(ctx context.Context, tenantID, wlName, class, obje
 	if r, err := sc.Op(ctx, proto.Msg{Op: "fsscan"}); err == nil {
 		ks.GuestFiles = r.Scanned
 		for _, f := range r.Found {
-			if !strings.HasPrefix(f, "/run/twd/ctr/") {
+			if !strings.HasPrefix(f, "/run/tailworks/ctr/") {
 				ks.GuestStateF = append(ks.GuestStateF, f)
 			}
 		}
@@ -180,7 +180,7 @@ func (h *Host) ContainerCheck(ctx context.Context, tenantID, wlName, class, obje
 		// vz: Virtualization.framework refuses to save these VMs' state
 		// (as for DO guests). The disk and file scans stand; the report
 		// says RAM was not scanned, and its positive control fails, so
-		// `twd host vmcheck --container` still exits keys_in_guest.
+		// `tw host vmcheck --container` still exits keys_in_guest.
 		ks.Control = "FAILED: guest RAM not scanned: " + err.Error()
 		if ks.Found == nil {
 			ks.Found = []string{}

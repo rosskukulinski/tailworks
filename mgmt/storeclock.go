@@ -170,7 +170,7 @@ func (m *Mgmt) checkClock() {
 }
 
 // testWallOffset shifts this process's view of the wall clock (tests only:
-// twd-mgmt sets it from TWD_TEST_WALL_CLOCK_OFFSET, and only with
+// tw-mgmt sets it from TW_TEST_WALL_CLOCK_OFFSET, and only with
 // -local-dev). It simulates a machine whose clock is wrong (mm-loop S8).
 var testWallOffset atomic.Int64
 

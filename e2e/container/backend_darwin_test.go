@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/rosskukulinski/twd/hostd/sandbox"
-	"github.com/rosskukulinski/twd/hostd/vm"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/hostd/vm"
 )
 
 // memoryDumpRequired: Virtualization.framework refuses to save a VM's
@@ -19,16 +19,16 @@ import (
 // disks and the guest's files, not its RAM.
 const memoryDumpRequired = false
 
-// newBackend is vz (Virtualization.framework, no sudo): one twd-vz VMM
-// per container. TWD_VM_ROSETTA shares Rosetta for Linux into the guests,
-// and then TWD_CTR_IMAGES is the stock amd64 set.
+// newBackend is vz (Virtualization.framework, no sudo): one tw-vz VMM
+// per container. TW_VM_ROSETTA shares Rosetta for Linux into the guests,
+// and then TW_CTR_IMAGES is the stock amd64 set.
 func newBackend(t *testing.T) (sandbox.ContainerBackend, []string) {
 	t.Helper()
-	kernel, rootfs := os.Getenv("TWD_VM_KERNEL"), os.Getenv("TWD_VM_ROOTFS")
+	kernel, rootfs := os.Getenv("TW_VM_KERNEL"), os.Getenv("TW_VM_ROOTFS")
 	if kernel == "" || rootfs == "" {
-		t.Skip("TWD_VM_KERNEL and TWD_VM_ROOTFS must be set (make e2e-vz-container)")
+		t.Skip("TW_VM_KERNEL and TW_VM_ROOTFS must be set (make e2e-vz-container)")
 	}
-	be, err := vm.New(vm.Config{VMM: os.Getenv("TWD_VZ_VMM"), Kernel: kernel, Rootfs: rootfs, Rosetta: os.Getenv("TWD_VM_ROSETTA") != ""})
+	be, err := vm.New(vm.Config{VMM: os.Getenv("TW_VZ_VMM"), Kernel: kernel, Rootfs: rootfs, Rosetta: os.Getenv("TW_VM_ROSETTA") != ""})
 	if err != nil {
 		t.Fatalf("vz backend unavailable: %v", err)
 	}

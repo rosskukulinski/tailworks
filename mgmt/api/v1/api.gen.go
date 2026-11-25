@@ -20,6 +20,66 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for ApprovalStatus.
+const (
+	ApprovalStatusApproved ApprovalStatus = "approved"
+	ApprovalStatusPending  ApprovalStatus = "pending"
+	ApprovalStatusRejected ApprovalStatus = "rejected"
+	ApprovalStatusTimeout  ApprovalStatus = "timeout"
+)
+
+// Valid indicates whether the value is a known member of the ApprovalStatus enum.
+func (e ApprovalStatus) Valid() bool {
+	switch e {
+	case ApprovalStatusApproved:
+		return true
+	case ApprovalStatusPending:
+		return true
+	case ApprovalStatusRejected:
+		return true
+	case ApprovalStatusTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApprovalDecisionRequestDecision.
+const (
+	Approve ApprovalDecisionRequestDecision = "approve"
+	Reject  ApprovalDecisionRequestDecision = "reject"
+)
+
+// Valid indicates whether the value is a known member of the ApprovalDecisionRequestDecision enum.
+func (e ApprovalDecisionRequestDecision) Valid() bool {
+	switch e {
+	case Approve:
+		return true
+	case Reject:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApproverVia.
+const (
+	ApproverViaMgmt    ApproverVia = "mgmt"
+	ApproverViaTailnet ApproverVia = "tailnet"
+)
+
+// Valid indicates whether the value is a known member of the ApproverVia enum.
+func (e ApproverVia) Valid() bool {
+	switch e {
+	case ApproverViaMgmt:
+		return true
+	case ApproverViaTailnet:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Arch.
 const (
 	ArchAmd64 Arch = "amd64"
@@ -41,12 +101,19 @@ func (e Arch) Valid() bool {
 // Defines values for AuditKind.
 const (
 	AuditKindAllow               AuditKind = "allow"
+	AuditKindApprovalDecision    AuditKind = "approval_decision"
+	AuditKindApprovalDenied      AuditKind = "approval_denied"
+	AuditKindApprovalRequested   AuditKind = "approval_requested"
+	AuditKindApprovalTimeout     AuditKind = "approval_timeout"
+	AuditKindAuditDropped        AuditKind = "audit_dropped"
+	AuditKindAuditPruned         AuditKind = "audit_pruned"
 	AuditKindContainerRelease    AuditKind = "container_release"
 	AuditKindContainerReserve    AuditKind = "container_reserve"
 	AuditKindContainerStart      AuditKind = "container_start"
 	AuditKindContainerStop       AuditKind = "container_stop"
 	AuditKindCreate              AuditKind = "create"
 	AuditKindCredential          AuditKind = "credential"
+	AuditKindD1Write             AuditKind = "d1_write"
 	AuditKindDeny                AuditKind = "deny"
 	AuditKindDeploy              AuditKind = "deploy"
 	AuditKindDeviceDelete        AuditKind = "device_delete"
@@ -54,32 +121,66 @@ const (
 	AuditKindExposeOff           AuditKind = "expose_off"
 	AuditKindExposeOn            AuditKind = "expose_on"
 	AuditKindHostAdd             AuditKind = "host_add"
+	AuditKindHostCordon          AuditKind = "host_cordon"
 	AuditKindHostDelete          AuditKind = "host_delete"
+	AuditKindHostDrain           AuditKind = "host_drain"
 	AuditKindHostRegister        AuditKind = "host_register"
+	AuditKindHostUncordon        AuditKind = "host_uncordon"
 	AuditKindImagePin            AuditKind = "image_pin"
 	AuditKindImagePublic         AuditKind = "image_public"
 	AuditKindImagePush           AuditKind = "image_push"
 	AuditKindKill                AuditKind = "kill"
+	AuditKindKvDelete            AuditKind = "kv_delete"
+	AuditKindKvPut               AuditKind = "kv_put"
 	AuditKindMint                AuditKind = "mint"
+	AuditKindNotificationDelete  AuditKind = "notification_delete"
+	AuditKindNotificationFailed  AuditKind = "notification_failed"
+	AuditKindNotificationPut     AuditKind = "notification_put"
+	AuditKindNotificationTest    AuditKind = "notification_test"
 	AuditKindObjectUpdate        AuditKind = "object_update"
 	AuditKindOboRoot             AuditKind = "obo_root"
+	AuditKindPolicyApply         AuditKind = "policy_apply"
 	AuditKindPreflight           AuditKind = "preflight"
 	AuditKindPrincipal           AuditKind = "principal"
+	AuditKindPublicNameClaim     AuditKind = "public_name_claim"
+	AuditKindPublicNameRelease   AuditKind = "public_name_release"
 	AuditKindPublicObjectCreated AuditKind = "public_object_created"
 	AuditKindPublicRejected      AuditKind = "public_rejected"
 	AuditKindPublicRequest       AuditKind = "public_request"
 	AuditKindPurge               AuditKind = "purge"
+	AuditKindQueueCreate         AuditKind = "queue_create"
+	AuditKindQueueDelete         AuditKind = "queue_delete"
+	AuditKindQueuePurge          AuditKind = "queue_purge"
 	AuditKindReady               AuditKind = "ready"
 	AuditKindReap                AuditKind = "reap"
+	AuditKindReleaseArtifact     AuditKind = "release_artifact"
+	AuditKindReleaseImport       AuditKind = "release_import"
 	AuditKindRemint              AuditKind = "remint"
 	AuditKindRevoke              AuditKind = "revoke"
+	AuditKindRollback            AuditKind = "rollback"
+	AuditKindSecretDelete        AuditKind = "secret_delete"
+	AuditKindSecretPut           AuditKind = "secret_put"
+	AuditKindSecretRelease       AuditKind = "secret_release"
 	AuditKindSpawn               AuditKind = "spawn"
+	AuditKindStoreCreate         AuditKind = "store_create"
+	AuditKindStoreDelete         AuditKind = "store_delete"
+	AuditKindStoreRepair         AuditKind = "store_repair"
+	AuditKindStoreReplayFailed   AuditKind = "store_replay_failed"
+	AuditKindTelemetryDelete     AuditKind = "telemetry_delete"
+	AuditKindTelemetryPut        AuditKind = "telemetry_put"
+	AuditKindTelemetryRelease    AuditKind = "telemetry_release"
 	AuditKindTenantCreate        AuditKind = "tenant_create"
 	AuditKindTenantDelete        AuditKind = "tenant_delete"
 	AuditKindTenantNote          AuditKind = "tenant_note"
+	AuditKindTenantPurgeHost     AuditKind = "tenant_purge_host"
 	AuditKindTenantUpdate        AuditKind = "tenant_update"
 	AuditKindTransfer            AuditKind = "transfer"
 	AuditKindUndeploy            AuditKind = "undeploy"
+	AuditKindUpgradeAbort        AuditKind = "upgrade_abort"
+	AuditKindUpgradePause        AuditKind = "upgrade_pause"
+	AuditKindUpgradeResume       AuditKind = "upgrade_resume"
+	AuditKindUpgradeStart        AuditKind = "upgrade_start"
+	AuditKindUpgradeStep         AuditKind = "upgrade_step"
 	AuditKindVolumeKey           AuditKind = "volume_key"
 )
 
@@ -87,6 +188,18 @@ const (
 func (e AuditKind) Valid() bool {
 	switch e {
 	case AuditKindAllow:
+		return true
+	case AuditKindApprovalDecision:
+		return true
+	case AuditKindApprovalDenied:
+		return true
+	case AuditKindApprovalRequested:
+		return true
+	case AuditKindApprovalTimeout:
+		return true
+	case AuditKindAuditDropped:
+		return true
+	case AuditKindAuditPruned:
 		return true
 	case AuditKindContainerRelease:
 		return true
@@ -99,6 +212,8 @@ func (e AuditKind) Valid() bool {
 	case AuditKindCreate:
 		return true
 	case AuditKindCredential:
+		return true
+	case AuditKindD1Write:
 		return true
 	case AuditKindDeny:
 		return true
@@ -114,9 +229,15 @@ func (e AuditKind) Valid() bool {
 		return true
 	case AuditKindHostAdd:
 		return true
+	case AuditKindHostCordon:
+		return true
 	case AuditKindHostDelete:
 		return true
+	case AuditKindHostDrain:
+		return true
 	case AuditKindHostRegister:
+		return true
+	case AuditKindHostUncordon:
 		return true
 	case AuditKindImagePin:
 		return true
@@ -126,15 +247,33 @@ func (e AuditKind) Valid() bool {
 		return true
 	case AuditKindKill:
 		return true
+	case AuditKindKvDelete:
+		return true
+	case AuditKindKvPut:
+		return true
 	case AuditKindMint:
+		return true
+	case AuditKindNotificationDelete:
+		return true
+	case AuditKindNotificationFailed:
+		return true
+	case AuditKindNotificationPut:
+		return true
+	case AuditKindNotificationTest:
 		return true
 	case AuditKindObjectUpdate:
 		return true
 	case AuditKindOboRoot:
 		return true
+	case AuditKindPolicyApply:
+		return true
 	case AuditKindPreflight:
 		return true
 	case AuditKindPrincipal:
+		return true
+	case AuditKindPublicNameClaim:
+		return true
+	case AuditKindPublicNameRelease:
 		return true
 	case AuditKindPublicObjectCreated:
 		return true
@@ -144,15 +283,47 @@ func (e AuditKind) Valid() bool {
 		return true
 	case AuditKindPurge:
 		return true
+	case AuditKindQueueCreate:
+		return true
+	case AuditKindQueueDelete:
+		return true
+	case AuditKindQueuePurge:
+		return true
 	case AuditKindReady:
 		return true
 	case AuditKindReap:
+		return true
+	case AuditKindReleaseArtifact:
+		return true
+	case AuditKindReleaseImport:
 		return true
 	case AuditKindRemint:
 		return true
 	case AuditKindRevoke:
 		return true
+	case AuditKindRollback:
+		return true
+	case AuditKindSecretDelete:
+		return true
+	case AuditKindSecretPut:
+		return true
+	case AuditKindSecretRelease:
+		return true
 	case AuditKindSpawn:
+		return true
+	case AuditKindStoreCreate:
+		return true
+	case AuditKindStoreDelete:
+		return true
+	case AuditKindStoreRepair:
+		return true
+	case AuditKindStoreReplayFailed:
+		return true
+	case AuditKindTelemetryDelete:
+		return true
+	case AuditKindTelemetryPut:
+		return true
+	case AuditKindTelemetryRelease:
 		return true
 	case AuditKindTenantCreate:
 		return true
@@ -160,11 +331,23 @@ func (e AuditKind) Valid() bool {
 		return true
 	case AuditKindTenantNote:
 		return true
+	case AuditKindTenantPurgeHost:
+		return true
 	case AuditKindTenantUpdate:
 		return true
 	case AuditKindTransfer:
 		return true
 	case AuditKindUndeploy:
+		return true
+	case AuditKindUpgradeAbort:
+		return true
+	case AuditKindUpgradePause:
+		return true
+	case AuditKindUpgradeResume:
+		return true
+	case AuditKindUpgradeStart:
+		return true
+	case AuditKindUpgradeStep:
 		return true
 	case AuditKindVolumeKey:
 		return true
@@ -234,6 +417,7 @@ func (e ContainerImagePinArch) Valid() bool {
 const (
 	DeploymentStatusActive     DeploymentStatus = "active"
 	DeploymentStatusAssigned   DeploymentStatus = "assigned"
+	DeploymentStatusCrashloop  DeploymentStatus = "crashloop"
 	DeploymentStatusDraining   DeploymentStatus = "draining"
 	DeploymentStatusFailed     DeploymentStatus = "failed"
 	DeploymentStatusStarting   DeploymentStatus = "starting"
@@ -247,6 +431,8 @@ func (e DeploymentStatus) Valid() bool {
 	case DeploymentStatusActive:
 		return true
 	case DeploymentStatusAssigned:
+		return true
+	case DeploymentStatusCrashloop:
 		return true
 	case DeploymentStatusDraining:
 		return true
@@ -266,14 +452,23 @@ func (e DeploymentStatus) Valid() bool {
 // Defines values for ErrorCode.
 const (
 	ErrorCodeAlreadyJoined           ErrorCode = "already_joined"
+	ErrorCodeApprovalNotPending      ErrorCode = "approval_not_pending"
+	ErrorCodeAuditKeyRequired        ErrorCode = "audit_key_required"
+	ErrorCodeAuditObjectForeign      ErrorCode = "audit_object_foreign"
 	ErrorCodeBadBundle               ErrorCode = "bad_bundle"
 	ErrorCodeBadCursor               ErrorCode = "bad_cursor"
+	ErrorCodeBadHostSig              ErrorCode = "bad_host_sig"
+	ErrorCodeBadObjectName           ErrorCode = "bad_object_name"
 	ErrorCodeBadRequest              ErrorCode = "bad_request"
 	ErrorCodeBootstrapFailed         ErrorCode = "bootstrap_failed"
+	ErrorCodeCapMissing              ErrorCode = "cap_missing"
 	ErrorCodeContainerQuotaExceeded  ErrorCode = "container_quota_exceeded"
+	ErrorCodeD1Error                 ErrorCode = "d1_error"
 	ErrorCodeDelegationExceedsParent ErrorCode = "delegation_exceeds_parent"
 	ErrorCodeDelegationInvalid       ErrorCode = "delegation_invalid"
 	ErrorCodeExists                  ErrorCode = "exists"
+	ErrorCodeExperimentalFlag        ErrorCode = "experimental_flag"
+	ErrorCodeFeatureUnavailable      ErrorCode = "feature_unavailable"
 	ErrorCodeForbidden               ErrorCode = "forbidden"
 	ErrorCodeHostHoldsLeases         ErrorCode = "host_holds_leases"
 	ErrorCodeHostIdentityMismatch    ErrorCode = "host_identity_mismatch"
@@ -281,6 +476,7 @@ const (
 	ErrorCodeHostTokenInvalid        ErrorCode = "host_token_invalid"
 	ErrorCodeHostTokenRequired       ErrorCode = "host_token_required"
 	ErrorCodeHostTokenUnconfigured   ErrorCode = "host_token_unconfigured"
+	ErrorCodeHostUnavailable         ErrorCode = "host_unavailable"
 	ErrorCodeIdentityConflict        ErrorCode = "identity_conflict"
 	ErrorCodeIdentityPending         ErrorCode = "identity_pending"
 	ErrorCodeImageUnavailable        ErrorCode = "image_unavailable"
@@ -290,31 +486,65 @@ const (
 	ErrorCodeLeaseChanged            ErrorCode = "lease_changed"
 	ErrorCodeLeaseHeld               ErrorCode = "lease_held"
 	ErrorCodeLeaseLost               ErrorCode = "lease_lost"
+	ErrorCodeMintModeRemoved         ErrorCode = "mint_mode_removed"
 	ErrorCodeMirrorDisabled          ErrorCode = "mirror_disabled"
+	ErrorCodeMisdirectedRequest      ErrorCode = "misdirected_request"
 	ErrorCodeMoveUnconfirmed         ErrorCode = "move_unconfirmed"
+	ErrorCodeNamePrefixRequired      ErrorCode = "name_prefix_required"
 	ErrorCodeNamespaceAmbiguous      ErrorCode = "namespace_ambiguous"
 	ErrorCodeNoHost                  ErrorCode = "no_host"
 	ErrorCodeNoIdentity              ErrorCode = "no_identity"
+	ErrorCodeNoLogs                  ErrorCode = "no_logs"
 	ErrorCodeNotAdmin                ErrorCode = "not_admin"
 	ErrorCodeNotFound                ErrorCode = "not_found"
 	ErrorCodeNotReady                ErrorCode = "not_ready"
 	ErrorCodeObjectQuotaExceeded     ErrorCode = "object_quota_exceeded"
+	ErrorCodePolicyApplyFailed       ErrorCode = "policy_apply_failed"
+	ErrorCodePolicyConflict          ErrorCode = "policy_conflict"
 	ErrorCodePolicyMissingTagOwners  ErrorCode = "policy_missing_tag_owners"
 	ErrorCodePolicyUnavailable       ErrorCode = "policy_unavailable"
+	ErrorCodePolicyWriteDenied       ErrorCode = "policy_write_denied"
 	ErrorCodePreconditionFailed      ErrorCode = "precondition_failed"
+	ErrorCodePreviewConflict         ErrorCode = "preview_conflict"
+	ErrorCodePreviewFailed           ErrorCode = "preview_failed"
+	ErrorCodePreviewUnsupported      ErrorCode = "preview_unsupported"
+	ErrorCodeProfileUnsupported      ErrorCode = "profile_unsupported"
 	ErrorCodePublicIngressNotAllowed ErrorCode = "public_ingress_not_allowed"
+	ErrorCodePublicNameInUse         ErrorCode = "public_name_in_use"
+	ErrorCodePublicNameOwned         ErrorCode = "public_name_owned"
+	ErrorCodeQueueLimit              ErrorCode = "queue_limit"
+	ErrorCodeRateLimited             ErrorCode = "rate_limited"
 	ErrorCodeRegistryUnavailable     ErrorCode = "registry_unavailable"
+	ErrorCodeReplicaConflict         ErrorCode = "replica_conflict"
+	ErrorCodeReservedTag             ErrorCode = "reserved_tag"
 	ErrorCodeServiceAPIFailed        ErrorCode = "service_api_failed"
 	ErrorCodeServiceConflict         ErrorCode = "service_conflict"
+	ErrorCodeServiceNotFound         ErrorCode = "service_not_found"
+	ErrorCodeSharedOwnerTag          ErrorCode = "shared_owner_tag"
 	ErrorCodeSpawnBudgetExceeded     ErrorCode = "spawn_budget_exceeded"
+	ErrorCodeStorageQuotaExceeded    ErrorCode = "storage_quota_exceeded"
+	ErrorCodeStoreConflict           ErrorCode = "store_conflict"
+	ErrorCodeStoreDegraded           ErrorCode = "store_degraded"
+	ErrorCodeStoreLimit              ErrorCode = "store_limit"
+	ErrorCodeStoreNotDegraded        ErrorCode = "store_not_degraded"
 	ErrorCodeStoreUnavailable        ErrorCode = "store_unavailable"
 	ErrorCodeSuperseded              ErrorCode = "superseded"
+	ErrorCodeTagNotOwned             ErrorCode = "tag_not_owned"
 	ErrorCodeTakeoverUnconfirmed     ErrorCode = "takeover_unconfirmed"
+	ErrorCodeTenantForbidden         ErrorCode = "tenant_forbidden"
 	ErrorCodeTenantHasLiveObjects    ErrorCode = "tenant_has_live_objects"
 	ErrorCodeTierUnavailable         ErrorCode = "tier_unavailable"
+	ErrorCodeTooManySecrets          ErrorCode = "too_many_secrets"
 	ErrorCodeUnknownNamespace        ErrorCode = "unknown_namespace"
+	ErrorCodeUnknownPreview          ErrorCode = "unknown_preview"
+	ErrorCodeUnknownQueue            ErrorCode = "unknown_queue"
+	ErrorCodeUnknownSecret           ErrorCode = "unknown_secret"
+	ErrorCodeUnknownStore            ErrorCode = "unknown_store"
 	ErrorCodeUnknownTenant           ErrorCode = "unknown_tenant"
 	ErrorCodeUnknownWorkload         ErrorCode = "unknown_workload"
+	ErrorCodeUpgradeBlocked          ErrorCode = "upgrade_blocked"
+	ErrorCodeUpgradeState            ErrorCode = "upgrade_state"
+	ErrorCodeVersionSkew             ErrorCode = "version_skew"
 )
 
 // Valid indicates whether the value is a known member of the ErrorCode enum.
@@ -322,21 +552,39 @@ func (e ErrorCode) Valid() bool {
 	switch e {
 	case ErrorCodeAlreadyJoined:
 		return true
+	case ErrorCodeApprovalNotPending:
+		return true
+	case ErrorCodeAuditKeyRequired:
+		return true
+	case ErrorCodeAuditObjectForeign:
+		return true
 	case ErrorCodeBadBundle:
 		return true
 	case ErrorCodeBadCursor:
+		return true
+	case ErrorCodeBadHostSig:
+		return true
+	case ErrorCodeBadObjectName:
 		return true
 	case ErrorCodeBadRequest:
 		return true
 	case ErrorCodeBootstrapFailed:
 		return true
+	case ErrorCodeCapMissing:
+		return true
 	case ErrorCodeContainerQuotaExceeded:
+		return true
+	case ErrorCodeD1Error:
 		return true
 	case ErrorCodeDelegationExceedsParent:
 		return true
 	case ErrorCodeDelegationInvalid:
 		return true
 	case ErrorCodeExists:
+		return true
+	case ErrorCodeExperimentalFlag:
+		return true
+	case ErrorCodeFeatureUnavailable:
 		return true
 	case ErrorCodeForbidden:
 		return true
@@ -351,6 +599,8 @@ func (e ErrorCode) Valid() bool {
 	case ErrorCodeHostTokenRequired:
 		return true
 	case ErrorCodeHostTokenUnconfigured:
+		return true
+	case ErrorCodeHostUnavailable:
 		return true
 	case ErrorCodeIdentityConflict:
 		return true
@@ -370,15 +620,23 @@ func (e ErrorCode) Valid() bool {
 		return true
 	case ErrorCodeLeaseLost:
 		return true
+	case ErrorCodeMintModeRemoved:
+		return true
 	case ErrorCodeMirrorDisabled:
 		return true
+	case ErrorCodeMisdirectedRequest:
+		return true
 	case ErrorCodeMoveUnconfirmed:
+		return true
+	case ErrorCodeNamePrefixRequired:
 		return true
 	case ErrorCodeNamespaceAmbiguous:
 		return true
 	case ErrorCodeNoHost:
 		return true
 	case ErrorCodeNoIdentity:
+		return true
+	case ErrorCodeNoLogs:
 		return true
 	case ErrorCodeNotAdmin:
 		return true
@@ -388,37 +646,97 @@ func (e ErrorCode) Valid() bool {
 		return true
 	case ErrorCodeObjectQuotaExceeded:
 		return true
+	case ErrorCodePolicyApplyFailed:
+		return true
+	case ErrorCodePolicyConflict:
+		return true
 	case ErrorCodePolicyMissingTagOwners:
 		return true
 	case ErrorCodePolicyUnavailable:
 		return true
+	case ErrorCodePolicyWriteDenied:
+		return true
 	case ErrorCodePreconditionFailed:
+		return true
+	case ErrorCodePreviewConflict:
+		return true
+	case ErrorCodePreviewFailed:
+		return true
+	case ErrorCodePreviewUnsupported:
+		return true
+	case ErrorCodeProfileUnsupported:
 		return true
 	case ErrorCodePublicIngressNotAllowed:
 		return true
+	case ErrorCodePublicNameInUse:
+		return true
+	case ErrorCodePublicNameOwned:
+		return true
+	case ErrorCodeQueueLimit:
+		return true
+	case ErrorCodeRateLimited:
+		return true
 	case ErrorCodeRegistryUnavailable:
+		return true
+	case ErrorCodeReplicaConflict:
+		return true
+	case ErrorCodeReservedTag:
 		return true
 	case ErrorCodeServiceAPIFailed:
 		return true
 	case ErrorCodeServiceConflict:
 		return true
+	case ErrorCodeServiceNotFound:
+		return true
+	case ErrorCodeSharedOwnerTag:
+		return true
 	case ErrorCodeSpawnBudgetExceeded:
+		return true
+	case ErrorCodeStorageQuotaExceeded:
+		return true
+	case ErrorCodeStoreConflict:
+		return true
+	case ErrorCodeStoreDegraded:
+		return true
+	case ErrorCodeStoreLimit:
+		return true
+	case ErrorCodeStoreNotDegraded:
 		return true
 	case ErrorCodeStoreUnavailable:
 		return true
 	case ErrorCodeSuperseded:
 		return true
+	case ErrorCodeTagNotOwned:
+		return true
 	case ErrorCodeTakeoverUnconfirmed:
+		return true
+	case ErrorCodeTenantForbidden:
 		return true
 	case ErrorCodeTenantHasLiveObjects:
 		return true
 	case ErrorCodeTierUnavailable:
 		return true
+	case ErrorCodeTooManySecrets:
+		return true
 	case ErrorCodeUnknownNamespace:
+		return true
+	case ErrorCodeUnknownPreview:
+		return true
+	case ErrorCodeUnknownQueue:
+		return true
+	case ErrorCodeUnknownSecret:
+		return true
+	case ErrorCodeUnknownStore:
 		return true
 	case ErrorCodeUnknownTenant:
 		return true
 	case ErrorCodeUnknownWorkload:
+		return true
+	case ErrorCodeUpgradeBlocked:
+		return true
+	case ErrorCodeUpgradeState:
+		return true
+	case ErrorCodeVersionSkew:
 		return true
 	default:
 		return false
@@ -434,6 +752,24 @@ const (
 func (e HealthOk) Valid() bool {
 	switch e {
 	case True:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for HostRegistrationOs.
+const (
+	Darwin HostRegistrationOs = "darwin"
+	Linux  HostRegistrationOs = "linux"
+)
+
+// Valid indicates whether the value is a known member of the HostRegistrationOs enum.
+func (e HostRegistrationOs) Valid() bool {
+	switch e {
+	case Darwin:
+		return true
+	case Linux:
 		return true
 	default:
 		return false
@@ -502,16 +838,19 @@ func (e KillWarningCode) Valid() bool {
 
 // Defines values for MintMode.
 const (
-	Apikey MintMode = "apikey"
-	Oauth  MintMode = "oauth"
-	Static MintMode = "static"
-	Wif    MintMode = "wif"
+	Apikey    MintMode = "apikey"
+	Headscale MintMode = "headscale"
+	Oauth     MintMode = "oauth"
+	Static    MintMode = "static"
+	Wif       MintMode = "wif"
 )
 
 // Valid indicates whether the value is a known member of the MintMode enum.
 func (e MintMode) Valid() bool {
 	switch e {
 	case Apikey:
+		return true
+	case Headscale:
 		return true
 	case Oauth:
 		return true
@@ -533,6 +872,24 @@ const (
 func (e NodeCertificatePayloadV) Valid() bool {
 	switch e {
 	case N1:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NotificationEventKind.
+const (
+	NotificationEventKindApprovalRequested NotificationEventKind = "approval_requested"
+	NotificationEventKindTest              NotificationEventKind = "test"
+)
+
+// Valid indicates whether the value is a known member of the NotificationEventKind enum.
+func (e NotificationEventKind) Valid() bool {
+	switch e {
+	case NotificationEventKindApprovalRequested:
+		return true
+	case NotificationEventKindTest:
 		return true
 	default:
 		return false
@@ -731,6 +1088,93 @@ func (e PublicIngress) Valid() bool {
 	}
 }
 
+// Defines values for QueueContentType.
+const (
+	Bytes QueueContentType = "bytes"
+	JSON  QueueContentType = "json"
+	Text  QueueContentType = "text"
+	V8    QueueContentType = "v8"
+)
+
+// Valid indicates whether the value is a known member of the QueueContentType enum.
+func (e QueueContentType) Valid() bool {
+	switch e {
+	case Bytes:
+		return true
+	case JSON:
+		return true
+	case Text:
+		return true
+	case V8:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ReleaseEntrySource.
+const (
+	Builtin  ReleaseEntrySource = "builtin"
+	Imported ReleaseEntrySource = "imported"
+)
+
+// Valid indicates whether the value is a known member of the ReleaseEntrySource enum.
+func (e ReleaseEntrySource) Valid() bool {
+	switch e {
+	case Builtin:
+		return true
+	case Imported:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ReleaseNoteKind.
+const (
+	Breaking ReleaseNoteKind = "breaking"
+	Feature  ReleaseNoteKind = "feature"
+	Fix      ReleaseNoteKind = "fix"
+	Security ReleaseNoteKind = "security"
+)
+
+// Valid indicates whether the value is a known member of the ReleaseNoteKind enum.
+func (e ReleaseNoteKind) Valid() bool {
+	switch e {
+	case Breaking:
+		return true
+	case Feature:
+		return true
+	case Fix:
+		return true
+	case Security:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RequestRecordKind.
+const (
+	Dropped    RequestRecordKind = "dropped"
+	Invocation RequestRecordKind = "invocation"
+	Request    RequestRecordKind = "request"
+)
+
+// Valid indicates whether the value is a known member of the RequestRecordKind enum.
+func (e RequestRecordKind) Valid() bool {
+	switch e {
+	case Dropped:
+		return true
+	case Invocation:
+		return true
+	case Request:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for StatusClockSource.
 const (
 	StatusClockSourceLocal    StatusClockSource = "local"
@@ -743,6 +1187,54 @@ func (e StatusClockSource) Valid() bool {
 	case StatusClockSourceLocal:
 		return true
 	case StatusClockSourcePostgres:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TelemetrySignal.
+const (
+	Logs    TelemetrySignal = "logs"
+	Metrics TelemetrySignal = "metrics"
+	Traces  TelemetrySignal = "traces"
+)
+
+// Valid indicates whether the value is a known member of the TelemetrySignal enum.
+func (e TelemetrySignal) Valid() bool {
+	switch e {
+	case Logs:
+		return true
+	case Metrics:
+		return true
+	case Traces:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TenantGrantActions.
+const (
+	TenantGrantActionsData    TenantGrantActions = "data"
+	TenantGrantActionsDeploy  TenantGrantActions = "deploy"
+	TenantGrantActionsKill    TenantGrantActions = "kill"
+	TenantGrantActionsRead    TenantGrantActions = "read"
+	TenantGrantActionsSecrets TenantGrantActions = "secrets"
+)
+
+// Valid indicates whether the value is a known member of the TenantGrantActions enum.
+func (e TenantGrantActions) Valid() bool {
+	switch e {
+	case TenantGrantActionsData:
+		return true
+	case TenantGrantActionsDeploy:
+		return true
+	case TenantGrantActionsKill:
+		return true
+	case TenantGrantActionsRead:
+		return true
+	case TenantGrantActionsSecrets:
 		return true
 	default:
 		return false
@@ -785,21 +1277,99 @@ func (e Transport) Valid() bool {
 	}
 }
 
-// Defines values for WIFCheckResultLifecycle.
+// Defines values for UpgradeRunState.
 const (
-	WIFCheckResultLifecycleAbsent WIFCheckResultLifecycle = "absent"
-	WIFCheckResultLifecycleError  WIFCheckResultLifecycle = "error"
-	WIFCheckResultLifecycleOk     WIFCheckResultLifecycle = "ok"
+	UpgradeRunStateAborted UpgradeRunState = "aborted"
+	UpgradeRunStateDone    UpgradeRunState = "done"
+	UpgradeRunStateFailed  UpgradeRunState = "failed"
+	UpgradeRunStatePaused  UpgradeRunState = "paused"
+	UpgradeRunStateRunning UpgradeRunState = "running"
 )
 
-// Valid indicates whether the value is a known member of the WIFCheckResultLifecycle enum.
-func (e WIFCheckResultLifecycle) Valid() bool {
+// Valid indicates whether the value is a known member of the UpgradeRunState enum.
+func (e UpgradeRunState) Valid() bool {
 	switch e {
-	case WIFCheckResultLifecycleAbsent:
+	case UpgradeRunStateAborted:
 		return true
-	case WIFCheckResultLifecycleError:
+	case UpgradeRunStateDone:
 		return true
-	case WIFCheckResultLifecycleOk:
+	case UpgradeRunStateFailed:
+		return true
+	case UpgradeRunStatePaused:
+		return true
+	case UpgradeRunStateRunning:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UpgradeStepKind.
+const (
+	UpgradeStepKindBackup   UpgradeStepKind = "backup"
+	UpgradeStepKindContract UpgradeStepKind = "contract"
+	UpgradeStepKindHost     UpgradeStepKind = "host"
+	UpgradeStepKindMgmt     UpgradeStepKind = "mgmt"
+)
+
+// Valid indicates whether the value is a known member of the UpgradeStepKind enum.
+func (e UpgradeStepKind) Valid() bool {
+	switch e {
+	case UpgradeStepKindBackup:
+		return true
+	case UpgradeStepKindContract:
+		return true
+	case UpgradeStepKindHost:
+		return true
+	case UpgradeStepKindMgmt:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UpgradeStepMethod.
+const (
+	Bounce UpgradeStepMethod = "bounce"
+	Drain  UpgradeStepMethod = "drain"
+)
+
+// Valid indicates whether the value is a known member of the UpgradeStepMethod enum.
+func (e UpgradeStepMethod) Valid() bool {
+	switch e {
+	case Bounce:
+		return true
+	case Drain:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UpgradeStepStatus.
+const (
+	UpgradeStepStatusDone    UpgradeStepStatus = "done"
+	UpgradeStepStatusFailed  UpgradeStepStatus = "failed"
+	UpgradeStepStatusPending UpgradeStepStatus = "pending"
+	UpgradeStepStatusRunning UpgradeStepStatus = "running"
+	UpgradeStepStatusSkipped UpgradeStepStatus = "skipped"
+	UpgradeStepStatusWaiting UpgradeStepStatus = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the UpgradeStepStatus enum.
+func (e UpgradeStepStatus) Valid() bool {
+	switch e {
+	case UpgradeStepStatusDone:
+		return true
+	case UpgradeStepStatusFailed:
+		return true
+	case UpgradeStepStatusPending:
+		return true
+	case UpgradeStepStatusRunning:
+		return true
+	case UpgradeStepStatusSkipped:
+		return true
+	case UpgradeStepStatusWaiting:
 		return true
 	default:
 		return false
@@ -824,6 +1394,24 @@ func (e WhoAmIKind) Valid() bool {
 	case WhoAmIKindNode:
 		return true
 	case WhoAmIKindUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListAuditParamsOrder.
+const (
+	Asc  ListAuditParamsOrder = "asc"
+	Desc ListAuditParamsOrder = "desc"
+)
+
+// Valid indicates whether the value is a known member of the ListAuditParamsOrder enum.
+func (e ListAuditParamsOrder) Valid() bool {
+	switch e {
+	case Asc:
+		return true
+	case Desc:
 		return true
 	default:
 		return false
@@ -866,6 +1454,135 @@ func (e PurgeTenantObjectsParamsState) Valid() bool {
 	}
 }
 
+// Defines values for GetWorkloadLogsParamsSource.
+const (
+	Console  GetWorkloadLogsParamsSource = "console"
+	Requests GetWorkloadLogsParamsSource = "requests"
+)
+
+// Valid indicates whether the value is a known member of the GetWorkloadLogsParamsSource enum.
+func (e GetWorkloadLogsParamsSource) Valid() bool {
+	switch e {
+	case Console:
+		return true
+	case Requests:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ActOnUpgradeJSONBodyAction.
+const (
+	Abort  ActOnUpgradeJSONBodyAction = "abort"
+	Pause  ActOnUpgradeJSONBodyAction = "pause"
+	Resume ActOnUpgradeJSONBodyAction = "resume"
+)
+
+// Valid indicates whether the value is a known member of the ActOnUpgradeJSONBodyAction enum.
+func (e ActOnUpgradeJSONBodyAction) Valid() bool {
+	switch e {
+	case Abort:
+		return true
+	case Pause:
+		return true
+	case Resume:
+		return true
+	default:
+		return false
+	}
+}
+
+// Approval One approval wait of one Workflow instance, as the host running it records it.
+type Approval struct {
+	// Approver The verified tailnet identity that decided an approval (WireGuard, never the request body).
+	Approver  *Approver  `json:"approver,omitempty"`
+	Comment   *string    `json:"comment,omitempty"`
+	DecidedAt *time.Time `json:"decidedAt,omitempty"`
+
+	// Facts The instance's numeric params, which grant `limits` are checked against.
+	Facts *map[string]float64 `json:"facts,omitempty"`
+
+	// Host The host that runs the instance (set by mgmt).
+	Host        *string        `json:"host,omitempty"`
+	Instance    string         `json:"instance"`
+	RequestedAt time.Time      `json:"requestedAt"`
+	Status      ApprovalStatus `json:"status"`
+
+	// Step The `waitForEvent` step name (`wait-for-approval` for `waitForApproval`).
+	Step     string `json:"step"`
+	TenantID string `json:"tenantID"`
+
+	// Timeout The wait's timeout as the Workflow gave it.
+	Timeout *string `json:"timeout,omitempty"`
+
+	// Type The event type waited for: `approval` or `approval-*`.
+	Type     string `json:"type"`
+	Workflow string `json:"workflow"`
+	Workload string `json:"workload"`
+}
+
+// ApprovalStatus defines model for Approval.Status.
+type ApprovalStatus string
+
+// ApprovalDecisionRequest defines model for ApprovalDecisionRequest.
+type ApprovalDecisionRequest struct {
+	// Comment Shown to the Workflow (`comment`; a rejection's `reason`) and audited.
+	Comment  *string                         `json:"comment,omitempty"`
+	Decision ApprovalDecisionRequestDecision `json:"decision"`
+
+	// Metadata Extra fields for the Workflow (`waitForApproval` returns them). An `approver` key is replaced by tailworks'.
+	Metadata *map[string]interface{} `json:"metadata,omitempty"`
+
+	// Step Which wait, when the instance waits for several.
+	Step *string `json:"step,omitempty"`
+}
+
+// ApprovalDecisionRequestDecision defines model for ApprovalDecisionRequest.Decision.
+type ApprovalDecisionRequestDecision string
+
+// ApprovalDecisionResponse defines model for ApprovalDecisionResponse.
+type ApprovalDecisionResponse struct {
+	// Approval One approval wait of one Workflow instance, as the host running it records it.
+	Approval Approval `json:"approval"`
+}
+
+// ApprovalList defines model for ApprovalList.
+type ApprovalList struct {
+	Approvals []Approval `json:"approvals"`
+
+	// Unreachable Hosts that did not answer (their approvals are missing).
+	Unreachable *[]string `json:"unreachable,omitempty"`
+}
+
+// ApproveGrant One value of a `github.com/rosskukulinski/tailworks/cap/approve` grant. A missing field does not narrow; `"*"` in a list matches anything.
+type ApproveGrant struct {
+	Decisions *[]string           `json:"decisions,omitempty"`
+	Limits    *map[string]float32 `json:"limits,omitempty"`
+	Steps     *[]string           `json:"steps,omitempty"`
+	Workflows *[]string           `json:"workflows,omitempty"`
+	Workloads *[]string           `json:"workloads,omitempty"`
+}
+
+// Approver The verified tailnet identity that decided an approval (WireGuard, never the request body).
+type Approver struct {
+	// Node MagicDNS name.
+	Node string `json:"node"`
+
+	// NodeID Stable node ID.
+	NodeID string   `json:"nodeId"`
+	Tags   []string `json:"tags"`
+
+	// User Login (untagged nodes).
+	User *string `json:"user,omitempty"`
+
+	// Via `tailnet`: sent to the workload's (or object's) own node; `mgmt`: `tw approve` or the admin UI.
+	Via ApproverVia `json:"via"`
+}
+
+// ApproverVia `tailnet`: sent to the workload's (or object's) own node; `mgmt`: `tw approve` or the admin UI.
+type ApproverVia string
+
 // Arch A Go GOARCH. Container images must match their host's.
 type Arch string
 
@@ -875,7 +1592,7 @@ type Assignment struct {
 
 	// Containers The workload's container classes as mgmt resolved them at deploy (ADR-032 D3): the image
 	// refs `ctx.container` sees and their per-arch pins. hostd starts a container only from the
-	// pin for its own arch, pulled by digest from twd's registry.
+	// pin for its own arch, pulled by digest from tailworks' registry.
 	Containers   *[]ContainerClass `json:"containers,omitempty"`
 	ControlURL   *string           `json:"controlURL,omitempty"`
 	CreatedAt    int64             `json:"createdAt"`
@@ -935,15 +1652,29 @@ type AuditBatch struct {
 // `principal`,
 // `tenant_note` (source `tenant`, unverified),
 // `container_start` (an object's container, ADR-032),
-// `container_stop` (an object's container, ADR-032).
+// `container_stop` (an object's container, ADR-032),
+// `audit_dropped` (records refused before they were chained, e.g. tenant notes over their rate during a flood; `detail.n` and `detail.byReason` count them, so the gap is visible and the chain still verifies).
 // mgmt chain:
+// `audit_pruned` (audit retention deleted a chain's oldest records: the chain, how many, and the seq and hash of the last one deleted, its new checkpoint),
 // `tenant_create`,
 // `tenant_update`,
 // `tenant_delete`,
+// `tenant_purge_host` (a host removed a deleted tenant's files),
 // `host_register`,
 // `host_delete`,
+// `host_cordon`,
+// `host_uncordon`,
+// `host_drain`,
+// `release_import`,
+// `release_artifact`,
+// `upgrade_start`,
+// `upgrade_step`,
+// `upgrade_pause`,
+// `upgrade_resume`,
+// `upgrade_abort`,
 // `deploy`,
 // `undeploy`,
+// `rollback` (a deploy of an earlier deployment's stored bundle, ADR-046),
 // `create`,
 // `mint`,
 // `remint`,
@@ -952,8 +1683,29 @@ type AuditBatch struct {
 // `device_delete`,
 // `purge`,
 // `volume_key`,
+// `secret_put` (a workload secret set; name only),
+// `secret_delete`,
+// `secret_release` (a workload's secrets released to its lease holder; names only),
+// `store_create` (a platform store created, by its first write or an admin),
+// `store_delete` (a platform store and its data key deleted),
+// `store_replay_failed` (a store's object stopped its replay at a journal entry it can't apply; the entry's seq, the error and the host),
+// `store_repair` (an operator skipped the journal entry a degraded store stopped at, `tw d1 repair`),
+// `queue_create` (a queue created, by its first use or an admin),
+// `queue_delete` (a queue, its messages and its data key deleted),
+// `queue_purge` (every message of a queue deleted),
+// `d1_write` (an operator's SQL changed a D1 database; statement count only),
+// `kv_put` (an admin wrote a Workers KV key; the namespace only, never the key),
+// `kv_delete` (an admin deleted a Workers KV key; the namespace only),
+// `telemetry_put` (the tenant's OTLP export set; endpoint and header names only),
+// `telemetry_delete`,
+// `telemetry_release` (the OTLP export config released to a workload's lease holder; once per host, workload and version),
+// `notification_put` (the tenant's notification webhook set; its host and header names only),
+// `notification_delete`,
+// `notification_failed` (a notification was not delivered; the webhook's host and the error),
+// `notification_test` (`tw notify test`; the origin and the outcome),
 // `reap`,
 // `preflight` (optional; dryRun deploys),
+// `policy_apply` (`tw policy --apply`: the additions written to the tailnet policy and both ETags, or why nothing was written),
 // `host_add`,
 // `credential`,
 // `obo_root`,
@@ -967,8 +1719,16 @@ type AuditBatch struct {
 // `revoke` (an unused pooled key revoked).
 // Public ingress (ADR-029), host chain:
 // `public_request` (one per public request),
-// `public_rejected` (per-minute summary of requests the limits refused),
+// `public_rejected` (per-minute summary of requests the limits refused, and of `not_public`/`bad_request` path refusals),
 // `public_object_created` (a name admitted for a public create).
+// Public ingress, mgmt chain:
+// `public_name_claim` (a tenant took a public name on its tailnet, red-team H10),
+// `public_name_release` (a tenant gave a public name up).
+// Workflow approvals (ADR-040), host chain:
+// `approval_requested` (a Workflow instance waits for an approval),
+// `approval_decision` (approved or rejected, with the approver's identity),
+// `approval_denied` (a decision refused, e.g. `cap_missing`),
+// `approval_timeout` (the wait timed out: rejected by default).
 // Both chains:
 // `expose_on` / `expose_off` (mgmt: the operator's change; host: the listener opened/closed).
 type AuditKind string
@@ -1014,15 +1774,29 @@ type AuditRecord struct {
 	// `principal`,
 	// `tenant_note` (source `tenant`, unverified),
 	// `container_start` (an object's container, ADR-032),
-	// `container_stop` (an object's container, ADR-032).
+	// `container_stop` (an object's container, ADR-032),
+	// `audit_dropped` (records refused before they were chained, e.g. tenant notes over their rate during a flood; `detail.n` and `detail.byReason` count them, so the gap is visible and the chain still verifies).
 	// mgmt chain:
+	// `audit_pruned` (audit retention deleted a chain's oldest records: the chain, how many, and the seq and hash of the last one deleted, its new checkpoint),
 	// `tenant_create`,
 	// `tenant_update`,
 	// `tenant_delete`,
+	// `tenant_purge_host` (a host removed a deleted tenant's files),
 	// `host_register`,
 	// `host_delete`,
+	// `host_cordon`,
+	// `host_uncordon`,
+	// `host_drain`,
+	// `release_import`,
+	// `release_artifact`,
+	// `upgrade_start`,
+	// `upgrade_step`,
+	// `upgrade_pause`,
+	// `upgrade_resume`,
+	// `upgrade_abort`,
 	// `deploy`,
 	// `undeploy`,
+	// `rollback` (a deploy of an earlier deployment's stored bundle, ADR-046),
 	// `create`,
 	// `mint`,
 	// `remint`,
@@ -1031,8 +1805,29 @@ type AuditRecord struct {
 	// `device_delete`,
 	// `purge`,
 	// `volume_key`,
+	// `secret_put` (a workload secret set; name only),
+	// `secret_delete`,
+	// `secret_release` (a workload's secrets released to its lease holder; names only),
+	// `store_create` (a platform store created, by its first write or an admin),
+	// `store_delete` (a platform store and its data key deleted),
+	// `store_replay_failed` (a store's object stopped its replay at a journal entry it can't apply; the entry's seq, the error and the host),
+	// `store_repair` (an operator skipped the journal entry a degraded store stopped at, `tw d1 repair`),
+	// `queue_create` (a queue created, by its first use or an admin),
+	// `queue_delete` (a queue, its messages and its data key deleted),
+	// `queue_purge` (every message of a queue deleted),
+	// `d1_write` (an operator's SQL changed a D1 database; statement count only),
+	// `kv_put` (an admin wrote a Workers KV key; the namespace only, never the key),
+	// `kv_delete` (an admin deleted a Workers KV key; the namespace only),
+	// `telemetry_put` (the tenant's OTLP export set; endpoint and header names only),
+	// `telemetry_delete`,
+	// `telemetry_release` (the OTLP export config released to a workload's lease holder; once per host, workload and version),
+	// `notification_put` (the tenant's notification webhook set; its host and header names only),
+	// `notification_delete`,
+	// `notification_failed` (a notification was not delivered; the webhook's host and the error),
+	// `notification_test` (`tw notify test`; the origin and the outcome),
 	// `reap`,
 	// `preflight` (optional; dryRun deploys),
+	// `policy_apply` (`tw policy --apply`: the additions written to the tailnet policy and both ETags, or why nothing was written),
 	// `host_add`,
 	// `credential`,
 	// `obo_root`,
@@ -1046,8 +1841,16 @@ type AuditRecord struct {
 	// `revoke` (an unused pooled key revoked).
 	// Public ingress (ADR-029), host chain:
 	// `public_request` (one per public request),
-	// `public_rejected` (per-minute summary of requests the limits refused),
+	// `public_rejected` (per-minute summary of requests the limits refused, and of `not_public`/`bad_request` path refusals),
 	// `public_object_created` (a name admitted for a public create).
+	// Public ingress, mgmt chain:
+	// `public_name_claim` (a tenant took a public name on its tailnet, red-team H10),
+	// `public_name_release` (a tenant gave a public name up).
+	// Workflow approvals (ADR-040), host chain:
+	// `approval_requested` (a Workflow instance waits for an approval),
+	// `approval_decision` (approved or rejected, with the approver's identity),
+	// `approval_denied` (a decision refused, e.g. `cap_missing`),
+	// `approval_timeout` (the wait timed out: rejected by default).
 	// Both chains:
 	// `expose_on` / `expose_off` (mgmt: the operator's change; host: the listener opened/closed).
 	Kind     AuditKind `json:"kind"`
@@ -1095,15 +1898,26 @@ type ChainStatus struct {
 	Chain    string  `json:"chain"`
 	Error    *string `json:"error,omitempty"`
 	Ok       bool    `json:"ok"`
-	Records  int     `json:"records"`
+
+	// PrunedThrough Audit retention (`tw-mgmt -audit-max-age`, `-audit-max-records`) deleted this chain's records up to this seq. The records kept still verify: the first one links to the checkpointed hash of the last one deleted. Absent: nothing was pruned.
+	PrunedThrough *int64 `json:"prunedThrough,omitempty"`
+	Records       int    `json:"records"`
 }
 
-// ClassConfig One DO namespace from `twd.jsonc` `tailnet.objects`.
+// ClassConfig One DO namespace from `tailworks.jsonc` `tailnet.objects`.
 type ClassConfig struct {
-	Agent *bool  `json:"agent,omitempty"`
 	Class string `json:"class"`
 
-	// Service `_workload` only: the Tailscale Service the workload entry node hosts (`twd.jsonc` `tailnet.service`).
+	// PreviewOf `_workload` only, previews: the workload this deployment is a preview of (ADR-048), deployed as the workload `<workload>--preview-<alias>`.
+	PreviewOf *string `json:"previewOf,omitempty"`
+
+	// ReplicaOf `_workload` only, replicas 2..N: the workload this deployment is a replica of (`tailworks.jsonc` `replicas`). Replica i is deployed as the workload `<workload>--r<i>`.
+	ReplicaOf *string `json:"replicaOf,omitempty"`
+
+	// Replicas `_workload` only, the workload itself: its replica count when > 1.
+	Replicas *int `json:"replicas,omitempty"`
+
+	// Service `_workload` only: the Tailscale Service the workload entry node hosts (`tailworks.jsonc` `tailnet.service`).
 	Service *string  `json:"service,omitempty"`
 	Tags    []string `json:"tags"`
 
@@ -1111,7 +1925,7 @@ type ClassConfig struct {
 	TTL *string `json:"ttl,omitempty"`
 }
 
-// ContainerClass A container class of a deployment (a wrangler `containers` entry plus twd.jsonc overrides) and its pinned images.
+// ContainerClass A container class of a deployment (a wrangler `containers` entry plus tailworks.jsonc overrides) and its pinned images.
 type ContainerClass struct {
 	Arch  *ContainerClassArch `json:"arch,omitempty"`
 	Class string              `json:"class"`
@@ -1122,7 +1936,7 @@ type ContainerClass struct {
 	// Image The default image reference `start()` runs.
 	Image *string `json:"image,omitempty"`
 
-	// ImageSources Named images twd deploy builds: name → the wrangler Dockerfile, as written.
+	// ImageSources Named images tw deploy builds: name → the wrangler Dockerfile, as written.
 	ImageSources *map[string]string `json:"imageSources,omitempty"`
 
 	// Images Named images (`ctx.container.images`): name → reference.
@@ -1139,7 +1953,7 @@ type ContainerClass struct {
 type ContainerClassArch string
 
 // ContainerImagePin One image reference of a container class, resolved once at deploy for one arch (ADR-032 D3):
-// hosts pull exactly `repository@digest` from twd's registry and nothing else. Retagging the
+// hosts pull exactly `repository@digest` from tailworks' registry and nothing else. Retagging the
 // upstream ref later changes nothing until the next deploy.
 type ContainerImagePin struct {
 	Arch ContainerImagePinArch `json:"arch"`
@@ -1147,13 +1961,13 @@ type ContainerImagePin struct {
 	// Digest The linux/`arch` image manifest (never an index).
 	Digest string `json:"digest"`
 
-	// From What was resolved: `<upstream ref>@<digest>` (mirrored), `alias <ref>`, `public <ref>`, or the twd.local ref.
+	// From What was resolved: `<upstream ref>@<digest>` (mirrored), `alias <ref>`, `public <ref>`, or the tw.local ref.
 	From *string `json:"from,omitempty"`
 
 	// Name The class's image name (wrangler `images` key); absent for the default image.
 	Name *string `json:"name,omitempty"`
 
-	// Ref The reference as `ctx.container` sees it (the wrangler image, or the `twd.local/<tenant>/…@sha256:…` ref `twd deploy` built).
+	// Ref The reference as `ctx.container` sees it (the wrangler image, or the `tw.local/<tenant>/…@sha256:…` ref `tw deploy` built).
 	Ref string `json:"ref"`
 
 	// Repository `<tenantID>/…` (the tenant's builds and mirrors) or `public/…` (public bases, alias targets).
@@ -1163,8 +1977,8 @@ type ContainerImagePin struct {
 // ContainerImagePinArch defines model for ContainerImagePin.Arch.
 type ContainerImagePinArch string
 
-// ContainerImages Images `twd deploy` built and pushed, by class: `{"<Class>": {"image": ref, "images": {name: ref}}}`
-// with `twd.local/<tenantID>/<repo>@sha256:…` refs (an index when built for several arches). They
+// ContainerImages Images `tw deploy` built and pushed, by class: `{"<Class>": {"image": ref, "images": {name: ref}}}`
+// with `tw.local/<tenantID>/<repo>@sha256:…` refs (an index when built for several arches). They
 // replace the class's Dockerfile `image` / `images` entries; every ref is then pinned like any other.
 type ContainerImages map[string]struct {
 	Image  *string            `json:"image,omitempty"`
@@ -1240,6 +2054,37 @@ type Credential struct {
 	Tags     []string `json:"tags"`
 }
 
+// D1Query defines model for D1Query.
+type D1Query struct {
+	Queries []struct {
+		// Params Positional parameters: null, numbers, strings, booleans (bound as 1/0), or a BLOB as an array of byte values.
+		Params *[]interface{} `json:"params,omitempty"`
+
+		// SQL One statement (or several separated by `;`; parameters bind to the last).
+		SQL string `json:"sql"`
+	} `json:"queries"`
+}
+
+// D1Result One statement's result, as D1's wire protocol has it.
+type D1Result struct {
+	Error *string `json:"error,omitempty"`
+
+	// Meta `changes`, `last_row_id`, `changed_db`, `rows_read`, `rows_written`, `size_after`, `duration` (ms), `served_by`.
+	Meta    *map[string]interface{} `json:"meta,omitempty"`
+	Results *struct {
+		Columns *[]string `json:"columns,omitempty"`
+
+		// Rows Values: null, numbers, strings, and BLOBs as arrays of byte values.
+		Rows *[][]interface{} `json:"rows,omitempty"`
+	} `json:"results,omitempty"`
+	Success bool `json:"success"`
+}
+
+// DegradedStores defines model for DegradedStores.
+type DegradedStores struct {
+	Items []Store `json:"items"`
+}
+
 // Deployment defines model for Deployment.
 type Deployment struct {
 	// Containers The bundle's container classes with the images pinned at deploy (ADR-032 D3): what hosts pull, by digest.
@@ -1265,22 +2110,38 @@ type Deployment struct {
 	Placement *PlacementDecision `json:"placement,omitempty"`
 
 	// Public The deployment's public routes (ADR-029); absent when tailnet-only.
-	Public       *DeploymentPublic `json:"public,omitempty"`
-	Status       DeploymentStatus  `json:"status"`
-	TenantID     string            `json:"tenantID"`
-	Tier         *Tier             `json:"tier,omitempty"`
-	UpdatedAt    *int64            `json:"updatedAt,omitempty"`
-	Workload     string            `json:"workload"`
-	WorkloadTags *[]string         `json:"workloadTags,omitempty"`
+	Public *DeploymentPublic `json:"public,omitempty"`
+
+	// Replicas A workload with `tailworks.jsonc` `replicas` > 1 (stateless only): every copy, this deployment first, each on a distinct host. Undeploying the workload undeploys its replicas.
+	Replicas *[]ReplicaRef `json:"replicas,omitempty"`
+
+	// Status - `assigned`: mgmt placed it; the host has not reported yet.
+	// - `starting`: the host is starting it.
+	// - `active`: serving.
+	// - `crashloop`: it served, then its workerd kept exiting; the host
+	//   keeps restarting it with exponential backoff (200 ms doubling to
+	//   5 min) and reports `active` again once it answers. `error` holds
+	//   the attempt count, the next delay and the last log lines.
+	// - `draining`: being replaced or undeployed.
+	// - `stopped`: stopped (undeployed, fenced or unassigned).
+	// - `failed`: the deploy failed (bad bundle or config, or it never
+	//   became healthy); the host does not retry it. `error` says why.
+	// - `superseded`: a newer deployment of the workload replaced it.
+	Status       DeploymentStatus `json:"status"`
+	TenantID     string           `json:"tenantID"`
+	Tier         *Tier            `json:"tier,omitempty"`
+	UpdatedAt    *int64           `json:"updatedAt,omitempty"`
+	Workload     string           `json:"workload"`
+	WorkloadTags *[]string        `json:"workloadTags,omitempty"`
 }
 
 // DeploymentCreate defines model for DeploymentCreate.
 type DeploymentCreate struct {
-	// Bundle tar (optionally gzipped) of the built worker + `twd.jsonc` + `wrangler.jsonc`.
+	// Bundle tar (optionally gzipped) of the built worker + `tailworks.jsonc` + `wrangler.jsonc`.
 	Bundle []byte `json:"bundle"`
 
-	// ContainerImages Images `twd deploy` built and pushed, by class: `{"<Class>": {"image": ref, "images": {name: ref}}}`
-	// with `twd.local/<tenantID>/<repo>@sha256:…` refs (an index when built for several arches). They
+	// ContainerImages Images `tw deploy` built and pushed, by class: `{"<Class>": {"image": ref, "images": {name: ref}}}`
+	// with `tw.local/<tenantID>/<repo>@sha256:…` refs (an index when built for several arches). They
 	// replace the class's Dockerfile `image` / `images` entries; every ref is then pinned like any other.
 	ContainerImages *ContainerImages `json:"containerImages,omitempty"`
 
@@ -1290,13 +2151,29 @@ type DeploymentCreate struct {
 	// Host Pin a host.
 	Host *string `json:"host,omitempty"`
 
-	// Namespaces Override the classes read from `twd.jsonc` (tests).
+	// Namespaces Override the classes read from `tailworks.jsonc` (tests).
 	Namespaces *[]ClassConfig `json:"namespaces,omitempty"`
+
+	// Preview Deploy as a preview (`tw deploy --preview`, ADR-048): a workload of its own, `<workload>--preview-<alias>`, with the same tags, its own lease, Durable Object storage and stores, the workload's secrets, and no Tailscale Service, public routes or replicas. The workload itself is not touched. A bundle with queue bindings is `400 preview_unsupported`.
+	Preview *bool `json:"preview,omitempty"`
+
+	// PreviewAlias The preview's alias (implies `preview`). Default: the first 8 hex digits of the bundle's SHA-256, so the same bundle is the same preview.
+	PreviewAlias *string `json:"previewAlias,omitempty"`
 
 	// Replace Re-place a running workload (smart placement, ADR-033): move it to a clearly better eligible host, or to `host` when pinned. Audited (`movedFrom`, `replace`).
 	Replace  *bool  `json:"replace,omitempty"`
 	TenantID string `json:"tenantID"`
 	Workload string `json:"workload"`
+}
+
+// DeploymentHistoryPage defines model for DeploymentHistoryPage.
+type DeploymentHistoryPage struct {
+	// BundleRetention How many of each workload's newest bundles mgmt keeps (0 = every bundle).
+	BundleRetention int                `json:"bundleRetention"`
+	Items           []DeploymentRecord `json:"items"`
+
+	// NextCursor Pass as `?cursor=` for the next page; `null` when there is none.
+	NextCursor nullable.Nullable[string] `json:"nextCursor"`
 }
 
 // DeploymentPage defines model for DeploymentPage.
@@ -1312,7 +2189,7 @@ type DeploymentPublic struct {
 	// Allowed The tenant's `publicIngress` is `allow`; false: declared but not served.
 	Allowed bool `json:"allowed"`
 
-	// Exposed `twd expose` setting.
+	// Exposed `tw expose` setting.
 	Exposed bool     `json:"exposed"`
 	Routes  []string `json:"routes"`
 
@@ -1320,14 +2197,86 @@ type DeploymentPublic struct {
 	URL string `json:"url"`
 }
 
-// DeploymentReport defines model for DeploymentReport.
-type DeploymentReport struct {
-	DeploymentID string           `json:"deploymentID"`
-	Error        *string          `json:"error,omitempty"`
-	Status       DeploymentStatus `json:"status"`
+// DeploymentRecord One entry of a workload's deployment history (ADR-046).
+type DeploymentRecord struct {
+	// ActiveAt When the host first reported it `active` (unix ms). Absent if it never was, or the record predates history.
+	ActiveAt *int64 `json:"activeAt,omitempty"`
+
+	// BundleBytes Size of the retained bundle (0 once pruned).
+	BundleBytes *int64 `json:"bundleBytes,omitempty"`
+
+	// BundleRetained mgmt still holds the bundle, so it can be rolled back to.
+	BundleRetained bool `json:"bundleRetained"`
+
+	// BundleSHA256 Hex SHA-256 of the bundle as uploaded (empty: deployed without a bundle).
+	BundleSHA256 string `json:"bundleSHA256"`
+	CreatedAt    int64  `json:"createdAt"`
+
+	// DeployedBy The actor who deployed (see Conventions).
+	DeployedBy *string `json:"deployedBy,omitempty"`
+
+	// DeploymentID Examples: dp_3f9a1c2b7d8e4f50
+	DeploymentID string `json:"deploymentID"`
+	Epoch        int64  `json:"epoch"`
+
+	// Error The host's last error for this deployment.
+	Error *string `json:"error,omitempty"`
+	Host  string  `json:"host"`
+
+	// HostStatus The last status the host reported (or mgmt set) for this deployment, kept after it is superseded: `active` means it was serving when it was replaced.
+	HostStatus *string `json:"hostStatus,omitempty"`
+
+	// RollbackOf Set on a rollback: the deployment whose bundle it redeployed.
+	RollbackOf *string `json:"rollbackOf,omitempty"`
+
+	// Status - `assigned`: mgmt placed it; the host has not reported yet.
+	// - `starting`: the host is starting it.
+	// - `active`: serving.
+	// - `crashloop`: it served, then its workerd kept exiting; the host
+	//   keeps restarting it with exponential backoff (200 ms doubling to
+	//   5 min) and reports `active` again once it answers. `error` holds
+	//   the attempt count, the next delay and the last log lines.
+	// - `draining`: being replaced or undeployed.
+	// - `stopped`: stopped (undeployed, fenced or unassigned).
+	// - `failed`: the deploy failed (bad bundle or config, or it never
+	//   became healthy); the host does not retry it. `error` says why.
+	// - `superseded`: a newer deployment of the workload replaced it.
+	Status   DeploymentStatus `json:"status"`
+	Workload string           `json:"workload"`
 }
 
-// DeploymentStatus defines model for DeploymentStatus.
+// DeploymentReport defines model for DeploymentReport.
+type DeploymentReport struct {
+	DeploymentID string  `json:"deploymentID"`
+	Error        *string `json:"error,omitempty"`
+
+	// Status - `assigned`: mgmt placed it; the host has not reported yet.
+	// - `starting`: the host is starting it.
+	// - `active`: serving.
+	// - `crashloop`: it served, then its workerd kept exiting; the host
+	//   keeps restarting it with exponential backoff (200 ms doubling to
+	//   5 min) and reports `active` again once it answers. `error` holds
+	//   the attempt count, the next delay and the last log lines.
+	// - `draining`: being replaced or undeployed.
+	// - `stopped`: stopped (undeployed, fenced or unassigned).
+	// - `failed`: the deploy failed (bad bundle or config, or it never
+	//   became healthy); the host does not retry it. `error` says why.
+	// - `superseded`: a newer deployment of the workload replaced it.
+	Status DeploymentStatus `json:"status"`
+}
+
+// DeploymentStatus - `assigned`: mgmt placed it; the host has not reported yet.
+//   - `starting`: the host is starting it.
+//   - `active`: serving.
+//   - `crashloop`: it served, then its workerd kept exiting; the host
+//     keeps restarting it with exponential backoff (200 ms doubling to
+//     5 min) and reports `active` again once it answers. `error` holds
+//     the attempt count, the next delay and the last log lines.
+//   - `draining`: being replaced or undeployed.
+//   - `stopped`: stopped (undeployed, fenced or unassigned).
+//   - `failed`: the deploy failed (bad bundle or config, or it never
+//     became healthy); the host does not retry it. `error` says why.
+//   - `superseded`: a newer deployment of the workload replaced it.
 type DeploymentStatus string
 
 // DeviceDeleteRun defines model for DeviceDeleteRun.
@@ -1355,10 +2304,11 @@ type Endpoint struct {
 	Status ObjectStatus `json:"status"`
 }
 
-// Error The DX.md error catalog shape. `code` is stable and machine-readable;
+// Error The typed error catalog (docs/errors.md) shape. `code` is stable and machine-readable;
 // `missing` names what is absent (grant, cap, field, quota); `snippet`
 // is policy HuJSON to paste when a grant is missing; `doc_url` is
-// `https://twd.dev/errors/<code>`; `trace_id` correlates with audit.
+// `https://github.com/rosskukulinski/tailworks/blob/master/docs/errors.md#<code>` (the
+// code's heading in the typed error catalog); `trace_id` correlates with audit.
 type Error struct {
 	// Code The catalog. Status in parentheses.
 	//
@@ -1366,31 +2316,60 @@ type Error struct {
 	// |---|---|---|
 	// | `bad_request` | 400 | malformed body, parameter or filter |
 	// | `bad_cursor` | 400 | `cursor` does not decode |
-	// | `bad_bundle` | 400 | bundle has no `twd.jsonc`, neither `tailnet.tags` nor `tailnet.objects`, or invalid `triggers.crons` |
+	// | `bad_bundle` | 400 | bundle has no `tailworks.jsonc`, neither `tailnet.tags` nor `tailnet.objects`, or invalid `triggers.crons` |
+	// | `bad_object_name` | 400 | a new object name (`objectName`) contains a C0 control, DEL, a C1 control or a bidi control |
+	// | `reserved_tag` | 400 | a bundle or namespace asks for one of tailworks' own tags (`tag:tw`, `tag:tw-mgmt`, `tag:tw-host`) |
 	// | `immutable_field` | 400 | PATCH touches a field the caller may not change |
+	// | `mint_mode_removed` | 400 | a create or PATCH names the removed `apikey` or `wif` mint mode, or a tenant stored in one tries to mint (switch it to `oauth`) |
+	// | `too_many_secrets` | 400 | a workload already has 128 secrets |
+	// | `d1_error` | 400 | a D1 statement failed (SQLite's message, or a D1 limit); nothing of its batch was applied |
 	// | `no_identity` | 401 | WhoIs failed for the connection |
-	// | `host_token_required` | 401 | local-dev socket without `Twd-Host-Token` |
+	// | `host_token_required` | 401 | local-dev socket without `Tw-Host-Token` |
 	// | `host_token_invalid` | 403 | local-dev socket, wrong token |
-	// | `not_admin` | 403 | tailnet caller without `twd.dev/cap/admin` (`snippet` given) |
+	// | `not_admin` | 403 | tailnet caller without `github.com/rosskukulinski/tailworks/cap/admin` (`snippet` given) |
+	// | `tag_not_owned` | 400 | a tenant with its own owner tag asks for a tag its owner tag doesn't own, or that another tenant's on the tailnet owns (`snippet` given) |
+	// | `shared_owner_tag` | 409 | a second tenant on a tailnet where either tenant uses `tag:tw`, or both the same owner tag |
+	// | `name_prefix_required` | 409 | a second tenant on a tailnet without a distinct `namePrefix` |
+	// | `tenant_forbidden` | 403 | a tenant admin's `github.com/rosskukulinski/tailworks/cap/tenant-admin` grants don't name the tenant with the action, or the route is admin-only (`snippet` given) |
+	// | `cap_missing` | 403 | an approval the caller's `github.com/rosskukulinski/tailworks/cap/approve` grants do not cover (`snippet` given) |
 	// | `forbidden` | 403 | role ok, but outside the caller's records / namespaces |
-	// | `host_not_registered` | 403 | `tag:twd-host` node that never did `PUT /v1/hosts/{id}` |
-	// | `host_identity_mismatch` | 403 | host ID bound to another node |
+	// | `experimental_flag` | 403 | the bundle's `compatibility_flags` list flags workerd marks experimental (`unsafe_module`, `rtti_api`, `precise_timers`, …) and no host allows them (`tw-hostd -allow-experimental-flags`); the deploy and its dry run |
+	// | `host_not_registered` | 403 | `tag:tw-host` node that never did `PUT /v1/hosts/{id}`, or a `PUT` for a host ID the admin never created |
+	// | `host_identity_mismatch` | 403 | host ID bound to another node; `registrationSecret` missing or wrong; `auditPubKey` differs from the pinned one |
 	// | `delegation_invalid` | 403 | child tag not owned by the parent's, parent unknown (404) or dead (410) |
 	// | `delegation_exceeds_parent` | 403 | spawn caps ⊄ parent (`missing: {src, dst, cap, field}`) |
-	// | `policy_missing_tag_owners` | 403 | the control plane refused to mint a key for twd's own tags (`snippet` gives the tagOwners to add) |
+	// | `policy_missing_tag_owners` | 403 | the control plane refused to mint a key for tailworks' own tags (`snippet` gives the tagOwners to add) |
 	// | `not_found` | 404 | — |
 	// | `unknown_tenant` | 404 | — |
 	// | `unknown_namespace` | 404 | `(workload, class)` not declared |
+	// | `no_logs` | 404 | the workload's host has no log file for it yet |
+	// | `unknown_secret` | 404 | the workload has no secret of that name |
+	// | `unknown_store` | 404 | the workload has no store of that kind and name |
+	// | `unknown_queue` | 404 | the tenant has no queue of that name |
+	// | `service_not_found` | 404 | a workload's service binding is not declared, or its target workload was never deployed in the tenant |
 	// | `exists` | 409 | create of an existing ID |
 	// | `lease_lost` | 409 | epoch/holder fence failed |
 	// | `lease_held` | 409 | another host holds the lease |
+	// | `store_conflict` | 409 | a store journal append's `after` (or `incarnation`) is not the journal's head: catch up and retry |
+	// | `store_degraded` | 409 | the store object on the workload's host could not apply a journal entry: it stopped its replay there, serves reads from what it applied and refuses writes (`tw d1 export`, then `tw d1 repair --skip <seq>` or recreate the database) |
+	// | `store_not_degraded` | 409 | `…/repair` of a store mgmt does not record as degraded at that journal entry |
+	// | `store_limit` | 400 | a store append exceeds an entry, append or store size limit |
+	// | `queue_limit` | 400 | a send exceeds a message, batch, delay or queue size limit |
 	// | `store_unavailable` | 503 | the store is unreachable, restarting or contended (a row-lock or idle-transaction timeout); retry after `Retry-After` |
 	// | `tier_unavailable` | 409 | the chosen host (`--host`, or the workload's current host) does not offer the deployment's tier, or `containers` (for the image's `arch`) when the bundle declares containers |
-	// | `service_conflict` | 409 | `tailnet.service` names a Service that exists and isn't managed by twd for this tenant and workload |
+	// | `replica_conflict` | 409 | a deploy names a replica (`<workload>--r<n>`) instead of its workload, a replica name is taken by a separate workload, or a workload that is not a replica is given a name of that shape (n ≥ 2), which belongs to replicas |
+	// | `preview_conflict` | 409 | a preview's name (`<workload>--preview-<alias>`) is taken by a workload that is not a preview of this one |
+	// | `preview_failed` | 409 | promote of a preview its host reported `failed` |
+	// | `preview_unsupported` | 400 | `preview` for a bundle with queue bindings (queues are tenant-wide), or of a workload that is itself a preview or replica |
+	// | `unknown_preview` | 404 | promote of a preview that doesn't exist or is stopped |
+	// | `service_conflict` | 409 | `tailnet.service` names a Service that exists and isn't managed by tailworks for this tenant and workload |
 	// | `service_api_failed` | 502 | mgmt can't read or create the Service definition (an OAuth client needs Services › Write) |
+	// | `profile_unsupported` | 400 | the tenant's control-plane profile can't serve the request: on the Headscale profile (ADR-015), `tailnet.service` (no Tailscale Services), public routes or `publicIngress: allow` (no Funnel) |
+	// | `public_name_owned` | 409 | a deploy declares public routes under a workload name another tenant on the same tailnet owns as its public name (red-team H10) |
+	// | `public_name_in_use` | 409 | release of a public name the workload still serves: its latest deployment declares public routes, or its public node is live |
 	// | `move_unconfirmed` | 409 | `replace` would move a stateful workload off its live host, leaving its DO storage behind; confirm with `forceTakeover` |
 	// | `lease_changed` | 409 | the workload's lease changed while `replace` was moving it (a concurrent deploy); retry |
-	// | `takeover_unconfirmed` | 409 | the workload has Durable Objects and its host stopped heartbeating but is still registered: it may still be serving them. `twd host rm <host> --drain`, or redeploy with `--force-takeover` |
+	// | `takeover_unconfirmed` | 409 | the workload has Durable Objects and its host stopped heartbeating but is still registered: it may still be serving them. `tw host rm <host> --force`, or redeploy with `--force-takeover` |
 	// | `already_joined` | 409 | credential for an object that has a node |
 	// | `identity_conflict` | 409 | object ID collision across identities |
 	// | `namespace_ambiguous` | 409 | class declared by several workloads, `workload` missing |
@@ -1398,19 +2377,31 @@ type Error struct {
 	// | `superseded` | 409 | undeploy of a non-latest deployment |
 	// | `tenant_has_live_objects` | 409 | tenant delete without `force` |
 	// | `host_holds_leases` | 409 | host delete without `drain` |
+	// | `version_skew` | 409 | a host (or CLI, or mgmt replica) outside the version window: a host newer than mgmt, or more than one release line behind it; or a store a newer tw-mgmt contracted (ADR-041 §7) |
+	// | `upgrade_blocked` | 409 | an upgrade run can't start: its plan has blockers (`message` lists them; `POST /v1/upgrades` with `dryRun` shows the plan) |
+	// | `upgrade_state` | 409 | pause, resume or abort of a run that isn't running (pause), paused (resume), or active (abort) |
+	// | `feature_unavailable` | 409 | the deployment needs a host feature (`kv`, `r2`, `d1`, …) that no eligible host, or the workload's current host, advertises: upgrade the hosts |
 	// | `killed` | 410 | tombstone (`TombstoneError`) |
 	// | `precondition_failed` | 412 | `If-Match` mismatch |
+	// | `misdirected_request` | 421 | a tailnet request whose `Host` is not one of mgmt's own names or an IP literal (DNS-rebinding guard) |
 	// | `object_quota_exceeded` | 429 | tenant `maxObjects` |
 	// | `spawn_budget_exceeded` | 429 | `maxLive` / `maxDepth` |
 	// | `container_quota_exceeded` | 429 | tenant `maxContainers` / `maxContainerMemMiB` / `maxContainerVCPU`, or the class's `max_instances` (`missing: {quota, limit, used, requested}`) |
-	// | `image_unavailable` | 502 | a container image could not be pinned at deploy (not in twd's registry, no image for any of the pool's arches, or the upstream mirror failed) |
-	// | `registry_unavailable` | 409 | this twd-mgmt serves no OCI registry (`-registry-dir off`) |
-	// | `mirror_disabled` | 409 | this twd-mgmt does not mirror external images (`-no-mirror`) |
+	// | `storage_quota_exceeded` | 429 | a store append or queue send would take the tenant past `maxStoreBytes` / `maxQueueBytes`, or a new store past `maxStores` (`missing: {quota, limit, used, requested}`) |
+	// | `rate_limited` | 429 | a tailnet caller is over its API request rate, or mgmt is serving its maximum of concurrent requests from non-host callers (`Retry-After` given) |
+	// | `image_unavailable` | 502 | a container image could not be pinned at deploy (not in tailworks' registry, no image for any of the pool's arches, or the upstream mirror failed) |
+	// | `registry_unavailable` | 409 | this tw-mgmt serves no OCI registry (`-registry-dir off`) |
+	// | `mirror_disabled` | 409 | this tw-mgmt does not mirror external images (`-no-mirror`) |
 	// | `bootstrap_failed` | 502 | control plane refused the mint |
+	// | `host_unavailable` | 502 | the host holding the workload's lease did not answer mgmt (logs, approvals) |
 	// | `host_token_unconfigured` | 503 | local-dev mgmt without a token (fail closed) |
 	// | `identity_pending` | 503 | mint still queued (`Retry-After: 1`) |
 	// | `no_host` | 503 | no live host for the deployment (in the tenant's pool, offering its tier, and `containers` for the image's `arch` when it declares containers, with a free node and, for the microVM tier or containers, a free VM in its capacity vector) |
 	// | `policy_unavailable` | 503 | mgmt cannot read the tenant policy |
+	// | `policy_write_denied` | 403 | the tenant's credential may not write the tailnet policy (an OAuth client without Policy File write) |
+	// | `policy_conflict` | 409 | the tailnet policy changed during the write, and again on the retry (`If-Match`) |
+	// | `policy_apply_failed` | 500 | the control plane refused the merged policy, or tailworks refused the snippet (RT-06) |
+	// | `approval_not_pending` | 409 | no approval of that Workflow instance is waiting (decided, timed out, or never asked) |
 	// | `internal` | 500 | — |
 	Code    ErrorCode `json:"code"`
 	DocURL  string    `json:"doc_url"`
@@ -1430,31 +2421,60 @@ type Error struct {
 // |---|---|---|
 // | `bad_request` | 400 | malformed body, parameter or filter |
 // | `bad_cursor` | 400 | `cursor` does not decode |
-// | `bad_bundle` | 400 | bundle has no `twd.jsonc`, neither `tailnet.tags` nor `tailnet.objects`, or invalid `triggers.crons` |
+// | `bad_bundle` | 400 | bundle has no `tailworks.jsonc`, neither `tailnet.tags` nor `tailnet.objects`, or invalid `triggers.crons` |
+// | `bad_object_name` | 400 | a new object name (`objectName`) contains a C0 control, DEL, a C1 control or a bidi control |
+// | `reserved_tag` | 400 | a bundle or namespace asks for one of tailworks' own tags (`tag:tw`, `tag:tw-mgmt`, `tag:tw-host`) |
 // | `immutable_field` | 400 | PATCH touches a field the caller may not change |
+// | `mint_mode_removed` | 400 | a create or PATCH names the removed `apikey` or `wif` mint mode, or a tenant stored in one tries to mint (switch it to `oauth`) |
+// | `too_many_secrets` | 400 | a workload already has 128 secrets |
+// | `d1_error` | 400 | a D1 statement failed (SQLite's message, or a D1 limit); nothing of its batch was applied |
 // | `no_identity` | 401 | WhoIs failed for the connection |
-// | `host_token_required` | 401 | local-dev socket without `Twd-Host-Token` |
+// | `host_token_required` | 401 | local-dev socket without `Tw-Host-Token` |
 // | `host_token_invalid` | 403 | local-dev socket, wrong token |
-// | `not_admin` | 403 | tailnet caller without `twd.dev/cap/admin` (`snippet` given) |
+// | `not_admin` | 403 | tailnet caller without `github.com/rosskukulinski/tailworks/cap/admin` (`snippet` given) |
+// | `tag_not_owned` | 400 | a tenant with its own owner tag asks for a tag its owner tag doesn't own, or that another tenant's on the tailnet owns (`snippet` given) |
+// | `shared_owner_tag` | 409 | a second tenant on a tailnet where either tenant uses `tag:tw`, or both the same owner tag |
+// | `name_prefix_required` | 409 | a second tenant on a tailnet without a distinct `namePrefix` |
+// | `tenant_forbidden` | 403 | a tenant admin's `github.com/rosskukulinski/tailworks/cap/tenant-admin` grants don't name the tenant with the action, or the route is admin-only (`snippet` given) |
+// | `cap_missing` | 403 | an approval the caller's `github.com/rosskukulinski/tailworks/cap/approve` grants do not cover (`snippet` given) |
 // | `forbidden` | 403 | role ok, but outside the caller's records / namespaces |
-// | `host_not_registered` | 403 | `tag:twd-host` node that never did `PUT /v1/hosts/{id}` |
-// | `host_identity_mismatch` | 403 | host ID bound to another node |
+// | `experimental_flag` | 403 | the bundle's `compatibility_flags` list flags workerd marks experimental (`unsafe_module`, `rtti_api`, `precise_timers`, …) and no host allows them (`tw-hostd -allow-experimental-flags`); the deploy and its dry run |
+// | `host_not_registered` | 403 | `tag:tw-host` node that never did `PUT /v1/hosts/{id}`, or a `PUT` for a host ID the admin never created |
+// | `host_identity_mismatch` | 403 | host ID bound to another node; `registrationSecret` missing or wrong; `auditPubKey` differs from the pinned one |
 // | `delegation_invalid` | 403 | child tag not owned by the parent's, parent unknown (404) or dead (410) |
 // | `delegation_exceeds_parent` | 403 | spawn caps ⊄ parent (`missing: {src, dst, cap, field}`) |
-// | `policy_missing_tag_owners` | 403 | the control plane refused to mint a key for twd's own tags (`snippet` gives the tagOwners to add) |
+// | `policy_missing_tag_owners` | 403 | the control plane refused to mint a key for tailworks' own tags (`snippet` gives the tagOwners to add) |
 // | `not_found` | 404 | — |
 // | `unknown_tenant` | 404 | — |
 // | `unknown_namespace` | 404 | `(workload, class)` not declared |
+// | `no_logs` | 404 | the workload's host has no log file for it yet |
+// | `unknown_secret` | 404 | the workload has no secret of that name |
+// | `unknown_store` | 404 | the workload has no store of that kind and name |
+// | `unknown_queue` | 404 | the tenant has no queue of that name |
+// | `service_not_found` | 404 | a workload's service binding is not declared, or its target workload was never deployed in the tenant |
 // | `exists` | 409 | create of an existing ID |
 // | `lease_lost` | 409 | epoch/holder fence failed |
 // | `lease_held` | 409 | another host holds the lease |
+// | `store_conflict` | 409 | a store journal append's `after` (or `incarnation`) is not the journal's head: catch up and retry |
+// | `store_degraded` | 409 | the store object on the workload's host could not apply a journal entry: it stopped its replay there, serves reads from what it applied and refuses writes (`tw d1 export`, then `tw d1 repair --skip <seq>` or recreate the database) |
+// | `store_not_degraded` | 409 | `…/repair` of a store mgmt does not record as degraded at that journal entry |
+// | `store_limit` | 400 | a store append exceeds an entry, append or store size limit |
+// | `queue_limit` | 400 | a send exceeds a message, batch, delay or queue size limit |
 // | `store_unavailable` | 503 | the store is unreachable, restarting or contended (a row-lock or idle-transaction timeout); retry after `Retry-After` |
 // | `tier_unavailable` | 409 | the chosen host (`--host`, or the workload's current host) does not offer the deployment's tier, or `containers` (for the image's `arch`) when the bundle declares containers |
-// | `service_conflict` | 409 | `tailnet.service` names a Service that exists and isn't managed by twd for this tenant and workload |
+// | `replica_conflict` | 409 | a deploy names a replica (`<workload>--r<n>`) instead of its workload, a replica name is taken by a separate workload, or a workload that is not a replica is given a name of that shape (n ≥ 2), which belongs to replicas |
+// | `preview_conflict` | 409 | a preview's name (`<workload>--preview-<alias>`) is taken by a workload that is not a preview of this one |
+// | `preview_failed` | 409 | promote of a preview its host reported `failed` |
+// | `preview_unsupported` | 400 | `preview` for a bundle with queue bindings (queues are tenant-wide), or of a workload that is itself a preview or replica |
+// | `unknown_preview` | 404 | promote of a preview that doesn't exist or is stopped |
+// | `service_conflict` | 409 | `tailnet.service` names a Service that exists and isn't managed by tailworks for this tenant and workload |
 // | `service_api_failed` | 502 | mgmt can't read or create the Service definition (an OAuth client needs Services › Write) |
+// | `profile_unsupported` | 400 | the tenant's control-plane profile can't serve the request: on the Headscale profile (ADR-015), `tailnet.service` (no Tailscale Services), public routes or `publicIngress: allow` (no Funnel) |
+// | `public_name_owned` | 409 | a deploy declares public routes under a workload name another tenant on the same tailnet owns as its public name (red-team H10) |
+// | `public_name_in_use` | 409 | release of a public name the workload still serves: its latest deployment declares public routes, or its public node is live |
 // | `move_unconfirmed` | 409 | `replace` would move a stateful workload off its live host, leaving its DO storage behind; confirm with `forceTakeover` |
 // | `lease_changed` | 409 | the workload's lease changed while `replace` was moving it (a concurrent deploy); retry |
-// | `takeover_unconfirmed` | 409 | the workload has Durable Objects and its host stopped heartbeating but is still registered: it may still be serving them. `twd host rm <host> --drain`, or redeploy with `--force-takeover` |
+// | `takeover_unconfirmed` | 409 | the workload has Durable Objects and its host stopped heartbeating but is still registered: it may still be serving them. `tw host rm <host> --force`, or redeploy with `--force-takeover` |
 // | `already_joined` | 409 | credential for an object that has a node |
 // | `identity_conflict` | 409 | object ID collision across identities |
 // | `namespace_ambiguous` | 409 | class declared by several workloads, `workload` missing |
@@ -1462,19 +2482,31 @@ type Error struct {
 // | `superseded` | 409 | undeploy of a non-latest deployment |
 // | `tenant_has_live_objects` | 409 | tenant delete without `force` |
 // | `host_holds_leases` | 409 | host delete without `drain` |
+// | `version_skew` | 409 | a host (or CLI, or mgmt replica) outside the version window: a host newer than mgmt, or more than one release line behind it; or a store a newer tw-mgmt contracted (ADR-041 §7) |
+// | `upgrade_blocked` | 409 | an upgrade run can't start: its plan has blockers (`message` lists them; `POST /v1/upgrades` with `dryRun` shows the plan) |
+// | `upgrade_state` | 409 | pause, resume or abort of a run that isn't running (pause), paused (resume), or active (abort) |
+// | `feature_unavailable` | 409 | the deployment needs a host feature (`kv`, `r2`, `d1`, …) that no eligible host, or the workload's current host, advertises: upgrade the hosts |
 // | `killed` | 410 | tombstone (`TombstoneError`) |
 // | `precondition_failed` | 412 | `If-Match` mismatch |
+// | `misdirected_request` | 421 | a tailnet request whose `Host` is not one of mgmt's own names or an IP literal (DNS-rebinding guard) |
 // | `object_quota_exceeded` | 429 | tenant `maxObjects` |
 // | `spawn_budget_exceeded` | 429 | `maxLive` / `maxDepth` |
 // | `container_quota_exceeded` | 429 | tenant `maxContainers` / `maxContainerMemMiB` / `maxContainerVCPU`, or the class's `max_instances` (`missing: {quota, limit, used, requested}`) |
-// | `image_unavailable` | 502 | a container image could not be pinned at deploy (not in twd's registry, no image for any of the pool's arches, or the upstream mirror failed) |
-// | `registry_unavailable` | 409 | this twd-mgmt serves no OCI registry (`-registry-dir off`) |
-// | `mirror_disabled` | 409 | this twd-mgmt does not mirror external images (`-no-mirror`) |
+// | `storage_quota_exceeded` | 429 | a store append or queue send would take the tenant past `maxStoreBytes` / `maxQueueBytes`, or a new store past `maxStores` (`missing: {quota, limit, used, requested}`) |
+// | `rate_limited` | 429 | a tailnet caller is over its API request rate, or mgmt is serving its maximum of concurrent requests from non-host callers (`Retry-After` given) |
+// | `image_unavailable` | 502 | a container image could not be pinned at deploy (not in tailworks' registry, no image for any of the pool's arches, or the upstream mirror failed) |
+// | `registry_unavailable` | 409 | this tw-mgmt serves no OCI registry (`-registry-dir off`) |
+// | `mirror_disabled` | 409 | this tw-mgmt does not mirror external images (`-no-mirror`) |
 // | `bootstrap_failed` | 502 | control plane refused the mint |
+// | `host_unavailable` | 502 | the host holding the workload's lease did not answer mgmt (logs, approvals) |
 // | `host_token_unconfigured` | 503 | local-dev mgmt without a token (fail closed) |
 // | `identity_pending` | 503 | mint still queued (`Retry-After: 1`) |
 // | `no_host` | 503 | no live host for the deployment (in the tenant's pool, offering its tier, and `containers` for the image's `arch` when it declares containers, with a free node and, for the microVM tier or containers, a free VM in its capacity vector) |
 // | `policy_unavailable` | 503 | mgmt cannot read the tenant policy |
+// | `policy_write_denied` | 403 | the tenant's credential may not write the tailnet policy (an OAuth client without Policy File write) |
+// | `policy_conflict` | 409 | the tailnet policy changed during the write, and again on the retry (`If-Match`) |
+// | `policy_apply_failed` | 500 | the control plane refused the merged policy, or tailworks refused the snippet (RT-06) |
+// | `approval_not_pending` | 409 | no approval of that Workflow instance is waiting (decided, timed out, or never asked) |
 // | `internal` | 500 | — |
 type ErrorCode string
 
@@ -1491,6 +2523,15 @@ type Host struct {
 	// Arch A Go GOARCH. Container images must match their host's.
 	Arch *Arch `json:"arch,omitempty"`
 
+	// AuditHead Only in the answer to `PUT /v1/hosts/{id}`: the hash of the last
+	// record mgmt stores on the host's audit chain (`host:<hostID>`);
+	// absent when the chain is empty. A restarted host continues its
+	// chain from this head only when it matches the last record the
+	// host itself chained and flushed before a clean shutdown;
+	// otherwise it starts a new segment (`prevHash: ""`), which
+	// verification reports as a break.
+	AuditHead *string `json:"auditHead,omitempty"`
+
 	// AuditPubKey base64 ed25519; verifies `hostSig`.
 	AuditPubKey *string `json:"auditPubKey,omitempty"`
 
@@ -1502,11 +2543,18 @@ type Host struct {
 	// reports 0 for every VM dimension.
 	Capacity      *HostCapacity `json:"capacity,omitempty"`
 	CapacityNodes int           `json:"capacityNodes"`
-	CreatedAt     int64         `json:"createdAt"`
 
-	// DNSName `twd-host-<hostID>.<tailnet>`.
+	// CordonedAt unix ms; absent when not cordoned.
+	CordonedAt *int64  `json:"cordonedAt,omitempty"`
+	CordonedBy *string `json:"cordonedBy,omitempty"`
+	CreatedAt  int64   `json:"createdAt"`
+
+	// DNSName `tw-host-<hostID>.<tailnet>`.
 	DNSName *string `json:"dnsName,omitempty"`
-	HostID  string  `json:"hostID"`
+
+	// Features Host features it offers (`kv`, `r2`, `d1`, `telemetry`, …); placement needs every one a bundle uses.
+	Features *[]string `json:"features,omitempty"`
+	HostID   string    `json:"hostID"`
 
 	// LastSeen unix ms of the last heartbeat
 	LastSeen int64 `json:"lastSeen"`
@@ -1515,9 +2563,13 @@ type Host struct {
 	Leases    *[]Lease `json:"leases,omitempty"`
 	LiveNodes int      `json:"liveNodes"`
 
-	// NodeID Stable node ID of the host's `tag:twd-host` tsnet node (bound at registration).
+	// NodeID Stable node ID of the host's `tag:tw-host` tsnet node (bound at registration).
 	NodeID *string `json:"nodeID,omitempty"`
+	Os     *string `json:"os,omitempty"`
 	Pool   *string `json:"pool,omitempty"`
+
+	// Protocols Protocol versions a component speaks: `push`, `guest`, `helper`, `vz`, `rest`, `cliJSON`.
+	Protocols *Protocols `json:"protocols,omitempty"`
 
 	// Push Where mgmt pushes kills and assignment changes. Over the tailnet,
 	// `port` names hostd's push listener on **its own tsnet node** (the
@@ -1525,13 +2577,19 @@ type Host struct {
 	// on the local-dev socket and only as `unix:///…`.
 	Push *HostPush `json:"push,omitempty"`
 
-	// Status `pending`: created by `twd host add`, never registered. `live`: heartbeated within 10 s. `stale`: registered, no recent heartbeat. `draining`: being deleted.
+	// Skew Why the host is outside the version window (placement skips it); absent when it is within.
+	Skew *string `json:"skew,omitempty"`
+
+	// Status `pending`: created by `tw host add`, never registered. `live`: heartbeated within 10 s. `stale`: registered, no recent heartbeat. `draining`: being deleted.
 	Status    HostStatusEnum `json:"status"`
 	Tiers     []HostTier     `json:"tiers"`
 	UpdatedAt int64          `json:"updatedAt"`
 
 	// Usage Live usage against `HostCapacity`, reported with every heartbeat. `containers` is the running containers (a subset of `vms`).
 	Usage *HostUsage `json:"usage,omitempty"`
+
+	// Version The host's tw version, from its last registration (absent: a hostd from before version reporting, 0.1.x).
+	Version *string `json:"version,omitempty"`
 }
 
 // HostCapacity The capacity vector a host registers (ADR-032 D9). `nodes` is
@@ -1569,7 +2627,128 @@ type HostDeleteResult struct {
 	LeasesReleased []string  `json:"leasesReleased"`
 }
 
-// HostJoin A single-use join key for a host's `tag:twd-host` node. Never logged.
+// HostDrainRequest defines model for HostDrainRequest.
+type HostDrainRequest struct {
+	// AllowLocalStateLoss Move workloads with Durable Objects too; their storage stays behind on this host.
+	AllowLocalStateLoss *bool `json:"allowLocalStateLoss,omitempty"`
+	DryRun              *bool `json:"dryRun,omitempty"`
+}
+
+// HostDrainResult defines model for HostDrainResult.
+type HostDrainResult struct {
+	Cordoned bool   `json:"cordoned"`
+	DryRun   *bool  `json:"dryRun,omitempty"`
+	HostID   string `json:"hostID"`
+	Moved    []struct {
+		DeploymentID *string `json:"deploymentID,omitempty"`
+		TenantID     string  `json:"tenantID"`
+
+		// To The host it moved (or would move) to.
+		To       string `json:"to"`
+		Workload string `json:"workload"`
+	} `json:"moved"`
+	Refused []struct {
+		// Code The catalog. Status in parentheses.
+		//
+		// | code | status | when |
+		// |---|---|---|
+		// | `bad_request` | 400 | malformed body, parameter or filter |
+		// | `bad_cursor` | 400 | `cursor` does not decode |
+		// | `bad_bundle` | 400 | bundle has no `tailworks.jsonc`, neither `tailnet.tags` nor `tailnet.objects`, or invalid `triggers.crons` |
+		// | `bad_object_name` | 400 | a new object name (`objectName`) contains a C0 control, DEL, a C1 control or a bidi control |
+		// | `reserved_tag` | 400 | a bundle or namespace asks for one of tailworks' own tags (`tag:tw`, `tag:tw-mgmt`, `tag:tw-host`) |
+		// | `immutable_field` | 400 | PATCH touches a field the caller may not change |
+		// | `mint_mode_removed` | 400 | a create or PATCH names the removed `apikey` or `wif` mint mode, or a tenant stored in one tries to mint (switch it to `oauth`) |
+		// | `too_many_secrets` | 400 | a workload already has 128 secrets |
+		// | `d1_error` | 400 | a D1 statement failed (SQLite's message, or a D1 limit); nothing of its batch was applied |
+		// | `no_identity` | 401 | WhoIs failed for the connection |
+		// | `host_token_required` | 401 | local-dev socket without `Tw-Host-Token` |
+		// | `host_token_invalid` | 403 | local-dev socket, wrong token |
+		// | `not_admin` | 403 | tailnet caller without `github.com/rosskukulinski/tailworks/cap/admin` (`snippet` given) |
+		// | `tag_not_owned` | 400 | a tenant with its own owner tag asks for a tag its owner tag doesn't own, or that another tenant's on the tailnet owns (`snippet` given) |
+		// | `shared_owner_tag` | 409 | a second tenant on a tailnet where either tenant uses `tag:tw`, or both the same owner tag |
+		// | `name_prefix_required` | 409 | a second tenant on a tailnet without a distinct `namePrefix` |
+		// | `tenant_forbidden` | 403 | a tenant admin's `github.com/rosskukulinski/tailworks/cap/tenant-admin` grants don't name the tenant with the action, or the route is admin-only (`snippet` given) |
+		// | `cap_missing` | 403 | an approval the caller's `github.com/rosskukulinski/tailworks/cap/approve` grants do not cover (`snippet` given) |
+		// | `forbidden` | 403 | role ok, but outside the caller's records / namespaces |
+		// | `experimental_flag` | 403 | the bundle's `compatibility_flags` list flags workerd marks experimental (`unsafe_module`, `rtti_api`, `precise_timers`, …) and no host allows them (`tw-hostd -allow-experimental-flags`); the deploy and its dry run |
+		// | `host_not_registered` | 403 | `tag:tw-host` node that never did `PUT /v1/hosts/{id}`, or a `PUT` for a host ID the admin never created |
+		// | `host_identity_mismatch` | 403 | host ID bound to another node; `registrationSecret` missing or wrong; `auditPubKey` differs from the pinned one |
+		// | `delegation_invalid` | 403 | child tag not owned by the parent's, parent unknown (404) or dead (410) |
+		// | `delegation_exceeds_parent` | 403 | spawn caps ⊄ parent (`missing: {src, dst, cap, field}`) |
+		// | `policy_missing_tag_owners` | 403 | the control plane refused to mint a key for tailworks' own tags (`snippet` gives the tagOwners to add) |
+		// | `not_found` | 404 | — |
+		// | `unknown_tenant` | 404 | — |
+		// | `unknown_namespace` | 404 | `(workload, class)` not declared |
+		// | `no_logs` | 404 | the workload's host has no log file for it yet |
+		// | `unknown_secret` | 404 | the workload has no secret of that name |
+		// | `unknown_store` | 404 | the workload has no store of that kind and name |
+		// | `unknown_queue` | 404 | the tenant has no queue of that name |
+		// | `service_not_found` | 404 | a workload's service binding is not declared, or its target workload was never deployed in the tenant |
+		// | `exists` | 409 | create of an existing ID |
+		// | `lease_lost` | 409 | epoch/holder fence failed |
+		// | `lease_held` | 409 | another host holds the lease |
+		// | `store_conflict` | 409 | a store journal append's `after` (or `incarnation`) is not the journal's head: catch up and retry |
+		// | `store_degraded` | 409 | the store object on the workload's host could not apply a journal entry: it stopped its replay there, serves reads from what it applied and refuses writes (`tw d1 export`, then `tw d1 repair --skip <seq>` or recreate the database) |
+		// | `store_not_degraded` | 409 | `…/repair` of a store mgmt does not record as degraded at that journal entry |
+		// | `store_limit` | 400 | a store append exceeds an entry, append or store size limit |
+		// | `queue_limit` | 400 | a send exceeds a message, batch, delay or queue size limit |
+		// | `store_unavailable` | 503 | the store is unreachable, restarting or contended (a row-lock or idle-transaction timeout); retry after `Retry-After` |
+		// | `tier_unavailable` | 409 | the chosen host (`--host`, or the workload's current host) does not offer the deployment's tier, or `containers` (for the image's `arch`) when the bundle declares containers |
+		// | `replica_conflict` | 409 | a deploy names a replica (`<workload>--r<n>`) instead of its workload, a replica name is taken by a separate workload, or a workload that is not a replica is given a name of that shape (n ≥ 2), which belongs to replicas |
+		// | `preview_conflict` | 409 | a preview's name (`<workload>--preview-<alias>`) is taken by a workload that is not a preview of this one |
+		// | `preview_failed` | 409 | promote of a preview its host reported `failed` |
+		// | `preview_unsupported` | 400 | `preview` for a bundle with queue bindings (queues are tenant-wide), or of a workload that is itself a preview or replica |
+		// | `unknown_preview` | 404 | promote of a preview that doesn't exist or is stopped |
+		// | `service_conflict` | 409 | `tailnet.service` names a Service that exists and isn't managed by tailworks for this tenant and workload |
+		// | `service_api_failed` | 502 | mgmt can't read or create the Service definition (an OAuth client needs Services › Write) |
+		// | `profile_unsupported` | 400 | the tenant's control-plane profile can't serve the request: on the Headscale profile (ADR-015), `tailnet.service` (no Tailscale Services), public routes or `publicIngress: allow` (no Funnel) |
+		// | `public_name_owned` | 409 | a deploy declares public routes under a workload name another tenant on the same tailnet owns as its public name (red-team H10) |
+		// | `public_name_in_use` | 409 | release of a public name the workload still serves: its latest deployment declares public routes, or its public node is live |
+		// | `move_unconfirmed` | 409 | `replace` would move a stateful workload off its live host, leaving its DO storage behind; confirm with `forceTakeover` |
+		// | `lease_changed` | 409 | the workload's lease changed while `replace` was moving it (a concurrent deploy); retry |
+		// | `takeover_unconfirmed` | 409 | the workload has Durable Objects and its host stopped heartbeating but is still registered: it may still be serving them. `tw host rm <host> --force`, or redeploy with `--force-takeover` |
+		// | `already_joined` | 409 | credential for an object that has a node |
+		// | `identity_conflict` | 409 | object ID collision across identities |
+		// | `namespace_ambiguous` | 409 | class declared by several workloads, `workload` missing |
+		// | `not_ready` | 409 | certificate requested before `ready` |
+		// | `superseded` | 409 | undeploy of a non-latest deployment |
+		// | `tenant_has_live_objects` | 409 | tenant delete without `force` |
+		// | `host_holds_leases` | 409 | host delete without `drain` |
+		// | `version_skew` | 409 | a host (or CLI, or mgmt replica) outside the version window: a host newer than mgmt, or more than one release line behind it; or a store a newer tw-mgmt contracted (ADR-041 §7) |
+		// | `upgrade_blocked` | 409 | an upgrade run can't start: its plan has blockers (`message` lists them; `POST /v1/upgrades` with `dryRun` shows the plan) |
+		// | `upgrade_state` | 409 | pause, resume or abort of a run that isn't running (pause), paused (resume), or active (abort) |
+		// | `feature_unavailable` | 409 | the deployment needs a host feature (`kv`, `r2`, `d1`, …) that no eligible host, or the workload's current host, advertises: upgrade the hosts |
+		// | `killed` | 410 | tombstone (`TombstoneError`) |
+		// | `precondition_failed` | 412 | `If-Match` mismatch |
+		// | `misdirected_request` | 421 | a tailnet request whose `Host` is not one of mgmt's own names or an IP literal (DNS-rebinding guard) |
+		// | `object_quota_exceeded` | 429 | tenant `maxObjects` |
+		// | `spawn_budget_exceeded` | 429 | `maxLive` / `maxDepth` |
+		// | `container_quota_exceeded` | 429 | tenant `maxContainers` / `maxContainerMemMiB` / `maxContainerVCPU`, or the class's `max_instances` (`missing: {quota, limit, used, requested}`) |
+		// | `storage_quota_exceeded` | 429 | a store append or queue send would take the tenant past `maxStoreBytes` / `maxQueueBytes`, or a new store past `maxStores` (`missing: {quota, limit, used, requested}`) |
+		// | `rate_limited` | 429 | a tailnet caller is over its API request rate, or mgmt is serving its maximum of concurrent requests from non-host callers (`Retry-After` given) |
+		// | `image_unavailable` | 502 | a container image could not be pinned at deploy (not in tailworks' registry, no image for any of the pool's arches, or the upstream mirror failed) |
+		// | `registry_unavailable` | 409 | this tw-mgmt serves no OCI registry (`-registry-dir off`) |
+		// | `mirror_disabled` | 409 | this tw-mgmt does not mirror external images (`-no-mirror`) |
+		// | `bootstrap_failed` | 502 | control plane refused the mint |
+		// | `host_unavailable` | 502 | the host holding the workload's lease did not answer mgmt (logs, approvals) |
+		// | `host_token_unconfigured` | 503 | local-dev mgmt without a token (fail closed) |
+		// | `identity_pending` | 503 | mint still queued (`Retry-After: 1`) |
+		// | `no_host` | 503 | no live host for the deployment (in the tenant's pool, offering its tier, and `containers` for the image's `arch` when it declares containers, with a free node and, for the microVM tier or containers, a free VM in its capacity vector) |
+		// | `policy_unavailable` | 503 | mgmt cannot read the tenant policy |
+		// | `policy_write_denied` | 403 | the tenant's credential may not write the tailnet policy (an OAuth client without Policy File write) |
+		// | `policy_conflict` | 409 | the tailnet policy changed during the write, and again on the retry (`If-Match`) |
+		// | `policy_apply_failed` | 500 | the control plane refused the merged policy, or tailworks refused the snippet (RT-06) |
+		// | `approval_not_pending` | 409 | no approval of that Workflow instance is waiting (decided, timed out, or never asked) |
+		// | `internal` | 500 | — |
+		Code     ErrorCode `json:"code"`
+		Message  string    `json:"message"`
+		TenantID string    `json:"tenantID"`
+		Workload string    `json:"workload"`
+	} `json:"refused"`
+}
+
+// HostJoin A single-use join key for a host's `tag:tw-host` node. Never logged.
 type HostJoin struct {
 	AuthKey    string  `json:"authKey"`
 	ControlURL *string `json:"controlURL,omitempty"`
@@ -1578,10 +2757,19 @@ type HostJoin struct {
 	ExpiresAt int64 `json:"expiresAt"`
 	Host      Host  `json:"host"`
 
-	// Hostname `twd-host-<hostID>`
-	Hostname string   `json:"hostname"`
-	Tags     []string `json:"tags"`
-	Tailnet  *string  `json:"tailnet,omitempty"`
+	// Hostname `tw-host-<hostID>`
+	Hostname string `json:"hostname"`
+
+	// KeyTagsOnly The host's node must advertise no tags; its join key carries `tag:tw-host` (Headscale, ADR-015). `tw-hostd -tsnet-key-tags-only`.
+	KeyTagsOnly *bool `json:"keyTagsOnly,omitempty"`
+
+	// MgmtURL Where the host reaches mgmt over the tailnet (`tw-hostd -mgmt`): `http://tw-mgmt.<tailnet>`. Absent when mgmt doesn't know its own node name (local-dev).
+	MgmtURL *string `json:"mgmtURL,omitempty"`
+
+	// RegistrationSecret One-time secret (32 random bytes, base64url) the host presents in its first `PUT /v1/hosts/{id}`; mgmt stores only its SHA-256 and clears it once the node is bound.
+	RegistrationSecret string   `json:"registrationSecret"`
+	Tags               []string `json:"tags"`
+	Tailnet            *string  `json:"tailnet,omitempty"`
 }
 
 // HostPage defines model for HostPage.
@@ -1604,14 +2792,16 @@ type HostPathReport struct {
 type HostPush struct {
 	Port *int `json:"port,omitempty"`
 
-	// URL `unix:///path/hostd.sock`; local-dev only.
+	// URL `unix:///path/hostd.sock` (local-dev only), or `inproc://` for the host embedded in the mgmt process (single-process `tw up`; accepted only from the in-process transport).
 	URL *string `json:"url,omitempty"`
 }
 
 // HostRegistration defines model for HostRegistration.
 type HostRegistration struct {
 	// Arch A Go GOARCH. Container images must match their host's.
-	Arch        *Arch   `json:"arch,omitempty"`
+	Arch *Arch `json:"arch,omitempty"`
+
+	// AuditPubKey Pinned on first bind; a later registration may only repeat it.
 	AuditPubKey *string `json:"auditPubKey,omitempty"`
 
 	// Capacity The capacity vector a host registers (ADR-032 D9). `nodes` is
@@ -1622,15 +2812,31 @@ type HostRegistration struct {
 	// reports 0 for every VM dimension.
 	Capacity      *HostCapacity `json:"capacity,omitempty"`
 	CapacityNodes int           `json:"capacityNodes"`
-	Pool          *string       `json:"pool,omitempty"`
+	Features      *[]string     `json:"features,omitempty"`
+
+	// Os GOOS (which release tarball the host runs).
+	Os   *HostRegistrationOs `json:"os,omitempty"`
+	Pool *string             `json:"pool,omitempty"`
+
+	// Protocols Protocol versions a component speaks: `push`, `guest`, `helper`, `vz`, `rest`, `cliJSON`.
+	Protocols *Protocols `json:"protocols,omitempty"`
 
 	// Push Where mgmt pushes kills and assignment changes. Over the tailnet,
 	// `port` names hostd's push listener on **its own tsnet node** (the
 	// WhoIs node; mgmt never pushes anywhere else). `url` is accepted only
 	// on the local-dev socket and only as `unix:///…`.
-	Push  *HostPush  `json:"push,omitempty"`
-	Tiers []HostTier `json:"tiers"`
+	Push *HostPush `json:"push,omitempty"`
+
+	// RegistrationSecret Required on the first registration of a host created by `POST /v1/hosts` (the `registrationSecret` from that answer); ignored once the node is bound.
+	RegistrationSecret *string    `json:"registrationSecret,omitempty"`
+	Tiers              []HostTier `json:"tiers"`
+
+	// Version The host's tw version. A host outside the version window is refused: `409 version_skew`.
+	Version *string `json:"version,omitempty"`
 }
+
+// HostRegistrationOs GOOS (which release tarball the host runs).
+type HostRegistrationOs string
 
 // HostStatus The heartbeat body.
 type HostStatus struct {
@@ -1645,17 +2851,25 @@ type HostStatus struct {
 	Leases      []Lease             `json:"leases"`
 	LiveNodes   int                 `json:"liveNodes"`
 
+	// PurgedTenants Deleted tenants (from `purgeTenants`) whose local state this host has removed.
+	PurgedTenants *[]string `json:"purgedTenants,omitempty"`
+
 	// Usage Live usage against `HostCapacity`, reported with every heartbeat. `containers` is the running containers (a subset of `vms`).
 	Usage *HostUsage `json:"usage,omitempty"`
 }
 
-// HostStatusEnum `pending`: created by `twd host add`, never registered. `live`: heartbeated within 10 s. `stale`: registered, no recent heartbeat. `draining`: being deleted.
+// HostStatusEnum `pending`: created by `tw host add`, never registered. `live`: heartbeated within 10 s. `stale`: registered, no recent heartbeat. `draining`: being deleted.
 type HostStatusEnum string
 
 // HostStatusResponse defines model for HostStatusResponse.
 type HostStatusResponse struct {
 	// AssignmentsChanged A hint to re-list assignments (set when a push could not be delivered).
 	AssignmentsChanged *bool `json:"assignmentsChanged,omitempty"`
+
+	// PurgeTenants Deleted tenants whose local state this host must remove
+	// (`tenants/<id>/`, R2 blobs); repeated until the host reports them
+	// in `purgedTenants`.
+	PurgeTenants *[]string `json:"purgeTenants,omitempty"`
 
 	// Revoke Lease entries that are no longer held.
 	Revoke []string `json:"revoke"`
@@ -1683,7 +2897,10 @@ type ImageAlias struct {
 	// Arch "" = every arch.
 	Arch *string `json:"arch,omitempty"`
 	From string  `json:"from"`
-	To   string  `json:"to"`
+
+	// Source A digest-pinned external image (`ghcr.io/…:<tag>@sha256:…`) that fills `to` when it is not in tailworks' registry yet: mgmt copies it into `public/` at deploy (unless `-no-mirror`), and `tw deploy` builds from it. Absent: `to` must be pushed (`tw image push`).
+	Source *string `json:"source,omitempty"`
+	To     string  `json:"to"`
 }
 
 // ImageAliasList defines model for ImageAliasList.
@@ -1691,9 +2908,47 @@ type ImageAliasList struct {
 	Items []ImageAlias `json:"items"`
 }
 
-// JWKS defines model for JWKS.
-type JWKS struct {
-	Keys []map[string]interface{} `json:"keys"`
+// KVKey A Workers KV key as `list()` returns it (ADR-037).
+type KVKey struct {
+	// Expiration Unix seconds when the key expires (absent: never).
+	Expiration *int64 `json:"expiration,omitempty"`
+
+	// Metadata The key's metadata (any JSON; absent: none).
+	Metadata interface{} `json:"metadata,omitempty"`
+	Name     string      `json:"name"`
+}
+
+// KVKeyPage defines model for KVKeyPage.
+type KVKeyPage struct {
+	// Cursor Pass as `cursor` for the next page (absent when `listComplete`).
+	Cursor       *string `json:"cursor,omitempty"`
+	Keys         []KVKey `json:"keys"`
+	ListComplete bool    `json:"listComplete"`
+}
+
+// KVPut defines model for KVPut.
+type KVPut struct {
+	// Expiration Unix seconds; at least 60 s ahead.
+	Expiration *int64 `json:"expiration,omitempty"`
+
+	// ExpirationTTL Seconds from now (at least 60). Wins over `expiration`.
+	ExpirationTTL *int64 `json:"expirationTtl,omitempty"`
+
+	// Metadata Any JSON, at most 1024 bytes serialized.
+	Metadata interface{} `json:"metadata,omitempty"`
+
+	// Value The value's bytes (at most 2 MiB − 4 KiB).
+	Value []byte `json:"value"`
+}
+
+// KVValue defines model for KVValue.
+type KVValue struct {
+	Expiration *int64      `json:"expiration,omitempty"`
+	Metadata   interface{} `json:"metadata,omitempty"`
+	Name       string      `json:"name"`
+
+	// Value The value's bytes.
+	Value []byte `json:"value"`
 }
 
 // KillResult defines model for KillResult.
@@ -1736,7 +2991,7 @@ type Lease struct {
 	Namespace string `json:"namespace"`
 }
 
-// MintMode `oauth`: a Tailscale OAuth client (scope `auth_keys`, tag `tag:twd`; optionally `devices:core` and `policy_file:read`) whose secret stays in a 0600 file on the mgmt host (the default for self-hosted installs). `wif`: keyless, mints through a WIF trust credential (mgmt's OIDC issuer over Funnel; hosted / multi-tenant). `apikey`: a Tailscale API key file (explicit fallback, tests). `static`: fakemgmt only (testcontrol accepts any key).
+// MintMode `oauth`: a Tailscale OAuth client (scope `auth_keys`, tag `tag:tw`; optionally `devices:core` and `policy_file:read`) whose secret stays in a 0600 file on the mgmt host: the only mint mode for Tailscale tailnets. `headscale`: the Headscale profile (ADR-015): a Headscale server at `controlURL` mints tagged pre-auth keys with the Headscale API key in `apiKeyFile` (`HEADSCALE_API_KEY=…`); no Tailscale Services, no Funnel (public routes), no posture. `static`: fakemgmt only (testcontrol accepts any key). `apikey` and `wif` were removed (ADR-042): mgmt refuses to set them (`400 mint_mode_removed`); a tenant an older tailworks created in one still reports it here, but can't mint until it is switched to `oauth`.
 type MintMode string
 
 // NodeCertificate defines model for NodeCertificate.
@@ -1782,15 +3037,61 @@ type NodeCertificatePayload struct {
 // NodeCertificatePayloadV defines model for NodeCertificatePayload.V.
 type NodeCertificatePayloadV int
 
-// OIDCConfiguration defines model for OIDCConfiguration.
-type OIDCConfiguration struct {
-	ClaimsSupported                  *[]string              `json:"claims_supported,omitempty"`
-	IDTokenSigningAlgValuesSupported []string               `json:"id_token_signing_alg_values_supported"`
-	Issuer                           string                 `json:"issuer"`
-	JwksURI                          string                 `json:"jwks_uri"`
-	ResponseTypesSupported           []string               `json:"response_types_supported"`
-	SubjectTypesSupported            []string               `json:"subject_types_supported"`
-	AdditionalProperties             map[string]interface{} `json:"-"`
+// NotificationConfig defines model for NotificationConfig.
+type NotificationConfig struct {
+	TenantID  string  `json:"tenantID"`
+	UpdatedAt *int64  `json:"updatedAt,omitempty"`
+	UpdatedBy *string `json:"updatedBy,omitempty"`
+
+	// Webhook A tenant's notification webhook, without its secrets.
+	Webhook *WebhookView `json:"webhook,omitempty"`
+}
+
+// NotificationEventKind `approval_requested` (a Workflow instance started waiting for an approval),
+// `test` (`tw notify test`; never subscribed to).
+type NotificationEventKind string
+
+// NotificationTestResult defines model for NotificationTestResult.
+type NotificationTestResult struct {
+	Delivered bool    `json:"delivered"`
+	Error     *string `json:"error,omitempty"`
+
+	// Status The webhook's HTTP status, when it answered.
+	Status *int `json:"status,omitempty"`
+}
+
+// NotificationsPut defines model for NotificationsPut.
+type NotificationsPut struct {
+	Webhook WebhookPut `json:"webhook"`
+}
+
+// OTLPExport A tenant's OTLP export, without header values.
+type OTLPExport struct {
+	// Endpoint OTLP/HTTP base URL; signals go to `<endpoint>/v1/<signal>`.
+	Endpoint string `json:"endpoint"`
+
+	// HeaderNames Names of the headers sent with every export (values are never returned).
+	HeaderNames []string          `json:"headerNames"`
+	Signals     []TelemetrySignal `json:"signals"`
+}
+
+// OTLPExportPut defines model for OTLPExportPut.
+type OTLPExportPut struct {
+	// Endpoint http:// or https:// base URL of an OTLP/HTTP receiver on the tailnet (no user info, query or fragment).
+	Endpoint string `json:"endpoint"`
+
+	// Headers Headers sent with every export, typically the collector's credentials (at most 16; values at most 4 KiB). Never logged, audited or returned.
+	Headers *map[string]string `json:"headers,omitempty"`
+
+	// Signals What to export (default all three).
+	Signals *[]TelemetrySignal `json:"signals,omitempty"`
+}
+
+// OTLPGrant defines model for OTLPGrant.
+type OTLPGrant struct {
+	Endpoint string             `json:"endpoint"`
+	Headers  *map[string]string `json:"headers,omitempty"`
+	Signals  []TelemetrySignal  `json:"signals"`
 }
 
 // Object defines model for Object.
@@ -1861,6 +3162,13 @@ type ObjectCreate struct {
 	// Caps `{capName: value | [values]}`; see `caps ⊆ parent` semantics in `CreateObject`.
 	Caps *Caps `json:"caps,omitempty"`
 
+	// Epoch The lease epoch the calling host holds for the workload. hostd
+	// always sends it. A host may only create objects on leases it
+	// holds: the create is fenced on the lease's holder (and, when
+	// `epoch` is given, its epoch) in the insert transaction;
+	// otherwise `409 lease_lost`.
+	Epoch *int64 `json:"epoch,omitempty"`
+
 	// Hostname The hostname hostd proposes; mgmt answers with the one to use.
 	Hostname *string `json:"hostname,omitempty"`
 
@@ -1907,7 +3215,7 @@ type ObjectPage struct {
 
 // ObjectPatch JSON Merge Patch. Hosts send the `ready` group; admins send `ttl`.
 type ObjectPatch struct {
-	// Epoch Fences the ready commit.
+	// Epoch Fences the ready commit. hostd always sends it; with or without it, a host may only report ready on objects whose lease it holds (`409 lease_lost`).
 	Epoch        *int64             `json:"epoch,omitempty"`
 	MagicDNS     *string            `json:"magicDNS,omitempty"`
 	NodeID       *string            `json:"nodeID,omitempty"`
@@ -2015,9 +3323,59 @@ type PlacementDecisionMode string
 // PlacementDecisionReason pinned: `host` was given; sticky: kept on the current lease holder; smart: the best measured path; capacity: no measured path decided, so the most free capacity.
 type PlacementDecisionReason string
 
+// PolicyApply defines model for PolicyApply.
+type PolicyApply struct {
+	// Added The additions as a HuJSON snippet (with `dryRun`, what would be added). Empty when nothing is missing that tailworks writes.
+	Added *string `json:"added,omitempty"`
+
+	// CallerGrant The grant in `added` that lets every user of the tailnet call the app (`autogroup:member` to the workload's own tags, `tcp:80`), as JSON. Absent when `added` has none.
+	CallerGrant *string `json:"callerGrant,omitempty"`
+
+	// CanWrite With `dryRun`, when `added` is not empty — the control plane accepted the policy with `added` merged in, so the write would go through (Tailscale refuses a client without Policy File write). `tw deploy` on a terminal offers to write the lines only when it is true. Absent otherwise.
+	CanWrite *bool `json:"canWrite,omitempty"`
+
+	// Changed The policy was written.
+	Changed bool `json:"changed"`
+	DryRun  bool `json:"dryRun"`
+
+	// Manual What the bundle still needs that tailworks doesn't write; add it in the admin console.
+	Manual *[]string `json:"manual,omitempty"`
+
+	// NewETag Its ETag after.
+	NewETag *string `json:"newETag,omitempty"`
+
+	// OldETag The policy's ETag before the write.
+	OldETag   *string         `json:"oldETag,omitempty"`
+	Preflight PreflightResult `json:"preflight"`
+	TenantID  string          `json:"tenantID"`
+	Workload  string          `json:"workload"`
+}
+
+// PolicyApplyCreate defines model for PolicyApplyCreate.
+type PolicyApplyCreate struct {
+	// Bundle The bundle, as for `POST /v1/deployments`.
+	Bundle []byte `json:"bundle"`
+
+	// Namespaces Override the classes read from `tailworks.jsonc` (tests).
+	Namespaces *[]ClassConfig `json:"namespaces,omitempty"`
+}
+
+// PolicySnippet Additions to a tailnet policy, in the policy file's own shape.
+type PolicySnippet struct {
+	AutoApprovers *struct {
+		Services *map[string][]string `json:"services,omitempty"`
+	} `json:"autoApprovers,omitempty"`
+	Grants    *[]map[string]interface{} `json:"grants,omitempty"`
+	NodeAttrs *[]map[string]interface{} `json:"nodeAttrs,omitempty"`
+	TagOwners *map[string][]string      `json:"tagOwners,omitempty"`
+}
+
 // PreflightMissing defines model for PreflightMissing.
 type PreflightMissing struct {
 	Dst string `json:"dst"`
+
+	// IP The grant's port (`tcp:5432`).
+	IP *string `json:"ip,omitempty"`
 
 	// Snippet The grant to add (HuJSON).
 	Snippet string `json:"snippet"`
@@ -2026,9 +3384,11 @@ type PreflightMissing struct {
 
 // PreflightResult defines model for PreflightResult.
 type PreflightResult struct {
-	Missing []PreflightMissing `json:"missing"`
+	// AccessWarnings Grants to `tag:tw-mgmt` that don't do what they look like: values on `github.com/rosskukulinski/tailworks/cap/admin` (they don't narrow it), invalid `github.com/rosskukulinski/tailworks/cap/tenant-admin` values or unknown tenant IDs in them, and, on a tailnet with several tenants, `github.com/rosskukulinski/tailworks/cap/mcp` or `github.com/rosskukulinski/tailworks/cap/approve` grants (they apply to every tenant). Never make `ok` false.
+	AccessWarnings *[]string          `json:"accessWarnings,omitempty"`
+	Missing        []PreflightMissing `json:"missing"`
 
-	// MissingNodeAttrs Missing policy `nodeAttrs` (ADR-029 D6), e.g. `funnel on tag:twd-public` for a workload with public routes.
+	// MissingNodeAttrs Missing policy `nodeAttrs` (ADR-029 D6), e.g. `funnel on tag:tw-public` for a workload with public routes.
 	MissingNodeAttrs *[]string `json:"missingNodeAttrs,omitempty"`
 	MissingTagOwners []string  `json:"missingTagOwners"`
 
@@ -2048,13 +3408,80 @@ type PreflightResult struct {
 	// ServiceUnapproved The policy's `autoApprovers.services` doesn't let the workload tags host `service`: the node would advertise it but control would never route it. `ok` is false.
 	ServiceUnapproved *bool `json:"serviceUnapproved,omitempty"`
 
+	// Snippet Everything above that is missing, as one typed policy snippet: the string fields (`tagOwnersSnippet`, `nodeAttrsSnippet`, `serviceSnippet`, each `missing[].snippet`) are renderings of its parts. Absent when nothing is missing. Never holds the caller grant (`PolicyApply.callerGrant`).
+	Snippet *PolicySnippet `json:"snippet,omitempty"`
+
 	// SrcTags The tags checked (workload + object tags from the bundle).
-	SrcTags          *[]string `json:"srcTags,omitempty"`
+	SrcTags *[]string `json:"srcTags,omitempty"`
+
+	// TagOwnerProblems For a tenant with its own `ownerTag`, the tags its owner tag doesn't own, or that another tenant's owner tag on the tailnet owns. Makes `ok` false.
+	TagOwnerProblems *[]string `json:"tagOwnerProblems,omitempty"`
 	TagOwnersSnippet *string   `json:"tagOwnersSnippet,omitempty"`
 
 	// Unchecked `tailnet.connects` entries that are names, not tags.
 	Unchecked *[]string `json:"unchecked,omitempty"`
+
+	// UndefinedConnects `tailnet.connects` tags in `tag:tw*` (another tailworks app's, not deployed yet) that have no `tagOwners` entry; the control plane rejects a grant to them. `tagOwnersSnippet` defines them too, so `tw policy --apply` writes them with the grants. Never set for a tenant with its own `ownerTag`. Makes `ok` false.
+	UndefinedConnects *[]string `json:"undefinedConnects,omitempty"`
 }
+
+// Preview One running preview of a workload (ADR-048).
+type Preview struct {
+	// Alias Examples: 3f9a1c2b
+	Alias string `json:"alias"`
+
+	// BundleSHA256 Hex SHA-256 of the preview's bundle.
+	BundleSHA256 *string    `json:"bundleSHA256,omitempty"`
+	Deployment   Deployment `json:"deployment"`
+
+	// PreviewOf Examples: web
+	PreviewOf string `json:"previewOf"`
+
+	// Workload The preview's own workload name.
+	//
+	// Examples: web--preview-3f9a1c2b
+	Workload string `json:"workload"`
+}
+
+// PreviewList defines model for PreviewList.
+type PreviewList struct {
+	Items []Preview `json:"items"`
+}
+
+// Promotion A started promotion.
+type Promotion struct {
+	Deployment Deployment `json:"deployment"`
+
+	// Preview The preview's workload name.
+	Preview string `json:"preview"`
+
+	// PreviewStopped The preview was undeployed.
+	PreviewStopped bool `json:"previewStopped"`
+
+	// PromotedFrom The preview deployment whose bundle was deployed.
+	PromotedFrom string `json:"promotedFrom"`
+}
+
+// PromotionCreate defines model for PromotionCreate.
+type PromotionCreate struct {
+	// ForceTakeover As `POST /v1/deployments` `forceTakeover`.
+	ForceTakeover *bool `json:"forceTakeover,omitempty"`
+
+	// Host Pin a host, as for a deploy.
+	Host *string `json:"host,omitempty"`
+
+	// KeepPreview Leave the preview running after the promotion (default: undeploy it).
+	KeepPreview *bool `json:"keepPreview,omitempty"`
+
+	// Preview The preview to promote, by alias (`3f9a1c2b`) or by its workload name (`web--preview-3f9a1c2b`).
+	Preview string `json:"preview"`
+
+	// Replace Re-place the workload, as `POST /v1/deployments` `replace`.
+	Replace *bool `json:"replace,omitempty"`
+}
+
+// Protocols Protocol versions a component speaks: `push`, `guest`, `helper`, `vz`, `rest`, `cliJSON`.
+type Protocols map[string]int
 
 // PublicAssignment A workload's public ingress (ADR-029). The host runs one extra node
 // for it (namespace `_public`, object name = the workload, hostname =
@@ -2069,7 +3496,7 @@ type PublicAssignment struct {
 	// Routes Examples: ["/webhooks/*","/oauth/callback"]
 	Routes []string `json:"routes"`
 
-	// Tags Examples: ["tag:twd-public"]
+	// Tags Examples: ["tag:tw-public"]
 	Tags []string `json:"tags"`
 
 	// Upgrade Routes on which WebSocket/SSE upgrades are allowed.
@@ -2088,7 +3515,7 @@ type PublicImage struct {
 	// ID Examples: pi_3f9a1c2b7d8e4f50
 	ID string `json:"id"`
 
-	// Ref The normalised upstream ref (or twd.local ref) deploys match.
+	// Ref The normalised upstream ref (or tw.local ref) deploys match.
 	Ref string `json:"ref"`
 
 	// Repository `public/…`
@@ -2125,10 +3552,10 @@ type PublicImagePage struct {
 }
 
 // PublicIngress Operator gate for public (Funnel) ingress (ADR-029 D1). `allow`: the
-// tenant's `twd.jsonc` `public` routes take effect. `deny` (or absent):
+// tenant's `tailworks.jsonc` `public` routes take effect. `deny` (or absent):
 // a deploy that declares them is refused `403 public_ingress_not_allowed`,
 // and setting `deny` later makes hosts close every public listener.
-// `twd up` (single-tenant) creates its tenant with `allow`.
+// `tw up` (single-tenant) creates its tenant with `allow`.
 type PublicIngress string
 
 // PublicLimits netd's limits on a public listener (ADR-029 D5); defaults filled in.
@@ -2137,14 +3564,41 @@ type PublicLimits struct {
 	IPBurst *int `json:"ipBurst,omitempty"`
 
 	// IPRps Requests per second, per client IP.
-	IPRps          *float32 `json:"ipRps,omitempty"`
-	MaxBodyBytes   *int64   `json:"maxBodyBytes,omitempty"`
-	MaxConns       *int     `json:"maxConns,omitempty"`
-	MaxHeaderBytes *int     `json:"maxHeaderBytes,omitempty"`
+	IPRps        *float32 `json:"ipRps,omitempty"`
+	MaxBodyBytes *int64   `json:"maxBodyBytes,omitempty"`
+	MaxConns     *int     `json:"maxConns,omitempty"`
+
+	// MaxConnsPerIP Concurrent connections per client address (an IPv6 client counts per /64).
+	MaxConnsPerIP  *int `json:"maxConnsPerIp,omitempty"`
+	MaxHeaderBytes *int `json:"maxHeaderBytes,omitempty"`
 
 	// Rps Requests per second, per workload.
 	Rps            *float32 `json:"rps,omitempty"`
 	TimeoutSeconds *int     `json:"timeoutSeconds,omitempty"`
+
+	// UpgradeLifetimeSeconds Longest an upgraded (WebSocket) connection stays open.
+	UpgradeLifetimeSeconds *int `json:"upgradeLifetimeSeconds,omitempty"`
+}
+
+// PublicNameClaim A tenant's claim on a public name on its tailnet (red-team H10): `https://<name>.<tailnet>/` serves only this tenant.
+type PublicNameClaim struct {
+	ClaimedAt int64 `json:"claimedAt"`
+
+	// ClaimedBy The actor whose deploy claimed it (see Conventions); `legacy` for a name a pre-upgrade deployment already served.
+	ClaimedBy *string `json:"claimedBy,omitempty"`
+	Name      string  `json:"name"`
+
+	// Tailnet The tenant's tailnet, lower-cased, without a trailing dot.
+	Tailnet  string `json:"tailnet"`
+	TenantID string `json:"tenantID"`
+}
+
+// PublicNamePage defines model for PublicNamePage.
+type PublicNamePage struct {
+	Items []PublicNameClaim `json:"items"`
+
+	// NextCursor Pass as `?cursor=` for the next page; `null` when there is none.
+	NextCursor nullable.Nullable[string] `json:"nextCursor"`
 }
 
 // PurgeResult defines model for PurgeResult.
@@ -2154,6 +3608,365 @@ type PurgeResult struct {
 
 	// WarmKeysRevoked The tenant's unused pooled keys revoked with the purge.
 	WarmKeysRevoked *int `json:"warmKeysRevoked,omitempty"`
+}
+
+// Queue A tenant's queue (ADR-039).
+type Queue struct {
+	// Backlog Messages kept: not yet acked, in flight or delayed included.
+	Backlog int64 `json:"backlog"`
+
+	// Bytes Body bytes of the kept messages.
+	Bytes int64 `json:"bytes"`
+
+	// ConsumedAt unix ms of the last claim.
+	ConsumedAt *int64 `json:"consumedAt,omitempty"`
+
+	// Consumer The workload (or `admin`) that last claimed messages.
+	Consumer  *string `json:"consumer,omitempty"`
+	CreatedAt int64   `json:"createdAt"`
+
+	// Delayed Not yet visible (a delay or a retry delay).
+	Delayed int64 `json:"delayed"`
+
+	// InFlight Claimed by a consumer and not settled (lease not expired).
+	InFlight int64 `json:"inFlight"`
+
+	// Incarnation Random per creation.
+	Incarnation string `json:"incarnation"`
+	Name        string `json:"name"`
+
+	// OldestAt Send time (unix ms) of the oldest message; absent when empty.
+	OldestAt  *int64 `json:"oldestAt,omitempty"`
+	TenantID  string `json:"tenantID"`
+	UpdatedAt int64  `json:"updatedAt"`
+}
+
+// QueueAck defines model for QueueAck.
+type QueueAck struct {
+	// Acks Lease IDs to delete.
+	Acks            *[]string `json:"acks,omitempty"`
+	DeadLetterQueue *string   `json:"deadLetterQueue,omitempty"`
+
+	// Extend Lease IDs to keep hidden for `visibilityTimeoutMs` more.
+	Extend *[]string `json:"extend,omitempty"`
+
+	// MaxRetries Admin pull consumers, as for pull.
+	MaxRetries *int `json:"maxRetries,omitempty"`
+
+	// Release Lease IDs to hand back, visible again at once, without counting the attempt (the consumer never ran them: its instance was restarting or went away).
+	Release *[]string     `json:"release,omitempty"`
+	Retries *[]QueueRetry `json:"retries,omitempty"`
+
+	// RetryDelaySeconds Admin pull consumers: the default retry delay.
+	RetryDelaySeconds *int `json:"retryDelaySeconds,omitempty"`
+
+	// VisibilityTimeoutMs For `extend` (default 30000).
+	VisibilityTimeoutMs *int `json:"visibilityTimeoutMs,omitempty"`
+}
+
+// QueueAckResult defines model for QueueAckResult.
+type QueueAckResult struct {
+	Acked int `json:"acked"`
+
+	// DeadLettered Retries that went to the dead-letter queue (or were dropped) instead.
+	DeadLettered int `json:"deadLettered"`
+	Extended     int `json:"extended"`
+	Released     int `json:"released"`
+	Retried      int `json:"retried"`
+
+	// Stale Lease IDs that were no longer current.
+	Stale int `json:"stale"`
+}
+
+// QueueContentType How the body is encoded: `json` (UTF-8 JSON), `text` (UTF-8), `bytes` (raw), `v8` (V8 structured clone, decoded by workerd in the consumer).
+type QueueContentType string
+
+// QueueMessage defines model for QueueMessage.
+type QueueMessage struct {
+	// Attempts Deliveries so far, this one included (pull); 0 for a message never delivered.
+	Attempts int    `json:"attempts"`
+	Body     []byte `json:"body"`
+
+	// ContentType How the body is encoded: `json` (UTF-8 JSON), `text` (UTF-8), `bytes` (raw), `v8` (V8 structured clone, decoded by workerd in the consumer).
+	ContentType QueueContentType `json:"contentType"`
+	ID          string           `json:"id"`
+
+	// LeaseID Settle the message with this (pull only).
+	LeaseID *string `json:"leaseId,omitempty"`
+
+	// Timestamp Send time (unix ms).
+	Timestamp int64 `json:"timestamp"`
+
+	// VisibleAt When the message is (or was) visible (unix ms).
+	VisibleAt *int64 `json:"visibleAt,omitempty"`
+}
+
+// QueueMessageIn defines model for QueueMessageIn.
+type QueueMessageIn struct {
+	// Body The encoded body (see `contentType`), at most 128 KB.
+	Body []byte `json:"body"`
+
+	// ContentType How the body is encoded: `json` (UTF-8 JSON), `text` (UTF-8), `bytes` (raw), `v8` (V8 structured clone, decoded by workerd in the consumer).
+	ContentType *QueueContentType `json:"contentType,omitempty"`
+
+	// DelaySeconds Hide the message this long (default: the call's `delaySeconds`).
+	DelaySeconds *int `json:"delaySeconds,omitempty"`
+}
+
+// QueueMessageList defines model for QueueMessageList.
+type QueueMessageList struct {
+	Messages []QueueMessage `json:"messages"`
+}
+
+// QueuePage defines model for QueuePage.
+type QueuePage struct {
+	Items []Queue `json:"items"`
+
+	// NextCursor Pass as `?cursor=` for the next page; `null` when there is none.
+	NextCursor nullable.Nullable[string] `json:"nextCursor"`
+}
+
+// QueuePull defines model for QueuePull.
+type QueuePull struct {
+	// BatchSize At most this many messages (default 10).
+	BatchSize *int `json:"batchSize,omitempty"`
+
+	// DeadLetterQueue Admin pull consumers: where messages go after `maxRetries` (absent: dropped).
+	DeadLetterQueue *string `json:"deadLetterQueue,omitempty"`
+
+	// MaxRetries Admin pull consumers: deliveries beyond the first before a message is dead-lettered (default 3).
+	MaxRetries *int `json:"maxRetries,omitempty"`
+
+	// VisibilityTimeoutMs How long claimed messages stay hidden (default 30000).
+	VisibilityTimeoutMs *int `json:"visibilityTimeoutMs,omitempty"`
+
+	// WaitMs If nothing is visible, wait this long for a message (default 0).
+	WaitMs *int `json:"waitMs,omitempty"`
+}
+
+// QueuePullResult defines model for QueuePullResult.
+type QueuePullResult struct {
+	// DeadLettered Expired messages moved to the dead-letter queue (or dropped) by this claim.
+	DeadLettered *int           `json:"deadLettered,omitempty"`
+	Messages     []QueueMessage `json:"messages"`
+}
+
+// QueuePurgeResult defines model for QueuePurgeResult.
+type QueuePurgeResult struct {
+	Purged int64 `json:"purged"`
+}
+
+// QueueRetry defines model for QueueRetry.
+type QueueRetry struct {
+	DelaySeconds *int   `json:"delaySeconds,omitempty"`
+	LeaseID      string `json:"leaseId"`
+}
+
+// QueueSend defines model for QueueSend.
+type QueueSend struct {
+	// DelaySeconds The default delay of the messages.
+	DelaySeconds *int             `json:"delaySeconds,omitempty"`
+	Messages     []QueueMessageIn `json:"messages"`
+}
+
+// QueueSendResult defines model for QueueSendResult.
+type QueueSendResult struct {
+	Backlog int64 `json:"backlog"`
+	Bytes   int64 `json:"bytes"`
+
+	// Ids The new messages' IDs, in order.
+	Ids      []string `json:"ids"`
+	OldestAt *int64   `json:"oldestAt,omitempty"`
+}
+
+// R2Object One live object of an R2 bucket, as its index describes it.
+type R2Object struct {
+	// ContentType The object's `httpMetadata.contentType`, if set.
+	ContentType *string `json:"contentType,omitempty"`
+	Etag        string  `json:"etag"`
+	Key         string  `json:"key"`
+
+	// Size Bytes.
+	Size int64 `json:"size"`
+
+	// Uploaded Upload time (unix ms).
+	Uploaded int64 `json:"uploaded"`
+
+	// Version The object's version (R2's `R2Object.version`): new on every put.
+	Version string `json:"version"`
+}
+
+// R2ObjectPage defines model for R2ObjectPage.
+type R2ObjectPage struct {
+	Items []R2Object `json:"items"`
+
+	// NextCursor Pass as `?cursor=` for the next page; `null` when there is none.
+	NextCursor nullable.Nullable[string] `json:"nextCursor"`
+}
+
+// ReleaseArtifact defines model for ReleaseArtifact.
+type ReleaseArtifact struct {
+	Name    string `json:"name"`
+	Sha256  string `json:"sha256"`
+	Size    int64  `json:"size"`
+	Version string `json:"version"`
+}
+
+// ReleaseCatalog defines model for ReleaseCatalog.
+type ReleaseCatalog struct {
+	Current string         `json:"current"`
+	Items   []ReleaseEntry `json:"items"`
+}
+
+// ReleaseEntry defines model for ReleaseEntry.
+type ReleaseEntry struct {
+	// Artifacts Artifacts stored on this replica.
+	Artifacts          *[]string     `json:"artifacts,omitempty"`
+	ContractMigrations *[]string     `json:"contractMigrations,omitempty"`
+	Date               *string       `json:"date,omitempty"`
+	Notes              []ReleaseNote `json:"notes"`
+
+	// Protocols Protocol versions a component speaks: `push`, `guest`, `helper`, `vz`, `rest`, `cliJSON`.
+	Protocols *Protocols          `json:"protocols,omitempty"`
+	Schema    *string             `json:"schema,omitempty"`
+	Source    *ReleaseEntrySource `json:"source,omitempty"`
+	Upgrade   *[]string           `json:"upgrade,omitempty"`
+	Version   string              `json:"version"`
+	Workerd   *string             `json:"workerd,omitempty"`
+}
+
+// ReleaseEntrySource defines model for ReleaseEntry.Source.
+type ReleaseEntrySource string
+
+// ReleaseImport defines model for ReleaseImport.
+type ReleaseImport struct {
+	Entries []ReleaseEntry `json:"entries"`
+}
+
+// ReleaseNote defines model for ReleaseNote.
+type ReleaseNote struct {
+	Kind    ReleaseNoteKind `json:"kind"`
+	Source  *string         `json:"source,omitempty"`
+	Text    string          `json:"text"`
+	Upgrade *[]string       `json:"upgrade,omitempty"`
+}
+
+// ReleaseNoteKind defines model for ReleaseNote.Kind.
+type ReleaseNoteKind string
+
+// ReplicaRef One replica of a workload with `tailworks.jsonc` `replicas` > 1.
+type ReplicaRef struct {
+	DeploymentID string `json:"deploymentID"`
+	Host         string `json:"host"`
+
+	// Status - `assigned`: mgmt placed it; the host has not reported yet.
+	// - `starting`: the host is starting it.
+	// - `active`: serving.
+	// - `crashloop`: it served, then its workerd kept exiting; the host
+	//   keeps restarting it with exponential backoff (200 ms doubling to
+	//   5 min) and reports `active` again once it answers. `error` holds
+	//   the attempt count, the next delay and the last log lines.
+	// - `draining`: being replaced or undeployed.
+	// - `stopped`: stopped (undeployed, fenced or unassigned).
+	// - `failed`: the deploy failed (bad bundle or config, or it never
+	//   became healthy); the host does not retry it. `error` says why.
+	// - `superseded`: a newer deployment of the workload replaced it.
+	Status *DeploymentStatus `json:"status,omitempty"`
+
+	// Workload Examples: web--r2
+	Workload string `json:"workload"`
+}
+
+// RequestRecord One line of a workload's request log (`tw logs --json`,
+// ADR-045): a request through hostd's ingress (`kind:
+// request`), joined with its workerd invocation, or an invocation
+// with no ingress half (`kind: invocation`: a DO called from the
+// Worker, an alarm, a cron run), or a note that records were dropped
+// by the workload's rate limit (`kind: dropped`). Never holds bodies,
+// query strings, request headers or secret values.
+type RequestRecord struct {
+	AuditTraceID *string `json:"auditTraceId,omitempty"`
+
+	// Caller The verified caller (netd's WhoIs), never from tenant code.
+	Caller *struct {
+		IP     *string   `json:"ip,omitempty"`
+		Node   *string   `json:"node,omitempty"`
+		NodeID *string   `json:"nodeId,omitempty"`
+		Object *string   `json:"object,omitempty"`
+		Public *bool     `json:"public,omitempty"`
+		Tags   *[]string `json:"tags,omitempty"`
+		User   *string   `json:"user,omitempty"`
+	} `json:"caller,omitempty"`
+	Class      *string `json:"class,omitempty"`
+	Deployment *string `json:"deployment,omitempty"`
+	Dropped    *int    `json:"dropped,omitempty"`
+
+	// DurableObjectID workerd's ID of a plain-DO object whose name the invocation does not carry.
+	DurableObjectID *string  `json:"durableObjectId,omitempty"`
+	DurationMs      *float32 `json:"durationMs,omitempty"`
+	Entrypoint      *string  `json:"entrypoint,omitempty"`
+
+	// Event fetch, alarm, rpc, scheduled, websocket.
+	Event      *string `json:"event,omitempty"`
+	Exceptions *[]struct {
+		Message *string    `json:"message,omitempty"`
+		Name    *string    `json:"name,omitempty"`
+		Stack   *string    `json:"stack,omitempty"`
+		Time    *time.Time `json:"time,omitempty"`
+	} `json:"exceptions,omitempty"`
+	Host *string           `json:"host,omitempty"`
+	Kind RequestRecordKind `json:"kind"`
+	Logs *[]struct {
+		Level   *string    `json:"level,omitempty"`
+		Message *string    `json:"message,omitempty"`
+		Time    *time.Time `json:"time,omitempty"`
+	} `json:"logs,omitempty"`
+	Method *string `json:"method,omitempty"`
+	Name   *string `json:"name,omitempty"`
+
+	// Object The tailworks object ID.
+	Object       *string `json:"object,omitempty"`
+	Outcome      *string `json:"outcome,omitempty"`
+	ParentSpanID *string `json:"parentSpanId,omitempty"`
+
+	// Path The URL path (never the query string).
+	Path      *string   `json:"path,omitempty"`
+	SpanID    *string   `json:"spanId,omitempty"`
+	Status    *int      `json:"status,omitempty"`
+	Tenant    *string   `json:"tenant,omitempty"`
+	Time      time.Time `json:"time"`
+	TraceID   *string   `json:"traceId,omitempty"`
+	Truncated *bool     `json:"truncated,omitempty"`
+	Workload  *string   `json:"workload,omitempty"`
+}
+
+// RequestRecordKind defines model for RequestRecord.Kind.
+type RequestRecordKind string
+
+// Rollback A started rollback.
+type Rollback struct {
+	Deployment Deployment `json:"deployment"`
+
+	// RollbackOf The deployment whose bundle was redeployed.
+	RollbackOf string `json:"rollbackOf"`
+
+	// Target One entry of a workload's deployment history (ADR-046).
+	Target DeploymentRecord `json:"target"`
+}
+
+// RollbackCreate defines model for RollbackCreate.
+type RollbackCreate struct {
+	// DeploymentID The deployment to roll back to. Default the previous good one (see `CreateRollback`).
+	DeploymentID *string `json:"deploymentID,omitempty"`
+
+	// ForceTakeover As `POST /v1/deployments` `forceTakeover`.
+	ForceTakeover *bool `json:"forceTakeover,omitempty"`
+
+	// Host Pin a host, as for a deploy.
+	Host *string `json:"host,omitempty"`
+
+	// Replace Re-place the workload, as `POST /v1/deployments` `replace`.
+	Replace *bool `json:"replace,omitempty"`
 }
 
 // RunningContainer One running container in a heartbeat.
@@ -2170,16 +3983,96 @@ type RunningContainer struct {
 	Workload  string             `json:"workload"`
 }
 
+// SchemaStatus defines model for SchemaStatus.
+type SchemaStatus struct {
+	// Ahead Applied migrations this replica doesn't know (a newer replica ran them).
+	Ahead *[]string `json:"ahead,omitempty"`
+
+	// Applied The newest migration applied to the store.
+	Applied string `json:"applied"`
+
+	// Latest The newest migration this replica knows.
+	Latest string `json:"latest"`
+
+	// MinBinary The oldest tw-mgmt that may open the store.
+	MinBinary *string   `json:"minBinary,omitempty"`
+	Pending   *[]string `json:"pending,omitempty"`
+
+	// PendingContract Contract migrations deferred until every replica runs this version.
+	PendingContract   *[]string `json:"pendingContract,omitempty"`
+	RestoreGeneration *int64    `json:"restoreGeneration,omitempty"`
+}
+
+// Secret A workload secret's metadata. The value is never part of it.
+type Secret struct {
+	CreatedAt int64  `json:"createdAt"`
+	Name      string `json:"name"`
+	TenantID  string `json:"tenantID"`
+	UpdatedAt int64  `json:"updatedAt"`
+
+	// UpdatedBy The actor who last set it (see Conventions).
+	UpdatedBy *string `json:"updatedBy,omitempty"`
+	Workload  string  `json:"workload"`
+}
+
+// SecretGrant A fenced release of a workload's secret values. Never logged.
+type SecretGrant struct {
+	Epoch     int64  `json:"epoch"`
+	GrantedAt *int64 `json:"grantedAt,omitempty"`
+
+	// Secrets Name to value.
+	Secrets  map[string]string `json:"secrets"`
+	TenantID string            `json:"tenantID"`
+	Workload string            `json:"workload"`
+}
+
+// SecretPage defines model for SecretPage.
+type SecretPage struct {
+	Items []Secret `json:"items"`
+
+	// NextCursor Pass as `?cursor=` for the next page; `null` when there is none.
+	NextCursor nullable.Nullable[string] `json:"nextCursor"`
+}
+
+// SecretPut defines model for SecretPut.
+type SecretPut struct {
+	// Value The secret value (UTF-8, at most 5 KiB).
+	Value *string `json:"value,omitempty"`
+}
+
 // SelfInfo defines model for SelfInfo.
 type SelfInfo struct {
-	// DNSName `twd-mgmt.<tailnet>`
+	// DNSName `tw-mgmt.<tailnet>`
 	DNSName *string `json:"dnsName,omitempty"`
 	HTTPS   bool    `json:"https"`
-	Issuer  *string `json:"issuer,omitempty"`
 	Tailnet *string `json:"tailnet,omitempty"`
 
 	// Transport `tsnet` in normal operation; `local-dev` when the unix socket is serving.
 	Transport *Transport `json:"transport,omitempty"`
+}
+
+// ServiceBindingTarget Where a service binding's calls go (ADR-053).
+type ServiceBindingTarget struct {
+	Binding string `json:"binding"`
+
+	// Entrypoint The named export the binding calls; absent for the default export.
+	Entrypoint *string `json:"entrypoint,omitempty"`
+	Hostname   string  `json:"hostname"`
+
+	// MagicDNS The entry node's MagicDNS name (no trailing dot).
+	MagicDNS string `json:"magicDNS"`
+
+	// ObjectID The target's entry node object.
+	ObjectID string `json:"objectID"`
+
+	// Service The target workload.
+	Service string `json:"service"`
+
+	// Status `pending` → `minted` → `ready`; or, for an object given a pre-joined
+	// pool node (`ObjectCreate.poolObjectID`, ADR-031), `assigned` → `ready`
+	// (never minted). Terminal: `killed` (tombstone, `410`), `failed`, and
+	// `transferred` (a `_pool` node whose node went to an object).
+	Status ObjectStatus `json:"status"`
 }
 
 // ServiceEndpoint A workload's Tailscale Service: a stable name and VIPs that survive the workload node being re-minted or moving host. Callers need a grant to the `svc:` name; control routes it to the workload node only when policy `autoApprovers.services` lets the workload tags host it.
@@ -2196,14 +4089,14 @@ type ServiceEndpoint struct {
 
 // Status defines model for Status.
 type Status struct {
-	// Clock The shared clock this replica uses for leases, host liveness and expiries (ADR-028): the store's clock. `ok` is false (and the top-level `ok` with it) when this replica's wall clock is more than 2 s from the store clock, or the store clock has not been sampled for 30 s. Ownership decisions do not use the wall clock, so this is a warning, not a refusal; local-clock users (WIF issuer tokens, throttles) may misbehave.
+	// Clock The shared clock this replica uses for leases, host liveness and expiries (ADR-028): the store's clock. `ok` is false (and the top-level `ok` with it) when this replica's wall clock is more than 2 s from the store clock, or the store clock has not been sampled for 30 s. Ownership decisions do not use the wall clock, so this is a warning, not a refusal; local-clock users (throttles) may misbehave.
 	Clock *StatusClock `json:"clock,omitempty"`
 	Hosts struct {
 		Live  int `json:"live"`
 		Total int `json:"total"`
 	} `json:"hosts"`
 
-	// Listeners e.g. `tsnet:80`, `tsnet:443`, `funnel:443`, `unix:~/.twd/run/mgmt.sock`.
+	// Listeners e.g. `tsnet:80`, `tsnet:443`, `funnel:443`, `unix:~/.tailworks/run/mgmt.sock`.
 	Listeners *[]string `json:"listeners,omitempty"`
 
 	// Objects Count per `ObjectStatus`.
@@ -2218,9 +4111,12 @@ type Status struct {
 	// Transport `tsnet` in normal operation; `local-dev` when the unix socket is serving.
 	Transport Transport `json:"transport"`
 	Version   *string   `json:"version,omitempty"`
+
+	// Versions What runs where (ADR-041 §7).
+	Versions *StatusVersions `json:"versions,omitempty"`
 }
 
-// StatusClock The shared clock this replica uses for leases, host liveness and expiries (ADR-028): the store's clock. `ok` is false (and the top-level `ok` with it) when this replica's wall clock is more than 2 s from the store clock, or the store clock has not been sampled for 30 s. Ownership decisions do not use the wall clock, so this is a warning, not a refusal; local-clock users (WIF issuer tokens, throttles) may misbehave.
+// StatusClock The shared clock this replica uses for leases, host liveness and expiries (ADR-028): the store's clock. `ok` is false (and the top-level `ok` with it) when this replica's wall clock is more than 2 s from the store clock, or the store clock has not been sampled for 30 s. Ownership decisions do not use the wall clock, so this is a warning, not a refusal; local-clock users (throttles) may misbehave.
 type StatusClock struct {
 	Message *string `json:"message,omitempty"`
 
@@ -2249,9 +4145,167 @@ type StatusReplicas struct {
 	Ok      bool    `json:"ok"`
 }
 
+// StatusVersions What runs where (ADR-041 §7).
+type StatusVersions struct {
+	// Hosts Host count by reported version ("" = none reported).
+	Hosts map[string]int `json:"hosts"`
+
+	// Mgmt Each live replica's version, by replica ID.
+	Mgmt   map[string]string `json:"mgmt"`
+	Schema *SchemaStatus     `json:"schema,omitempty"`
+
+	// Skewed Hosts outside the version window.
+	Skewed *[]string `json:"skewed,omitempty"`
+}
+
+// Store A platform storage object of a workload (ADR-044).
+type Store struct {
+	// Bytes Plaintext bytes of the kept entries.
+	Bytes     int64 `json:"bytes"`
+	CreatedAt int64 `json:"createdAt"`
+
+	// Degraded The journal entry a store's object could not apply, as its host last reported it (`store_degraded`). Absent: no host reports the store degraded.
+	Degraded *StoreDegraded `json:"degraded,omitempty"`
+
+	// Entries Journal entries kept (after compaction).
+	Entries int64 `json:"entries"`
+
+	// Head The last sequence number appended.
+	Head int64 `json:"head"`
+
+	// Incarnation Random per creation: a store deleted and created again has a new one, so a store object holding the old data empties itself.
+	Incarnation string `json:"incarnation"`
+
+	// Kind A storage binding type (`kv`, `r2`, `d1`; later `queue`, …).
+	Kind      StoreKind `json:"kind"`
+	Name      string    `json:"name"`
+	TenantID  string    `json:"tenantID"`
+	UpdatedAt int64     `json:"updatedAt"`
+	Workload  string    `json:"workload"`
+}
+
+// StoreAppend defines model for StoreAppend.
+type StoreAppend struct {
+	// After The journal head the writer has applied; the append fails with `store_conflict` unless it is still the head.
+	After   int64          `json:"after"`
+	Entries []StoreEntryIn `json:"entries"`
+
+	// Incarnation The incarnation the writer has applied (empty for a new store). A mismatch is a `store_conflict`.
+	Incarnation *string `json:"incarnation,omitempty"`
+}
+
+// StoreAppendResult defines model for StoreAppendResult.
+type StoreAppendResult struct {
+	// Head The new head: the entries got `after+1 … head`, in order.
+	Head        int64  `json:"head"`
+	Incarnation string `json:"incarnation"`
+}
+
+// StoreDegraded The journal entry a store's object could not apply, as its host last reported it (`store_degraded`). Absent: no host reports the store degraded.
+type StoreDegraded struct {
+	// At When it first failed there (ms).
+	At int64 `json:"at"`
+
+	// Error Why it failed (SQLite's error for D1).
+	Error string `json:"error"`
+
+	// Host The host whose store object reported it (empty in local dev).
+	Host *string `json:"host,omitempty"`
+
+	// Seq The entry that failed: the object's copy stops before it. `tw d1 repair --skip` takes it.
+	Seq int64 `json:"seq"`
+
+	// Workload The workload, or replica (`<workload>--r<n>`), that host runs it for.
+	Workload *string `json:"workload,omitempty"`
+}
+
+// StoreEntry defines model for StoreEntry.
+type StoreEntry struct {
+	Data []byte `json:"data"`
+	Seq  int64  `json:"seq"`
+}
+
+// StoreEntryIn defines model for StoreEntryIn.
+type StoreEntryIn struct {
+	// Ckey Compaction key: this entry supersedes every earlier entry with the same `ckey` (for KV, the key). Empty: never compacted.
+	Ckey *string `json:"ckey,omitempty"`
+
+	// Data The entry, opaque to mgmt (its kind's encoding), at most 2 MiB.
+	Data []byte `json:"data"`
+}
+
+// StoreJournal defines model for StoreJournal.
+type StoreJournal struct {
+	// Degraded The journal entry a store's object could not apply, as its host last reported it (`store_degraded`). Absent: no host reports the store degraded.
+	Degraded *StoreDegraded `json:"degraded,omitempty"`
+	Entries  []StoreEntry   `json:"entries"`
+	Head     int64          `json:"head"`
+
+	// Incarnation Empty when the store does not exist.
+	Incarnation *string `json:"incarnation,omitempty"`
+
+	// More True if entries after the last one returned remain: read again with `after` = its `seq`.
+	More bool `json:"more"`
+}
+
+// StoreKind A storage binding type (`kv`, `r2`, `d1`; later `queue`, …).
+type StoreKind = string
+
+// StorePage defines model for StorePage.
+type StorePage struct {
+	Items []Store `json:"items"`
+
+	// NextCursor Pass as `?cursor=` for the next page; `null` when there is none.
+	NextCursor nullable.Nullable[string] `json:"nextCursor"`
+}
+
+// StoreRepair defines model for StoreRepair.
+type StoreRepair struct {
+	// Skip The journal entry to delete: it must be the store's `degraded.seq`.
+	Skip int64 `json:"skip"`
+}
+
+// StoreStatusReport defines model for StoreStatusReport.
+type StoreStatusReport struct {
+	// Applied The last journal seq the object applied.
+	Applied int64 `json:"applied"`
+
+	// Degraded The journal entry a store's object could not apply, as its host last reported it (`store_degraded`). Absent: no host reports the store degraded.
+	Degraded *StoreDegraded `json:"degraded,omitempty"`
+
+	// Incarnation The incarnation the object holds; a report for another is ignored.
+	Incarnation string `json:"incarnation"`
+}
+
+// TelemetryConfig defines model for TelemetryConfig.
+type TelemetryConfig struct {
+	// Otlp A tenant's OTLP export, without header values.
+	Otlp      *OTLPExport `json:"otlp,omitempty"`
+	TenantID  string      `json:"tenantID"`
+	UpdatedAt *int64      `json:"updatedAt,omitempty"`
+	UpdatedBy *string     `json:"updatedBy,omitempty"`
+}
+
+// TelemetryGrant A fenced release of the tenant's OTLP export config. Never logged.
+type TelemetryGrant struct {
+	Epoch     int64      `json:"epoch"`
+	GrantedAt *int64     `json:"grantedAt,omitempty"`
+	Otlp      *OTLPGrant `json:"otlp,omitempty"`
+	TenantID  string     `json:"tenantID"`
+	Workload  string     `json:"workload"`
+}
+
+// TelemetryPut defines model for TelemetryPut.
+type TelemetryPut struct {
+	Otlp OTLPExportPut `json:"otlp"`
+}
+
+// TelemetrySignal An OTLP signal.
+type TelemetrySignal string
+
 // Tenant defines model for Tenant.
 type Tenant struct {
-	// APIKeyFile `apikey` mode: absolute path, read at use; the key is never stored or returned.
+	// APIKeyFile `headscale` mode: absolute path of the Headscale API key file, read at use; the key is never stored or returned.
 	APIKeyFile *string `json:"apiKeyFile,omitempty"`
 
 	// ControlURL Non-default control plane (testcontrol, headscale).
@@ -2268,8 +4322,24 @@ type Tenant struct {
 	MaxContainers *int `json:"maxContainers,omitempty"`
 	MaxObjects    int  `json:"maxObjects"`
 
-	// MintMode `oauth`: a Tailscale OAuth client (scope `auth_keys`, tag `tag:twd`; optionally `devices:core` and `policy_file:read`) whose secret stays in a 0600 file on the mgmt host (the default for self-hosted installs). `wif`: keyless, mints through a WIF trust credential (mgmt's OIDC issuer over Funnel; hosted / multi-tenant). `apikey`: a Tailscale API key file (explicit fallback, tests). `static`: fakemgmt only (testcontrol accepts any key).
+	// MaxQueueBytes Bytes of all the tenant's queued messages together; past it a send is `429 storage_quota_exceeded`. Absent or 0: unlimited (each queue still has its own 1 GiB).
+	MaxQueueBytes *int64 `json:"maxQueueBytes,omitempty"`
+
+	// MaxStoreBytes Bytes kept by all the tenant's platform stores together (KV, D1, R2 index journals); past it an append that grows a store is `429 storage_quota_exceeded`. Absent or 0: unlimited (each store still has its own 1 GiB).
+	MaxStoreBytes *int64 `json:"maxStoreBytes,omitempty"`
+
+	// MaxStores Platform stores the tenant may have; past it creating one is `429 storage_quota_exceeded`. Absent or 0: unlimited.
+	MaxStores *int `json:"maxStores,omitempty"`
+
+	// MintMode `oauth`: a Tailscale OAuth client (scope `auth_keys`, tag `tag:tw`; optionally `devices:core` and `policy_file:read`) whose secret stays in a 0600 file on the mgmt host: the only mint mode for Tailscale tailnets. `headscale`: the Headscale profile (ADR-015): a Headscale server at `controlURL` mints tagged pre-auth keys with the Headscale API key in `apiKeyFile` (`HEADSCALE_API_KEY=…`); no Tailscale Services, no Funnel (public routes), no posture. `static`: fakemgmt only (testcontrol accepts any key). `apikey` and `wif` were removed (ADR-042): mgmt refuses to set them (`400 mint_mode_removed`); a tenant an older tailworks created in one still reports it here, but can't mint until it is switched to `oauth`.
 	MintMode MintMode `json:"mintMode"`
+
+	// NamePrefix Goes in front of every tailnet name tailworks generates for this tenant (object
+	// and workload nodes, Services, public names): `<prefix>-<name>`. Up to 11
+	// of a-z, 0-9 and inner hyphens. On a tailnet with several tenants, at most
+	// one may go without (`409 name_prefix_required`). Fixed once the tenant
+	// has deployed.
+	NamePrefix *string `json:"namePrefix,omitempty"`
 
 	// OauthClientFile `oauth` mode: absolute path of the 0600 file with `TS_OAUTH_CLIENT_ID=…` / `TS_OAUTH_CLIENT_SECRET=tskey-client-…`, read at use on the mgmt host (a looser mode is refused).
 	OauthClientFile *string `json:"oauthClientFile,omitempty"`
@@ -2280,20 +4350,24 @@ type Tenant struct {
 	// OboPublicKey base64 Ed25519 key that verifies this tenant's node certificates; hostd pins it.
 	OboPublicKey *string `json:"oboPublicKey,omitempty"`
 
+	// OwnerTag The tag that owns this tenant's workload and object tags, and that its
+	// OAuth client is scoped to. Default `tag:tw`. Two tenants on one
+	// tailnet need their own, so neither's client can mint the other's tags
+	// (`409 shared_owner_tag`). See docs/teams.md (ADR-043).
+	OwnerTag *string `json:"ownerTag,omitempty"`
+
 	// Pool Host pool the tenant's deployments are placed on (hosts with a matching `pool`; empty = any host).
 	Pool *string `json:"pool,omitempty"`
 
 	// PublicIngress Operator gate for public (Funnel) ingress (ADR-029 D1). `allow`: the
-	// tenant's `twd.jsonc` `public` routes take effect. `deny` (or absent):
+	// tenant's `tailworks.jsonc` `public` routes take effect. `deny` (or absent):
 	// a deploy that declares them is refused `403 public_ingress_not_allowed`,
 	// and setting `deny` later makes hosts close every public listener.
-	// `twd up` (single-tenant) creates its tenant with `allow`.
+	// `tw up` (single-tenant) creates its tenant with `allow`.
 	PublicIngress          *PublicIngress `json:"publicIngress,omitempty"`
 	RegistrationsPerMinute int            `json:"registrationsPerMinute"`
 
-	// Tailnet MagicDNS suffix of the customer tailnet.
-	//
-	// Examples: tail7906d5.ts.net
+	// Tailnet MagicDNS suffix of the customer tailnet., examples: [tail7906d5.ts.net]
 	Tailnet string `json:"tailnet"`
 
 	// TenantID Examples: tn_tail7906d5
@@ -2301,14 +4375,12 @@ type Tenant struct {
 	Tier      *Tier  `json:"tier,omitempty"`
 	UpdatedAt int64  `json:"updatedAt"`
 
-	// Wif Present in wif mode.
-	Wif *WIFInfo `json:"wif,omitempty"`
-
-	// WifClientID Public client ID of the mint trust credential (`auth_keys`).
-	WifClientID *string `json:"wifClientID,omitempty"`
-
-	// WifLifecycleClientID Public client ID of the lifecycle credential (`devices:core`, `policy_file:read`).
-	WifLifecycleClientID *string `json:"wifLifecycleClientID,omitempty"`
+	// WarmKeys Pooled preauthorized join keys of this tenant in mgmt's custody
+	// (the warm-key pool: unused, being adopted, or expired with the
+	// revocation still to retry). Anyone who can read custody can join
+	// a node with one until it expires. `tw down` and `tw tenant rm`
+	// revoke them.
+	WarmKeys *int `json:"warmKeys,omitempty"`
 }
 
 // TenantCreate defines model for TenantCreate.
@@ -2320,26 +4392,30 @@ type TenantCreate struct {
 	MaxContainers      *int     `json:"maxContainers,omitempty"`
 	MaxObjects         *int     `json:"maxObjects,omitempty"`
 
-	// MintMode `oauth`: a Tailscale OAuth client (scope `auth_keys`, tag `tag:twd`; optionally `devices:core` and `policy_file:read`) whose secret stays in a 0600 file on the mgmt host (the default for self-hosted installs). `wif`: keyless, mints through a WIF trust credential (mgmt's OIDC issuer over Funnel; hosted / multi-tenant). `apikey`: a Tailscale API key file (explicit fallback, tests). `static`: fakemgmt only (testcontrol accepts any key).
-	MintMode        MintMode `json:"mintMode"`
-	OauthClientFile *string  `json:"oauthClientFile,omitempty"`
-	OauthClientID   *string  `json:"oauthClientID,omitempty"`
-	Pool            *string  `json:"pool,omitempty"`
+	// MintMode `oauth`: a Tailscale OAuth client (scope `auth_keys`, tag `tag:tw`; optionally `devices:core` and `policy_file:read`) whose secret stays in a 0600 file on the mgmt host: the only mint mode for Tailscale tailnets. `headscale`: the Headscale profile (ADR-015): a Headscale server at `controlURL` mints tagged pre-auth keys with the Headscale API key in `apiKeyFile` (`HEADSCALE_API_KEY=…`); no Tailscale Services, no Funnel (public routes), no posture. `static`: fakemgmt only (testcontrol accepts any key). `apikey` and `wif` were removed (ADR-042): mgmt refuses to set them (`400 mint_mode_removed`); a tenant an older tailworks created in one still reports it here, but can't mint until it is switched to `oauth`.
+	MintMode MintMode `json:"mintMode"`
+
+	// NamePrefix Default none (see `Tenant.namePrefix`).
+	NamePrefix      *string `json:"namePrefix,omitempty"`
+	OauthClientFile *string `json:"oauthClientFile,omitempty"`
+	OauthClientID   *string `json:"oauthClientID,omitempty"`
+
+	// OwnerTag Default `tag:tw` (see `Tenant.ownerTag`).
+	OwnerTag *string `json:"ownerTag,omitempty"`
+	Pool     *string `json:"pool,omitempty"`
 
 	// PublicIngress Operator gate for public (Funnel) ingress (ADR-029 D1). `allow`: the
-	// tenant's `twd.jsonc` `public` routes take effect. `deny` (or absent):
+	// tenant's `tailworks.jsonc` `public` routes take effect. `deny` (or absent):
 	// a deploy that declares them is refused `403 public_ingress_not_allowed`,
 	// and setting `deny` later makes hosts close every public listener.
-	// `twd up` (single-tenant) creates its tenant with `allow`.
+	// `tw up` (single-tenant) creates its tenant with `allow`.
 	PublicIngress          *PublicIngress `json:"publicIngress,omitempty"`
 	RegistrationsPerMinute *int           `json:"registrationsPerMinute,omitempty"`
 	Tailnet                string         `json:"tailnet"`
 
 	// TenantID Optional; generated (`tn_…`) when absent.
-	TenantID             *string `json:"tenantID,omitempty"`
-	Tier                 *Tier   `json:"tier,omitempty"`
-	WifClientID          *string `json:"wifClientID,omitempty"`
-	WifLifecycleClientID *string `json:"wifLifecycleClientID,omitempty"`
+	TenantID *string `json:"tenantID,omitempty"`
+	Tier     *Tier   `json:"tier,omitempty"`
 }
 
 // TenantDeleteResult defines model for TenantDeleteResult.
@@ -2348,8 +4424,28 @@ type TenantDeleteResult struct {
 	DevicesDeleting    *[]string `json:"devicesDeleting,omitempty"`
 	Killed             []string  `json:"killed"`
 	Purged             *[]string `json:"purged,omitempty"`
-	TenantID           string    `json:"tenantID"`
+
+	// Removed What the delete removed, by kind (rows, custody entries, hosts to purge).
+	Removed  *map[string]int64 `json:"removed,omitempty"`
+	TenantID string            `json:"tenantID"`
 }
+
+// TenantGrant One valid `github.com/rosskukulinski/tailworks/cap/tenant-admin` value. Allows each action in each tenant it names.
+type TenantGrant struct {
+	Actions []TenantGrantActions `json:"actions"`
+
+	// Approve `github.com/rosskukulinski/tailworks/cap/approve` values that apply only to approvals in these tenants (docs/approvals.md).
+	Approve *[]ApproveGrant `json:"approve,omitempty"`
+
+	// Mcp Admits the caller to `/mcp` for these tenants. The read tools need `read`; each write or destructive tool must be named here and its action held in `actions`.
+	Mcp *struct {
+		Tools []string `json:"tools"`
+	} `json:"mcp,omitempty"`
+	Tenants []string `json:"tenants"`
+}
+
+// TenantGrantActions defines model for TenantGrant.Actions.
+type TenantGrantActions string
 
 // TenantPage defines model for TenantPage.
 type TenantPage struct {
@@ -2367,18 +4463,78 @@ type TenantPatch struct {
 	MaxContainers      *int                      `json:"maxContainers,omitempty"`
 	MaxObjects         *int                      `json:"maxObjects,omitempty"`
 
-	// MintMode `oauth`: a Tailscale OAuth client (scope `auth_keys`, tag `tag:twd`; optionally `devices:core` and `policy_file:read`) whose secret stays in a 0600 file on the mgmt host (the default for self-hosted installs). `wif`: keyless, mints through a WIF trust credential (mgmt's OIDC issuer over Funnel; hosted / multi-tenant). `apikey`: a Tailscale API key file (explicit fallback, tests). `static`: fakemgmt only (testcontrol accepts any key).
-	MintMode        *MintMode                 `json:"mintMode,omitempty"`
+	// MaxQueueBytes 0 or null: unlimited.
+	MaxQueueBytes nullable.Nullable[int64] `json:"maxQueueBytes,omitempty"`
+
+	// MaxStoreBytes 0 or null: unlimited.
+	MaxStoreBytes nullable.Nullable[int64] `json:"maxStoreBytes,omitempty"`
+
+	// MaxStores 0 or null: unlimited.
+	MaxStores nullable.Nullable[int] `json:"maxStores,omitempty"`
+
+	// MintMode `oauth`: a Tailscale OAuth client (scope `auth_keys`, tag `tag:tw`; optionally `devices:core` and `policy_file:read`) whose secret stays in a 0600 file on the mgmt host: the only mint mode for Tailscale tailnets. `headscale`: the Headscale profile (ADR-015): a Headscale server at `controlURL` mints tagged pre-auth keys with the Headscale API key in `apiKeyFile` (`HEADSCALE_API_KEY=…`); no Tailscale Services, no Funnel (public routes), no posture. `static`: fakemgmt only (testcontrol accepts any key). `apikey` and `wif` were removed (ADR-042): mgmt refuses to set them (`400 mint_mode_removed`); a tenant an older tailworks created in one still reports it here, but can't mint until it is switched to `oauth`.
+	MintMode *MintMode `json:"mintMode,omitempty"`
+
+	// NamePrefix Only before the tenant's first deploy (`400 immutable_field` after).
+	NamePrefix      nullable.Nullable[string] `json:"namePrefix,omitempty"`
 	OauthClientFile nullable.Nullable[string] `json:"oauthClientFile,omitempty"`
 	OauthClientID   nullable.Nullable[string] `json:"oauthClientID,omitempty"`
-	Pool            nullable.Nullable[string] `json:"pool,omitempty"`
+
+	// OwnerTag Move the tenant to its own owner tag (`null` = back to `tag:tw`). Existing nodes keep their tags; set `oauthClientFile` to a client scoped to the new tag in the same patch.
+	OwnerTag nullable.Nullable[string] `json:"ownerTag,omitempty"`
+	Pool     nullable.Nullable[string] `json:"pool,omitempty"`
 
 	// PublicIngress The ADR-029 gate: `allow` or `deny` (anything else is `400 bad_request`); `null` clears it (= `deny`).
 	PublicIngress          nullable.Nullable[string] `json:"publicIngress,omitempty"`
 	RegistrationsPerMinute *int                      `json:"registrationsPerMinute,omitempty"`
 	Tier                   *Tier                     `json:"tier,omitempty"`
-	WifClientID            nullable.Nullable[string] `json:"wifClientID,omitempty"`
-	WifLifecycleClientID   nullable.Nullable[string] `json:"wifLifecycleClientID,omitempty"`
+}
+
+// TenantUsage defines model for TenantUsage.
+type TenantUsage struct {
+	// Largest The tenant's largest stores and queues (at most 5), biggest first.
+	Largest []struct {
+		Bytes int64 `json:"bytes"`
+
+		// Kind `kv`, `d1`, `r2`, … or `queue`.
+		Kind string `json:"kind"`
+
+		// Limit Its own size limit.
+		Limit int64  `json:"limit"`
+		Name  string `json:"name"`
+
+		// Workload The store's workload (absent for a queue).
+		Workload *string `json:"workload,omitempty"`
+	} `json:"largest"`
+	Limits struct {
+		// MaxQueueBytes The tenant's quota; 0 = unlimited.
+		MaxQueueBytes int64 `json:"maxQueueBytes"`
+
+		// MaxStoreBytes The tenant's quota; 0 = unlimited.
+		MaxStoreBytes int64 `json:"maxStoreBytes"`
+
+		// MaxStores The tenant's quota; 0 = unlimited.
+		MaxStores int `json:"maxStores"`
+
+		// QueueMaxBytes One queue's own limit.
+		QueueMaxBytes int64 `json:"queueMaxBytes"`
+
+		// StoreMaxBytes One store's own limit.
+		StoreMaxBytes int64 `json:"storeMaxBytes"`
+	} `json:"limits"`
+	Queues struct {
+		// Bytes Bytes of the queued messages (what counts against `maxQueueBytes`).
+		Bytes    int64 `json:"bytes"`
+		Count    int64 `json:"count"`
+		Messages int64 `json:"messages"`
+	} `json:"queues"`
+	Stores struct {
+		// Bytes Bytes kept by the stores' journals (what counts against `maxStoreBytes`).
+		Bytes   int64 `json:"bytes"`
+		Count   int64 `json:"count"`
+		Entries int64 `json:"entries"`
+	} `json:"stores"`
+	TenantID string `json:"tenantID"`
 }
 
 // Tier defines model for Tier.
@@ -2419,31 +4575,60 @@ type TombstoneError struct {
 	// |---|---|---|
 	// | `bad_request` | 400 | malformed body, parameter or filter |
 	// | `bad_cursor` | 400 | `cursor` does not decode |
-	// | `bad_bundle` | 400 | bundle has no `twd.jsonc`, neither `tailnet.tags` nor `tailnet.objects`, or invalid `triggers.crons` |
+	// | `bad_bundle` | 400 | bundle has no `tailworks.jsonc`, neither `tailnet.tags` nor `tailnet.objects`, or invalid `triggers.crons` |
+	// | `bad_object_name` | 400 | a new object name (`objectName`) contains a C0 control, DEL, a C1 control or a bidi control |
+	// | `reserved_tag` | 400 | a bundle or namespace asks for one of tailworks' own tags (`tag:tw`, `tag:tw-mgmt`, `tag:tw-host`) |
 	// | `immutable_field` | 400 | PATCH touches a field the caller may not change |
+	// | `mint_mode_removed` | 400 | a create or PATCH names the removed `apikey` or `wif` mint mode, or a tenant stored in one tries to mint (switch it to `oauth`) |
+	// | `too_many_secrets` | 400 | a workload already has 128 secrets |
+	// | `d1_error` | 400 | a D1 statement failed (SQLite's message, or a D1 limit); nothing of its batch was applied |
 	// | `no_identity` | 401 | WhoIs failed for the connection |
-	// | `host_token_required` | 401 | local-dev socket without `Twd-Host-Token` |
+	// | `host_token_required` | 401 | local-dev socket without `Tw-Host-Token` |
 	// | `host_token_invalid` | 403 | local-dev socket, wrong token |
-	// | `not_admin` | 403 | tailnet caller without `twd.dev/cap/admin` (`snippet` given) |
+	// | `not_admin` | 403 | tailnet caller without `github.com/rosskukulinski/tailworks/cap/admin` (`snippet` given) |
+	// | `tag_not_owned` | 400 | a tenant with its own owner tag asks for a tag its owner tag doesn't own, or that another tenant's on the tailnet owns (`snippet` given) |
+	// | `shared_owner_tag` | 409 | a second tenant on a tailnet where either tenant uses `tag:tw`, or both the same owner tag |
+	// | `name_prefix_required` | 409 | a second tenant on a tailnet without a distinct `namePrefix` |
+	// | `tenant_forbidden` | 403 | a tenant admin's `github.com/rosskukulinski/tailworks/cap/tenant-admin` grants don't name the tenant with the action, or the route is admin-only (`snippet` given) |
+	// | `cap_missing` | 403 | an approval the caller's `github.com/rosskukulinski/tailworks/cap/approve` grants do not cover (`snippet` given) |
 	// | `forbidden` | 403 | role ok, but outside the caller's records / namespaces |
-	// | `host_not_registered` | 403 | `tag:twd-host` node that never did `PUT /v1/hosts/{id}` |
-	// | `host_identity_mismatch` | 403 | host ID bound to another node |
+	// | `experimental_flag` | 403 | the bundle's `compatibility_flags` list flags workerd marks experimental (`unsafe_module`, `rtti_api`, `precise_timers`, …) and no host allows them (`tw-hostd -allow-experimental-flags`); the deploy and its dry run |
+	// | `host_not_registered` | 403 | `tag:tw-host` node that never did `PUT /v1/hosts/{id}`, or a `PUT` for a host ID the admin never created |
+	// | `host_identity_mismatch` | 403 | host ID bound to another node; `registrationSecret` missing or wrong; `auditPubKey` differs from the pinned one |
 	// | `delegation_invalid` | 403 | child tag not owned by the parent's, parent unknown (404) or dead (410) |
 	// | `delegation_exceeds_parent` | 403 | spawn caps ⊄ parent (`missing: {src, dst, cap, field}`) |
-	// | `policy_missing_tag_owners` | 403 | the control plane refused to mint a key for twd's own tags (`snippet` gives the tagOwners to add) |
+	// | `policy_missing_tag_owners` | 403 | the control plane refused to mint a key for tailworks' own tags (`snippet` gives the tagOwners to add) |
 	// | `not_found` | 404 | — |
 	// | `unknown_tenant` | 404 | — |
 	// | `unknown_namespace` | 404 | `(workload, class)` not declared |
+	// | `no_logs` | 404 | the workload's host has no log file for it yet |
+	// | `unknown_secret` | 404 | the workload has no secret of that name |
+	// | `unknown_store` | 404 | the workload has no store of that kind and name |
+	// | `unknown_queue` | 404 | the tenant has no queue of that name |
+	// | `service_not_found` | 404 | a workload's service binding is not declared, or its target workload was never deployed in the tenant |
 	// | `exists` | 409 | create of an existing ID |
 	// | `lease_lost` | 409 | epoch/holder fence failed |
 	// | `lease_held` | 409 | another host holds the lease |
+	// | `store_conflict` | 409 | a store journal append's `after` (or `incarnation`) is not the journal's head: catch up and retry |
+	// | `store_degraded` | 409 | the store object on the workload's host could not apply a journal entry: it stopped its replay there, serves reads from what it applied and refuses writes (`tw d1 export`, then `tw d1 repair --skip <seq>` or recreate the database) |
+	// | `store_not_degraded` | 409 | `…/repair` of a store mgmt does not record as degraded at that journal entry |
+	// | `store_limit` | 400 | a store append exceeds an entry, append or store size limit |
+	// | `queue_limit` | 400 | a send exceeds a message, batch, delay or queue size limit |
 	// | `store_unavailable` | 503 | the store is unreachable, restarting or contended (a row-lock or idle-transaction timeout); retry after `Retry-After` |
 	// | `tier_unavailable` | 409 | the chosen host (`--host`, or the workload's current host) does not offer the deployment's tier, or `containers` (for the image's `arch`) when the bundle declares containers |
-	// | `service_conflict` | 409 | `tailnet.service` names a Service that exists and isn't managed by twd for this tenant and workload |
+	// | `replica_conflict` | 409 | a deploy names a replica (`<workload>--r<n>`) instead of its workload, a replica name is taken by a separate workload, or a workload that is not a replica is given a name of that shape (n ≥ 2), which belongs to replicas |
+	// | `preview_conflict` | 409 | a preview's name (`<workload>--preview-<alias>`) is taken by a workload that is not a preview of this one |
+	// | `preview_failed` | 409 | promote of a preview its host reported `failed` |
+	// | `preview_unsupported` | 400 | `preview` for a bundle with queue bindings (queues are tenant-wide), or of a workload that is itself a preview or replica |
+	// | `unknown_preview` | 404 | promote of a preview that doesn't exist or is stopped |
+	// | `service_conflict` | 409 | `tailnet.service` names a Service that exists and isn't managed by tailworks for this tenant and workload |
 	// | `service_api_failed` | 502 | mgmt can't read or create the Service definition (an OAuth client needs Services › Write) |
+	// | `profile_unsupported` | 400 | the tenant's control-plane profile can't serve the request: on the Headscale profile (ADR-015), `tailnet.service` (no Tailscale Services), public routes or `publicIngress: allow` (no Funnel) |
+	// | `public_name_owned` | 409 | a deploy declares public routes under a workload name another tenant on the same tailnet owns as its public name (red-team H10) |
+	// | `public_name_in_use` | 409 | release of a public name the workload still serves: its latest deployment declares public routes, or its public node is live |
 	// | `move_unconfirmed` | 409 | `replace` would move a stateful workload off its live host, leaving its DO storage behind; confirm with `forceTakeover` |
 	// | `lease_changed` | 409 | the workload's lease changed while `replace` was moving it (a concurrent deploy); retry |
-	// | `takeover_unconfirmed` | 409 | the workload has Durable Objects and its host stopped heartbeating but is still registered: it may still be serving them. `twd host rm <host> --drain`, or redeploy with `--force-takeover` |
+	// | `takeover_unconfirmed` | 409 | the workload has Durable Objects and its host stopped heartbeating but is still registered: it may still be serving them. `tw host rm <host> --force`, or redeploy with `--force-takeover` |
 	// | `already_joined` | 409 | credential for an object that has a node |
 	// | `identity_conflict` | 409 | object ID collision across identities |
 	// | `namespace_ambiguous` | 409 | class declared by several workloads, `workload` missing |
@@ -2451,19 +4636,31 @@ type TombstoneError struct {
 	// | `superseded` | 409 | undeploy of a non-latest deployment |
 	// | `tenant_has_live_objects` | 409 | tenant delete without `force` |
 	// | `host_holds_leases` | 409 | host delete without `drain` |
+	// | `version_skew` | 409 | a host (or CLI, or mgmt replica) outside the version window: a host newer than mgmt, or more than one release line behind it; or a store a newer tw-mgmt contracted (ADR-041 §7) |
+	// | `upgrade_blocked` | 409 | an upgrade run can't start: its plan has blockers (`message` lists them; `POST /v1/upgrades` with `dryRun` shows the plan) |
+	// | `upgrade_state` | 409 | pause, resume or abort of a run that isn't running (pause), paused (resume), or active (abort) |
+	// | `feature_unavailable` | 409 | the deployment needs a host feature (`kv`, `r2`, `d1`, …) that no eligible host, or the workload's current host, advertises: upgrade the hosts |
 	// | `killed` | 410 | tombstone (`TombstoneError`) |
 	// | `precondition_failed` | 412 | `If-Match` mismatch |
+	// | `misdirected_request` | 421 | a tailnet request whose `Host` is not one of mgmt's own names or an IP literal (DNS-rebinding guard) |
 	// | `object_quota_exceeded` | 429 | tenant `maxObjects` |
 	// | `spawn_budget_exceeded` | 429 | `maxLive` / `maxDepth` |
 	// | `container_quota_exceeded` | 429 | tenant `maxContainers` / `maxContainerMemMiB` / `maxContainerVCPU`, or the class's `max_instances` (`missing: {quota, limit, used, requested}`) |
-	// | `image_unavailable` | 502 | a container image could not be pinned at deploy (not in twd's registry, no image for any of the pool's arches, or the upstream mirror failed) |
-	// | `registry_unavailable` | 409 | this twd-mgmt serves no OCI registry (`-registry-dir off`) |
-	// | `mirror_disabled` | 409 | this twd-mgmt does not mirror external images (`-no-mirror`) |
+	// | `storage_quota_exceeded` | 429 | a store append or queue send would take the tenant past `maxStoreBytes` / `maxQueueBytes`, or a new store past `maxStores` (`missing: {quota, limit, used, requested}`) |
+	// | `rate_limited` | 429 | a tailnet caller is over its API request rate, or mgmt is serving its maximum of concurrent requests from non-host callers (`Retry-After` given) |
+	// | `image_unavailable` | 502 | a container image could not be pinned at deploy (not in tailworks' registry, no image for any of the pool's arches, or the upstream mirror failed) |
+	// | `registry_unavailable` | 409 | this tw-mgmt serves no OCI registry (`-registry-dir off`) |
+	// | `mirror_disabled` | 409 | this tw-mgmt does not mirror external images (`-no-mirror`) |
 	// | `bootstrap_failed` | 502 | control plane refused the mint |
+	// | `host_unavailable` | 502 | the host holding the workload's lease did not answer mgmt (logs, approvals) |
 	// | `host_token_unconfigured` | 503 | local-dev mgmt without a token (fail closed) |
 	// | `identity_pending` | 503 | mint still queued (`Retry-After: 1`) |
 	// | `no_host` | 503 | no live host for the deployment (in the tenant's pool, offering its tier, and `containers` for the image's `arch` when it declares containers, with a free node and, for the microVM tier or containers, a free VM in its capacity vector) |
 	// | `policy_unavailable` | 503 | mgmt cannot read the tenant policy |
+	// | `policy_write_denied` | 403 | the tenant's credential may not write the tailnet policy (an OAuth client without Policy File write) |
+	// | `policy_conflict` | 409 | the tailnet policy changed during the write, and again on the retry (`If-Match`) |
+	// | `policy_apply_failed` | 500 | the control plane refused the merged policy, or tailworks refused the snippet (RT-06) |
+	// | `approval_not_pending` | 409 | no approval of that Workflow instance is waiting (decided, timed out, or never asked) |
 	// | `internal` | 500 | — |
 	Code    ErrorCode `json:"code"`
 	DocURL  string    `json:"doc_url"`
@@ -2483,6 +4680,93 @@ type TombstoneError struct {
 // Transport `tsnet` in normal operation; `local-dev` when the unix socket is serving.
 type Transport string
 
+// UpgradePlan defines model for UpgradePlan.
+type UpgradePlan struct {
+	// Actions Notes that need an operator action.
+	Actions *[]ReleaseNote `json:"actions,omitempty"`
+
+	// Blockers Why the run can't start; empty when it can.
+	Blockers []string      `json:"blockers"`
+	Breaking []ReleaseNote `json:"breaking"`
+	From     struct {
+		// Hosts Host ID to version.
+		Hosts map[string]string `json:"hosts"`
+		Mgmt  []string          `json:"mgmt"`
+	} `json:"from"`
+
+	// Path Every release between the oldest running version and `to` that has a contract migration (each must be passed through).
+	Path     *[]string     `json:"path,omitempty"`
+	Steps    []UpgradeStep `json:"steps"`
+	To       string        `json:"to"`
+	Warnings []string      `json:"warnings"`
+}
+
+// UpgradeRequest defines model for UpgradeRequest.
+type UpgradeRequest struct {
+	// Canary The canary host (default: the first host in order).
+	Canary *string `json:"canary,omitempty"`
+	DryRun *bool   `json:"dryRun,omitempty"`
+
+	// Hosts Upgrade only these hosts (default: every host below `to`).
+	Hosts *[]string `json:"hosts,omitempty"`
+
+	// SettleSeconds How long a host may take to re-register and settle (default 300).
+	SettleSeconds *int `json:"settleSeconds,omitempty"`
+
+	// SoakSeconds How long to watch the canary before the rest (default 300).
+	SoakSeconds *int `json:"soakSeconds,omitempty"`
+
+	// To The target release version (it must be in the catalog).
+	To string `json:"to"`
+}
+
+// UpgradeRun defines model for UpgradeRun.
+type UpgradeRun struct {
+	CreatedAt int64        `json:"createdAt"`
+	CreatedBy *string      `json:"createdBy,omitempty"`
+	ID        string       `json:"id"`
+	Plan      *UpgradePlan `json:"plan,omitempty"`
+
+	// Reason Why the run is paused, failed or aborted.
+	Reason *string         `json:"reason,omitempty"`
+	State  UpgradeRunState `json:"state"`
+
+	// Step Index of the current step.
+	Step      *int          `json:"step,omitempty"`
+	Steps     []UpgradeStep `json:"steps"`
+	To        string        `json:"to"`
+	UpdatedAt int64         `json:"updatedAt"`
+}
+
+// UpgradeRunState defines model for UpgradeRun.State.
+type UpgradeRunState string
+
+// UpgradeStep defines model for UpgradeStep.
+type UpgradeStep struct {
+	Canary     *bool           `json:"canary,omitempty"`
+	Detail     *string         `json:"detail,omitempty"`
+	FinishedAt *int64          `json:"finishedAt,omitempty"`
+	Host       *string         `json:"host,omitempty"`
+	Kind       UpgradeStepKind `json:"kind"`
+
+	// Method Hosts: `drain` moves its workloads off first; `bounce` restarts in place (workloads with host-local state, or nowhere to move).
+	Method *UpgradeStepMethod `json:"method,omitempty"`
+
+	// NeedsOperator A command the operator must run before this step can finish.
+	NeedsOperator *string           `json:"needsOperator,omitempty"`
+	StartedAt     *int64            `json:"startedAt,omitempty"`
+	Status        UpgradeStepStatus `json:"status"`
+}
+
+// UpgradeStepKind defines model for UpgradeStep.Kind.
+type UpgradeStepKind string
+
+// UpgradeStepMethod Hosts: `drain` moves its workloads off first; `bounce` restarts in place (workloads with host-local state, or nowhere to move).
+type UpgradeStepMethod string
+
+// UpgradeStepStatus defines model for UpgradeStep.Status.
+type UpgradeStepStatus string
+
 // VolumeKeyGrant A fenced release of a volume's data key. Never logged.
 type VolumeKeyGrant struct {
 	Epoch     int64  `json:"epoch"`
@@ -2495,59 +4779,84 @@ type VolumeKeyGrant struct {
 	Workload string `json:"workload"`
 }
 
-// WIFCheckResult defines model for WIFCheckResult.
-type WIFCheckResult struct {
-	Issuer string `json:"issuer"`
+// WebhookPut defines model for WebhookPut.
+type WebhookPut struct {
+	// Events What to send. Default `[approval_requested]`.
+	Events *[]NotificationEventKind `json:"events,omitempty"`
 
-	// Lifecycle `absent`: no lifecycle client ID (kill tier 2, reaper device deletes, spawn checks and preflight are off).
-	Lifecycle      WIFCheckResultLifecycle `json:"lifecycle"`
-	LifecycleError *string                 `json:"lifecycleError,omitempty"`
+	// Headers Headers sent with every notification (at most 16; values at most 4 KiB). Never logged, audited or returned.
+	Headers *map[string]string `json:"headers,omitempty"`
 
-	// Mint The mint credential's token exchange succeeded (its `auth_keys` scope is only proven by the first real mint).
-	Mint      bool    `json:"mint"`
-	MintError *string `json:"mintError,omitempty"`
-
-	// MintMode `oauth`: a Tailscale OAuth client (scope `auth_keys`, tag `tag:twd`; optionally `devices:core` and `policy_file:read`) whose secret stays in a 0600 file on the mgmt host (the default for self-hosted installs). `wif`: keyless, mints through a WIF trust credential (mgmt's OIDC issuer over Funnel; hosted / multi-tenant). `apikey`: a Tailscale API key file (explicit fallback, tests). `static`: fakemgmt only (testcontrol accepts any key).
-	MintMode MintMode `json:"mintMode"`
-
-	// PolicyRead The lifecycle credential read the policy (`policy_file:read`).
-	PolicyRead      bool    `json:"policyRead"`
-	PolicyReadError *string `json:"policyReadError,omitempty"`
+	// URL http:// or https:// URL (no user info or fragment). Treated as a secret: a chat webhook's path is its credential.
+	URL *string `json:"url,omitempty"`
 }
 
-// WIFCheckResultLifecycle `absent`: no lifecycle client ID (kill tier 2, reaper device deletes, spawn checks and preflight are off).
-type WIFCheckResultLifecycle string
+// WebhookView A tenant's notification webhook, without its secrets.
+type WebhookView struct {
+	Events      []NotificationEventKind `json:"events"`
+	HeaderNames []string                `json:"headerNames"`
 
-// WIFInfo Present in wif mode.
-type WIFInfo struct {
-	// Issuer Examples: https://twd-mgmt.tail7906d5.ts.net/t/tn_tail7906d5
-	Issuer string `json:"issuer"`
-
-	// LifecycleSubject Examples: twd:tenant:tn_tail7906d5:lifecycle
-	LifecycleSubject string `json:"lifecycleSubject"`
-
-	// MintSubject Examples: twd:tenant:tn_tail7906d5:mint
-	MintSubject string `json:"mintSubject"`
+	// Origin The URL's scheme and host (`https://hooks.slack.com`); its path and query are never returned.
+	Origin string `json:"origin"`
 }
 
 // WhoAmI defines model for WhoAmI.
 type WhoAmI struct {
-	Actor  string     `json:"actor"`
-	Admin  bool       `json:"admin"`
-	HostID *string    `json:"hostID,omitempty"`
-	Kind   WhoAmIKind `json:"kind"`
-	Login  *string    `json:"login,omitempty"`
-	Mgmt   SelfInfo   `json:"mgmt"`
-	NodeID *string    `json:"nodeID,omitempty"`
-	Tags   *[]string  `json:"tags,omitempty"`
+	Actor string `json:"actor"`
+	Admin bool   `json:"admin"`
+
+	// ApproveGrants The values of the caller's `github.com/rosskukulinski/tailworks/cap/approve` grants toward
+	// `tag:tw-mgmt` (docs/approvals.md): what it may decide through
+	// `tw approve` and the admin UI. Empty when it holds none.
+	ApproveGrants *[]ApproveGrant `json:"approveGrants,omitempty"`
+
+	// Approver The caller holds `github.com/rosskukulinski/tailworks/cap/approve` and may decide Workflow approvals its grants cover (`tw approve`). Always false for the local operator, which has no personal identity.
+	Approver *bool `json:"approver,omitempty"`
+
+	// Caps The `github.com/rosskukulinski/tailworks/cap/*` capabilities the caller holds toward mgmt (WhoIs CapMap), sorted. Empty for the local operator and hosts.
+	Caps   *[]string `json:"caps,omitempty"`
+	HostID *string   `json:"hostID,omitempty"`
+
+	// InvalidTenantGrants The caller's `github.com/rosskukulinski/tailworks/cap/tenant-admin` values that grant nothing, each with the reason (missing `tenants` or `actions`, an unknown action, a wildcard).
+	InvalidTenantGrants *[]string  `json:"invalidTenantGrants,omitempty"`
+	Kind                WhoAmIKind `json:"kind"`
+	Login               *string    `json:"login,omitempty"`
+
+	// McpTools The MCP tools `/mcp` lets the caller use without a `Tw-MCP-Tools` header, in `tools/list` order.
+	McpTools *[]string `json:"mcpTools,omitempty"`
+	Mgmt     SelfInfo  `json:"mgmt"`
+	NodeID   *string   `json:"nodeID,omitempty"`
+	Tags     *[]string `json:"tags,omitempty"`
+
+	// Tailnet The caller's own tailnet (the MagicDNS suffix of its node, from WhoIs). Absent for the local operator and hosts.
+	Tailnet *string `json:"tailnet,omitempty"`
+
+	// TenantGrants The caller's valid `github.com/rosskukulinski/tailworks/cap/tenant-admin` values: the tenants
+	// it may act in, and how. Empty when it holds none. An admin's
+	// values are listed too but don't narrow it.
+	TenantGrants *[]TenantGrant `json:"tenantGrants,omitempty"`
+
+	// Tenants The tenants the caller can act in without knowing their IDs:
+	// those whose `tailnet` is the caller's own tailnet. The local
+	// operator gets every tenant; hosts get none. The admin UI's
+	// approvals page and `tw approvals` / `tw approve` default to
+	// these. A tailnet admin can still list every tenant
+	// (`GET /v1/tenants`).
+	Tenants *[]WhoAmITenant `json:"tenants,omitempty"`
 }
 
 // WhoAmIKind defines model for WhoAmI.Kind.
 type WhoAmIKind string
 
+// WhoAmITenant defines model for WhoAmITenant.
+type WhoAmITenant struct {
+	Tailnet  string `json:"tailnet"`
+	TenantID string `json:"tenantID"`
+}
+
 // WorkloadPublic defines model for WorkloadPublic.
 type WorkloadPublic struct {
-	// Exposed `twd expose on` (true, the default) or `off`.
+	// Exposed `tw expose on` (true, the default) or `off`.
 	Exposed   bool   `json:"exposed"`
 	TenantID  string `json:"tenantID"`
 	UpdatedAt *int64 `json:"updatedAt,omitempty"`
@@ -2586,17 +4895,35 @@ type Limit = int
 // ObjectID defines model for objectID.
 type ObjectID = string
 
+// PublicName defines model for publicName.
+type PublicName = string
+
+// QueueEpoch defines model for queueEpoch.
+type QueueEpoch = int64
+
+// QueueName defines model for queueName.
+type QueueName = string
+
+// QueueWorkload defines model for queueWorkload.
+type QueueWorkload = string
+
 // RepositoryName defines model for repositoryName.
 type RepositoryName = string
 
 // ReservationID defines model for reservationID.
 type ReservationID = string
 
+// SecretName defines model for secretName.
+type SecretName = string
+
+// StoreEpoch defines model for storeEpoch.
+type StoreEpoch = int64
+
+// StoreName defines model for storeName.
+type StoreName = string
+
 // TenantID defines model for tenantID.
 type TenantID = string
-
-// TenantPath defines model for tenantPath.
-type TenantPath = string
 
 // VolumeID defines model for volumeID.
 type VolumeID = string
@@ -2604,55 +4931,70 @@ type VolumeID = string
 // WorkloadName defines model for workloadName.
 type WorkloadName = string
 
-// BadRequest The DX.md error catalog shape. `code` is stable and machine-readable;
+// BadRequest The typed error catalog (docs/errors.md) shape. `code` is stable and machine-readable;
 // `missing` names what is absent (grant, cap, field, quota); `snippet`
 // is policy HuJSON to paste when a grant is missing; `doc_url` is
-// `https://twd.dev/errors/<code>`; `trace_id` correlates with audit.
+// `https://github.com/rosskukulinski/tailworks/blob/master/docs/errors.md#<code>` (the
+// code's heading in the typed error catalog); `trace_id` correlates with audit.
 type BadRequest = Error
 
-// Conflict The DX.md error catalog shape. `code` is stable and machine-readable;
+// Conflict The typed error catalog (docs/errors.md) shape. `code` is stable and machine-readable;
 // `missing` names what is absent (grant, cap, field, quota); `snippet`
 // is policy HuJSON to paste when a grant is missing; `doc_url` is
-// `https://twd.dev/errors/<code>`; `trace_id` correlates with audit.
+// `https://github.com/rosskukulinski/tailworks/blob/master/docs/errors.md#<code>` (the
+// code's heading in the typed error catalog); `trace_id` correlates with audit.
 type Conflict = Error
 
-// Forbidden The DX.md error catalog shape. `code` is stable and machine-readable;
+// Forbidden The typed error catalog (docs/errors.md) shape. `code` is stable and machine-readable;
 // `missing` names what is absent (grant, cap, field, quota); `snippet`
 // is policy HuJSON to paste when a grant is missing; `doc_url` is
-// `https://twd.dev/errors/<code>`; `trace_id` correlates with audit.
+// `https://github.com/rosskukulinski/tailworks/blob/master/docs/errors.md#<code>` (the
+// code's heading in the typed error catalog); `trace_id` correlates with audit.
 type Forbidden = Error
 
 // Gone `410 Gone`: the error plus the kill record. `tombstone` is absent only when the 410 is `delegation_invalid` for a spawn whose parent is dead (the parent's record is then at `GET /v1/objects/{parent}`).
 type Gone = TombstoneError
 
-// LeaseLost The DX.md error catalog shape. `code` is stable and machine-readable;
+// LeaseLost The typed error catalog (docs/errors.md) shape. `code` is stable and machine-readable;
 // `missing` names what is absent (grant, cap, field, quota); `snippet`
 // is policy HuJSON to paste when a grant is missing; `doc_url` is
-// `https://twd.dev/errors/<code>`; `trace_id` correlates with audit.
+// `https://github.com/rosskukulinski/tailworks/blob/master/docs/errors.md#<code>` (the
+// code's heading in the typed error catalog); `trace_id` correlates with audit.
 type LeaseLost = Error
 
-// NotFound The DX.md error catalog shape. `code` is stable and machine-readable;
+// NotFound The typed error catalog (docs/errors.md) shape. `code` is stable and machine-readable;
 // `missing` names what is absent (grant, cap, field, quota); `snippet`
 // is policy HuJSON to paste when a grant is missing; `doc_url` is
-// `https://twd.dev/errors/<code>`; `trace_id` correlates with audit.
+// `https://github.com/rosskukulinski/tailworks/blob/master/docs/errors.md#<code>` (the
+// code's heading in the typed error catalog); `trace_id` correlates with audit.
 type NotFound = Error
 
-// PreconditionFailed The DX.md error catalog shape. `code` is stable and machine-readable;
+// PreconditionFailed The typed error catalog (docs/errors.md) shape. `code` is stable and machine-readable;
 // `missing` names what is absent (grant, cap, field, quota); `snippet`
 // is policy HuJSON to paste when a grant is missing; `doc_url` is
-// `https://twd.dev/errors/<code>`; `trace_id` correlates with audit.
+// `https://github.com/rosskukulinski/tailworks/blob/master/docs/errors.md#<code>` (the
+// code's heading in the typed error catalog); `trace_id` correlates with audit.
 type PreconditionFailed = Error
 
-// ReadyConflict The DX.md error catalog shape. `code` is stable and machine-readable;
+// ReadyConflict The typed error catalog (docs/errors.md) shape. `code` is stable and machine-readable;
 // `missing` names what is absent (grant, cap, field, quota); `snippet`
 // is policy HuJSON to paste when a grant is missing; `doc_url` is
-// `https://twd.dev/errors/<code>`; `trace_id` correlates with audit.
+// `https://github.com/rosskukulinski/tailworks/blob/master/docs/errors.md#<code>` (the
+// code's heading in the typed error catalog); `trace_id` correlates with audit.
 type ReadyConflict = Error
 
-// Unauthorized The DX.md error catalog shape. `code` is stable and machine-readable;
+// StoreConflict The typed error catalog (docs/errors.md) shape. `code` is stable and machine-readable;
 // `missing` names what is absent (grant, cap, field, quota); `snippet`
 // is policy HuJSON to paste when a grant is missing; `doc_url` is
-// `https://twd.dev/errors/<code>`; `trace_id` correlates with audit.
+// `https://github.com/rosskukulinski/tailworks/blob/master/docs/errors.md#<code>` (the
+// code's heading in the typed error catalog); `trace_id` correlates with audit.
+type StoreConflict = Error
+
+// Unauthorized The typed error catalog (docs/errors.md) shape. `code` is stable and machine-readable;
+// `missing` names what is absent (grant, cap, field, quota); `snippet`
+// is policy HuJSON to paste when a grant is missing; `doc_url` is
+// `https://github.com/rosskukulinski/tailworks/blob/master/docs/errors.md#<code>` (the
+// code's heading in the typed error catalog); `trace_id` correlates with audit.
 type Unauthorized = Error
 
 // ListAuditParams defines parameters for ListAudit.
@@ -2672,13 +5014,26 @@ type ListAuditParams struct {
 	Tenant *string `form:"tenant,omitempty" json:"tenant,omitempty"`
 
 	// Chain `mgmt` or `host:<hostID>`.
-	Chain *string      `form:"chain,omitempty" json:"chain,omitempty"`
-	Kind  *[]AuditKind `form:"kind,omitempty" json:"kind,omitempty"`
+	Chain *string `form:"chain,omitempty" json:"chain,omitempty"`
+
+	// Workload Records about this workload: records whose object belongs to it,
+	// and mgmt records that name it in their detail (deploy, undeploy,
+	// secrets). Combine with `tenant` when several tenants use the name.
+	Workload *string      `form:"workload,omitempty" json:"workload,omitempty"`
+	Kind     *[]AuditKind `form:"kind,omitempty" json:"kind,omitempty"`
 
 	// Since Records at or after this time (RFC 3339 or unix ms).
 	Since *string `form:"since,omitempty" json:"since,omitempty"`
 	Until *string `form:"until,omitempty" json:"until,omitempty"`
+
+	// Order `asc` (default): oldest first. `desc`: newest first, as the admin
+	// UI shows activity. A cursor continues in the order of the page
+	// that returned it, so repeat `order` with the cursor.
+	Order *ListAuditParamsOrder `form:"order,omitempty" json:"order,omitempty"`
 }
+
+// ListAuditParamsOrder defines parameters for ListAudit.
+type ListAuditParamsOrder string
 
 // GetCertificateParams defines parameters for GetCertificate.
 type GetCertificateParams struct {
@@ -2708,7 +5063,7 @@ type ListDeploymentsParams struct {
 	Workload *string `form:"workload,omitempty" json:"workload,omitempty"`
 	Host     *string `form:"host,omitempty" json:"host,omitempty"`
 
-	// Latest Only the newest deployment of each `(tenant, workload)` (what `twd ls` shows).
+	// Latest Only the newest deployment of each `(tenant, workload)` (what `tw ls` shows).
 	Latest *bool `form:"latest,omitempty" json:"latest,omitempty"`
 }
 
@@ -2790,6 +5145,12 @@ type ListObjectsParams struct {
 	// Namespace DO class name, or `_workload`.
 	Namespace *string `form:"namespace,omitempty" json:"namespace,omitempty"`
 
+	// Tag Objects carrying this tag (the full `tag:<name>`, matched exactly).
+	Tag *string `form:"tag,omitempty" json:"tag,omitempty"`
+
+	// Human Objects whose `actingFor` is this principal (exact match, as on `GET /v1/audit`).
+	Human *string `form:"human,omitempty" json:"human,omitempty"`
+
 	// State Repeatable. Default is every state, tombstones included.
 	State *[]ObjectStatus `form:"state,omitempty" json:"state,omitempty"`
 
@@ -2837,6 +5198,12 @@ type CreateObjectCredentialParams struct {
 // CreateObjectCredentialParamsReason defines parameters for CreateObjectCredential.
 type CreateObjectCredentialParamsReason string
 
+// ListDegradedStoresParams defines parameters for ListDegradedStores.
+type ListDegradedStoresParams struct {
+	// Tenant Only this tenant's stores.
+	Tenant *string `form:"tenant,omitempty" json:"tenant,omitempty"`
+}
+
 // ListTenantsParams defines parameters for ListTenants.
 type ListTenantsParams struct {
 	// Limit Page size, 1–500 (default 50). Out-of-range values are `400 bad_request`.
@@ -2867,6 +5234,15 @@ type UpdateTenantParams struct {
 	IfMatch *IfMatch `json:"If-Match,omitempty"`
 }
 
+// ListApprovalsParams defines parameters for ListApprovals.
+type ListApprovalsParams struct {
+	// Workload Only this workload's approvals.
+	Workload *string `form:"workload,omitempty" json:"workload,omitempty"`
+
+	// All Include decided (and timed-out) approvals the hosts still keep.
+	All *bool `form:"all,omitempty" json:"all,omitempty"`
+}
+
 // PurgeTenantObjectsParams defines parameters for PurgeTenantObjects.
 type PurgeTenantObjectsParams struct {
 	// State Terminal states to purge. Repeatable. Any other value is `400 bad_request`.
@@ -2876,11 +5252,249 @@ type PurgeTenantObjectsParams struct {
 // PurgeTenantObjectsParamsState defines parameters for PurgeTenantObjects.
 type PurgeTenantObjectsParamsState string
 
+// ListPublicNamesParams defines parameters for ListPublicNames.
+type ListPublicNamesParams struct {
+	// Limit Page size, 1–500 (default 50). Out-of-range values are `400 bad_request`.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque page cursor from the previous page's `nextCursor`. Filters must be repeated unchanged.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ListQueuesParams defines parameters for ListQueues.
+type ListQueuesParams struct {
+	// Limit Page size, 1–500 (default 50). Out-of-range values are `400 bad_request`.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque page cursor from the previous page's `nextCursor`. Filters must be repeated unchanged.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// GetQueueParams defines parameters for GetQueue.
+type GetQueueParams struct {
+	// Workload Hosts: the workload the call acts for (its producer binding or consumer). Admins leave it out.
+	Workload *QueueWorkload `form:"workload,omitempty" json:"workload,omitempty"`
+
+	// Epoch Hosts: the workload's lease epoch the caller holds (required with `workload`; `409 lease_lost`).
+	Epoch *QueueEpoch `form:"epoch,omitempty" json:"epoch,omitempty"`
+}
+
+// PeekQueueMessagesParams defines parameters for PeekQueueMessages.
+type PeekQueueMessagesParams struct {
+	// Limit At most this many messages (default 20, maximum 100).
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// SendQueueMessagesParams defines parameters for SendQueueMessages.
+type SendQueueMessagesParams struct {
+	// Workload Hosts: the workload the call acts for (its producer binding or consumer). Admins leave it out.
+	Workload *QueueWorkload `form:"workload,omitempty" json:"workload,omitempty"`
+
+	// Epoch Hosts: the workload's lease epoch the caller holds (required with `workload`; `409 lease_lost`).
+	Epoch *QueueEpoch `form:"epoch,omitempty" json:"epoch,omitempty"`
+}
+
+// AckQueueMessagesParams defines parameters for AckQueueMessages.
+type AckQueueMessagesParams struct {
+	// Workload Hosts: the workload the call acts for (its producer binding or consumer). Admins leave it out.
+	Workload *QueueWorkload `form:"workload,omitempty" json:"workload,omitempty"`
+
+	// Epoch Hosts: the workload's lease epoch the caller holds (required with `workload`; `409 lease_lost`).
+	Epoch *QueueEpoch `form:"epoch,omitempty" json:"epoch,omitempty"`
+}
+
+// PullQueueMessagesParams defines parameters for PullQueueMessages.
+type PullQueueMessagesParams struct {
+	// Workload Hosts: the workload the call acts for (its producer binding or consumer). Admins leave it out.
+	Workload *QueueWorkload `form:"workload,omitempty" json:"workload,omitempty"`
+
+	// Epoch Hosts: the workload's lease epoch the caller holds (required with `workload`; `409 lease_lost`).
+	Epoch *QueueEpoch `form:"epoch,omitempty" json:"epoch,omitempty"`
+}
+
+// ListWorkloadDeploymentsParams defines parameters for ListWorkloadDeployments.
+type ListWorkloadDeploymentsParams struct {
+	// Limit Page size, 1–500 (default 50). Out-of-range values are `400 bad_request`.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque page cursor from the previous page's `nextCursor`. Filters must be repeated unchanged.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// GetWorkloadLogsParams defines parameters for GetWorkloadLogs.
+type GetWorkloadLogsParams struct {
+	// N Lines from the end of the log (0 with `follow` for new lines only).
+	N *int `form:"n,omitempty" json:"n,omitempty"`
+
+	// Follow Keep the stream open and send new lines as they are written.
+	Follow *bool `form:"follow,omitempty" json:"follow,omitempty"`
+
+	// Host Only the replica on this host (a host ID).
+	Host *string `form:"host,omitempty" json:"host,omitempty"`
+
+	// Source `console`: the app's raw output (workerd's stdout, the Node
+	// runtime's `app.log`, the microVM console). `requests`: the
+	// workload's structured request records (ADR-045), as
+	// JSON Lines (`application/x-ndjson`), one `RequestRecord` per
+	// line; `n` and the filters below then count records, not lines.
+	Source *GetWorkloadLogsParamsSource `form:"source,omitempty" json:"source,omitempty"`
+
+	// Object `source=requests`: only records of this object (object ID, `Class/name`, `Class` or name).
+	Object *string `form:"object,omitempty" json:"object,omitempty"`
+
+	// Status `source=requests`: only this HTTP status (`404`) or class (`5xx`).
+	Status *string `form:"status,omitempty" json:"status,omitempty"`
+
+	// Outcome `source=requests`: only this workerd outcome (`ok`, `exception`, `canceled`, …).
+	Outcome *string `form:"outcome,omitempty" json:"outcome,omitempty"`
+
+	// Caller `source=requests`: only callers whose login or node name contains this (`public` for Funnel requests).
+	Caller *string `form:"caller,omitempty" json:"caller,omitempty"`
+
+	// Trace `source=requests`: only this W3C trace ID (or a prefix of it) or audit trace ID.
+	Trace *string `form:"trace,omitempty" json:"trace,omitempty"`
+
+	// Errors `source=requests`: only errors (status ≥ 400, an outcome other than `ok`, or an exception).
+	Errors *bool `form:"errors,omitempty" json:"errors,omitempty"`
+}
+
+// GetWorkloadLogsParamsSource defines parameters for GetWorkloadLogs.
+type GetWorkloadLogsParamsSource string
+
+// ApplyWorkloadPolicyParams defines parameters for ApplyWorkloadPolicy.
+type ApplyWorkloadPolicyParams struct {
+	// DryRun Plan only (`added` is what would be written); the policy is not changed.
+	DryRun *bool `form:"dryRun,omitempty" json:"dryRun,omitempty"`
+}
+
+// CreatePromotionParams defines parameters for CreatePromotion.
+type CreatePromotionParams struct {
+	// DryRun Preflight only (`200 PreflightResult`); nothing is deployed.
+	DryRun *bool `form:"dryRun,omitempty" json:"dryRun,omitempty"`
+}
+
 // UpdateWorkloadPublicParams defines parameters for UpdateWorkloadPublic.
 type UpdateWorkloadPublicParams struct {
 	// IfMatch Only apply if the resource's current `ETag` matches; otherwise `412 precondition_failed`.
 	IfMatch *IfMatch `json:"If-Match,omitempty"`
 }
+
+// CreateRollbackParams defines parameters for CreateRollback.
+type CreateRollbackParams struct {
+	// DryRun Preflight only (`200 PreflightResult`); nothing is deployed.
+	DryRun *bool `form:"dryRun,omitempty" json:"dryRun,omitempty"`
+}
+
+// CreateWorkloadSecretGrantParams defines parameters for CreateWorkloadSecretGrant.
+type CreateWorkloadSecretGrantParams struct {
+	// Epoch The namespace lease epoch the caller believes it holds. Fenced in the store (`409 lease_lost`).
+	Epoch Epoch `form:"epoch" json:"epoch"`
+}
+
+// ListWorkloadSecretsParams defines parameters for ListWorkloadSecrets.
+type ListWorkloadSecretsParams struct {
+	// Limit Page size, 1–500 (default 50). Out-of-range values are `400 bad_request`.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque page cursor from the previous page's `nextCursor`. Filters must be repeated unchanged.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// GetServiceBindingTargetParams defines parameters for GetServiceBindingTarget.
+type GetServiceBindingTargetParams struct {
+	// Epoch The namespace lease epoch the caller believes it holds. Fenced in the store (`409 lease_lost`).
+	Epoch Epoch `form:"epoch" json:"epoch"`
+}
+
+// ListWorkloadStoresParams defines parameters for ListWorkloadStores.
+type ListWorkloadStoresParams struct {
+	// Limit Page size, 1–500 (default 50). Out-of-range values are `400 bad_request`.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque page cursor from the previous page's `nextCursor`. Filters must be repeated unchanged.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Kind Only stores of this kind.
+	Kind *StoreKind `form:"kind,omitempty" json:"kind,omitempty"`
+}
+
+// ListKVKeysParams defines parameters for ListKVKeys.
+type ListKVKeysParams struct {
+	// Prefix Only keys that start with this.
+	Prefix *string `form:"prefix,omitempty" json:"prefix,omitempty"`
+
+	// Cursor The `cursor` of the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// DeleteKVValueParams defines parameters for DeleteKVValue.
+type DeleteKVValueParams struct {
+	// Key The KV key (any UTF-8, 1 to 512 bytes; not `.` or `..`).
+	Key string `form:"key" json:"key"`
+}
+
+// GetKVValueParams defines parameters for GetKVValue.
+type GetKVValueParams struct {
+	// Key The KV key (any UTF-8, 1 to 512 bytes; not `.` or `..`).
+	Key string `form:"key" json:"key"`
+}
+
+// PutKVValueParams defines parameters for PutKVValue.
+type PutKVValueParams struct {
+	// Key The KV key (any UTF-8, 1 to 512 bytes; not `.` or `..`).
+	Key string `form:"key" json:"key"`
+}
+
+// ListR2ObjectsParams defines parameters for ListR2Objects.
+type ListR2ObjectsParams struct {
+	// Limit Page size, 1–500 (default 50). Out-of-range values are `400 bad_request`.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque page cursor from the previous page's `nextCursor`. Filters must be repeated unchanged.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Prefix Only objects whose keys start with this.
+	Prefix *string `form:"prefix,omitempty" json:"prefix,omitempty"`
+}
+
+// ReadStoreJournalParams defines parameters for ReadStoreJournal.
+type ReadStoreJournalParams struct {
+	// Epoch Hosts: the workload's lease epoch the caller holds (required; `409 lease_lost`). Admins leave it out.
+	Epoch *StoreEpoch `form:"epoch,omitempty" json:"epoch,omitempty"`
+
+	// After Return entries with a larger `seq` (default 0).
+	After *int64 `form:"after,omitempty" json:"after,omitempty"`
+
+	// Limit At most this many entries (default and maximum 1000; a page also stops at about 4 MiB of data).
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// AppendStoreJournalParams defines parameters for AppendStoreJournal.
+type AppendStoreJournalParams struct {
+	// Epoch Hosts: the workload's lease epoch the caller holds (required; `409 lease_lost`). Admins leave it out.
+	Epoch *StoreEpoch `form:"epoch,omitempty" json:"epoch,omitempty"`
+}
+
+// ReportStoreStatusParams defines parameters for ReportStoreStatus.
+type ReportStoreStatusParams struct {
+	// Epoch Hosts: the workload's lease epoch the caller holds (required; `409 lease_lost`). Admins leave it out.
+	Epoch *StoreEpoch `form:"epoch,omitempty" json:"epoch,omitempty"`
+}
+
+// CreateTelemetryGrantParams defines parameters for CreateTelemetryGrant.
+type CreateTelemetryGrantParams struct {
+	// Epoch The namespace lease epoch the caller believes it holds. Fenced in the store (`409 lease_lost`).
+	Epoch Epoch `form:"epoch" json:"epoch"`
+}
+
+// ActOnUpgradeJSONBody defines parameters for ActOnUpgrade.
+type ActOnUpgradeJSONBody struct {
+	Action ActOnUpgradeJSONBodyAction `json:"action"`
+}
+
+// ActOnUpgradeJSONBodyAction defines parameters for ActOnUpgrade.
+type ActOnUpgradeJSONBodyAction string
 
 // CreateVolumeKeyGrantParams defines parameters for CreateVolumeKeyGrant.
 type CreateVolumeKeyGrantParams struct {
@@ -2903,6 +5517,9 @@ type CreateHostJSONRequestBody = HostCreate
 // RegisterHostJSONRequestBody defines body for RegisterHost for application/json ContentType.
 type RegisterHostJSONRequestBody = HostRegistration
 
+// DrainHostJSONRequestBody defines body for DrainHost for application/json ContentType.
+type DrainHostJSONRequestBody = HostDrainRequest
+
 // ReportHostPathsJSONRequestBody defines body for ReportHostPaths for application/json ContentType.
 type ReportHostPathsJSONRequestBody = HostPathReport
 
@@ -2921,6 +5538,9 @@ type UpdateObjectJSONRequestBody = ObjectPatch
 // UpdateObjectApplicationMergePatchPlusJSONRequestBody defines body for UpdateObject for application/merge-patch+json ContentType.
 type UpdateObjectApplicationMergePatchPlusJSONRequestBody = ObjectPatch
 
+// ImportReleasesJSONRequestBody defines body for ImportReleases for application/json ContentType.
+type ImportReleasesJSONRequestBody = ReleaseImport
+
 // CreateTenantJSONRequestBody defines body for CreateTenant for application/json ContentType.
 type CreateTenantJSONRequestBody = TenantCreate
 
@@ -2930,150 +5550,62 @@ type UpdateTenantJSONRequestBody = TenantPatch
 // UpdateTenantApplicationMergePatchPlusJSONRequestBody defines body for UpdateTenant for application/merge-patch+json ContentType.
 type UpdateTenantApplicationMergePatchPlusJSONRequestBody = TenantPatch
 
+// PutTenantNotificationsJSONRequestBody defines body for PutTenantNotifications for application/json ContentType.
+type PutTenantNotificationsJSONRequestBody = NotificationsPut
+
+// SendQueueMessagesJSONRequestBody defines body for SendQueueMessages for application/json ContentType.
+type SendQueueMessagesJSONRequestBody = QueueSend
+
+// AckQueueMessagesJSONRequestBody defines body for AckQueueMessages for application/json ContentType.
+type AckQueueMessagesJSONRequestBody = QueueAck
+
+// PullQueueMessagesJSONRequestBody defines body for PullQueueMessages for application/json ContentType.
+type PullQueueMessagesJSONRequestBody = QueuePull
+
+// PutTenantTelemetryJSONRequestBody defines body for PutTenantTelemetry for application/json ContentType.
+type PutTenantTelemetryJSONRequestBody = TelemetryPut
+
+// DecideApprovalJSONRequestBody defines body for DecideApproval for application/json ContentType.
+type DecideApprovalJSONRequestBody = ApprovalDecisionRequest
+
+// QueryD1JSONRequestBody defines body for QueryD1 for application/json ContentType.
+type QueryD1JSONRequestBody = D1Query
+
+// ApplyWorkloadPolicyJSONRequestBody defines body for ApplyWorkloadPolicy for application/json ContentType.
+type ApplyWorkloadPolicyJSONRequestBody = PolicyApplyCreate
+
+// CreatePromotionJSONRequestBody defines body for CreatePromotion for application/json ContentType.
+type CreatePromotionJSONRequestBody = PromotionCreate
+
 // UpdateWorkloadPublicJSONRequestBody defines body for UpdateWorkloadPublic for application/json ContentType.
 type UpdateWorkloadPublicJSONRequestBody = WorkloadPublicPatch
 
 // UpdateWorkloadPublicApplicationMergePatchPlusJSONRequestBody defines body for UpdateWorkloadPublic for application/merge-patch+json ContentType.
 type UpdateWorkloadPublicApplicationMergePatchPlusJSONRequestBody = WorkloadPublicPatch
 
-// Getter for additional properties for OIDCConfiguration. Returns the specified
-// element and whether it was found
-func (a OIDCConfiguration) Get(fieldName string) (value interface{}, found bool) {
-	if a.AdditionalProperties != nil {
-		value, found = a.AdditionalProperties[fieldName]
-	}
-	return
-}
+// CreateRollbackJSONRequestBody defines body for CreateRollback for application/json ContentType.
+type CreateRollbackJSONRequestBody = RollbackCreate
 
-// Setter for additional properties for OIDCConfiguration
-func (a *OIDCConfiguration) Set(fieldName string, value interface{}) {
-	if a.AdditionalProperties == nil {
-		a.AdditionalProperties = make(map[string]interface{})
-	}
-	a.AdditionalProperties[fieldName] = value
-}
+// PutWorkloadSecretJSONRequestBody defines body for PutWorkloadSecret for application/json ContentType.
+type PutWorkloadSecretJSONRequestBody = SecretPut
 
-// Override default JSON handling for OIDCConfiguration to handle AdditionalProperties
-func (a *OIDCConfiguration) UnmarshalJSON(b []byte) error {
-	object := make(map[string]json.RawMessage)
-	err := json.Unmarshal(b, &object)
-	if err != nil {
-		return err
-	}
+// PutKVValueJSONRequestBody defines body for PutKVValue for application/json ContentType.
+type PutKVValueJSONRequestBody = KVPut
 
-	if raw, found := object["claims_supported"]; found {
-		err = json.Unmarshal(raw, &a.ClaimsSupported)
-		if err != nil {
-			return fmt.Errorf("error reading 'claims_supported': %w", err)
-		}
-		delete(object, "claims_supported")
-	}
+// AppendStoreJournalJSONRequestBody defines body for AppendStoreJournal for application/json ContentType.
+type AppendStoreJournalJSONRequestBody = StoreAppend
 
-	if raw, found := object["id_token_signing_alg_values_supported"]; found {
-		err = json.Unmarshal(raw, &a.IDTokenSigningAlgValuesSupported)
-		if err != nil {
-			return fmt.Errorf("error reading 'id_token_signing_alg_values_supported': %w", err)
-		}
-		delete(object, "id_token_signing_alg_values_supported")
-	}
+// RepairStoreJSONRequestBody defines body for RepairStore for application/json ContentType.
+type RepairStoreJSONRequestBody = StoreRepair
 
-	if raw, found := object["issuer"]; found {
-		err = json.Unmarshal(raw, &a.Issuer)
-		if err != nil {
-			return fmt.Errorf("error reading 'issuer': %w", err)
-		}
-		delete(object, "issuer")
-	}
+// ReportStoreStatusJSONRequestBody defines body for ReportStoreStatus for application/json ContentType.
+type ReportStoreStatusJSONRequestBody = StoreStatusReport
 
-	if raw, found := object["jwks_uri"]; found {
-		err = json.Unmarshal(raw, &a.JwksURI)
-		if err != nil {
-			return fmt.Errorf("error reading 'jwks_uri': %w", err)
-		}
-		delete(object, "jwks_uri")
-	}
+// CreateUpgradeJSONRequestBody defines body for CreateUpgrade for application/json ContentType.
+type CreateUpgradeJSONRequestBody = UpgradeRequest
 
-	if raw, found := object["response_types_supported"]; found {
-		err = json.Unmarshal(raw, &a.ResponseTypesSupported)
-		if err != nil {
-			return fmt.Errorf("error reading 'response_types_supported': %w", err)
-		}
-		delete(object, "response_types_supported")
-	}
-
-	if raw, found := object["subject_types_supported"]; found {
-		err = json.Unmarshal(raw, &a.SubjectTypesSupported)
-		if err != nil {
-			return fmt.Errorf("error reading 'subject_types_supported': %w", err)
-		}
-		delete(object, "subject_types_supported")
-	}
-
-	if len(object) != 0 {
-		a.AdditionalProperties = make(map[string]interface{})
-		for fieldName, fieldBuf := range object {
-			var fieldVal interface{}
-			err := json.Unmarshal(fieldBuf, &fieldVal)
-			if err != nil {
-				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
-			}
-			a.AdditionalProperties[fieldName] = fieldVal
-		}
-	}
-	return nil
-}
-
-// Override default JSON handling for OIDCConfiguration to handle AdditionalProperties
-func (a OIDCConfiguration) MarshalJSON() ([]byte, error) {
-	var err error
-	object := make(map[string]json.RawMessage)
-
-	if a.ClaimsSupported != nil {
-		object["claims_supported"], err = json.Marshal(a.ClaimsSupported)
-		if err != nil {
-			return nil, fmt.Errorf("error marshaling 'claims_supported': %w", err)
-		}
-	}
-
-	if a.IDTokenSigningAlgValuesSupported != nil {
-		object["id_token_signing_alg_values_supported"], err = json.Marshal(a.IDTokenSigningAlgValuesSupported)
-		if err != nil {
-			return nil, fmt.Errorf("error marshaling 'id_token_signing_alg_values_supported': %w", err)
-		}
-	}
-
-	object["issuer"], err = json.Marshal(a.Issuer)
-	if err != nil {
-		return nil, fmt.Errorf("error marshaling 'issuer': %w", err)
-	}
-
-	object["jwks_uri"], err = json.Marshal(a.JwksURI)
-	if err != nil {
-		return nil, fmt.Errorf("error marshaling 'jwks_uri': %w", err)
-	}
-
-	if a.ResponseTypesSupported != nil {
-		object["response_types_supported"], err = json.Marshal(a.ResponseTypesSupported)
-		if err != nil {
-			return nil, fmt.Errorf("error marshaling 'response_types_supported': %w", err)
-		}
-	}
-
-	if a.SubjectTypesSupported != nil {
-		object["subject_types_supported"], err = json.Marshal(a.SubjectTypesSupported)
-		if err != nil {
-			return nil, fmt.Errorf("error marshaling 'subject_types_supported': %w", err)
-		}
-	}
-
-	for fieldName, field := range a.AdditionalProperties {
-		object[fieldName], err = json.Marshal(field)
-		if err != nil {
-			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
-		}
-	}
-	return json.Marshal(object)
-}
+// ActOnUpgradeJSONRequestBody defines body for ActOnUpgrade for application/json ContentType.
+type ActOnUpgradeJSONRequestBody ActOnUpgradeJSONBody
 
 // AsAuditRecordDetail0 returns the union data inside the AuditRecord_Detail as a AuditRecordDetail0
 func (t AuditRecord_Detail) AsAuditRecordDetail0() (AuditRecordDetail0, error) {
@@ -3201,18 +5733,6 @@ func (t *ObjectCreate_TTL) UnmarshalJSON(b []byte) error {
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
-	// GetOIDCConfiguration OIDC discovery (base issuer)
-	// (GET /.well-known/openid-configuration)
-	GetOIDCConfiguration(w http.ResponseWriter, r *http.Request)
-	// GetJWKS Issuer signing keys
-	// (GET /jwks)
-	GetJWKS(w http.ResponseWriter, r *http.Request)
-	// GetTenantOIDCConfiguration OIDC discovery (per-tenant issuer `…/t/{tenant}`)
-	// (GET /t/{tenant}/.well-known/openid-configuration)
-	GetTenantOIDCConfiguration(w http.ResponseWriter, r *http.Request, tenant TenantPath)
-	// GetTenantJWKS Per-tenant issuer signing keys (same key set)
-	// (GET /t/{tenant}/jwks)
-	GetTenantJWKS(w http.ResponseWriter, r *http.Request, tenant TenantPath)
 	// ListAudit Query audit records
 	// (GET /v1/audit)
 	ListAudit(w http.ResponseWriter, r *http.Request, params ListAuditParams)
@@ -3273,9 +5793,21 @@ type ServerInterface interface {
 	// ListHostAssignments List the deployments assigned to a host
 	// (GET /v1/hosts/{id}/assignments)
 	ListHostAssignments(w http.ResponseWriter, r *http.Request, id HostID, params ListHostAssignmentsParams)
+	// UncordonHost Uncordon a host
+	// (DELETE /v1/hosts/{id}/cordon)
+	UncordonHost(w http.ResponseWriter, r *http.Request, id HostID)
+	// CordonHost Cordon a host (no new placements)
+	// (PUT /v1/hosts/{id}/cordon)
+	CordonHost(w http.ResponseWriter, r *http.Request, id HostID)
+	// DrainHost Cordon a host and move its workloads to other hosts
+	// (POST /v1/hosts/{id}/drain)
+	DrainHost(w http.ResponseWriter, r *http.Request, id HostID)
 	// ReportHostPaths Report measured tailnet paths (smart placement)
 	// (PUT /v1/hosts/{id}/paths)
 	ReportHostPaths(w http.ResponseWriter, r *http.Request, id HostID)
+	// GetHostSandboxDeny Every tenant's credential file paths, for the host's sandbox deny list
+	// (GET /v1/hosts/{id}/sandbox-deny)
+	GetHostSandboxDeny(w http.ResponseWriter, r *http.Request, id HostID)
 	// ReportHostStatus Heartbeat (replace the host's reported status)
 	// (PUT /v1/hosts/{id}/status)
 	ReportHostStatus(w http.ResponseWriter, r *http.Request, id HostID)
@@ -3308,13 +5840,30 @@ type ServerInterface interface {
 	UpdateObject(w http.ResponseWriter, r *http.Request, id ObjectID, params UpdateObjectParams)
 	// GetObjectCertificate Read the object's node certificate
 	// (GET /v1/objects/{id}/certificate)
+	//
+	// Deprecated: this operation has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	GetObjectCertificate(w http.ResponseWriter, r *http.Request, id ObjectID)
 	// CreateObjectCredential Mint a single-use auth key for the object's node
 	// (POST /v1/objects/{id}/credentials)
 	CreateObjectCredential(w http.ResponseWriter, r *http.Request, id ObjectID, params CreateObjectCredentialParams)
+	// ListReleases The release catalog
+	// (GET /v1/releases)
+	ListReleases(w http.ResponseWriter, r *http.Request)
+	// ImportReleases Import catalog entries (from a release's share/tailworks/catalog.json)
+	// (POST /v1/releases)
+	ImportReleases(w http.ResponseWriter, r *http.Request)
+	// GetReleaseArtifact Download a release tarball (hosts upgrading themselves)
+	// (GET /v1/releases/{version}/artifacts/{name})
+	GetReleaseArtifact(w http.ResponseWriter, r *http.Request, version string, name string)
+	// PutReleaseArtifact Upload a release tarball (or its SHA256SUMS)
+	// (PUT /v1/releases/{version}/artifacts/{name})
+	PutReleaseArtifact(w http.ResponseWriter, r *http.Request, version string, name string)
 	// GetStatus mgmt status
 	// (GET /v1/status)
 	GetStatus(w http.ResponseWriter, r *http.Request)
+	// ListDegradedStores List degraded stores
+	// (GET /v1/stores/degraded)
+	ListDegradedStores(w http.ResponseWriter, r *http.Request, params ListDegradedStoresParams)
 	// ListTenants List tenants
 	// (GET /v1/tenants)
 	ListTenants(w http.ResponseWriter, r *http.Request, params ListTenantsParams)
@@ -3330,18 +5879,171 @@ type ServerInterface interface {
 	// UpdateTenant Update a tenant (JSON Merge Patch)
 	// (PATCH /v1/tenants/{id})
 	UpdateTenant(w http.ResponseWriter, r *http.Request, id TenantID, params UpdateTenantParams)
+	// ListApprovals The Workflow approvals waiting in a tenant (`tw approvals`, the admin UI)
+	// (GET /v1/tenants/{id}/approvals)
+	ListApprovals(w http.ResponseWriter, r *http.Request, id TenantID, params ListApprovalsParams)
+	// DeleteTenantNotifications Stop the tenant's notifications (`tw notify rm`)
+	// (DELETE /v1/tenants/{id}/notifications)
+	DeleteTenantNotifications(w http.ResponseWriter, r *http.Request, id TenantID)
+	// GetTenantNotifications Read the tenant's notification webhook (`tw notify`), without secrets
+	// (GET /v1/tenants/{id}/notifications)
+	GetTenantNotifications(w http.ResponseWriter, r *http.Request, id TenantID)
+	// PutTenantNotifications Set the tenant's notification webhook (`tw notify set`)
+	// (PUT /v1/tenants/{id}/notifications)
+	PutTenantNotifications(w http.ResponseWriter, r *http.Request, id TenantID)
+	// TestTenantNotifications Send a test notification now (`tw notify test`)
+	// (POST /v1/tenants/{id}/notifications/test)
+	TestTenantNotifications(w http.ResponseWriter, r *http.Request, id TenantID)
 	// PurgeTenantObjects Purge terminal objects of a tenant
 	// (DELETE /v1/tenants/{id}/objects)
 	PurgeTenantObjects(w http.ResponseWriter, r *http.Request, id TenantID, params PurgeTenantObjectsParams)
-	// CheckTenantWIF Verify a wif tenant's trust credentials (diagnostic)
-	// (POST /v1/tenants/{id}/wif-check)
-	CheckTenantWIF(w http.ResponseWriter, r *http.Request, id TenantID)
-	// GetWorkloadPublic Read a workload's public-ingress exposure (`twd expose`)
+	// ListPublicNames List the public names a tenant owns
+	// (GET /v1/tenants/{id}/public-names)
+	ListPublicNames(w http.ResponseWriter, r *http.Request, id TenantID, params ListPublicNamesParams)
+	// ReleasePublicName Release a public name the tenant owns
+	// (DELETE /v1/tenants/{id}/public-names/{name})
+	ReleasePublicName(w http.ResponseWriter, r *http.Request, id TenantID, name PublicName)
+	// ListQueues List a tenant's queues
+	// (GET /v1/tenants/{id}/queues)
+	ListQueues(w http.ResponseWriter, r *http.Request, id TenantID, params ListQueuesParams)
+	// DeleteQueue Delete a queue and its messages
+	// (DELETE /v1/tenants/{id}/queues/{queue})
+	DeleteQueue(w http.ResponseWriter, r *http.Request, id TenantID, queue QueueName)
+	// GetQueue Get one queue and its backlog
+	// (GET /v1/tenants/{id}/queues/{queue})
+	GetQueue(w http.ResponseWriter, r *http.Request, id TenantID, queue QueueName, params GetQueueParams)
+	// PutQueue Create a queue (idempotent)
+	// (PUT /v1/tenants/{id}/queues/{queue})
+	PutQueue(w http.ResponseWriter, r *http.Request, id TenantID, queue QueueName)
+	// PeekQueueMessages Read messages without claiming them
+	// (GET /v1/tenants/{id}/queues/{queue}/messages)
+	PeekQueueMessages(w http.ResponseWriter, r *http.Request, id TenantID, queue QueueName, params PeekQueueMessagesParams)
+	// SendQueueMessages Send messages to a queue
+	// (POST /v1/tenants/{id}/queues/{queue}/messages)
+	SendQueueMessages(w http.ResponseWriter, r *http.Request, id TenantID, queue QueueName, params SendQueueMessagesParams)
+	// AckQueueMessages Settle claimed messages (ack, retry, extend)
+	// (POST /v1/tenants/{id}/queues/{queue}/messages/ack)
+	AckQueueMessages(w http.ResponseWriter, r *http.Request, id TenantID, queue QueueName, params AckQueueMessagesParams)
+	// PullQueueMessages Claim a batch of messages (push consumers and HTTP pull)
+	// (POST /v1/tenants/{id}/queues/{queue}/messages/pull)
+	PullQueueMessages(w http.ResponseWriter, r *http.Request, id TenantID, queue QueueName, params PullQueueMessagesParams)
+	// PurgeQueue Delete every message of a queue, keeping the queue
+	// (POST /v1/tenants/{id}/queues/{queue}/purge)
+	PurgeQueue(w http.ResponseWriter, r *http.Request, id TenantID, queue QueueName)
+	// DeleteTenantTelemetry Stop the tenant's OTLP export (`tw telemetry rm`)
+	// (DELETE /v1/tenants/{id}/telemetry)
+	DeleteTenantTelemetry(w http.ResponseWriter, r *http.Request, id TenantID)
+	// GetTenantTelemetry Read the tenant's OTLP export (`tw telemetry`), without header values
+	// (GET /v1/tenants/{id}/telemetry)
+	GetTenantTelemetry(w http.ResponseWriter, r *http.Request, id TenantID)
+	// PutTenantTelemetry Set the tenant's OTLP export (`tw telemetry set`)
+	// (PUT /v1/tenants/{id}/telemetry)
+	PutTenantTelemetry(w http.ResponseWriter, r *http.Request, id TenantID)
+	// GetTenantUsage What a tenant keeps in mgmt (`tw tenant ls`, `tw doctor`)
+	// (GET /v1/tenants/{id}/usage)
+	GetTenantUsage(w http.ResponseWriter, r *http.Request, id TenantID)
+	// DecideApproval Approve or reject a waiting Workflow instance (`tw approve`, the admin UI)
+	// (POST /v1/tenants/{id}/workloads/{workload}/approvals/{workflow}/{instance})
+	DecideApproval(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, workflow string, instance string)
+	// ExportD1 Export a D1 database as SQL (`tw d1 export`)
+	// (GET /v1/tenants/{id}/workloads/{workload}/d1/{name}/export)
+	ExportD1(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, name StoreName)
+	// QueryD1 Run SQL on a D1 database (`tw d1 execute`, `tw d1 migrations apply`)
+	// (POST /v1/tenants/{id}/workloads/{workload}/d1/{name}/query)
+	QueryD1(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, name StoreName)
+	// ListWorkloadDeployments A workload's deployment history, newest first (`tw deployments`)
+	// (GET /v1/tenants/{id}/workloads/{workload}/deployments)
+	ListWorkloadDeployments(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, params ListWorkloadDeploymentsParams)
+	// GetWorkloadLogs Read (or follow) a workload's workerd / node log (`tw logs` from a linked machine)
+	// (GET /v1/tenants/{id}/workloads/{workload}/logs)
+	GetWorkloadLogs(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, params GetWorkloadLogsParams)
+	// ApplyWorkloadPolicy Add what a bundle needs to the tailnet policy (`tw policy --apply`), or plan it with dryRun
+	// (POST /v1/tenants/{id}/workloads/{workload}/policy)
+	ApplyWorkloadPolicy(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, params ApplyWorkloadPolicyParams)
+	// ListWorkloadPreviews A workload's running previews (`tw previews`)
+	// (GET /v1/tenants/{id}/workloads/{workload}/previews)
+	ListWorkloadPreviews(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName)
+	// CreatePromotion Promote a preview to the workload (`tw promote`), or preflight it with dryRun
+	// (POST /v1/tenants/{id}/workloads/{workload}/promotions)
+	CreatePromotion(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, params CreatePromotionParams)
+	// GetWorkloadPublic Read a workload's public-ingress exposure (`tw expose`)
 	// (GET /v1/tenants/{id}/workloads/{workload}/public)
 	GetWorkloadPublic(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName)
 	// UpdateWorkloadPublic Expose or unexpose a workload's public routes (JSON Merge Patch)
 	// (PATCH /v1/tenants/{id}/workloads/{workload}/public)
 	UpdateWorkloadPublic(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, params UpdateWorkloadPublicParams)
+	// CreateRollback Roll a workload back to a stored bundle (`tw rollback`), or preflight it with dryRun
+	// (POST /v1/tenants/{id}/workloads/{workload}/rollbacks)
+	CreateRollback(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, params CreateRollbackParams)
+	// CreateWorkloadSecretGrant Release a workload's secret values to the lease holder
+	// (POST /v1/tenants/{id}/workloads/{workload}/secret-grants)
+	CreateWorkloadSecretGrant(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, params CreateWorkloadSecretGrantParams)
+	// ListWorkloadSecrets List a workload's secrets (names and times, never values)
+	// (GET /v1/tenants/{id}/workloads/{workload}/secrets)
+	ListWorkloadSecrets(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, params ListWorkloadSecretsParams)
+	// DeleteWorkloadSecret Delete a workload secret (`tw secret rm`)
+	// (DELETE /v1/tenants/{id}/workloads/{workload}/secrets/{name})
+	DeleteWorkloadSecret(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, name SecretName)
+	// PutWorkloadSecret Create or replace a workload secret (`tw secret put`)
+	// (PUT /v1/tenants/{id}/workloads/{workload}/secrets/{name})
+	PutWorkloadSecret(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, name SecretName)
+	// GetServiceBindingTarget Resolve a workload's service binding to its target's entry node
+	// (GET /v1/tenants/{id}/workloads/{workload}/service-bindings/{binding})
+	GetServiceBindingTarget(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, binding string, params GetServiceBindingTargetParams)
+	// ListWorkloadStores List a workload's stores
+	// (GET /v1/tenants/{id}/workloads/{workload}/stores)
+	ListWorkloadStores(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, params ListWorkloadStoresParams)
+	// ListKVKeys List a KV namespace's keys
+	// (GET /v1/tenants/{id}/workloads/{workload}/stores/kv/{name}/keys)
+	ListKVKeys(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, name StoreName, params ListKVKeysParams)
+	// DeleteKVValue Delete one KV value
+	// (DELETE /v1/tenants/{id}/workloads/{workload}/stores/kv/{name}/value)
+	DeleteKVValue(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, name StoreName, params DeleteKVValueParams)
+	// GetKVValue Get one KV value
+	// (GET /v1/tenants/{id}/workloads/{workload}/stores/kv/{name}/value)
+	GetKVValue(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, name StoreName, params GetKVValueParams)
+	// PutKVValue Write one KV value
+	// (PUT /v1/tenants/{id}/workloads/{workload}/stores/kv/{name}/value)
+	PutKVValue(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, name StoreName, params PutKVValueParams)
+	// ListR2Objects List an R2 bucket's objects
+	// (GET /v1/tenants/{id}/workloads/{workload}/stores/r2/{name}/objects)
+	ListR2Objects(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, name StoreName, params ListR2ObjectsParams)
+	// DeleteWorkloadStore Delete a store and its data
+	// (DELETE /v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name})
+	DeleteWorkloadStore(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, kind StoreKind, name StoreName)
+	// GetWorkloadStore Get one store
+	// (GET /v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name})
+	GetWorkloadStore(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, kind StoreKind, name StoreName)
+	// PutWorkloadStore Create a store (idempotent)
+	// (PUT /v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name})
+	PutWorkloadStore(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, kind StoreKind, name StoreName)
+	// ReadStoreJournal Read a store's journal after a sequence number
+	// (GET /v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name}/journal)
+	ReadStoreJournal(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, kind StoreKind, name StoreName, params ReadStoreJournalParams)
+	// AppendStoreJournal Append entries to a store's journal (conditional on its head)
+	// (POST /v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name}/journal)
+	AppendStoreJournal(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, kind StoreKind, name StoreName, params AppendStoreJournalParams)
+	// RepairStore Skip the journal entry a degraded store stopped at
+	// (POST /v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name}/repair)
+	RepairStore(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, kind StoreKind, name StoreName)
+	// ReportStoreStatus Report that a store object is degraded, or healthy again
+	// (POST /v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name}/status)
+	ReportStoreStatus(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, kind StoreKind, name StoreName, params ReportStoreStatusParams)
+	// CreateTelemetryGrant Release the tenant's OTLP export config to a workload's lease holder
+	// (POST /v1/tenants/{id}/workloads/{workload}/telemetry-grants)
+	CreateTelemetryGrant(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, params CreateTelemetryGrantParams)
+	// ListUpgrades Upgrade runs, newest first
+	// (GET /v1/upgrades)
+	ListUpgrades(w http.ResponseWriter, r *http.Request)
+	// CreateUpgrade Plan an upgrade, or start an upgrade run
+	// (POST /v1/upgrades)
+	CreateUpgrade(w http.ResponseWriter, r *http.Request)
+	// GetUpgrade One upgrade run
+	// (GET /v1/upgrades/{id})
+	GetUpgrade(w http.ResponseWriter, r *http.Request, id string)
+	// ActOnUpgrade Pause, resume or abort an upgrade run
+	// (POST /v1/upgrades/{id}/actions)
+	ActOnUpgrade(w http.ResponseWriter, r *http.Request, id string)
 	// CreateVolumeKeyGrant Release a volume's dm-crypt data key to the lease holder
 	// (POST /v1/volumes/{id}/keys)
 	CreateVolumeKeyGrant(w http.ResponseWriter, r *http.Request, id VolumeID, params CreateVolumeKeyGrantParams)
@@ -3358,86 +6060,6 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
-
-// GetOIDCConfiguration operation middleware
-func (siw *ServerInterfaceWrapper) GetOIDCConfiguration(w http.ResponseWriter, r *http.Request) {
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetOIDCConfiguration(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// GetJWKS operation middleware
-func (siw *ServerInterfaceWrapper) GetJWKS(w http.ResponseWriter, r *http.Request) {
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetJWKS(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// GetTenantOIDCConfiguration operation middleware
-func (siw *ServerInterfaceWrapper) GetTenantOIDCConfiguration(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "tenant" -------------
-	var tenant TenantPath
-
-	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetTenantOIDCConfiguration(w, r, tenant)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// GetTenantJWKS operation middleware
-func (siw *ServerInterfaceWrapper) GetTenantJWKS(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "tenant" -------------
-	var tenant TenantPath
-
-	err = runtime.BindStyledParameterWithOptions("simple", "tenant", r.PathValue("tenant"), &tenant, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetTenantJWKS(w, r, tenant)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
 
 // ListAudit operation middleware
 func (siw *ServerInterfaceWrapper) ListAudit(w http.ResponseWriter, r *http.Request) {
@@ -3539,6 +6161,19 @@ func (siw *ServerInterfaceWrapper) ListAudit(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// ------------- Optional query parameter "workload" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workload", r.URL.Query(), &params.Workload, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "workload"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		}
+		return
+	}
+
 	// ------------- Optional query parameter "kind" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "kind", r.URL.Query(), &params.Kind, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
@@ -3574,6 +6209,19 @@ func (siw *ServerInterfaceWrapper) ListAudit(w http.ResponseWriter, r *http.Requ
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "until"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "until", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "order" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "order", r.URL.Query(), &params.Order, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "order"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "order", Err: err})
 		}
 		return
 	}
@@ -4336,6 +6984,84 @@ func (siw *ServerInterfaceWrapper) ListHostAssignments(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
+// UncordonHost operation middleware
+func (siw *ServerInterfaceWrapper) UncordonHost(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id HostID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UncordonHost(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CordonHost operation middleware
+func (siw *ServerInterfaceWrapper) CordonHost(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id HostID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CordonHost(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DrainHost operation middleware
+func (siw *ServerInterfaceWrapper) DrainHost(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id HostID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DrainHost(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ReportHostPaths operation middleware
 func (siw *ServerInterfaceWrapper) ReportHostPaths(w http.ResponseWriter, r *http.Request) {
 
@@ -4353,6 +7079,32 @@ func (siw *ServerInterfaceWrapper) ReportHostPaths(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ReportHostPaths(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetHostSandboxDeny operation middleware
+func (siw *ServerInterfaceWrapper) GetHostSandboxDeny(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id HostID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetHostSandboxDeny(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4558,6 +7310,32 @@ func (siw *ServerInterfaceWrapper) ListObjects(w http.ResponseWriter, r *http.Re
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "namespace"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "namespace", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "tag" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "tag", r.URL.Query(), &params.Tag, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "tag"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tag", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "human" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "human", r.URL.Query(), &params.Human, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "human"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "human", Err: err})
 		}
 		return
 	}
@@ -4896,11 +7674,142 @@ func (siw *ServerInterfaceWrapper) CreateObjectCredential(w http.ResponseWriter,
 	handler.ServeHTTP(w, r)
 }
 
+// ListReleases operation middleware
+func (siw *ServerInterfaceWrapper) ListReleases(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListReleases(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ImportReleases operation middleware
+func (siw *ServerInterfaceWrapper) ImportReleases(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ImportReleases(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetReleaseArtifact operation middleware
+func (siw *ServerInterfaceWrapper) GetReleaseArtifact(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "version" -------------
+	var version string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "version", r.PathValue("version"), &version, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "version", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetReleaseArtifact(w, r, version, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutReleaseArtifact operation middleware
+func (siw *ServerInterfaceWrapper) PutReleaseArtifact(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "version" -------------
+	var version string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "version", r.PathValue("version"), &version, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "version", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutReleaseArtifact(w, r, version, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetStatus operation middleware
 func (siw *ServerInterfaceWrapper) GetStatus(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetStatus(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListDegradedStores operation middleware
+func (siw *ServerInterfaceWrapper) ListDegradedStores(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListDegradedStoresParams
+
+	// ------------- Optional query parameter "tenant" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "tenant", r.URL.Query(), &params.Tenant, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "tenant"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tenant", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListDegradedStores(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5133,6 +8042,165 @@ func (siw *ServerInterfaceWrapper) UpdateTenant(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// ListApprovals operation middleware
+func (siw *ServerInterfaceWrapper) ListApprovals(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListApprovalsParams
+
+	// ------------- Optional query parameter "workload" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workload", r.URL.Query(), &params.Workload, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "workload"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "all" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "all", r.URL.Query(), &params.All, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "all"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "all", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListApprovals(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteTenantNotifications operation middleware
+func (siw *ServerInterfaceWrapper) DeleteTenantNotifications(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteTenantNotifications(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetTenantNotifications operation middleware
+func (siw *ServerInterfaceWrapper) GetTenantNotifications(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetTenantNotifications(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutTenantNotifications operation middleware
+func (siw *ServerInterfaceWrapper) PutTenantNotifications(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutTenantNotifications(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TestTenantNotifications operation middleware
+func (siw *ServerInterfaceWrapper) TestTenantNotifications(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TestTenantNotifications(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // PurgeTenantObjects operation middleware
 func (siw *ServerInterfaceWrapper) PurgeTenantObjects(w http.ResponseWriter, r *http.Request) {
 
@@ -5175,8 +8243,565 @@ func (siw *ServerInterfaceWrapper) PurgeTenantObjects(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
-// CheckTenantWIF operation middleware
-func (siw *ServerInterfaceWrapper) CheckTenantWIF(w http.ResponseWriter, r *http.Request) {
+// ListPublicNames operation middleware
+func (siw *ServerInterfaceWrapper) ListPublicNames(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListPublicNamesParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListPublicNames(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReleasePublicName operation middleware
+func (siw *ServerInterfaceWrapper) ReleasePublicName(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name PublicName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReleasePublicName(w, r, id, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListQueues operation middleware
+func (siw *ServerInterfaceWrapper) ListQueues(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListQueuesParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListQueues(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteQueue operation middleware
+func (siw *ServerInterfaceWrapper) DeleteQueue(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "queue" -------------
+	var queue QueueName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "queue", r.PathValue("queue"), &queue, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "queue", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteQueue(w, r, id, queue)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetQueue operation middleware
+func (siw *ServerInterfaceWrapper) GetQueue(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "queue" -------------
+	var queue QueueName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "queue", r.PathValue("queue"), &queue, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "queue", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetQueueParams
+
+	// ------------- Optional query parameter "workload" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workload", r.URL.Query(), &params.Workload, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "workload"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "epoch" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "epoch", r.URL.Query(), &params.Epoch, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "epoch"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "epoch", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetQueue(w, r, id, queue, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutQueue operation middleware
+func (siw *ServerInterfaceWrapper) PutQueue(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "queue" -------------
+	var queue QueueName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "queue", r.PathValue("queue"), &queue, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "queue", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutQueue(w, r, id, queue)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PeekQueueMessages operation middleware
+func (siw *ServerInterfaceWrapper) PeekQueueMessages(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "queue" -------------
+	var queue QueueName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "queue", r.PathValue("queue"), &queue, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "queue", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PeekQueueMessagesParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PeekQueueMessages(w, r, id, queue, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SendQueueMessages operation middleware
+func (siw *ServerInterfaceWrapper) SendQueueMessages(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "queue" -------------
+	var queue QueueName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "queue", r.PathValue("queue"), &queue, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "queue", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params SendQueueMessagesParams
+
+	// ------------- Optional query parameter "workload" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workload", r.URL.Query(), &params.Workload, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "workload"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "epoch" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "epoch", r.URL.Query(), &params.Epoch, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "epoch"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "epoch", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SendQueueMessages(w, r, id, queue, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AckQueueMessages operation middleware
+func (siw *ServerInterfaceWrapper) AckQueueMessages(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "queue" -------------
+	var queue QueueName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "queue", r.PathValue("queue"), &queue, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "queue", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params AckQueueMessagesParams
+
+	// ------------- Optional query parameter "workload" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workload", r.URL.Query(), &params.Workload, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "workload"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "epoch" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "epoch", r.URL.Query(), &params.Epoch, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "epoch"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "epoch", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AckQueueMessages(w, r, id, queue, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PullQueueMessages operation middleware
+func (siw *ServerInterfaceWrapper) PullQueueMessages(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "queue" -------------
+	var queue QueueName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "queue", r.PathValue("queue"), &queue, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "queue", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PullQueueMessagesParams
+
+	// ------------- Optional query parameter "workload" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workload", r.URL.Query(), &params.Workload, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "workload"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "epoch" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "epoch", r.URL.Query(), &params.Epoch, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "epoch"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "epoch", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PullQueueMessages(w, r, id, queue, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PurgeQueue operation middleware
+func (siw *ServerInterfaceWrapper) PurgeQueue(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "queue" -------------
+	var queue QueueName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "queue", r.PathValue("queue"), &queue, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "queue", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PurgeQueue(w, r, id, queue)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteTenantTelemetry operation middleware
+func (siw *ServerInterfaceWrapper) DeleteTenantTelemetry(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -5191,7 +8816,595 @@ func (siw *ServerInterfaceWrapper) CheckTenantWIF(w http.ResponseWriter, r *http
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.CheckTenantWIF(w, r, id)
+		siw.Handler.DeleteTenantTelemetry(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetTenantTelemetry operation middleware
+func (siw *ServerInterfaceWrapper) GetTenantTelemetry(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetTenantTelemetry(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutTenantTelemetry operation middleware
+func (siw *ServerInterfaceWrapper) PutTenantTelemetry(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutTenantTelemetry(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetTenantUsage operation middleware
+func (siw *ServerInterfaceWrapper) GetTenantUsage(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetTenantUsage(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DecideApproval operation middleware
+func (siw *ServerInterfaceWrapper) DecideApproval(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workflow" -------------
+	var workflow string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workflow", r.PathValue("workflow"), &workflow, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workflow", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "instance" -------------
+	var instance string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "instance", r.PathValue("instance"), &instance, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "instance", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DecideApproval(w, r, id, workload, workflow, instance)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ExportD1 operation middleware
+func (siw *ServerInterfaceWrapper) ExportD1(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name StoreName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ExportD1(w, r, id, workload, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// QueryD1 operation middleware
+func (siw *ServerInterfaceWrapper) QueryD1(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name StoreName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.QueryD1(w, r, id, workload, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListWorkloadDeployments operation middleware
+func (siw *ServerInterfaceWrapper) ListWorkloadDeployments(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListWorkloadDeploymentsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListWorkloadDeployments(w, r, id, workload, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetWorkloadLogs operation middleware
+func (siw *ServerInterfaceWrapper) GetWorkloadLogs(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetWorkloadLogsParams
+
+	// ------------- Optional query parameter "n" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "n", r.URL.Query(), &params.N, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "n"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "n", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "follow" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "follow", r.URL.Query(), &params.Follow, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "follow"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "follow", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "host" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "host", r.URL.Query(), &params.Host, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "host"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "host", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "source" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "source", r.URL.Query(), &params.Source, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "source"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "source", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "object" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "object", r.URL.Query(), &params.Object, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "object"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "object", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "outcome" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "outcome", r.URL.Query(), &params.Outcome, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "outcome"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "outcome", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "caller" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "caller", r.URL.Query(), &params.Caller, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "caller"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "caller", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "trace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "trace", r.URL.Query(), &params.Trace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "trace"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "trace", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "errors" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "errors", r.URL.Query(), &params.Errors, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "errors"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "errors", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetWorkloadLogs(w, r, id, workload, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApplyWorkloadPolicy operation middleware
+func (siw *ServerInterfaceWrapper) ApplyWorkloadPolicy(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ApplyWorkloadPolicyParams
+
+	// ------------- Optional query parameter "dryRun" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "dryRun", r.URL.Query(), &params.DryRun, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "dryRun"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dryRun", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApplyWorkloadPolicy(w, r, id, workload, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListWorkloadPreviews operation middleware
+func (siw *ServerInterfaceWrapper) ListWorkloadPreviews(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListWorkloadPreviews(w, r, id, workload)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreatePromotion operation middleware
+func (siw *ServerInterfaceWrapper) CreatePromotion(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreatePromotionParams
+
+	// ------------- Optional query parameter "dryRun" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "dryRun", r.URL.Query(), &params.DryRun, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "dryRun"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dryRun", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreatePromotion(w, r, id, workload, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5286,6 +9499,1325 @@ func (siw *ServerInterfaceWrapper) UpdateWorkloadPublic(w http.ResponseWriter, r
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UpdateWorkloadPublic(w, r, id, workload, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateRollback operation middleware
+func (siw *ServerInterfaceWrapper) CreateRollback(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateRollbackParams
+
+	// ------------- Optional query parameter "dryRun" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "dryRun", r.URL.Query(), &params.DryRun, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "dryRun"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dryRun", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateRollback(w, r, id, workload, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateWorkloadSecretGrant operation middleware
+func (siw *ServerInterfaceWrapper) CreateWorkloadSecretGrant(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateWorkloadSecretGrantParams
+
+	// ------------- Required query parameter "epoch" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "epoch", r.URL.Query(), &params.Epoch, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "epoch"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "epoch", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateWorkloadSecretGrant(w, r, id, workload, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListWorkloadSecrets operation middleware
+func (siw *ServerInterfaceWrapper) ListWorkloadSecrets(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListWorkloadSecretsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListWorkloadSecrets(w, r, id, workload, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteWorkloadSecret operation middleware
+func (siw *ServerInterfaceWrapper) DeleteWorkloadSecret(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name SecretName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteWorkloadSecret(w, r, id, workload, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutWorkloadSecret operation middleware
+func (siw *ServerInterfaceWrapper) PutWorkloadSecret(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name SecretName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutWorkloadSecret(w, r, id, workload, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetServiceBindingTarget operation middleware
+func (siw *ServerInterfaceWrapper) GetServiceBindingTarget(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", r.PathValue("binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetServiceBindingTargetParams
+
+	// ------------- Required query parameter "epoch" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "epoch", r.URL.Query(), &params.Epoch, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "epoch"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "epoch", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetServiceBindingTarget(w, r, id, workload, binding, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListWorkloadStores operation middleware
+func (siw *ServerInterfaceWrapper) ListWorkloadStores(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListWorkloadStoresParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "kind" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "kind", r.URL.Query(), &params.Kind, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "kind"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kind", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListWorkloadStores(w, r, id, workload, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListKVKeys operation middleware
+func (siw *ServerInterfaceWrapper) ListKVKeys(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name StoreName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListKVKeysParams
+
+	// ------------- Optional query parameter "prefix" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "prefix", r.URL.Query(), &params.Prefix, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "prefix"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "prefix", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListKVKeys(w, r, id, workload, name, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteKVValue operation middleware
+func (siw *ServerInterfaceWrapper) DeleteKVValue(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name StoreName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteKVValueParams
+
+	// ------------- Required query parameter "key" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "key", r.URL.Query(), &params.Key, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "key"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteKVValue(w, r, id, workload, name, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetKVValue operation middleware
+func (siw *ServerInterfaceWrapper) GetKVValue(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name StoreName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetKVValueParams
+
+	// ------------- Required query parameter "key" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "key", r.URL.Query(), &params.Key, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "key"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetKVValue(w, r, id, workload, name, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutKVValue operation middleware
+func (siw *ServerInterfaceWrapper) PutKVValue(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name StoreName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PutKVValueParams
+
+	// ------------- Required query parameter "key" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "key", r.URL.Query(), &params.Key, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "key"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutKVValue(w, r, id, workload, name, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListR2Objects operation middleware
+func (siw *ServerInterfaceWrapper) ListR2Objects(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name StoreName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListR2ObjectsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "prefix" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "prefix", r.URL.Query(), &params.Prefix, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "prefix"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "prefix", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListR2Objects(w, r, id, workload, name, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteWorkloadStore operation middleware
+func (siw *ServerInterfaceWrapper) DeleteWorkloadStore(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "kind" -------------
+	var kind StoreKind
+
+	err = runtime.BindStyledParameterWithOptions("simple", "kind", r.PathValue("kind"), &kind, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kind", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name StoreName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteWorkloadStore(w, r, id, workload, kind, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetWorkloadStore operation middleware
+func (siw *ServerInterfaceWrapper) GetWorkloadStore(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "kind" -------------
+	var kind StoreKind
+
+	err = runtime.BindStyledParameterWithOptions("simple", "kind", r.PathValue("kind"), &kind, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kind", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name StoreName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetWorkloadStore(w, r, id, workload, kind, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutWorkloadStore operation middleware
+func (siw *ServerInterfaceWrapper) PutWorkloadStore(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "kind" -------------
+	var kind StoreKind
+
+	err = runtime.BindStyledParameterWithOptions("simple", "kind", r.PathValue("kind"), &kind, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kind", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name StoreName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutWorkloadStore(w, r, id, workload, kind, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReadStoreJournal operation middleware
+func (siw *ServerInterfaceWrapper) ReadStoreJournal(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "kind" -------------
+	var kind StoreKind
+
+	err = runtime.BindStyledParameterWithOptions("simple", "kind", r.PathValue("kind"), &kind, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kind", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name StoreName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ReadStoreJournalParams
+
+	// ------------- Optional query parameter "epoch" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "epoch", r.URL.Query(), &params.Epoch, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "epoch"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "epoch", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "after" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "after"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "after", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReadStoreJournal(w, r, id, workload, kind, name, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AppendStoreJournal operation middleware
+func (siw *ServerInterfaceWrapper) AppendStoreJournal(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "kind" -------------
+	var kind StoreKind
+
+	err = runtime.BindStyledParameterWithOptions("simple", "kind", r.PathValue("kind"), &kind, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kind", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name StoreName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params AppendStoreJournalParams
+
+	// ------------- Optional query parameter "epoch" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "epoch", r.URL.Query(), &params.Epoch, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "epoch"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "epoch", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AppendStoreJournal(w, r, id, workload, kind, name, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RepairStore operation middleware
+func (siw *ServerInterfaceWrapper) RepairStore(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "kind" -------------
+	var kind StoreKind
+
+	err = runtime.BindStyledParameterWithOptions("simple", "kind", r.PathValue("kind"), &kind, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kind", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name StoreName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RepairStore(w, r, id, workload, kind, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReportStoreStatus operation middleware
+func (siw *ServerInterfaceWrapper) ReportStoreStatus(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "kind" -------------
+	var kind StoreKind
+
+	err = runtime.BindStyledParameterWithOptions("simple", "kind", r.PathValue("kind"), &kind, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kind", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name StoreName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ReportStoreStatusParams
+
+	// ------------- Optional query parameter "epoch" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "epoch", r.URL.Query(), &params.Epoch, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "epoch"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "epoch", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReportStoreStatus(w, r, id, workload, kind, name, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateTelemetryGrant operation middleware
+func (siw *ServerInterfaceWrapper) CreateTelemetryGrant(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateTelemetryGrantParams
+
+	// ------------- Required query parameter "epoch" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "epoch", r.URL.Query(), &params.Epoch, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "epoch"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "epoch", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateTelemetryGrant(w, r, id, workload, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListUpgrades operation middleware
+func (siw *ServerInterfaceWrapper) ListUpgrades(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListUpgrades(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateUpgrade operation middleware
+func (siw *ServerInterfaceWrapper) CreateUpgrade(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateUpgrade(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetUpgrade operation middleware
+func (siw *ServerInterfaceWrapper) GetUpgrade(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetUpgrade(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ActOnUpgrade operation middleware
+func (siw *ServerInterfaceWrapper) ActOnUpgrade(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ActOnUpgrade(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5476,17 +11008,69 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/tenants/{id}", wrapper.DeleteTenant)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}", wrapper.GetTenant)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/v1/tenants/{id}", wrapper.UpdateTenant)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/usage", wrapper.GetTenantUsage)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/tenants/{id}/objects", wrapper.PurgeTenantObjects)
-	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/tenants/{id}/wif-check", wrapper.CheckTenantWIF)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/logs", wrapper.GetWorkloadLogs)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/approvals", wrapper.ListApprovals)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/approvals/{workflow}/{instance}", wrapper.DecideApproval)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/tenants/{id}/notifications", wrapper.DeleteTenantNotifications)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/notifications", wrapper.GetTenantNotifications)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/tenants/{id}/notifications", wrapper.PutTenantNotifications)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/tenants/{id}/notifications/test", wrapper.TestTenantNotifications)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/deployments", wrapper.ListWorkloadDeployments)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/rollbacks", wrapper.CreateRollback)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/previews", wrapper.ListWorkloadPreviews)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/promotions", wrapper.CreatePromotion)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/policy", wrapper.ApplyWorkloadPolicy)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/public", wrapper.GetWorkloadPublic)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/public", wrapper.UpdateWorkloadPublic)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/public-names", wrapper.ListPublicNames)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/tenants/{id}/public-names/{name}", wrapper.ReleasePublicName)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/secrets", wrapper.ListWorkloadSecrets)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/secrets/{name}", wrapper.DeleteWorkloadSecret)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/secrets/{name}", wrapper.PutWorkloadSecret)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/secret-grants", wrapper.CreateWorkloadSecretGrant)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/stores/degraded", wrapper.ListDegradedStores)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/stores", wrapper.ListWorkloadStores)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name}", wrapper.DeleteWorkloadStore)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name}", wrapper.GetWorkloadStore)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name}", wrapper.PutWorkloadStore)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name}/journal", wrapper.ReadStoreJournal)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name}/journal", wrapper.AppendStoreJournal)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name}/status", wrapper.ReportStoreStatus)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name}/repair", wrapper.RepairStore)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/stores/kv/{name}/keys", wrapper.ListKVKeys)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/stores/kv/{name}/value", wrapper.DeleteKVValue)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/stores/kv/{name}/value", wrapper.GetKVValue)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/stores/kv/{name}/value", wrapper.PutKVValue)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/stores/r2/{name}/objects", wrapper.ListR2Objects)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/d1/{name}/query", wrapper.QueryD1)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/d1/{name}/export", wrapper.ExportD1)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/queues", wrapper.ListQueues)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/tenants/{id}/queues/{queue}", wrapper.DeleteQueue)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/queues/{queue}", wrapper.GetQueue)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/tenants/{id}/queues/{queue}", wrapper.PutQueue)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/tenants/{id}/queues/{queue}/purge", wrapper.PurgeQueue)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/queues/{queue}/messages", wrapper.PeekQueueMessages)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/tenants/{id}/queues/{queue}/messages", wrapper.SendQueueMessages)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/tenants/{id}/queues/{queue}/messages/pull", wrapper.PullQueueMessages)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/tenants/{id}/queues/{queue}/messages/ack", wrapper.AckQueueMessages)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/telemetry-grants", wrapper.CreateTelemetryGrant)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/service-bindings/{binding}", wrapper.GetServiceBindingTarget)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/tenants/{id}/telemetry", wrapper.DeleteTenantTelemetry)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/telemetry", wrapper.GetTenantTelemetry)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/tenants/{id}/telemetry", wrapper.PutTenantTelemetry)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/hosts", wrapper.ListHosts)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/hosts", wrapper.CreateHost)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/hosts/{id}", wrapper.DeleteHost)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/hosts/{id}", wrapper.GetHost)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/hosts/{id}", wrapper.RegisterHost)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/hosts/{id}/status", wrapper.ReportHostStatus)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/hosts/{id}/cordon", wrapper.UncordonHost)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/hosts/{id}/cordon", wrapper.CordonHost)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/hosts/{id}/drain", wrapper.DrainHost)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/hosts/{id}/paths", wrapper.ReportHostPaths)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/hosts/{id}/sandbox-deny", wrapper.GetHostSandboxDeny)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/hosts/{id}/assignments", wrapper.ListHostAssignments)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/deployments", wrapper.ListDeployments)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/deployments", wrapper.CreateDeployment)
@@ -5513,19 +11097,23 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/images/public/{id}", wrapper.DeletePublicImage)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/images/aliases", wrapper.ListImageAliases)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/healthz", wrapper.GetHealthz)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/releases", wrapper.ListReleases)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/releases", wrapper.ImportReleases)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/releases/{version}/artifacts/{name}", wrapper.GetReleaseArtifact)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/releases/{version}/artifacts/{name}", wrapper.PutReleaseArtifact)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/status", wrapper.GetStatus)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/upgrades", wrapper.ListUpgrades)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/upgrades", wrapper.CreateUpgrade)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/upgrades/{id}", wrapper.GetUpgrade)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/upgrades/{id}/actions", wrapper.ActOnUpgrade)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/whoami", wrapper.WhoAmI)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/device-delete-runs", wrapper.CreateDeviceDeleteRun)
-	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/.well-known/openid-configuration", wrapper.GetOIDCConfiguration)
-	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/jwks", wrapper.GetJWKS)
-	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/t/{tenant}/.well-known/openid-configuration", wrapper.GetTenantOIDCConfiguration)
-	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/t/{tenant}/jwks", wrapper.GetTenantJWKS)
 
 	return m
 }
 
 type BadRequestResponseHeaders struct {
-	TwdError *string
+	TwError *string
 }
 type BadRequestJSONResponse struct {
 	Body Error
@@ -5534,7 +11122,7 @@ type BadRequestJSONResponse struct {
 }
 
 type ConflictResponseHeaders struct {
-	TwdError *string
+	TwError *string
 }
 type ConflictJSONResponse struct {
 	Body Error
@@ -5543,7 +11131,7 @@ type ConflictJSONResponse struct {
 }
 
 type ErrorResponseHeaders struct {
-	TwdError *string
+	TwError *string
 }
 type ErrorJSONResponse struct {
 	Body Error
@@ -5552,7 +11140,7 @@ type ErrorJSONResponse struct {
 }
 
 type ForbiddenResponseHeaders struct {
-	TwdError *string
+	TwError *string
 }
 type ForbiddenJSONResponse struct {
 	Body Error
@@ -5561,7 +11149,7 @@ type ForbiddenJSONResponse struct {
 }
 
 type GoneResponseHeaders struct {
-	TwdError *string
+	TwError *string
 }
 type GoneJSONResponse struct {
 	Body TombstoneError
@@ -5570,7 +11158,7 @@ type GoneJSONResponse struct {
 }
 
 type LeaseLostResponseHeaders struct {
-	TwdError *string
+	TwError *string
 }
 type LeaseLostJSONResponse struct {
 	Body Error
@@ -5579,7 +11167,7 @@ type LeaseLostJSONResponse struct {
 }
 
 type NotFoundResponseHeaders struct {
-	TwdError *string
+	TwError *string
 }
 type NotFoundJSONResponse struct {
 	Body Error
@@ -5595,8 +11183,8 @@ type NotModifiedResponse struct {
 }
 
 type PreconditionFailedResponseHeaders struct {
-	ETag     *string
-	TwdError *string
+	ETag    *string
+	TwError *string
 }
 type PreconditionFailedJSONResponse struct {
 	Body Error
@@ -5605,7 +11193,7 @@ type PreconditionFailedJSONResponse struct {
 }
 
 type ReadyConflictResponseHeaders struct {
-	TwdError *string
+	TwError *string
 }
 type ReadyConflictJSONResponse struct {
 	Body Error
@@ -5613,167 +11201,22 @@ type ReadyConflictJSONResponse struct {
 	Headers ReadyConflictResponseHeaders
 }
 
+type StoreConflictResponseHeaders struct {
+	TwError *string
+}
+type StoreConflictJSONResponse struct {
+	Body Error
+
+	Headers StoreConflictResponseHeaders
+}
+
 type UnauthorizedResponseHeaders struct {
-	TwdError *string
+	TwError *string
 }
 type UnauthorizedJSONResponse struct {
 	Body Error
 
 	Headers UnauthorizedResponseHeaders
-}
-
-type GetOIDCConfigurationRequestObject struct {
-}
-
-type GetOIDCConfigurationResponseObject interface {
-	VisitGetOIDCConfigurationResponse(w http.ResponseWriter) error
-}
-
-type GetOIDCConfiguration200JSONResponse OIDCConfiguration
-
-func (response GetOIDCConfiguration200JSONResponse) VisitGetOIDCConfigurationResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type GetOIDCConfiguration404JSONResponse struct{ NotFoundJSONResponse }
-
-func (response GetOIDCConfiguration404JSONResponse) VisitGetOIDCConfigurationResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
-	}
-	w.WriteHeader(404)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type GetJWKSRequestObject struct {
-}
-
-type GetJWKSResponseObject interface {
-	VisitGetJWKSResponse(w http.ResponseWriter) error
-}
-
-type GetJWKS200JSONResponse JWKS
-
-func (response GetJWKS200JSONResponse) VisitGetJWKSResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type GetJWKS404JSONResponse struct{ NotFoundJSONResponse }
-
-func (response GetJWKS404JSONResponse) VisitGetJWKSResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
-	}
-	w.WriteHeader(404)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type GetTenantOIDCConfigurationRequestObject struct {
-	Tenant TenantPath `json:"tenant"`
-}
-
-type GetTenantOIDCConfigurationResponseObject interface {
-	VisitGetTenantOIDCConfigurationResponse(w http.ResponseWriter) error
-}
-
-type GetTenantOIDCConfiguration200JSONResponse OIDCConfiguration
-
-func (response GetTenantOIDCConfiguration200JSONResponse) VisitGetTenantOIDCConfigurationResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type GetTenantOIDCConfiguration404JSONResponse struct{ NotFoundJSONResponse }
-
-func (response GetTenantOIDCConfiguration404JSONResponse) VisitGetTenantOIDCConfigurationResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
-	}
-	w.WriteHeader(404)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type GetTenantJWKSRequestObject struct {
-	Tenant TenantPath `json:"tenant"`
-}
-
-type GetTenantJWKSResponseObject interface {
-	VisitGetTenantJWKSResponse(w http.ResponseWriter) error
-}
-
-type GetTenantJWKS200JSONResponse JWKS
-
-func (response GetTenantJWKS200JSONResponse) VisitGetTenantJWKSResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type GetTenantJWKS404JSONResponse struct{ NotFoundJSONResponse }
-
-func (response GetTenantJWKS404JSONResponse) VisitGetTenantJWKSResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
-	}
-	w.WriteHeader(404)
-	_, err := buf.WriteTo(w)
-	return err
 }
 
 type ListAuditRequestObject struct {
@@ -5807,8 +11250,8 @@ func (response ListAudit400JSONResponse) VisitListAuditResponse(w http.ResponseW
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
@@ -5824,8 +11267,8 @@ func (response ListAudit403JSONResponse) VisitListAuditResponse(w http.ResponseW
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -5845,8 +11288,8 @@ func (response ListAuditdefaultJSONResponse) VisitListAuditResponse(w http.Respo
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -5898,8 +11341,8 @@ func (response AppendAudit403JSONResponse) VisitAppendAuditResponse(w http.Respo
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -5919,8 +11362,8 @@ func (response AppendAuditdefaultJSONResponse) VisitAppendAuditResponse(w http.R
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -5957,8 +11400,8 @@ func (response GetAuditVerification403JSONResponse) VisitGetAuditVerificationRes
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -5978,8 +11421,8 @@ func (response GetAuditVerificationdefaultJSONResponse) VisitGetAuditVerificatio
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -6028,8 +11471,8 @@ func (response GetCertificate400JSONResponse) VisitGetCertificateResponse(w http
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
@@ -6045,8 +11488,8 @@ func (response GetCertificate403JSONResponse) VisitGetCertificateResponse(w http
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -6062,8 +11505,8 @@ func (response GetCertificate404JSONResponse) VisitGetCertificateResponse(w http
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
@@ -6079,8 +11522,8 @@ func (response GetCertificate410JSONResponse) VisitGetCertificateResponse(w http
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(410)
 	_, err := buf.WriteTo(w)
@@ -6100,8 +11543,8 @@ func (response GetCertificatedefaultJSONResponse) VisitGetCertificateResponse(w 
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -6139,8 +11582,8 @@ func (response ListContainerReservations400JSONResponse) VisitListContainerReser
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
@@ -6156,8 +11599,8 @@ func (response ListContainerReservations403JSONResponse) VisitListContainerReser
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -6177,8 +11620,8 @@ func (response ListContainerReservationsdefaultJSONResponse) VisitListContainerR
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -6240,8 +11683,8 @@ func (response CreateContainerReservation400JSONResponse) VisitCreateContainerRe
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
@@ -6257,8 +11700,8 @@ func (response CreateContainerReservation403JSONResponse) VisitCreateContainerRe
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -6288,8 +11731,8 @@ func (response CreateContainerReservation409JSONResponse) VisitCreateContainerRe
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
@@ -6323,8 +11766,8 @@ func (response CreateContainerReservationdefaultJSONResponse) VisitCreateContain
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -6356,8 +11799,8 @@ func (response DeleteContainerReservation403JSONResponse) VisitDeleteContainerRe
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -6373,8 +11816,8 @@ func (response DeleteContainerReservation404JSONResponse) VisitDeleteContainerRe
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
@@ -6394,8 +11837,8 @@ func (response DeleteContainerReservationdefaultJSONResponse) VisitDeleteContain
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -6433,8 +11876,8 @@ func (response ListDeployments400JSONResponse) VisitListDeploymentsResponse(w ht
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
@@ -6450,8 +11893,8 @@ func (response ListDeployments403JSONResponse) VisitListDeploymentsResponse(w ht
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -6471,8 +11914,8 @@ func (response ListDeploymentsdefaultJSONResponse) VisitListDeploymentsResponse(
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -6549,8 +11992,8 @@ func (response CreateDeployment403JSONResponse) VisitCreateDeploymentResponse(w 
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -6598,8 +12041,8 @@ func (response CreateDeploymentdefaultJSONResponse) VisitCreateDeploymentRespons
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -6638,8 +12081,8 @@ func (response DeleteDeployment403JSONResponse) VisitDeleteDeploymentResponse(w 
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -6655,8 +12098,8 @@ func (response DeleteDeployment404JSONResponse) VisitDeleteDeploymentResponse(w 
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
@@ -6672,8 +12115,8 @@ func (response DeleteDeployment409JSONResponse) VisitDeleteDeploymentResponse(w 
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
@@ -6692,8 +12135,8 @@ func (response DeleteDeployment412JSONResponse) VisitDeleteDeploymentResponse(w 
 	if response.Headers.ETag != nil {
 		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
 	}
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(412)
 	_, err := buf.WriteTo(w)
@@ -6713,8 +12156,8 @@ func (response DeleteDeploymentdefaultJSONResponse) VisitDeleteDeploymentRespons
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -6773,8 +12216,8 @@ func (response GetDeployment403JSONResponse) VisitGetDeploymentResponse(w http.R
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -6790,8 +12233,8 @@ func (response GetDeployment404JSONResponse) VisitGetDeploymentResponse(w http.R
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
@@ -6811,8 +12254,8 @@ func (response GetDeploymentdefaultJSONResponse) VisitGetDeploymentResponse(w ht
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -6888,8 +12331,8 @@ func (response GetDeploymentBundle403JSONResponse) VisitGetDeploymentBundleRespo
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -6905,8 +12348,8 @@ func (response GetDeploymentBundle404JSONResponse) VisitGetDeploymentBundleRespo
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
@@ -6926,8 +12369,8 @@ func (response GetDeploymentBundledefaultJSONResponse) VisitGetDeploymentBundleR
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -6964,8 +12407,8 @@ func (response CreateDeviceDeleteRun403JSONResponse) VisitCreateDeviceDeleteRunR
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -6985,8 +12428,8 @@ func (response CreateDeviceDeleteRundefaultJSONResponse) VisitCreateDeviceDelete
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -7023,8 +12466,8 @@ func (response GetHealthz401JSONResponse) VisitGetHealthzResponse(w http.Respons
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
@@ -7044,8 +12487,8 @@ func (response GetHealthzdefaultJSONResponse) VisitGetHealthzResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -7083,8 +12526,8 @@ func (response ListHosts400JSONResponse) VisitListHostsResponse(w http.ResponseW
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
@@ -7100,8 +12543,8 @@ func (response ListHosts403JSONResponse) VisitListHostsResponse(w http.ResponseW
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -7121,8 +12564,8 @@ func (response ListHostsdefaultJSONResponse) VisitListHostsResponse(w http.Respo
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -7198,8 +12641,8 @@ func (response CreateHost400JSONResponse) VisitCreateHostResponse(w http.Respons
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
@@ -7215,8 +12658,8 @@ func (response CreateHost403JSONResponse) VisitCreateHostResponse(w http.Respons
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -7246,8 +12689,8 @@ func (response CreateHost409JSONResponse) VisitCreateHostResponse(w http.Respons
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
@@ -7281,8 +12724,8 @@ func (response CreateHostdefaultJSONResponse) VisitCreateHostResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -7329,8 +12772,8 @@ func (response DeleteHost403JSONResponse) VisitDeleteHostResponse(w http.Respons
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -7346,8 +12789,8 @@ func (response DeleteHost404JSONResponse) VisitDeleteHostResponse(w http.Respons
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
@@ -7380,8 +12823,8 @@ func (response DeleteHost412JSONResponse) VisitDeleteHostResponse(w http.Respons
 	if response.Headers.ETag != nil {
 		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
 	}
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(412)
 	_, err := buf.WriteTo(w)
@@ -7401,8 +12844,8 @@ func (response DeleteHostdefaultJSONResponse) VisitDeleteHostResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -7461,8 +12904,8 @@ func (response GetHost403JSONResponse) VisitGetHostResponse(w http.ResponseWrite
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -7478,8 +12921,8 @@ func (response GetHost404JSONResponse) VisitGetHostResponse(w http.ResponseWrite
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
@@ -7499,8 +12942,8 @@ func (response GetHostdefaultJSONResponse) VisitGetHostResponse(w http.ResponseW
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -7573,8 +13016,8 @@ func (response RegisterHost400JSONResponse) VisitRegisterHostResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
@@ -7608,8 +13051,8 @@ func (response RegisterHostdefaultJSONResponse) VisitRegisterHostResponse(w http
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -7648,8 +13091,8 @@ func (response ListHostAssignments400JSONResponse) VisitListHostAssignmentsRespo
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
@@ -7665,8 +13108,8 @@ func (response ListHostAssignments403JSONResponse) VisitListHostAssignmentsRespo
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -7682,8 +13125,8 @@ func (response ListHostAssignments404JSONResponse) VisitListHostAssignmentsRespo
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
@@ -7703,8 +13146,240 @@ func (response ListHostAssignmentsdefaultJSONResponse) VisitListHostAssignmentsR
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UncordonHostRequestObject struct {
+	ID HostID `json:"id"`
+}
+
+type UncordonHostResponseObject interface {
+	VisitUncordonHostResponse(w http.ResponseWriter) error
+}
+
+type UncordonHost200JSONResponse Host
+
+func (response UncordonHost200JSONResponse) VisitUncordonHostResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UncordonHost403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response UncordonHost403JSONResponse) VisitUncordonHostResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UncordonHost404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response UncordonHost404JSONResponse) VisitUncordonHostResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UncordonHostdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response UncordonHostdefaultJSONResponse) VisitUncordonHostResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CordonHostRequestObject struct {
+	ID HostID `json:"id"`
+}
+
+type CordonHostResponseObject interface {
+	VisitCordonHostResponse(w http.ResponseWriter) error
+}
+
+type CordonHost200JSONResponse Host
+
+func (response CordonHost200JSONResponse) VisitCordonHostResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CordonHost403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CordonHost403JSONResponse) VisitCordonHostResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CordonHost404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CordonHost404JSONResponse) VisitCordonHostResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CordonHostdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response CordonHostdefaultJSONResponse) VisitCordonHostResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DrainHostRequestObject struct {
+	ID   HostID `json:"id"`
+	Body *DrainHostJSONRequestBody
+}
+
+type DrainHostResponseObject interface {
+	VisitDrainHostResponse(w http.ResponseWriter) error
+}
+
+type DrainHost200JSONResponse HostDrainResult
+
+func (response DrainHost200JSONResponse) VisitDrainHostResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DrainHost403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DrainHost403JSONResponse) VisitDrainHostResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DrainHost404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DrainHost404JSONResponse) VisitDrainHostResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DrainHostdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response DrainHostdefaultJSONResponse) VisitDrainHostResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -7746,8 +13421,8 @@ func (response ReportHostPaths400JSONResponse) VisitReportHostPathsResponse(w ht
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
@@ -7763,8 +13438,8 @@ func (response ReportHostPaths403JSONResponse) VisitReportHostPathsResponse(w ht
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -7798,8 +13473,87 @@ func (response ReportHostPathsdefaultJSONResponse) VisitReportHostPathsResponse(
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetHostSandboxDenyRequestObject struct {
+	ID HostID `json:"id"`
+}
+
+type GetHostSandboxDenyResponseObject interface {
+	VisitGetHostSandboxDenyResponse(w http.ResponseWriter) error
+}
+
+type GetHostSandboxDeny200JSONResponse struct {
+	Paths []string `json:"paths"`
+}
+
+func (response GetHostSandboxDeny200JSONResponse) VisitGetHostSandboxDenyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetHostSandboxDeny403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetHostSandboxDeny403JSONResponse) VisitGetHostSandboxDenyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetHostSandboxDeny404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetHostSandboxDeny404JSONResponse) VisitGetHostSandboxDenyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetHostSandboxDenydefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response GetHostSandboxDenydefaultJSONResponse) VisitGetHostSandboxDenyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -7838,8 +13592,8 @@ func (response ReportHostStatus400JSONResponse) VisitReportHostStatusResponse(w 
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
@@ -7855,8 +13609,8 @@ func (response ReportHostStatus403JSONResponse) VisitReportHostStatusResponse(w 
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -7890,8 +13644,8 @@ func (response ReportHostStatusdefaultJSONResponse) VisitReportHostStatusRespons
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -7928,8 +13682,8 @@ func (response ListImageAliases403JSONResponse) VisitListImageAliasesResponse(w 
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -7949,8 +13703,8 @@ func (response ListImageAliasesdefaultJSONResponse) VisitListImageAliasesRespons
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -7988,8 +13742,8 @@ func (response ListPublicImages400JSONResponse) VisitListPublicImagesResponse(w 
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
@@ -8005,8 +13759,8 @@ func (response ListPublicImages403JSONResponse) VisitListPublicImagesResponse(w 
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -8026,8 +13780,8 @@ func (response ListPublicImagesdefaultJSONResponse) VisitListPublicImagesRespons
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -8065,8 +13819,8 @@ func (response CreatePublicImage400JSONResponse) VisitCreatePublicImageResponse(
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
@@ -8082,8 +13836,8 @@ func (response CreatePublicImage403JSONResponse) VisitCreatePublicImageResponse(
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -8131,8 +13885,8 @@ func (response CreatePublicImagedefaultJSONResponse) VisitCreatePublicImageRespo
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -8164,8 +13918,8 @@ func (response DeletePublicImage403JSONResponse) VisitDeletePublicImageResponse(
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -8181,8 +13935,8 @@ func (response DeletePublicImage404JSONResponse) VisitDeletePublicImageResponse(
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
@@ -8202,8 +13956,8 @@ func (response DeletePublicImagedefaultJSONResponse) VisitDeletePublicImageRespo
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -8241,8 +13995,8 @@ func (response ListObjects400JSONResponse) VisitListObjectsResponse(w http.Respo
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
@@ -8258,8 +14012,8 @@ func (response ListObjects403JSONResponse) VisitListObjectsResponse(w http.Respo
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -8279,8 +14033,8 @@ func (response ListObjectsdefaultJSONResponse) VisitListObjectsResponse(w http.R
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -8352,8 +14106,8 @@ func (response CreateObject400JSONResponse) VisitCreateObjectResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
@@ -8411,8 +14165,8 @@ func (response CreateObject410JSONResponse) VisitCreateObjectResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(410)
 	_, err := buf.WriteTo(w)
@@ -8446,8 +14200,8 @@ func (response CreateObjectdefaultJSONResponse) VisitCreateObjectResponse(w http
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -8486,8 +14240,8 @@ func (response DeleteObject403JSONResponse) VisitDeleteObjectResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -8503,8 +14257,8 @@ func (response DeleteObject404JSONResponse) VisitDeleteObjectResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
@@ -8520,8 +14274,8 @@ func (response DeleteObject410JSONResponse) VisitDeleteObjectResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(410)
 	_, err := buf.WriteTo(w)
@@ -8540,8 +14294,8 @@ func (response DeleteObject412JSONResponse) VisitDeleteObjectResponse(w http.Res
 	if response.Headers.ETag != nil {
 		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
 	}
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(412)
 	_, err := buf.WriteTo(w)
@@ -8561,8 +14315,8 @@ func (response DeleteObjectdefaultJSONResponse) VisitDeleteObjectResponse(w http
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -8621,8 +14375,8 @@ func (response GetObject403JSONResponse) VisitGetObjectResponse(w http.ResponseW
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -8638,8 +14392,8 @@ func (response GetObject404JSONResponse) VisitGetObjectResponse(w http.ResponseW
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
@@ -8655,8 +14409,8 @@ func (response GetObject410JSONResponse) VisitGetObjectResponse(w http.ResponseW
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(410)
 	_, err := buf.WriteTo(w)
@@ -8676,8 +14430,8 @@ func (response GetObjectdefaultJSONResponse) VisitGetObjectResponse(w http.Respo
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -8728,8 +14482,8 @@ func (response UpdateObject400JSONResponse) VisitUpdateObjectResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
@@ -8745,8 +14499,8 @@ func (response UpdateObject403JSONResponse) VisitUpdateObjectResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -8762,8 +14516,8 @@ func (response UpdateObject404JSONResponse) VisitUpdateObjectResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
@@ -8779,8 +14533,8 @@ func (response UpdateObject409JSONResponse) VisitUpdateObjectResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
@@ -8796,8 +14550,8 @@ func (response UpdateObject410JSONResponse) VisitUpdateObjectResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(410)
 	_, err := buf.WriteTo(w)
@@ -8816,8 +14570,8 @@ func (response UpdateObject412JSONResponse) VisitUpdateObjectResponse(w http.Res
 	if response.Headers.ETag != nil {
 		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
 	}
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(412)
 	_, err := buf.WriteTo(w)
@@ -8837,8 +14591,8 @@ func (response UpdateObjectdefaultJSONResponse) VisitUpdateObjectResponse(w http
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -8886,8 +14640,8 @@ func (response GetObjectCertificate403JSONResponse) VisitGetObjectCertificateRes
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -8903,8 +14657,8 @@ func (response GetObjectCertificate404JSONResponse) VisitGetObjectCertificateRes
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
@@ -8934,8 +14688,8 @@ func (response GetObjectCertificate410JSONResponse) VisitGetObjectCertificateRes
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(410)
 	_, err := buf.WriteTo(w)
@@ -8955,8 +14709,8 @@ func (response GetObjectCertificatedefaultJSONResponse) VisitGetObjectCertificat
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -9005,8 +14759,8 @@ func (response CreateObjectCredential400JSONResponse) VisitCreateObjectCredentia
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
@@ -9022,8 +14776,8 @@ func (response CreateObjectCredential403JSONResponse) VisitCreateObjectCredentia
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -9039,8 +14793,8 @@ func (response CreateObjectCredential404JSONResponse) VisitCreateObjectCredentia
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
@@ -9070,8 +14824,8 @@ func (response CreateObjectCredential410JSONResponse) VisitCreateObjectCredentia
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(410)
 	_, err := buf.WriteTo(w)
@@ -9129,8 +14883,307 @@ func (response CreateObjectCredentialdefaultJSONResponse) VisitCreateObjectCrede
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListReleasesRequestObject struct {
+}
+
+type ListReleasesResponseObject interface {
+	VisitListReleasesResponse(w http.ResponseWriter) error
+}
+
+type ListReleases200JSONResponse ReleaseCatalog
+
+func (response ListReleases200JSONResponse) VisitListReleasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListReleases403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListReleases403JSONResponse) VisitListReleasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListReleasesdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ListReleasesdefaultJSONResponse) VisitListReleasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ImportReleasesRequestObject struct {
+	Body *ImportReleasesJSONRequestBody
+}
+
+type ImportReleasesResponseObject interface {
+	VisitImportReleasesResponse(w http.ResponseWriter) error
+}
+
+type ImportReleases200JSONResponse ReleaseCatalog
+
+func (response ImportReleases200JSONResponse) VisitImportReleasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ImportReleases400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ImportReleases400JSONResponse) VisitImportReleasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ImportReleases403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ImportReleases403JSONResponse) VisitImportReleasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ImportReleasesdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ImportReleasesdefaultJSONResponse) VisitImportReleasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetReleaseArtifactRequestObject struct {
+	Version string `json:"version"`
+	Name    string `json:"name"`
+}
+
+type GetReleaseArtifactResponseObject interface {
+	VisitGetReleaseArtifactResponse(w http.ResponseWriter) error
+}
+
+type GetReleaseArtifact200ApplicationOctetStreamResponse struct {
+	Body          io.Reader
+	ContentLength int64
+}
+
+func (response GetReleaseArtifact200ApplicationOctetStreamResponse) VisitGetReleaseArtifactResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	_, err := io.Copy(w, response.Body)
+	return err
+}
+
+type GetReleaseArtifact403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetReleaseArtifact403JSONResponse) VisitGetReleaseArtifactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetReleaseArtifact404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetReleaseArtifact404JSONResponse) VisitGetReleaseArtifactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetReleaseArtifactdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response GetReleaseArtifactdefaultJSONResponse) VisitGetReleaseArtifactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutReleaseArtifactRequestObject struct {
+	Version string `json:"version"`
+	Name    string `json:"name"`
+	Body    io.Reader
+}
+
+type PutReleaseArtifactResponseObject interface {
+	VisitPutReleaseArtifactResponse(w http.ResponseWriter) error
+}
+
+type PutReleaseArtifact201JSONResponse ReleaseArtifact
+
+func (response PutReleaseArtifact201JSONResponse) VisitPutReleaseArtifactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutReleaseArtifact400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response PutReleaseArtifact400JSONResponse) VisitPutReleaseArtifactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutReleaseArtifact403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response PutReleaseArtifact403JSONResponse) VisitPutReleaseArtifactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutReleaseArtifactdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response PutReleaseArtifactdefaultJSONResponse) VisitPutReleaseArtifactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -9167,8 +15220,8 @@ func (response GetStatus403JSONResponse) VisitGetStatusResponse(w http.ResponseW
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -9188,8 +15241,68 @@ func (response GetStatusdefaultJSONResponse) VisitGetStatusResponse(w http.Respo
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListDegradedStoresRequestObject struct {
+	Params ListDegradedStoresParams
+}
+
+type ListDegradedStoresResponseObject interface {
+	VisitListDegradedStoresResponse(w http.ResponseWriter) error
+}
+
+type ListDegradedStores200JSONResponse DegradedStores
+
+func (response ListDegradedStores200JSONResponse) VisitListDegradedStoresResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListDegradedStores403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListDegradedStores403JSONResponse) VisitListDegradedStoresResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListDegradedStoresdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ListDegradedStoresdefaultJSONResponse) VisitListDegradedStoresResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -9227,8 +15340,8 @@ func (response ListTenants400JSONResponse) VisitListTenantsResponse(w http.Respo
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
@@ -9244,8 +15357,8 @@ func (response ListTenants403JSONResponse) VisitListTenantsResponse(w http.Respo
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -9265,8 +15378,8 @@ func (response ListTenantsdefaultJSONResponse) VisitListTenantsResponse(w http.R
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -9318,8 +15431,8 @@ func (response CreateTenant400JSONResponse) VisitCreateTenantResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
@@ -9335,8 +15448,8 @@ func (response CreateTenant403JSONResponse) VisitCreateTenantResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -9352,8 +15465,8 @@ func (response CreateTenant409JSONResponse) VisitCreateTenantResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
@@ -9373,8 +15486,8 @@ func (response CreateTenantdefaultJSONResponse) VisitCreateTenantResponse(w http
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -9421,8 +15534,8 @@ func (response DeleteTenant403JSONResponse) VisitDeleteTenantResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -9438,8 +15551,8 @@ func (response DeleteTenant404JSONResponse) VisitDeleteTenantResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
@@ -9472,8 +15585,8 @@ func (response DeleteTenant412JSONResponse) VisitDeleteTenantResponse(w http.Res
 	if response.Headers.ETag != nil {
 		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
 	}
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(412)
 	_, err := buf.WriteTo(w)
@@ -9493,8 +15606,8 @@ func (response DeleteTenantdefaultJSONResponse) VisitDeleteTenantResponse(w http
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -9553,8 +15666,8 @@ func (response GetTenant403JSONResponse) VisitGetTenantResponse(w http.ResponseW
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -9570,8 +15683,8 @@ func (response GetTenant404JSONResponse) VisitGetTenantResponse(w http.ResponseW
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
@@ -9591,8 +15704,8 @@ func (response GetTenantdefaultJSONResponse) VisitGetTenantResponse(w http.Respo
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -9643,8 +15756,8 @@ func (response UpdateTenant400JSONResponse) VisitUpdateTenantResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
@@ -9660,8 +15773,8 @@ func (response UpdateTenant403JSONResponse) VisitUpdateTenantResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -9677,8 +15790,8 @@ func (response UpdateTenant404JSONResponse) VisitUpdateTenantResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
@@ -9697,8 +15810,8 @@ func (response UpdateTenant412JSONResponse) VisitUpdateTenantResponse(w http.Res
 	if response.Headers.ETag != nil {
 		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
 	}
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(412)
 	_, err := buf.WriteTo(w)
@@ -9718,8 +15831,406 @@ func (response UpdateTenantdefaultJSONResponse) VisitUpdateTenantResponse(w http
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListApprovalsRequestObject struct {
+	ID     TenantID `json:"id"`
+	Params ListApprovalsParams
+}
+
+type ListApprovalsResponseObject interface {
+	VisitListApprovalsResponse(w http.ResponseWriter) error
+}
+
+type ListApprovals200JSONResponse ApprovalList
+
+func (response ListApprovals200JSONResponse) VisitListApprovalsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListApprovals403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListApprovals403JSONResponse) VisitListApprovalsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListApprovals404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListApprovals404JSONResponse) VisitListApprovalsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListApprovalsdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ListApprovalsdefaultJSONResponse) VisitListApprovalsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteTenantNotificationsRequestObject struct {
+	ID TenantID `json:"id"`
+}
+
+type DeleteTenantNotificationsResponseObject interface {
+	VisitDeleteTenantNotificationsResponse(w http.ResponseWriter) error
+}
+
+type DeleteTenantNotifications204Response struct {
+}
+
+func (response DeleteTenantNotifications204Response) VisitDeleteTenantNotificationsResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteTenantNotifications403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeleteTenantNotifications403JSONResponse) VisitDeleteTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteTenantNotifications404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteTenantNotifications404JSONResponse) VisitDeleteTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteTenantNotificationsdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response DeleteTenantNotificationsdefaultJSONResponse) VisitDeleteTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTenantNotificationsRequestObject struct {
+	ID TenantID `json:"id"`
+}
+
+type GetTenantNotificationsResponseObject interface {
+	VisitGetTenantNotificationsResponse(w http.ResponseWriter) error
+}
+
+type GetTenantNotifications200JSONResponse NotificationConfig
+
+func (response GetTenantNotifications200JSONResponse) VisitGetTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTenantNotifications403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetTenantNotifications403JSONResponse) VisitGetTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTenantNotifications404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetTenantNotifications404JSONResponse) VisitGetTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTenantNotificationsdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response GetTenantNotificationsdefaultJSONResponse) VisitGetTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutTenantNotificationsRequestObject struct {
+	ID   TenantID `json:"id"`
+	Body *PutTenantNotificationsJSONRequestBody
+}
+
+type PutTenantNotificationsResponseObject interface {
+	VisitPutTenantNotificationsResponse(w http.ResponseWriter) error
+}
+
+type PutTenantNotifications200JSONResponse NotificationConfig
+
+func (response PutTenantNotifications200JSONResponse) VisitPutTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutTenantNotifications400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response PutTenantNotifications400JSONResponse) VisitPutTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutTenantNotifications403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response PutTenantNotifications403JSONResponse) VisitPutTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutTenantNotifications404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response PutTenantNotifications404JSONResponse) VisitPutTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutTenantNotificationsdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response PutTenantNotificationsdefaultJSONResponse) VisitPutTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TestTenantNotificationsRequestObject struct {
+	ID TenantID `json:"id"`
+}
+
+type TestTenantNotificationsResponseObject interface {
+	VisitTestTenantNotificationsResponse(w http.ResponseWriter) error
+}
+
+type TestTenantNotifications200JSONResponse NotificationTestResult
+
+func (response TestTenantNotifications200JSONResponse) VisitTestTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TestTenantNotifications403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response TestTenantNotifications403JSONResponse) VisitTestTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TestTenantNotifications404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response TestTenantNotifications404JSONResponse) VisitTestTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TestTenantNotificationsdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response TestTenantNotificationsdefaultJSONResponse) VisitTestTenantNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -9758,8 +16269,8 @@ func (response PurgeTenantObjects400JSONResponse) VisitPurgeTenantObjectsRespons
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
@@ -9775,8 +16286,8 @@ func (response PurgeTenantObjects403JSONResponse) VisitPurgeTenantObjectsRespons
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -9792,8 +16303,8 @@ func (response PurgeTenantObjects404JSONResponse) VisitPurgeTenantObjectsRespons
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
@@ -9813,25 +16324,26 @@ func (response PurgeTenantObjectsdefaultJSONResponse) VisitPurgeTenantObjectsRes
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
 	return err
 }
 
-type CheckTenantWIFRequestObject struct {
-	ID TenantID `json:"id"`
+type ListPublicNamesRequestObject struct {
+	ID     TenantID `json:"id"`
+	Params ListPublicNamesParams
 }
 
-type CheckTenantWIFResponseObject interface {
-	VisitCheckTenantWIFResponse(w http.ResponseWriter) error
+type ListPublicNamesResponseObject interface {
+	VisitListPublicNamesResponse(w http.ResponseWriter) error
 }
 
-type CheckTenantWIF200JSONResponse WIFCheckResult
+type ListPublicNames200JSONResponse PublicNamePage
 
-func (response CheckTenantWIF200JSONResponse) VisitCheckTenantWIFResponse(w http.ResponseWriter) error {
+func (response ListPublicNames200JSONResponse) VisitListPublicNamesResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -9843,72 +16355,2314 @@ func (response CheckTenantWIF200JSONResponse) VisitCheckTenantWIFResponse(w http
 	return err
 }
 
-type CheckTenantWIF400JSONResponse struct{ BadRequestJSONResponse }
+type ListPublicNames400JSONResponse struct{ BadRequestJSONResponse }
 
-func (response CheckTenantWIF400JSONResponse) VisitCheckTenantWIFResponse(w http.ResponseWriter) error {
+func (response ListPublicNames400JSONResponse) VisitListPublicNamesResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
 	return err
 }
 
-type CheckTenantWIF403JSONResponse struct{ ForbiddenJSONResponse }
+type ListPublicNames403JSONResponse struct{ ForbiddenJSONResponse }
 
-func (response CheckTenantWIF403JSONResponse) VisitCheckTenantWIFResponse(w http.ResponseWriter) error {
+func (response ListPublicNames403JSONResponse) VisitListPublicNamesResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
 	return err
 }
 
-type CheckTenantWIF404JSONResponse struct{ NotFoundJSONResponse }
+type ListPublicNames404JSONResponse struct{ NotFoundJSONResponse }
 
-func (response CheckTenantWIF404JSONResponse) VisitCheckTenantWIFResponse(w http.ResponseWriter) error {
+func (response ListPublicNames404JSONResponse) VisitListPublicNamesResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
 
-type CheckTenantWIFdefaultJSONResponse struct {
+type ListPublicNamesdefaultJSONResponse struct {
 	Body       Error
 	Headers    ErrorResponseHeaders
 	StatusCode int
 }
 
-func (response CheckTenantWIFdefaultJSONResponse) VisitCheckTenantWIFResponse(w http.ResponseWriter) error {
+func (response ListPublicNamesdefaultJSONResponse) VisitListPublicNamesResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReleasePublicNameRequestObject struct {
+	ID   TenantID   `json:"id"`
+	Name PublicName `json:"name"`
+}
+
+type ReleasePublicNameResponseObject interface {
+	VisitReleasePublicNameResponse(w http.ResponseWriter) error
+}
+
+type ReleasePublicName204Response struct {
+}
+
+func (response ReleasePublicName204Response) VisitReleasePublicNameResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type ReleasePublicName403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ReleasePublicName403JSONResponse) VisitReleasePublicNameResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReleasePublicName404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ReleasePublicName404JSONResponse) VisitReleasePublicNameResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReleasePublicName409JSONResponse struct{ ConflictJSONResponse }
+
+func (response ReleasePublicName409JSONResponse) VisitReleasePublicNameResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReleasePublicNamedefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ReleasePublicNamedefaultJSONResponse) VisitReleasePublicNameResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListQueuesRequestObject struct {
+	ID     TenantID `json:"id"`
+	Params ListQueuesParams
+}
+
+type ListQueuesResponseObject interface {
+	VisitListQueuesResponse(w http.ResponseWriter) error
+}
+
+type ListQueues200JSONResponse QueuePage
+
+func (response ListQueues200JSONResponse) VisitListQueuesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListQueues400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ListQueues400JSONResponse) VisitListQueuesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListQueues403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListQueues403JSONResponse) VisitListQueuesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListQueues404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListQueues404JSONResponse) VisitListQueuesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListQueuesdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ListQueuesdefaultJSONResponse) VisitListQueuesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteQueueRequestObject struct {
+	ID    TenantID  `json:"id"`
+	Queue QueueName `json:"queue"`
+}
+
+type DeleteQueueResponseObject interface {
+	VisitDeleteQueueResponse(w http.ResponseWriter) error
+}
+
+type DeleteQueue204Response struct {
+}
+
+func (response DeleteQueue204Response) VisitDeleteQueueResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteQueue403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeleteQueue403JSONResponse) VisitDeleteQueueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteQueue404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteQueue404JSONResponse) VisitDeleteQueueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteQueuedefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response DeleteQueuedefaultJSONResponse) VisitDeleteQueueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetQueueRequestObject struct {
+	ID     TenantID  `json:"id"`
+	Queue  QueueName `json:"queue"`
+	Params GetQueueParams
+}
+
+type GetQueueResponseObject interface {
+	VisitGetQueueResponse(w http.ResponseWriter) error
+}
+
+type GetQueue200JSONResponse Queue
+
+func (response GetQueue200JSONResponse) VisitGetQueueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetQueue400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response GetQueue400JSONResponse) VisitGetQueueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetQueue403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetQueue403JSONResponse) VisitGetQueueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetQueue404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetQueue404JSONResponse) VisitGetQueueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetQueue409JSONResponse struct{ LeaseLostJSONResponse }
+
+func (response GetQueue409JSONResponse) VisitGetQueueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetQueuedefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response GetQueuedefaultJSONResponse) VisitGetQueueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutQueueRequestObject struct {
+	ID    TenantID  `json:"id"`
+	Queue QueueName `json:"queue"`
+}
+
+type PutQueueResponseObject interface {
+	VisitPutQueueResponse(w http.ResponseWriter) error
+}
+
+type PutQueue200JSONResponse Queue
+
+func (response PutQueue200JSONResponse) VisitPutQueueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutQueue201JSONResponse Queue
+
+func (response PutQueue201JSONResponse) VisitPutQueueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutQueue400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response PutQueue400JSONResponse) VisitPutQueueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutQueue403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response PutQueue403JSONResponse) VisitPutQueueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutQueue404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response PutQueue404JSONResponse) VisitPutQueueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutQueuedefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response PutQueuedefaultJSONResponse) VisitPutQueueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PeekQueueMessagesRequestObject struct {
+	ID     TenantID  `json:"id"`
+	Queue  QueueName `json:"queue"`
+	Params PeekQueueMessagesParams
+}
+
+type PeekQueueMessagesResponseObject interface {
+	VisitPeekQueueMessagesResponse(w http.ResponseWriter) error
+}
+
+type PeekQueueMessages200ResponseHeaders struct {
+	CacheControl *string
+}
+
+type PeekQueueMessages200JSONResponse struct {
+	Body    QueueMessageList
+	Headers PeekQueueMessages200ResponseHeaders
+}
+
+func (response PeekQueueMessages200JSONResponse) VisitPeekQueueMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PeekQueueMessages400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response PeekQueueMessages400JSONResponse) VisitPeekQueueMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PeekQueueMessages403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response PeekQueueMessages403JSONResponse) VisitPeekQueueMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PeekQueueMessages404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response PeekQueueMessages404JSONResponse) VisitPeekQueueMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PeekQueueMessagesdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response PeekQueueMessagesdefaultJSONResponse) VisitPeekQueueMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SendQueueMessagesRequestObject struct {
+	ID     TenantID  `json:"id"`
+	Queue  QueueName `json:"queue"`
+	Params SendQueueMessagesParams
+	Body   *SendQueueMessagesJSONRequestBody
+}
+
+type SendQueueMessagesResponseObject interface {
+	VisitSendQueueMessagesResponse(w http.ResponseWriter) error
+}
+
+type SendQueueMessages201JSONResponse QueueSendResult
+
+func (response SendQueueMessages201JSONResponse) VisitSendQueueMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SendQueueMessages400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response SendQueueMessages400JSONResponse) VisitSendQueueMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SendQueueMessages403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response SendQueueMessages403JSONResponse) VisitSendQueueMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SendQueueMessages404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response SendQueueMessages404JSONResponse) VisitSendQueueMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SendQueueMessages409JSONResponse struct{ LeaseLostJSONResponse }
+
+func (response SendQueueMessages409JSONResponse) VisitSendQueueMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SendQueueMessagesdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response SendQueueMessagesdefaultJSONResponse) VisitSendQueueMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AckQueueMessagesRequestObject struct {
+	ID     TenantID  `json:"id"`
+	Queue  QueueName `json:"queue"`
+	Params AckQueueMessagesParams
+	Body   *AckQueueMessagesJSONRequestBody
+}
+
+type AckQueueMessagesResponseObject interface {
+	VisitAckQueueMessagesResponse(w http.ResponseWriter) error
+}
+
+type AckQueueMessages200JSONResponse QueueAckResult
+
+func (response AckQueueMessages200JSONResponse) VisitAckQueueMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AckQueueMessages400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response AckQueueMessages400JSONResponse) VisitAckQueueMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AckQueueMessages403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response AckQueueMessages403JSONResponse) VisitAckQueueMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AckQueueMessages404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response AckQueueMessages404JSONResponse) VisitAckQueueMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AckQueueMessages409JSONResponse struct{ LeaseLostJSONResponse }
+
+func (response AckQueueMessages409JSONResponse) VisitAckQueueMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AckQueueMessagesdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response AckQueueMessagesdefaultJSONResponse) VisitAckQueueMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PullQueueMessagesRequestObject struct {
+	ID     TenantID  `json:"id"`
+	Queue  QueueName `json:"queue"`
+	Params PullQueueMessagesParams
+	Body   *PullQueueMessagesJSONRequestBody
+}
+
+type PullQueueMessagesResponseObject interface {
+	VisitPullQueueMessagesResponse(w http.ResponseWriter) error
+}
+
+type PullQueueMessages200ResponseHeaders struct {
+	CacheControl *string
+}
+
+type PullQueueMessages200JSONResponse struct {
+	Body    QueuePullResult
+	Headers PullQueueMessages200ResponseHeaders
+}
+
+func (response PullQueueMessages200JSONResponse) VisitPullQueueMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PullQueueMessages400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response PullQueueMessages400JSONResponse) VisitPullQueueMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PullQueueMessages403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response PullQueueMessages403JSONResponse) VisitPullQueueMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PullQueueMessages404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response PullQueueMessages404JSONResponse) VisitPullQueueMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PullQueueMessages409JSONResponse struct{ LeaseLostJSONResponse }
+
+func (response PullQueueMessages409JSONResponse) VisitPullQueueMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PullQueueMessagesdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response PullQueueMessagesdefaultJSONResponse) VisitPullQueueMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PurgeQueueRequestObject struct {
+	ID    TenantID  `json:"id"`
+	Queue QueueName `json:"queue"`
+}
+
+type PurgeQueueResponseObject interface {
+	VisitPurgeQueueResponse(w http.ResponseWriter) error
+}
+
+type PurgeQueue200JSONResponse QueuePurgeResult
+
+func (response PurgeQueue200JSONResponse) VisitPurgeQueueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PurgeQueue403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response PurgeQueue403JSONResponse) VisitPurgeQueueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PurgeQueue404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response PurgeQueue404JSONResponse) VisitPurgeQueueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PurgeQueuedefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response PurgeQueuedefaultJSONResponse) VisitPurgeQueueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteTenantTelemetryRequestObject struct {
+	ID TenantID `json:"id"`
+}
+
+type DeleteTenantTelemetryResponseObject interface {
+	VisitDeleteTenantTelemetryResponse(w http.ResponseWriter) error
+}
+
+type DeleteTenantTelemetry204Response struct {
+}
+
+func (response DeleteTenantTelemetry204Response) VisitDeleteTenantTelemetryResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteTenantTelemetry403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeleteTenantTelemetry403JSONResponse) VisitDeleteTenantTelemetryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteTenantTelemetry404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteTenantTelemetry404JSONResponse) VisitDeleteTenantTelemetryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteTenantTelemetrydefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response DeleteTenantTelemetrydefaultJSONResponse) VisitDeleteTenantTelemetryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTenantTelemetryRequestObject struct {
+	ID TenantID `json:"id"`
+}
+
+type GetTenantTelemetryResponseObject interface {
+	VisitGetTenantTelemetryResponse(w http.ResponseWriter) error
+}
+
+type GetTenantTelemetry200JSONResponse TelemetryConfig
+
+func (response GetTenantTelemetry200JSONResponse) VisitGetTenantTelemetryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTenantTelemetry403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetTenantTelemetry403JSONResponse) VisitGetTenantTelemetryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTenantTelemetry404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetTenantTelemetry404JSONResponse) VisitGetTenantTelemetryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTenantTelemetrydefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response GetTenantTelemetrydefaultJSONResponse) VisitGetTenantTelemetryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutTenantTelemetryRequestObject struct {
+	ID   TenantID `json:"id"`
+	Body *PutTenantTelemetryJSONRequestBody
+}
+
+type PutTenantTelemetryResponseObject interface {
+	VisitPutTenantTelemetryResponse(w http.ResponseWriter) error
+}
+
+type PutTenantTelemetry200JSONResponse TelemetryConfig
+
+func (response PutTenantTelemetry200JSONResponse) VisitPutTenantTelemetryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutTenantTelemetry400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response PutTenantTelemetry400JSONResponse) VisitPutTenantTelemetryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutTenantTelemetry403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response PutTenantTelemetry403JSONResponse) VisitPutTenantTelemetryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutTenantTelemetry404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response PutTenantTelemetry404JSONResponse) VisitPutTenantTelemetryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutTenantTelemetrydefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response PutTenantTelemetrydefaultJSONResponse) VisitPutTenantTelemetryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTenantUsageRequestObject struct {
+	ID TenantID `json:"id"`
+}
+
+type GetTenantUsageResponseObject interface {
+	VisitGetTenantUsageResponse(w http.ResponseWriter) error
+}
+
+type GetTenantUsage200JSONResponse TenantUsage
+
+func (response GetTenantUsage200JSONResponse) VisitGetTenantUsageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTenantUsage403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetTenantUsage403JSONResponse) VisitGetTenantUsageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTenantUsage404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetTenantUsage404JSONResponse) VisitGetTenantUsageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTenantUsagedefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response GetTenantUsagedefaultJSONResponse) VisitGetTenantUsageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DecideApprovalRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Workflow string       `json:"workflow"`
+	Instance string       `json:"instance"`
+	Body     *DecideApprovalJSONRequestBody
+}
+
+type DecideApprovalResponseObject interface {
+	VisitDecideApprovalResponse(w http.ResponseWriter) error
+}
+
+type DecideApproval200JSONResponse ApprovalDecisionResponse
+
+func (response DecideApproval200JSONResponse) VisitDecideApprovalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DecideApproval400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response DecideApproval400JSONResponse) VisitDecideApprovalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DecideApproval403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DecideApproval403JSONResponse) VisitDecideApprovalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DecideApproval404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DecideApproval404JSONResponse) VisitDecideApprovalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DecideApproval409JSONResponse struct{ ConflictJSONResponse }
+
+func (response DecideApproval409JSONResponse) VisitDecideApprovalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DecideApprovaldefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response DecideApprovaldefaultJSONResponse) VisitDecideApprovalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportD1RequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Name     StoreName    `json:"name"`
+}
+
+type ExportD1ResponseObject interface {
+	VisitExportD1Response(w http.ResponseWriter) error
+}
+
+type ExportD1200ResponseHeaders struct {
+	CacheControl *string
+}
+
+type ExportD1200TextResponse struct {
+	Body    string
+	Headers ExportD1200ResponseHeaders
+}
+
+func (response ExportD1200TextResponse) VisitExportD1Response(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	w.WriteHeader(200)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
+type ExportD1400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ExportD1400JSONResponse) VisitExportD1Response(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportD1403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ExportD1403JSONResponse) VisitExportD1Response(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportD1404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ExportD1404JSONResponse) VisitExportD1Response(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportD1defaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ExportD1defaultJSONResponse) VisitExportD1Response(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type QueryD1RequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Name     StoreName    `json:"name"`
+	Body     *QueryD1JSONRequestBody
+}
+
+type QueryD1ResponseObject interface {
+	VisitQueryD1Response(w http.ResponseWriter) error
+}
+
+type QueryD1200JSONResponse []D1Result
+
+func (response QueryD1200JSONResponse) VisitQueryD1Response(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type QueryD1400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response QueryD1400JSONResponse) VisitQueryD1Response(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type QueryD1403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response QueryD1403JSONResponse) VisitQueryD1Response(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type QueryD1404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response QueryD1404JSONResponse) VisitQueryD1Response(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type QueryD1defaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response QueryD1defaultJSONResponse) VisitQueryD1Response(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloadDeploymentsRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Params   ListWorkloadDeploymentsParams
+}
+
+type ListWorkloadDeploymentsResponseObject interface {
+	VisitListWorkloadDeploymentsResponse(w http.ResponseWriter) error
+}
+
+type ListWorkloadDeployments200JSONResponse DeploymentHistoryPage
+
+func (response ListWorkloadDeployments200JSONResponse) VisitListWorkloadDeploymentsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloadDeployments400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ListWorkloadDeployments400JSONResponse) VisitListWorkloadDeploymentsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloadDeployments403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListWorkloadDeployments403JSONResponse) VisitListWorkloadDeploymentsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloadDeployments404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListWorkloadDeployments404JSONResponse) VisitListWorkloadDeploymentsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloadDeploymentsdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ListWorkloadDeploymentsdefaultJSONResponse) VisitListWorkloadDeploymentsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWorkloadLogsRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Params   GetWorkloadLogsParams
+}
+
+type GetWorkloadLogsResponseObject interface {
+	VisitGetWorkloadLogsResponse(w http.ResponseWriter) error
+}
+
+type GetWorkloadLogs200ResponseHeaders struct {
+	CacheControl *string
+}
+
+type GetWorkloadLogs200ApplicationXNdjsonResponse struct {
+	Body          io.Reader
+	Headers       GetWorkloadLogs200ResponseHeaders
+	ContentLength int64
+}
+
+func (response GetWorkloadLogs200ApplicationXNdjsonResponse) VisitGetWorkloadLogsResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		// If w doesn't support flushing, fall back to io.Copy.
+		_, err := io.Copy(w, response.Body)
+		return err
+	}
+	// text/event-stream messages are typically small; use a
+	// modest buffer and flush after each chunk so clients see
+	// events immediately instead of waiting on OS buffering.
+	buf := make([]byte, 4096)
+	for {
+		n, err := response.Body.Read(buf)
+		if n > 0 {
+			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+				return writeErr
+			}
+			flusher.Flush()
+		}
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+	}
+}
+
+type GetWorkloadLogs200TextResponse struct {
+	Body    string
+	Headers GetWorkloadLogs200ResponseHeaders
+}
+
+func (response GetWorkloadLogs200TextResponse) VisitGetWorkloadLogsResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	w.WriteHeader(200)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
+type GetWorkloadLogs400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response GetWorkloadLogs400JSONResponse) VisitGetWorkloadLogsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWorkloadLogs403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetWorkloadLogs403JSONResponse) VisitGetWorkloadLogsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWorkloadLogs404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetWorkloadLogs404JSONResponse) VisitGetWorkloadLogsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWorkloadLogsdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response GetWorkloadLogsdefaultJSONResponse) VisitGetWorkloadLogsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyWorkloadPolicyRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Params   ApplyWorkloadPolicyParams
+	Body     *ApplyWorkloadPolicyJSONRequestBody
+}
+
+type ApplyWorkloadPolicyResponseObject interface {
+	VisitApplyWorkloadPolicyResponse(w http.ResponseWriter) error
+}
+
+type ApplyWorkloadPolicy200JSONResponse PolicyApply
+
+func (response ApplyWorkloadPolicy200JSONResponse) VisitApplyWorkloadPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyWorkloadPolicy400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ApplyWorkloadPolicy400JSONResponse) VisitApplyWorkloadPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyWorkloadPolicy403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ApplyWorkloadPolicy403JSONResponse) VisitApplyWorkloadPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyWorkloadPolicy404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ApplyWorkloadPolicy404JSONResponse) VisitApplyWorkloadPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyWorkloadPolicy409JSONResponse struct{ ConflictJSONResponse }
+
+func (response ApplyWorkloadPolicy409JSONResponse) VisitApplyWorkloadPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyWorkloadPolicydefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ApplyWorkloadPolicydefaultJSONResponse) VisitApplyWorkloadPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloadPreviewsRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+}
+
+type ListWorkloadPreviewsResponseObject interface {
+	VisitListWorkloadPreviewsResponse(w http.ResponseWriter) error
+}
+
+type ListWorkloadPreviews200JSONResponse PreviewList
+
+func (response ListWorkloadPreviews200JSONResponse) VisitListWorkloadPreviewsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloadPreviews400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ListWorkloadPreviews400JSONResponse) VisitListWorkloadPreviewsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloadPreviews403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListWorkloadPreviews403JSONResponse) VisitListWorkloadPreviewsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloadPreviews404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListWorkloadPreviews404JSONResponse) VisitListWorkloadPreviewsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloadPreviewsdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ListWorkloadPreviewsdefaultJSONResponse) VisitListWorkloadPreviewsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePromotionRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Params   CreatePromotionParams
+	Body     *CreatePromotionJSONRequestBody
+}
+
+type CreatePromotionResponseObject interface {
+	VisitCreatePromotionResponse(w http.ResponseWriter) error
+}
+
+type CreatePromotion200JSONResponse PreflightResult
+
+func (response CreatePromotion200JSONResponse) VisitCreatePromotionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePromotion202ResponseHeaders struct {
+	Location *string
+}
+
+type CreatePromotion202JSONResponse struct {
+	Body    Promotion
+	Headers CreatePromotion202ResponseHeaders
+}
+
+func (response CreatePromotion202JSONResponse) VisitCreatePromotionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.Location != nil {
+		w.Header().Set("Location", fmt.Sprint(*response.Headers.Location))
+	}
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePromotion400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreatePromotion400JSONResponse) VisitCreatePromotionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePromotion403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreatePromotion403JSONResponse) VisitCreatePromotionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePromotion404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreatePromotion404JSONResponse) VisitCreatePromotionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePromotion409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CreatePromotion409JSONResponse) VisitCreatePromotionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePromotiondefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response CreatePromotiondefaultJSONResponse) VisitCreatePromotionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -9957,8 +18711,8 @@ func (response GetWorkloadPublic403JSONResponse) VisitGetWorkloadPublicResponse(
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -9974,8 +18728,8 @@ func (response GetWorkloadPublic404JSONResponse) VisitGetWorkloadPublicResponse(
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
@@ -9995,8 +18749,8 @@ func (response GetWorkloadPublicdefaultJSONResponse) VisitGetWorkloadPublicRespo
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -10048,8 +18802,8 @@ func (response UpdateWorkloadPublic400JSONResponse) VisitUpdateWorkloadPublicRes
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
@@ -10065,8 +18819,8 @@ func (response UpdateWorkloadPublic403JSONResponse) VisitUpdateWorkloadPublicRes
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -10082,8 +18836,8 @@ func (response UpdateWorkloadPublic404JSONResponse) VisitUpdateWorkloadPublicRes
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
@@ -10102,8 +18856,8 @@ func (response UpdateWorkloadPublic412JSONResponse) VisitUpdateWorkloadPublicRes
 	if response.Headers.ETag != nil {
 		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
 	}
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(412)
 	_, err := buf.WriteTo(w)
@@ -10123,8 +18877,2543 @@ func (response UpdateWorkloadPublicdefaultJSONResponse) VisitUpdateWorkloadPubli
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRollbackRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Params   CreateRollbackParams
+	Body     *CreateRollbackJSONRequestBody
+}
+
+type CreateRollbackResponseObject interface {
+	VisitCreateRollbackResponse(w http.ResponseWriter) error
+}
+
+type CreateRollback200JSONResponse PreflightResult
+
+func (response CreateRollback200JSONResponse) VisitCreateRollbackResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRollback202ResponseHeaders struct {
+	Location *string
+}
+
+type CreateRollback202JSONResponse struct {
+	Body    Rollback
+	Headers CreateRollback202ResponseHeaders
+}
+
+func (response CreateRollback202JSONResponse) VisitCreateRollbackResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.Location != nil {
+		w.Header().Set("Location", fmt.Sprint(*response.Headers.Location))
+	}
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRollback400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateRollback400JSONResponse) VisitCreateRollbackResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRollback403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateRollback403JSONResponse) VisitCreateRollbackResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRollback404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateRollback404JSONResponse) VisitCreateRollbackResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRollback409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CreateRollback409JSONResponse) VisitCreateRollbackResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRollbackdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response CreateRollbackdefaultJSONResponse) VisitCreateRollbackResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWorkloadSecretGrantRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Params   CreateWorkloadSecretGrantParams
+}
+
+type CreateWorkloadSecretGrantResponseObject interface {
+	VisitCreateWorkloadSecretGrantResponse(w http.ResponseWriter) error
+}
+
+type CreateWorkloadSecretGrant201ResponseHeaders struct {
+	CacheControl *string
+}
+
+type CreateWorkloadSecretGrant201JSONResponse struct {
+	Body    SecretGrant
+	Headers CreateWorkloadSecretGrant201ResponseHeaders
+}
+
+func (response CreateWorkloadSecretGrant201JSONResponse) VisitCreateWorkloadSecretGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWorkloadSecretGrant400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateWorkloadSecretGrant400JSONResponse) VisitCreateWorkloadSecretGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWorkloadSecretGrant403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateWorkloadSecretGrant403JSONResponse) VisitCreateWorkloadSecretGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWorkloadSecretGrant404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateWorkloadSecretGrant404JSONResponse) VisitCreateWorkloadSecretGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWorkloadSecretGrant409JSONResponse struct{ LeaseLostJSONResponse }
+
+func (response CreateWorkloadSecretGrant409JSONResponse) VisitCreateWorkloadSecretGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWorkloadSecretGrantdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response CreateWorkloadSecretGrantdefaultJSONResponse) VisitCreateWorkloadSecretGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloadSecretsRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Params   ListWorkloadSecretsParams
+}
+
+type ListWorkloadSecretsResponseObject interface {
+	VisitListWorkloadSecretsResponse(w http.ResponseWriter) error
+}
+
+type ListWorkloadSecrets200JSONResponse SecretPage
+
+func (response ListWorkloadSecrets200JSONResponse) VisitListWorkloadSecretsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloadSecrets400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ListWorkloadSecrets400JSONResponse) VisitListWorkloadSecretsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloadSecrets403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListWorkloadSecrets403JSONResponse) VisitListWorkloadSecretsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloadSecrets404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListWorkloadSecrets404JSONResponse) VisitListWorkloadSecretsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloadSecretsdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ListWorkloadSecretsdefaultJSONResponse) VisitListWorkloadSecretsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteWorkloadSecretRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Name     SecretName   `json:"name"`
+}
+
+type DeleteWorkloadSecretResponseObject interface {
+	VisitDeleteWorkloadSecretResponse(w http.ResponseWriter) error
+}
+
+type DeleteWorkloadSecret204Response struct {
+}
+
+func (response DeleteWorkloadSecret204Response) VisitDeleteWorkloadSecretResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteWorkloadSecret403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeleteWorkloadSecret403JSONResponse) VisitDeleteWorkloadSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteWorkloadSecret404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteWorkloadSecret404JSONResponse) VisitDeleteWorkloadSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteWorkloadSecretdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response DeleteWorkloadSecretdefaultJSONResponse) VisitDeleteWorkloadSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutWorkloadSecretRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Name     SecretName   `json:"name"`
+	Body     *PutWorkloadSecretJSONRequestBody
+}
+
+type PutWorkloadSecretResponseObject interface {
+	VisitPutWorkloadSecretResponse(w http.ResponseWriter) error
+}
+
+type PutWorkloadSecret200JSONResponse Secret
+
+func (response PutWorkloadSecret200JSONResponse) VisitPutWorkloadSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutWorkloadSecret201JSONResponse Secret
+
+func (response PutWorkloadSecret201JSONResponse) VisitPutWorkloadSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutWorkloadSecret400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response PutWorkloadSecret400JSONResponse) VisitPutWorkloadSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutWorkloadSecret403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response PutWorkloadSecret403JSONResponse) VisitPutWorkloadSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutWorkloadSecret404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response PutWorkloadSecret404JSONResponse) VisitPutWorkloadSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutWorkloadSecretdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response PutWorkloadSecretdefaultJSONResponse) VisitPutWorkloadSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServiceBindingTargetRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Binding  string       `json:"binding"`
+	Params   GetServiceBindingTargetParams
+}
+
+type GetServiceBindingTargetResponseObject interface {
+	VisitGetServiceBindingTargetResponse(w http.ResponseWriter) error
+}
+
+type GetServiceBindingTarget200JSONResponse ServiceBindingTarget
+
+func (response GetServiceBindingTarget200JSONResponse) VisitGetServiceBindingTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServiceBindingTarget400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response GetServiceBindingTarget400JSONResponse) VisitGetServiceBindingTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServiceBindingTarget403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetServiceBindingTarget403JSONResponse) VisitGetServiceBindingTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServiceBindingTarget404JSONResponse Error
+
+func (response GetServiceBindingTarget404JSONResponse) VisitGetServiceBindingTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServiceBindingTarget409JSONResponse struct{ LeaseLostJSONResponse }
+
+func (response GetServiceBindingTarget409JSONResponse) VisitGetServiceBindingTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServiceBindingTarget410JSONResponse struct{ GoneJSONResponse }
+
+func (response GetServiceBindingTarget410JSONResponse) VisitGetServiceBindingTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(410)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServiceBindingTarget503JSONResponse Error
+
+func (response GetServiceBindingTarget503JSONResponse) VisitGetServiceBindingTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServiceBindingTargetdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response GetServiceBindingTargetdefaultJSONResponse) VisitGetServiceBindingTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloadStoresRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Params   ListWorkloadStoresParams
+}
+
+type ListWorkloadStoresResponseObject interface {
+	VisitListWorkloadStoresResponse(w http.ResponseWriter) error
+}
+
+type ListWorkloadStores200JSONResponse StorePage
+
+func (response ListWorkloadStores200JSONResponse) VisitListWorkloadStoresResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloadStores400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ListWorkloadStores400JSONResponse) VisitListWorkloadStoresResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloadStores403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListWorkloadStores403JSONResponse) VisitListWorkloadStoresResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloadStores404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListWorkloadStores404JSONResponse) VisitListWorkloadStoresResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloadStoresdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ListWorkloadStoresdefaultJSONResponse) VisitListWorkloadStoresResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKVKeysRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Name     StoreName    `json:"name"`
+	Params   ListKVKeysParams
+}
+
+type ListKVKeysResponseObject interface {
+	VisitListKVKeysResponse(w http.ResponseWriter) error
+}
+
+type ListKVKeys200ResponseHeaders struct {
+	CacheControl *string
+}
+
+type ListKVKeys200JSONResponse struct {
+	Body    KVKeyPage
+	Headers ListKVKeys200ResponseHeaders
+}
+
+func (response ListKVKeys200JSONResponse) VisitListKVKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKVKeys400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ListKVKeys400JSONResponse) VisitListKVKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKVKeys403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListKVKeys403JSONResponse) VisitListKVKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKVKeys404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListKVKeys404JSONResponse) VisitListKVKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKVKeysdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ListKVKeysdefaultJSONResponse) VisitListKVKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteKVValueRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Name     StoreName    `json:"name"`
+	Params   DeleteKVValueParams
+}
+
+type DeleteKVValueResponseObject interface {
+	VisitDeleteKVValueResponse(w http.ResponseWriter) error
+}
+
+type DeleteKVValue204Response struct {
+}
+
+func (response DeleteKVValue204Response) VisitDeleteKVValueResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteKVValue400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response DeleteKVValue400JSONResponse) VisitDeleteKVValueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteKVValue403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeleteKVValue403JSONResponse) VisitDeleteKVValueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteKVValue404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteKVValue404JSONResponse) VisitDeleteKVValueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteKVValue409JSONResponse struct{ StoreConflictJSONResponse }
+
+func (response DeleteKVValue409JSONResponse) VisitDeleteKVValueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteKVValuedefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response DeleteKVValuedefaultJSONResponse) VisitDeleteKVValueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetKVValueRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Name     StoreName    `json:"name"`
+	Params   GetKVValueParams
+}
+
+type GetKVValueResponseObject interface {
+	VisitGetKVValueResponse(w http.ResponseWriter) error
+}
+
+type GetKVValue200ResponseHeaders struct {
+	CacheControl *string
+}
+
+type GetKVValue200JSONResponse struct {
+	Body    KVValue
+	Headers GetKVValue200ResponseHeaders
+}
+
+func (response GetKVValue200JSONResponse) VisitGetKVValueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetKVValue400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response GetKVValue400JSONResponse) VisitGetKVValueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetKVValue403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetKVValue403JSONResponse) VisitGetKVValueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetKVValue404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetKVValue404JSONResponse) VisitGetKVValueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetKVValuedefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response GetKVValuedefaultJSONResponse) VisitGetKVValueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutKVValueRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Name     StoreName    `json:"name"`
+	Params   PutKVValueParams
+	Body     *PutKVValueJSONRequestBody
+}
+
+type PutKVValueResponseObject interface {
+	VisitPutKVValueResponse(w http.ResponseWriter) error
+}
+
+type PutKVValue200JSONResponse KVKey
+
+func (response PutKVValue200JSONResponse) VisitPutKVValueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutKVValue400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response PutKVValue400JSONResponse) VisitPutKVValueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutKVValue403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response PutKVValue403JSONResponse) VisitPutKVValueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutKVValue404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response PutKVValue404JSONResponse) VisitPutKVValueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutKVValue409JSONResponse struct{ StoreConflictJSONResponse }
+
+func (response PutKVValue409JSONResponse) VisitPutKVValueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutKVValuedefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response PutKVValuedefaultJSONResponse) VisitPutKVValueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListR2ObjectsRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Name     StoreName    `json:"name"`
+	Params   ListR2ObjectsParams
+}
+
+type ListR2ObjectsResponseObject interface {
+	VisitListR2ObjectsResponse(w http.ResponseWriter) error
+}
+
+type ListR2Objects200ResponseHeaders struct {
+	CacheControl *string
+}
+
+type ListR2Objects200JSONResponse struct {
+	Body    R2ObjectPage
+	Headers ListR2Objects200ResponseHeaders
+}
+
+func (response ListR2Objects200JSONResponse) VisitListR2ObjectsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListR2Objects400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ListR2Objects400JSONResponse) VisitListR2ObjectsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListR2Objects403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListR2Objects403JSONResponse) VisitListR2ObjectsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListR2Objects404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListR2Objects404JSONResponse) VisitListR2ObjectsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListR2Objects409JSONResponse struct{ ConflictJSONResponse }
+
+func (response ListR2Objects409JSONResponse) VisitListR2ObjectsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListR2ObjectsdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ListR2ObjectsdefaultJSONResponse) VisitListR2ObjectsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteWorkloadStoreRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Kind     StoreKind    `json:"kind"`
+	Name     StoreName    `json:"name"`
+}
+
+type DeleteWorkloadStoreResponseObject interface {
+	VisitDeleteWorkloadStoreResponse(w http.ResponseWriter) error
+}
+
+type DeleteWorkloadStore204Response struct {
+}
+
+func (response DeleteWorkloadStore204Response) VisitDeleteWorkloadStoreResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteWorkloadStore403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeleteWorkloadStore403JSONResponse) VisitDeleteWorkloadStoreResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteWorkloadStore404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteWorkloadStore404JSONResponse) VisitDeleteWorkloadStoreResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteWorkloadStoredefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response DeleteWorkloadStoredefaultJSONResponse) VisitDeleteWorkloadStoreResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWorkloadStoreRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Kind     StoreKind    `json:"kind"`
+	Name     StoreName    `json:"name"`
+}
+
+type GetWorkloadStoreResponseObject interface {
+	VisitGetWorkloadStoreResponse(w http.ResponseWriter) error
+}
+
+type GetWorkloadStore200JSONResponse Store
+
+func (response GetWorkloadStore200JSONResponse) VisitGetWorkloadStoreResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWorkloadStore403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetWorkloadStore403JSONResponse) VisitGetWorkloadStoreResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWorkloadStore404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetWorkloadStore404JSONResponse) VisitGetWorkloadStoreResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWorkloadStoredefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response GetWorkloadStoredefaultJSONResponse) VisitGetWorkloadStoreResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutWorkloadStoreRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Kind     StoreKind    `json:"kind"`
+	Name     StoreName    `json:"name"`
+}
+
+type PutWorkloadStoreResponseObject interface {
+	VisitPutWorkloadStoreResponse(w http.ResponseWriter) error
+}
+
+type PutWorkloadStore200JSONResponse Store
+
+func (response PutWorkloadStore200JSONResponse) VisitPutWorkloadStoreResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutWorkloadStore201JSONResponse Store
+
+func (response PutWorkloadStore201JSONResponse) VisitPutWorkloadStoreResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutWorkloadStore400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response PutWorkloadStore400JSONResponse) VisitPutWorkloadStoreResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutWorkloadStore403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response PutWorkloadStore403JSONResponse) VisitPutWorkloadStoreResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutWorkloadStore404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response PutWorkloadStore404JSONResponse) VisitPutWorkloadStoreResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutWorkloadStoredefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response PutWorkloadStoredefaultJSONResponse) VisitPutWorkloadStoreResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReadStoreJournalRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Kind     StoreKind    `json:"kind"`
+	Name     StoreName    `json:"name"`
+	Params   ReadStoreJournalParams
+}
+
+type ReadStoreJournalResponseObject interface {
+	VisitReadStoreJournalResponse(w http.ResponseWriter) error
+}
+
+type ReadStoreJournal200ResponseHeaders struct {
+	CacheControl *string
+}
+
+type ReadStoreJournal200JSONResponse struct {
+	Body    StoreJournal
+	Headers ReadStoreJournal200ResponseHeaders
+}
+
+func (response ReadStoreJournal200JSONResponse) VisitReadStoreJournalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReadStoreJournal400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ReadStoreJournal400JSONResponse) VisitReadStoreJournalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReadStoreJournal403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ReadStoreJournal403JSONResponse) VisitReadStoreJournalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReadStoreJournal404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ReadStoreJournal404JSONResponse) VisitReadStoreJournalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReadStoreJournal409JSONResponse struct{ LeaseLostJSONResponse }
+
+func (response ReadStoreJournal409JSONResponse) VisitReadStoreJournalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReadStoreJournaldefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ReadStoreJournaldefaultJSONResponse) VisitReadStoreJournalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AppendStoreJournalRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Kind     StoreKind    `json:"kind"`
+	Name     StoreName    `json:"name"`
+	Params   AppendStoreJournalParams
+	Body     *AppendStoreJournalJSONRequestBody
+}
+
+type AppendStoreJournalResponseObject interface {
+	VisitAppendStoreJournalResponse(w http.ResponseWriter) error
+}
+
+type AppendStoreJournal201JSONResponse StoreAppendResult
+
+func (response AppendStoreJournal201JSONResponse) VisitAppendStoreJournalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AppendStoreJournal400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response AppendStoreJournal400JSONResponse) VisitAppendStoreJournalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AppendStoreJournal403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response AppendStoreJournal403JSONResponse) VisitAppendStoreJournalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AppendStoreJournal404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response AppendStoreJournal404JSONResponse) VisitAppendStoreJournalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AppendStoreJournal409JSONResponse struct{ StoreConflictJSONResponse }
+
+func (response AppendStoreJournal409JSONResponse) VisitAppendStoreJournalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AppendStoreJournaldefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response AppendStoreJournaldefaultJSONResponse) VisitAppendStoreJournalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RepairStoreRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Kind     StoreKind    `json:"kind"`
+	Name     StoreName    `json:"name"`
+	Body     *RepairStoreJSONRequestBody
+}
+
+type RepairStoreResponseObject interface {
+	VisitRepairStoreResponse(w http.ResponseWriter) error
+}
+
+type RepairStore200JSONResponse Store
+
+func (response RepairStore200JSONResponse) VisitRepairStoreResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RepairStore400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RepairStore400JSONResponse) VisitRepairStoreResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RepairStore403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response RepairStore403JSONResponse) VisitRepairStoreResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RepairStore404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RepairStore404JSONResponse) VisitRepairStoreResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RepairStore409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RepairStore409JSONResponse) VisitRepairStoreResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RepairStoredefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response RepairStoredefaultJSONResponse) VisitRepairStoreResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReportStoreStatusRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Kind     StoreKind    `json:"kind"`
+	Name     StoreName    `json:"name"`
+	Params   ReportStoreStatusParams
+	Body     *ReportStoreStatusJSONRequestBody
+}
+
+type ReportStoreStatusResponseObject interface {
+	VisitReportStoreStatusResponse(w http.ResponseWriter) error
+}
+
+type ReportStoreStatus204Response struct {
+}
+
+func (response ReportStoreStatus204Response) VisitReportStoreStatusResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type ReportStoreStatus400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ReportStoreStatus400JSONResponse) VisitReportStoreStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReportStoreStatus403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ReportStoreStatus403JSONResponse) VisitReportStoreStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReportStoreStatus404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ReportStoreStatus404JSONResponse) VisitReportStoreStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReportStoreStatus409JSONResponse struct{ LeaseLostJSONResponse }
+
+func (response ReportStoreStatus409JSONResponse) VisitReportStoreStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReportStoreStatusdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ReportStoreStatusdefaultJSONResponse) VisitReportStoreStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateTelemetryGrantRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Params   CreateTelemetryGrantParams
+}
+
+type CreateTelemetryGrantResponseObject interface {
+	VisitCreateTelemetryGrantResponse(w http.ResponseWriter) error
+}
+
+type CreateTelemetryGrant201ResponseHeaders struct {
+	CacheControl *string
+}
+
+type CreateTelemetryGrant201JSONResponse struct {
+	Body    TelemetryGrant
+	Headers CreateTelemetryGrant201ResponseHeaders
+}
+
+func (response CreateTelemetryGrant201JSONResponse) VisitCreateTelemetryGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateTelemetryGrant400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateTelemetryGrant400JSONResponse) VisitCreateTelemetryGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateTelemetryGrant403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateTelemetryGrant403JSONResponse) VisitCreateTelemetryGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateTelemetryGrant404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateTelemetryGrant404JSONResponse) VisitCreateTelemetryGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateTelemetryGrant409JSONResponse struct{ LeaseLostJSONResponse }
+
+func (response CreateTelemetryGrant409JSONResponse) VisitCreateTelemetryGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateTelemetryGrantdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response CreateTelemetryGrantdefaultJSONResponse) VisitCreateTelemetryGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUpgradesRequestObject struct {
+}
+
+type ListUpgradesResponseObject interface {
+	VisitListUpgradesResponse(w http.ResponseWriter) error
+}
+
+type ListUpgrades200JSONResponse struct {
+	Items []UpgradeRun `json:"items"`
+}
+
+func (response ListUpgrades200JSONResponse) VisitListUpgradesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUpgrades403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListUpgrades403JSONResponse) VisitListUpgradesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUpgradesdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ListUpgradesdefaultJSONResponse) VisitListUpgradesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateUpgradeRequestObject struct {
+	Body *CreateUpgradeJSONRequestBody
+}
+
+type CreateUpgradeResponseObject interface {
+	VisitCreateUpgradeResponse(w http.ResponseWriter) error
+}
+
+type CreateUpgrade200JSONResponse UpgradePlan
+
+func (response CreateUpgrade200JSONResponse) VisitCreateUpgradeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateUpgrade201JSONResponse UpgradeRun
+
+func (response CreateUpgrade201JSONResponse) VisitCreateUpgradeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateUpgrade400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateUpgrade400JSONResponse) VisitCreateUpgradeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateUpgrade403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateUpgrade403JSONResponse) VisitCreateUpgradeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateUpgrade409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CreateUpgrade409JSONResponse) VisitCreateUpgradeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateUpgradedefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response CreateUpgradedefaultJSONResponse) VisitCreateUpgradeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUpgradeRequestObject struct {
+	ID string `json:"id"`
+}
+
+type GetUpgradeResponseObject interface {
+	VisitGetUpgradeResponse(w http.ResponseWriter) error
+}
+
+type GetUpgrade200JSONResponse UpgradeRun
+
+func (response GetUpgrade200JSONResponse) VisitGetUpgradeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUpgrade403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetUpgrade403JSONResponse) VisitGetUpgradeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUpgrade404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetUpgrade404JSONResponse) VisitGetUpgradeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUpgradedefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response GetUpgradedefaultJSONResponse) VisitGetUpgradeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ActOnUpgradeRequestObject struct {
+	ID   string `json:"id"`
+	Body *ActOnUpgradeJSONRequestBody
+}
+
+type ActOnUpgradeResponseObject interface {
+	VisitActOnUpgradeResponse(w http.ResponseWriter) error
+}
+
+type ActOnUpgrade200JSONResponse UpgradeRun
+
+func (response ActOnUpgrade200JSONResponse) VisitActOnUpgradeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ActOnUpgrade403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ActOnUpgrade403JSONResponse) VisitActOnUpgradeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ActOnUpgrade404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ActOnUpgrade404JSONResponse) VisitActOnUpgradeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ActOnUpgrade409JSONResponse struct{ ConflictJSONResponse }
+
+func (response ActOnUpgrade409JSONResponse) VisitActOnUpgradeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ActOnUpgradedefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ActOnUpgradedefaultJSONResponse) VisitActOnUpgradeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -10173,8 +21462,8 @@ func (response CreateVolumeKeyGrant400JSONResponse) VisitCreateVolumeKeyGrantRes
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
@@ -10190,8 +21479,8 @@ func (response CreateVolumeKeyGrant403JSONResponse) VisitCreateVolumeKeyGrantRes
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -10207,8 +21496,8 @@ func (response CreateVolumeKeyGrant404JSONResponse) VisitCreateVolumeKeyGrantRes
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
@@ -10224,8 +21513,8 @@ func (response CreateVolumeKeyGrant409JSONResponse) VisitCreateVolumeKeyGrantRes
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
@@ -10245,8 +21534,8 @@ func (response CreateVolumeKeyGrantdefaultJSONResponse) VisitCreateVolumeKeyGran
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -10283,8 +21572,8 @@ func (response WhoAmI403JSONResponse) VisitWhoAmIResponse(w http.ResponseWriter)
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
@@ -10304,8 +21593,8 @@ func (response WhoAmIdefaultJSONResponse) VisitWhoAmIResponse(w http.ResponseWri
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.TwdError != nil {
-		w.Header().Set("Twd-Error", fmt.Sprint(*response.Headers.TwdError))
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
 	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
@@ -10314,18 +21603,6 @@ func (response WhoAmIdefaultJSONResponse) VisitWhoAmIResponse(w http.ResponseWri
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
-	// GetOIDCConfiguration OIDC discovery (base issuer)
-	// (GET /.well-known/openid-configuration)
-	GetOIDCConfiguration(ctx context.Context, request GetOIDCConfigurationRequestObject) (GetOIDCConfigurationResponseObject, error)
-	// GetJWKS Issuer signing keys
-	// (GET /jwks)
-	GetJWKS(ctx context.Context, request GetJWKSRequestObject) (GetJWKSResponseObject, error)
-	// GetTenantOIDCConfiguration OIDC discovery (per-tenant issuer `…/t/{tenant}`)
-	// (GET /t/{tenant}/.well-known/openid-configuration)
-	GetTenantOIDCConfiguration(ctx context.Context, request GetTenantOIDCConfigurationRequestObject) (GetTenantOIDCConfigurationResponseObject, error)
-	// GetTenantJWKS Per-tenant issuer signing keys (same key set)
-	// (GET /t/{tenant}/jwks)
-	GetTenantJWKS(ctx context.Context, request GetTenantJWKSRequestObject) (GetTenantJWKSResponseObject, error)
 	// ListAudit Query audit records
 	// (GET /v1/audit)
 	ListAudit(ctx context.Context, request ListAuditRequestObject) (ListAuditResponseObject, error)
@@ -10386,9 +21663,21 @@ type StrictServerInterface interface {
 	// ListHostAssignments List the deployments assigned to a host
 	// (GET /v1/hosts/{id}/assignments)
 	ListHostAssignments(ctx context.Context, request ListHostAssignmentsRequestObject) (ListHostAssignmentsResponseObject, error)
+	// UncordonHost Uncordon a host
+	// (DELETE /v1/hosts/{id}/cordon)
+	UncordonHost(ctx context.Context, request UncordonHostRequestObject) (UncordonHostResponseObject, error)
+	// CordonHost Cordon a host (no new placements)
+	// (PUT /v1/hosts/{id}/cordon)
+	CordonHost(ctx context.Context, request CordonHostRequestObject) (CordonHostResponseObject, error)
+	// DrainHost Cordon a host and move its workloads to other hosts
+	// (POST /v1/hosts/{id}/drain)
+	DrainHost(ctx context.Context, request DrainHostRequestObject) (DrainHostResponseObject, error)
 	// ReportHostPaths Report measured tailnet paths (smart placement)
 	// (PUT /v1/hosts/{id}/paths)
 	ReportHostPaths(ctx context.Context, request ReportHostPathsRequestObject) (ReportHostPathsResponseObject, error)
+	// GetHostSandboxDeny Every tenant's credential file paths, for the host's sandbox deny list
+	// (GET /v1/hosts/{id}/sandbox-deny)
+	GetHostSandboxDeny(ctx context.Context, request GetHostSandboxDenyRequestObject) (GetHostSandboxDenyResponseObject, error)
 	// ReportHostStatus Heartbeat (replace the host's reported status)
 	// (PUT /v1/hosts/{id}/status)
 	ReportHostStatus(ctx context.Context, request ReportHostStatusRequestObject) (ReportHostStatusResponseObject, error)
@@ -10421,13 +21710,30 @@ type StrictServerInterface interface {
 	UpdateObject(ctx context.Context, request UpdateObjectRequestObject) (UpdateObjectResponseObject, error)
 	// GetObjectCertificate Read the object's node certificate
 	// (GET /v1/objects/{id}/certificate)
+	//
+	// Deprecated: this operation has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	GetObjectCertificate(ctx context.Context, request GetObjectCertificateRequestObject) (GetObjectCertificateResponseObject, error)
 	// CreateObjectCredential Mint a single-use auth key for the object's node
 	// (POST /v1/objects/{id}/credentials)
 	CreateObjectCredential(ctx context.Context, request CreateObjectCredentialRequestObject) (CreateObjectCredentialResponseObject, error)
+	// ListReleases The release catalog
+	// (GET /v1/releases)
+	ListReleases(ctx context.Context, request ListReleasesRequestObject) (ListReleasesResponseObject, error)
+	// ImportReleases Import catalog entries (from a release's share/tailworks/catalog.json)
+	// (POST /v1/releases)
+	ImportReleases(ctx context.Context, request ImportReleasesRequestObject) (ImportReleasesResponseObject, error)
+	// GetReleaseArtifact Download a release tarball (hosts upgrading themselves)
+	// (GET /v1/releases/{version}/artifacts/{name})
+	GetReleaseArtifact(ctx context.Context, request GetReleaseArtifactRequestObject) (GetReleaseArtifactResponseObject, error)
+	// PutReleaseArtifact Upload a release tarball (or its SHA256SUMS)
+	// (PUT /v1/releases/{version}/artifacts/{name})
+	PutReleaseArtifact(ctx context.Context, request PutReleaseArtifactRequestObject) (PutReleaseArtifactResponseObject, error)
 	// GetStatus mgmt status
 	// (GET /v1/status)
 	GetStatus(ctx context.Context, request GetStatusRequestObject) (GetStatusResponseObject, error)
+	// ListDegradedStores List degraded stores
+	// (GET /v1/stores/degraded)
+	ListDegradedStores(ctx context.Context, request ListDegradedStoresRequestObject) (ListDegradedStoresResponseObject, error)
 	// ListTenants List tenants
 	// (GET /v1/tenants)
 	ListTenants(ctx context.Context, request ListTenantsRequestObject) (ListTenantsResponseObject, error)
@@ -10443,18 +21749,171 @@ type StrictServerInterface interface {
 	// UpdateTenant Update a tenant (JSON Merge Patch)
 	// (PATCH /v1/tenants/{id})
 	UpdateTenant(ctx context.Context, request UpdateTenantRequestObject) (UpdateTenantResponseObject, error)
+	// ListApprovals The Workflow approvals waiting in a tenant (`tw approvals`, the admin UI)
+	// (GET /v1/tenants/{id}/approvals)
+	ListApprovals(ctx context.Context, request ListApprovalsRequestObject) (ListApprovalsResponseObject, error)
+	// DeleteTenantNotifications Stop the tenant's notifications (`tw notify rm`)
+	// (DELETE /v1/tenants/{id}/notifications)
+	DeleteTenantNotifications(ctx context.Context, request DeleteTenantNotificationsRequestObject) (DeleteTenantNotificationsResponseObject, error)
+	// GetTenantNotifications Read the tenant's notification webhook (`tw notify`), without secrets
+	// (GET /v1/tenants/{id}/notifications)
+	GetTenantNotifications(ctx context.Context, request GetTenantNotificationsRequestObject) (GetTenantNotificationsResponseObject, error)
+	// PutTenantNotifications Set the tenant's notification webhook (`tw notify set`)
+	// (PUT /v1/tenants/{id}/notifications)
+	PutTenantNotifications(ctx context.Context, request PutTenantNotificationsRequestObject) (PutTenantNotificationsResponseObject, error)
+	// TestTenantNotifications Send a test notification now (`tw notify test`)
+	// (POST /v1/tenants/{id}/notifications/test)
+	TestTenantNotifications(ctx context.Context, request TestTenantNotificationsRequestObject) (TestTenantNotificationsResponseObject, error)
 	// PurgeTenantObjects Purge terminal objects of a tenant
 	// (DELETE /v1/tenants/{id}/objects)
 	PurgeTenantObjects(ctx context.Context, request PurgeTenantObjectsRequestObject) (PurgeTenantObjectsResponseObject, error)
-	// CheckTenantWIF Verify a wif tenant's trust credentials (diagnostic)
-	// (POST /v1/tenants/{id}/wif-check)
-	CheckTenantWIF(ctx context.Context, request CheckTenantWIFRequestObject) (CheckTenantWIFResponseObject, error)
-	// GetWorkloadPublic Read a workload's public-ingress exposure (`twd expose`)
+	// ListPublicNames List the public names a tenant owns
+	// (GET /v1/tenants/{id}/public-names)
+	ListPublicNames(ctx context.Context, request ListPublicNamesRequestObject) (ListPublicNamesResponseObject, error)
+	// ReleasePublicName Release a public name the tenant owns
+	// (DELETE /v1/tenants/{id}/public-names/{name})
+	ReleasePublicName(ctx context.Context, request ReleasePublicNameRequestObject) (ReleasePublicNameResponseObject, error)
+	// ListQueues List a tenant's queues
+	// (GET /v1/tenants/{id}/queues)
+	ListQueues(ctx context.Context, request ListQueuesRequestObject) (ListQueuesResponseObject, error)
+	// DeleteQueue Delete a queue and its messages
+	// (DELETE /v1/tenants/{id}/queues/{queue})
+	DeleteQueue(ctx context.Context, request DeleteQueueRequestObject) (DeleteQueueResponseObject, error)
+	// GetQueue Get one queue and its backlog
+	// (GET /v1/tenants/{id}/queues/{queue})
+	GetQueue(ctx context.Context, request GetQueueRequestObject) (GetQueueResponseObject, error)
+	// PutQueue Create a queue (idempotent)
+	// (PUT /v1/tenants/{id}/queues/{queue})
+	PutQueue(ctx context.Context, request PutQueueRequestObject) (PutQueueResponseObject, error)
+	// PeekQueueMessages Read messages without claiming them
+	// (GET /v1/tenants/{id}/queues/{queue}/messages)
+	PeekQueueMessages(ctx context.Context, request PeekQueueMessagesRequestObject) (PeekQueueMessagesResponseObject, error)
+	// SendQueueMessages Send messages to a queue
+	// (POST /v1/tenants/{id}/queues/{queue}/messages)
+	SendQueueMessages(ctx context.Context, request SendQueueMessagesRequestObject) (SendQueueMessagesResponseObject, error)
+	// AckQueueMessages Settle claimed messages (ack, retry, extend)
+	// (POST /v1/tenants/{id}/queues/{queue}/messages/ack)
+	AckQueueMessages(ctx context.Context, request AckQueueMessagesRequestObject) (AckQueueMessagesResponseObject, error)
+	// PullQueueMessages Claim a batch of messages (push consumers and HTTP pull)
+	// (POST /v1/tenants/{id}/queues/{queue}/messages/pull)
+	PullQueueMessages(ctx context.Context, request PullQueueMessagesRequestObject) (PullQueueMessagesResponseObject, error)
+	// PurgeQueue Delete every message of a queue, keeping the queue
+	// (POST /v1/tenants/{id}/queues/{queue}/purge)
+	PurgeQueue(ctx context.Context, request PurgeQueueRequestObject) (PurgeQueueResponseObject, error)
+	// DeleteTenantTelemetry Stop the tenant's OTLP export (`tw telemetry rm`)
+	// (DELETE /v1/tenants/{id}/telemetry)
+	DeleteTenantTelemetry(ctx context.Context, request DeleteTenantTelemetryRequestObject) (DeleteTenantTelemetryResponseObject, error)
+	// GetTenantTelemetry Read the tenant's OTLP export (`tw telemetry`), without header values
+	// (GET /v1/tenants/{id}/telemetry)
+	GetTenantTelemetry(ctx context.Context, request GetTenantTelemetryRequestObject) (GetTenantTelemetryResponseObject, error)
+	// PutTenantTelemetry Set the tenant's OTLP export (`tw telemetry set`)
+	// (PUT /v1/tenants/{id}/telemetry)
+	PutTenantTelemetry(ctx context.Context, request PutTenantTelemetryRequestObject) (PutTenantTelemetryResponseObject, error)
+	// GetTenantUsage What a tenant keeps in mgmt (`tw tenant ls`, `tw doctor`)
+	// (GET /v1/tenants/{id}/usage)
+	GetTenantUsage(ctx context.Context, request GetTenantUsageRequestObject) (GetTenantUsageResponseObject, error)
+	// DecideApproval Approve or reject a waiting Workflow instance (`tw approve`, the admin UI)
+	// (POST /v1/tenants/{id}/workloads/{workload}/approvals/{workflow}/{instance})
+	DecideApproval(ctx context.Context, request DecideApprovalRequestObject) (DecideApprovalResponseObject, error)
+	// ExportD1 Export a D1 database as SQL (`tw d1 export`)
+	// (GET /v1/tenants/{id}/workloads/{workload}/d1/{name}/export)
+	ExportD1(ctx context.Context, request ExportD1RequestObject) (ExportD1ResponseObject, error)
+	// QueryD1 Run SQL on a D1 database (`tw d1 execute`, `tw d1 migrations apply`)
+	// (POST /v1/tenants/{id}/workloads/{workload}/d1/{name}/query)
+	QueryD1(ctx context.Context, request QueryD1RequestObject) (QueryD1ResponseObject, error)
+	// ListWorkloadDeployments A workload's deployment history, newest first (`tw deployments`)
+	// (GET /v1/tenants/{id}/workloads/{workload}/deployments)
+	ListWorkloadDeployments(ctx context.Context, request ListWorkloadDeploymentsRequestObject) (ListWorkloadDeploymentsResponseObject, error)
+	// GetWorkloadLogs Read (or follow) a workload's workerd / node log (`tw logs` from a linked machine)
+	// (GET /v1/tenants/{id}/workloads/{workload}/logs)
+	GetWorkloadLogs(ctx context.Context, request GetWorkloadLogsRequestObject) (GetWorkloadLogsResponseObject, error)
+	// ApplyWorkloadPolicy Add what a bundle needs to the tailnet policy (`tw policy --apply`), or plan it with dryRun
+	// (POST /v1/tenants/{id}/workloads/{workload}/policy)
+	ApplyWorkloadPolicy(ctx context.Context, request ApplyWorkloadPolicyRequestObject) (ApplyWorkloadPolicyResponseObject, error)
+	// ListWorkloadPreviews A workload's running previews (`tw previews`)
+	// (GET /v1/tenants/{id}/workloads/{workload}/previews)
+	ListWorkloadPreviews(ctx context.Context, request ListWorkloadPreviewsRequestObject) (ListWorkloadPreviewsResponseObject, error)
+	// CreatePromotion Promote a preview to the workload (`tw promote`), or preflight it with dryRun
+	// (POST /v1/tenants/{id}/workloads/{workload}/promotions)
+	CreatePromotion(ctx context.Context, request CreatePromotionRequestObject) (CreatePromotionResponseObject, error)
+	// GetWorkloadPublic Read a workload's public-ingress exposure (`tw expose`)
 	// (GET /v1/tenants/{id}/workloads/{workload}/public)
 	GetWorkloadPublic(ctx context.Context, request GetWorkloadPublicRequestObject) (GetWorkloadPublicResponseObject, error)
 	// UpdateWorkloadPublic Expose or unexpose a workload's public routes (JSON Merge Patch)
 	// (PATCH /v1/tenants/{id}/workloads/{workload}/public)
 	UpdateWorkloadPublic(ctx context.Context, request UpdateWorkloadPublicRequestObject) (UpdateWorkloadPublicResponseObject, error)
+	// CreateRollback Roll a workload back to a stored bundle (`tw rollback`), or preflight it with dryRun
+	// (POST /v1/tenants/{id}/workloads/{workload}/rollbacks)
+	CreateRollback(ctx context.Context, request CreateRollbackRequestObject) (CreateRollbackResponseObject, error)
+	// CreateWorkloadSecretGrant Release a workload's secret values to the lease holder
+	// (POST /v1/tenants/{id}/workloads/{workload}/secret-grants)
+	CreateWorkloadSecretGrant(ctx context.Context, request CreateWorkloadSecretGrantRequestObject) (CreateWorkloadSecretGrantResponseObject, error)
+	// ListWorkloadSecrets List a workload's secrets (names and times, never values)
+	// (GET /v1/tenants/{id}/workloads/{workload}/secrets)
+	ListWorkloadSecrets(ctx context.Context, request ListWorkloadSecretsRequestObject) (ListWorkloadSecretsResponseObject, error)
+	// DeleteWorkloadSecret Delete a workload secret (`tw secret rm`)
+	// (DELETE /v1/tenants/{id}/workloads/{workload}/secrets/{name})
+	DeleteWorkloadSecret(ctx context.Context, request DeleteWorkloadSecretRequestObject) (DeleteWorkloadSecretResponseObject, error)
+	// PutWorkloadSecret Create or replace a workload secret (`tw secret put`)
+	// (PUT /v1/tenants/{id}/workloads/{workload}/secrets/{name})
+	PutWorkloadSecret(ctx context.Context, request PutWorkloadSecretRequestObject) (PutWorkloadSecretResponseObject, error)
+	// GetServiceBindingTarget Resolve a workload's service binding to its target's entry node
+	// (GET /v1/tenants/{id}/workloads/{workload}/service-bindings/{binding})
+	GetServiceBindingTarget(ctx context.Context, request GetServiceBindingTargetRequestObject) (GetServiceBindingTargetResponseObject, error)
+	// ListWorkloadStores List a workload's stores
+	// (GET /v1/tenants/{id}/workloads/{workload}/stores)
+	ListWorkloadStores(ctx context.Context, request ListWorkloadStoresRequestObject) (ListWorkloadStoresResponseObject, error)
+	// ListKVKeys List a KV namespace's keys
+	// (GET /v1/tenants/{id}/workloads/{workload}/stores/kv/{name}/keys)
+	ListKVKeys(ctx context.Context, request ListKVKeysRequestObject) (ListKVKeysResponseObject, error)
+	// DeleteKVValue Delete one KV value
+	// (DELETE /v1/tenants/{id}/workloads/{workload}/stores/kv/{name}/value)
+	DeleteKVValue(ctx context.Context, request DeleteKVValueRequestObject) (DeleteKVValueResponseObject, error)
+	// GetKVValue Get one KV value
+	// (GET /v1/tenants/{id}/workloads/{workload}/stores/kv/{name}/value)
+	GetKVValue(ctx context.Context, request GetKVValueRequestObject) (GetKVValueResponseObject, error)
+	// PutKVValue Write one KV value
+	// (PUT /v1/tenants/{id}/workloads/{workload}/stores/kv/{name}/value)
+	PutKVValue(ctx context.Context, request PutKVValueRequestObject) (PutKVValueResponseObject, error)
+	// ListR2Objects List an R2 bucket's objects
+	// (GET /v1/tenants/{id}/workloads/{workload}/stores/r2/{name}/objects)
+	ListR2Objects(ctx context.Context, request ListR2ObjectsRequestObject) (ListR2ObjectsResponseObject, error)
+	// DeleteWorkloadStore Delete a store and its data
+	// (DELETE /v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name})
+	DeleteWorkloadStore(ctx context.Context, request DeleteWorkloadStoreRequestObject) (DeleteWorkloadStoreResponseObject, error)
+	// GetWorkloadStore Get one store
+	// (GET /v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name})
+	GetWorkloadStore(ctx context.Context, request GetWorkloadStoreRequestObject) (GetWorkloadStoreResponseObject, error)
+	// PutWorkloadStore Create a store (idempotent)
+	// (PUT /v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name})
+	PutWorkloadStore(ctx context.Context, request PutWorkloadStoreRequestObject) (PutWorkloadStoreResponseObject, error)
+	// ReadStoreJournal Read a store's journal after a sequence number
+	// (GET /v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name}/journal)
+	ReadStoreJournal(ctx context.Context, request ReadStoreJournalRequestObject) (ReadStoreJournalResponseObject, error)
+	// AppendStoreJournal Append entries to a store's journal (conditional on its head)
+	// (POST /v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name}/journal)
+	AppendStoreJournal(ctx context.Context, request AppendStoreJournalRequestObject) (AppendStoreJournalResponseObject, error)
+	// RepairStore Skip the journal entry a degraded store stopped at
+	// (POST /v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name}/repair)
+	RepairStore(ctx context.Context, request RepairStoreRequestObject) (RepairStoreResponseObject, error)
+	// ReportStoreStatus Report that a store object is degraded, or healthy again
+	// (POST /v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name}/status)
+	ReportStoreStatus(ctx context.Context, request ReportStoreStatusRequestObject) (ReportStoreStatusResponseObject, error)
+	// CreateTelemetryGrant Release the tenant's OTLP export config to a workload's lease holder
+	// (POST /v1/tenants/{id}/workloads/{workload}/telemetry-grants)
+	CreateTelemetryGrant(ctx context.Context, request CreateTelemetryGrantRequestObject) (CreateTelemetryGrantResponseObject, error)
+	// ListUpgrades Upgrade runs, newest first
+	// (GET /v1/upgrades)
+	ListUpgrades(ctx context.Context, request ListUpgradesRequestObject) (ListUpgradesResponseObject, error)
+	// CreateUpgrade Plan an upgrade, or start an upgrade run
+	// (POST /v1/upgrades)
+	CreateUpgrade(ctx context.Context, request CreateUpgradeRequestObject) (CreateUpgradeResponseObject, error)
+	// GetUpgrade One upgrade run
+	// (GET /v1/upgrades/{id})
+	GetUpgrade(ctx context.Context, request GetUpgradeRequestObject) (GetUpgradeResponseObject, error)
+	// ActOnUpgrade Pause, resume or abort an upgrade run
+	// (POST /v1/upgrades/{id}/actions)
+	ActOnUpgrade(ctx context.Context, request ActOnUpgradeRequestObject) (ActOnUpgradeResponseObject, error)
 	// CreateVolumeKeyGrant Release a volume's dm-crypt data key to the lease holder
 	// (POST /v1/volumes/{id}/keys)
 	CreateVolumeKeyGrant(ctx context.Context, request CreateVolumeKeyGrantRequestObject) (CreateVolumeKeyGrantResponseObject, error)
@@ -10500,106 +21959,6 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
-}
-
-// GetOIDCConfiguration operation middleware
-func (sh *strictHandler) GetOIDCConfiguration(w http.ResponseWriter, r *http.Request) {
-	var request GetOIDCConfigurationRequestObject
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.GetOIDCConfiguration(ctx, request.(GetOIDCConfigurationRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "GetOIDCConfiguration")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(GetOIDCConfigurationResponseObject); ok {
-		if err := validResponse.VisitGetOIDCConfigurationResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// GetJWKS operation middleware
-func (sh *strictHandler) GetJWKS(w http.ResponseWriter, r *http.Request) {
-	var request GetJWKSRequestObject
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.GetJWKS(ctx, request.(GetJWKSRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "GetJWKS")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(GetJWKSResponseObject); ok {
-		if err := validResponse.VisitGetJWKSResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// GetTenantOIDCConfiguration operation middleware
-func (sh *strictHandler) GetTenantOIDCConfiguration(w http.ResponseWriter, r *http.Request, tenant TenantPath) {
-	var request GetTenantOIDCConfigurationRequestObject
-
-	request.Tenant = tenant
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.GetTenantOIDCConfiguration(ctx, request.(GetTenantOIDCConfigurationRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "GetTenantOIDCConfiguration")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(GetTenantOIDCConfigurationResponseObject); ok {
-		if err := validResponse.VisitGetTenantOIDCConfigurationResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// GetTenantJWKS operation middleware
-func (sh *strictHandler) GetTenantJWKS(w http.ResponseWriter, r *http.Request, tenant TenantPath) {
-	var request GetTenantJWKSRequestObject
-
-	request.Tenant = tenant
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.GetTenantJWKS(ctx, request.(GetTenantJWKSRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "GetTenantJWKS")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(GetTenantJWKSResponseObject); ok {
-		if err := validResponse.VisitGetTenantJWKSResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
 }
 
 // ListAudit operation middleware
@@ -11151,6 +22510,94 @@ func (sh *strictHandler) ListHostAssignments(w http.ResponseWriter, r *http.Requ
 	}
 }
 
+// UncordonHost operation middleware
+func (sh *strictHandler) UncordonHost(w http.ResponseWriter, r *http.Request, id HostID) {
+	var request UncordonHostRequestObject
+
+	request.ID = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UncordonHost(ctx, request.(UncordonHostRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UncordonHost")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UncordonHostResponseObject); ok {
+		if err := validResponse.VisitUncordonHostResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CordonHost operation middleware
+func (sh *strictHandler) CordonHost(w http.ResponseWriter, r *http.Request, id HostID) {
+	var request CordonHostRequestObject
+
+	request.ID = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CordonHost(ctx, request.(CordonHostRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CordonHost")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CordonHostResponseObject); ok {
+		if err := validResponse.VisitCordonHostResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DrainHost operation middleware
+func (sh *strictHandler) DrainHost(w http.ResponseWriter, r *http.Request, id HostID) {
+	var request DrainHostRequestObject
+
+	request.ID = id
+
+	var body DrainHostJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DrainHost(ctx, request.(DrainHostRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DrainHost")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DrainHostResponseObject); ok {
+		if err := validResponse.VisitDrainHostResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ReportHostPaths operation middleware
 func (sh *strictHandler) ReportHostPaths(w http.ResponseWriter, r *http.Request, id HostID) {
 	var request ReportHostPathsRequestObject
@@ -11177,6 +22624,32 @@ func (sh *strictHandler) ReportHostPaths(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ReportHostPathsResponseObject); ok {
 		if err := validResponse.VisitReportHostPathsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetHostSandboxDeny operation middleware
+func (sh *strictHandler) GetHostSandboxDeny(w http.ResponseWriter, r *http.Request, id HostID) {
+	var request GetHostSandboxDenyRequestObject
+
+	request.ID = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetHostSandboxDeny(ctx, request.(GetHostSandboxDenyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetHostSandboxDeny")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetHostSandboxDenyResponseObject); ok {
+		if err := validResponse.VisitGetHostSandboxDenyResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -11535,6 +23008,117 @@ func (sh *strictHandler) CreateObjectCredential(w http.ResponseWriter, r *http.R
 	}
 }
 
+// ListReleases operation middleware
+func (sh *strictHandler) ListReleases(w http.ResponseWriter, r *http.Request) {
+	var request ListReleasesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListReleases(ctx, request.(ListReleasesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListReleases")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListReleasesResponseObject); ok {
+		if err := validResponse.VisitListReleasesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ImportReleases operation middleware
+func (sh *strictHandler) ImportReleases(w http.ResponseWriter, r *http.Request) {
+	var request ImportReleasesRequestObject
+
+	var body ImportReleasesJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ImportReleases(ctx, request.(ImportReleasesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ImportReleases")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ImportReleasesResponseObject); ok {
+		if err := validResponse.VisitImportReleasesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetReleaseArtifact operation middleware
+func (sh *strictHandler) GetReleaseArtifact(w http.ResponseWriter, r *http.Request, version string, name string) {
+	var request GetReleaseArtifactRequestObject
+
+	request.Version = version
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetReleaseArtifact(ctx, request.(GetReleaseArtifactRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetReleaseArtifact")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetReleaseArtifactResponseObject); ok {
+		if err := validResponse.VisitGetReleaseArtifactResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PutReleaseArtifact operation middleware
+func (sh *strictHandler) PutReleaseArtifact(w http.ResponseWriter, r *http.Request, version string, name string) {
+	var request PutReleaseArtifactRequestObject
+
+	request.Version = version
+	request.Name = name
+
+	request.Body = r.Body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PutReleaseArtifact(ctx, request.(PutReleaseArtifactRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutReleaseArtifact")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PutReleaseArtifactResponseObject); ok {
+		if err := validResponse.VisitPutReleaseArtifactResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetStatus operation middleware
 func (sh *strictHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	var request GetStatusRequestObject
@@ -11552,6 +23136,32 @@ func (sh *strictHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetStatusResponseObject); ok {
 		if err := validResponse.VisitGetStatusResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListDegradedStores operation middleware
+func (sh *strictHandler) ListDegradedStores(w http.ResponseWriter, r *http.Request, params ListDegradedStoresParams) {
+	var request ListDegradedStoresRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListDegradedStores(ctx, request.(ListDegradedStoresRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListDegradedStores")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListDegradedStoresResponseObject); ok {
+		if err := validResponse.VisitListDegradedStoresResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -11717,6 +23327,144 @@ func (sh *strictHandler) UpdateTenant(w http.ResponseWriter, r *http.Request, id
 	}
 }
 
+// ListApprovals operation middleware
+func (sh *strictHandler) ListApprovals(w http.ResponseWriter, r *http.Request, id TenantID, params ListApprovalsParams) {
+	var request ListApprovalsRequestObject
+
+	request.ID = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListApprovals(ctx, request.(ListApprovalsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListApprovals")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListApprovalsResponseObject); ok {
+		if err := validResponse.VisitListApprovalsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteTenantNotifications operation middleware
+func (sh *strictHandler) DeleteTenantNotifications(w http.ResponseWriter, r *http.Request, id TenantID) {
+	var request DeleteTenantNotificationsRequestObject
+
+	request.ID = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteTenantNotifications(ctx, request.(DeleteTenantNotificationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteTenantNotifications")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteTenantNotificationsResponseObject); ok {
+		if err := validResponse.VisitDeleteTenantNotificationsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetTenantNotifications operation middleware
+func (sh *strictHandler) GetTenantNotifications(w http.ResponseWriter, r *http.Request, id TenantID) {
+	var request GetTenantNotificationsRequestObject
+
+	request.ID = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetTenantNotifications(ctx, request.(GetTenantNotificationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetTenantNotifications")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetTenantNotificationsResponseObject); ok {
+		if err := validResponse.VisitGetTenantNotificationsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PutTenantNotifications operation middleware
+func (sh *strictHandler) PutTenantNotifications(w http.ResponseWriter, r *http.Request, id TenantID) {
+	var request PutTenantNotificationsRequestObject
+
+	request.ID = id
+
+	var body PutTenantNotificationsJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PutTenantNotifications(ctx, request.(PutTenantNotificationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutTenantNotifications")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PutTenantNotificationsResponseObject); ok {
+		if err := validResponse.VisitPutTenantNotificationsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// TestTenantNotifications operation middleware
+func (sh *strictHandler) TestTenantNotifications(w http.ResponseWriter, r *http.Request, id TenantID) {
+	var request TestTenantNotificationsRequestObject
+
+	request.ID = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.TestTenantNotifications(ctx, request.(TestTenantNotificationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "TestTenantNotifications")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(TestTenantNotificationsResponseObject); ok {
+		if err := validResponse.VisitTestTenantNotificationsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // PurgeTenantObjects operation middleware
 func (sh *strictHandler) PurgeTenantObjects(w http.ResponseWriter, r *http.Request, id TenantID, params PurgeTenantObjectsParams) {
 	var request PurgeTenantObjectsRequestObject
@@ -11744,25 +23492,685 @@ func (sh *strictHandler) PurgeTenantObjects(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-// CheckTenantWIF operation middleware
-func (sh *strictHandler) CheckTenantWIF(w http.ResponseWriter, r *http.Request, id TenantID) {
-	var request CheckTenantWIFRequestObject
+// ListPublicNames operation middleware
+func (sh *strictHandler) ListPublicNames(w http.ResponseWriter, r *http.Request, id TenantID, params ListPublicNamesParams) {
+	var request ListPublicNamesRequestObject
 
 	request.ID = id
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.CheckTenantWIF(ctx, request.(CheckTenantWIFRequestObject))
+		return sh.ssi.ListPublicNames(ctx, request.(ListPublicNamesRequestObject))
 	}
 	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "CheckTenantWIF")
+		handler = middleware(handler, "ListPublicNames")
 	}
 
 	response, err := handler(r.Context(), w, r, request)
 
 	if err != nil {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(CheckTenantWIFResponseObject); ok {
-		if err := validResponse.VisitCheckTenantWIFResponse(w); err != nil {
+	} else if validResponse, ok := response.(ListPublicNamesResponseObject); ok {
+		if err := validResponse.VisitListPublicNamesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReleasePublicName operation middleware
+func (sh *strictHandler) ReleasePublicName(w http.ResponseWriter, r *http.Request, id TenantID, name PublicName) {
+	var request ReleasePublicNameRequestObject
+
+	request.ID = id
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReleasePublicName(ctx, request.(ReleasePublicNameRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReleasePublicName")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReleasePublicNameResponseObject); ok {
+		if err := validResponse.VisitReleasePublicNameResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListQueues operation middleware
+func (sh *strictHandler) ListQueues(w http.ResponseWriter, r *http.Request, id TenantID, params ListQueuesParams) {
+	var request ListQueuesRequestObject
+
+	request.ID = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListQueues(ctx, request.(ListQueuesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListQueues")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListQueuesResponseObject); ok {
+		if err := validResponse.VisitListQueuesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteQueue operation middleware
+func (sh *strictHandler) DeleteQueue(w http.ResponseWriter, r *http.Request, id TenantID, queue QueueName) {
+	var request DeleteQueueRequestObject
+
+	request.ID = id
+	request.Queue = queue
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteQueue(ctx, request.(DeleteQueueRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteQueue")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteQueueResponseObject); ok {
+		if err := validResponse.VisitDeleteQueueResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetQueue operation middleware
+func (sh *strictHandler) GetQueue(w http.ResponseWriter, r *http.Request, id TenantID, queue QueueName, params GetQueueParams) {
+	var request GetQueueRequestObject
+
+	request.ID = id
+	request.Queue = queue
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetQueue(ctx, request.(GetQueueRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetQueue")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetQueueResponseObject); ok {
+		if err := validResponse.VisitGetQueueResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PutQueue operation middleware
+func (sh *strictHandler) PutQueue(w http.ResponseWriter, r *http.Request, id TenantID, queue QueueName) {
+	var request PutQueueRequestObject
+
+	request.ID = id
+	request.Queue = queue
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PutQueue(ctx, request.(PutQueueRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutQueue")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PutQueueResponseObject); ok {
+		if err := validResponse.VisitPutQueueResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PeekQueueMessages operation middleware
+func (sh *strictHandler) PeekQueueMessages(w http.ResponseWriter, r *http.Request, id TenantID, queue QueueName, params PeekQueueMessagesParams) {
+	var request PeekQueueMessagesRequestObject
+
+	request.ID = id
+	request.Queue = queue
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PeekQueueMessages(ctx, request.(PeekQueueMessagesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PeekQueueMessages")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PeekQueueMessagesResponseObject); ok {
+		if err := validResponse.VisitPeekQueueMessagesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SendQueueMessages operation middleware
+func (sh *strictHandler) SendQueueMessages(w http.ResponseWriter, r *http.Request, id TenantID, queue QueueName, params SendQueueMessagesParams) {
+	var request SendQueueMessagesRequestObject
+
+	request.ID = id
+	request.Queue = queue
+	request.Params = params
+
+	var body SendQueueMessagesJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SendQueueMessages(ctx, request.(SendQueueMessagesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SendQueueMessages")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SendQueueMessagesResponseObject); ok {
+		if err := validResponse.VisitSendQueueMessagesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AckQueueMessages operation middleware
+func (sh *strictHandler) AckQueueMessages(w http.ResponseWriter, r *http.Request, id TenantID, queue QueueName, params AckQueueMessagesParams) {
+	var request AckQueueMessagesRequestObject
+
+	request.ID = id
+	request.Queue = queue
+	request.Params = params
+
+	var body AckQueueMessagesJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AckQueueMessages(ctx, request.(AckQueueMessagesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AckQueueMessages")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AckQueueMessagesResponseObject); ok {
+		if err := validResponse.VisitAckQueueMessagesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PullQueueMessages operation middleware
+func (sh *strictHandler) PullQueueMessages(w http.ResponseWriter, r *http.Request, id TenantID, queue QueueName, params PullQueueMessagesParams) {
+	var request PullQueueMessagesRequestObject
+
+	request.ID = id
+	request.Queue = queue
+	request.Params = params
+
+	var body PullQueueMessagesJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PullQueueMessages(ctx, request.(PullQueueMessagesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PullQueueMessages")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PullQueueMessagesResponseObject); ok {
+		if err := validResponse.VisitPullQueueMessagesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PurgeQueue operation middleware
+func (sh *strictHandler) PurgeQueue(w http.ResponseWriter, r *http.Request, id TenantID, queue QueueName) {
+	var request PurgeQueueRequestObject
+
+	request.ID = id
+	request.Queue = queue
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PurgeQueue(ctx, request.(PurgeQueueRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PurgeQueue")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PurgeQueueResponseObject); ok {
+		if err := validResponse.VisitPurgeQueueResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteTenantTelemetry operation middleware
+func (sh *strictHandler) DeleteTenantTelemetry(w http.ResponseWriter, r *http.Request, id TenantID) {
+	var request DeleteTenantTelemetryRequestObject
+
+	request.ID = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteTenantTelemetry(ctx, request.(DeleteTenantTelemetryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteTenantTelemetry")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteTenantTelemetryResponseObject); ok {
+		if err := validResponse.VisitDeleteTenantTelemetryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetTenantTelemetry operation middleware
+func (sh *strictHandler) GetTenantTelemetry(w http.ResponseWriter, r *http.Request, id TenantID) {
+	var request GetTenantTelemetryRequestObject
+
+	request.ID = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetTenantTelemetry(ctx, request.(GetTenantTelemetryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetTenantTelemetry")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetTenantTelemetryResponseObject); ok {
+		if err := validResponse.VisitGetTenantTelemetryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PutTenantTelemetry operation middleware
+func (sh *strictHandler) PutTenantTelemetry(w http.ResponseWriter, r *http.Request, id TenantID) {
+	var request PutTenantTelemetryRequestObject
+
+	request.ID = id
+
+	var body PutTenantTelemetryJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PutTenantTelemetry(ctx, request.(PutTenantTelemetryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutTenantTelemetry")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PutTenantTelemetryResponseObject); ok {
+		if err := validResponse.VisitPutTenantTelemetryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetTenantUsage operation middleware
+func (sh *strictHandler) GetTenantUsage(w http.ResponseWriter, r *http.Request, id TenantID) {
+	var request GetTenantUsageRequestObject
+
+	request.ID = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetTenantUsage(ctx, request.(GetTenantUsageRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetTenantUsage")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetTenantUsageResponseObject); ok {
+		if err := validResponse.VisitGetTenantUsageResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DecideApproval operation middleware
+func (sh *strictHandler) DecideApproval(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, workflow string, instance string) {
+	var request DecideApprovalRequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Workflow = workflow
+	request.Instance = instance
+
+	var body DecideApprovalJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DecideApproval(ctx, request.(DecideApprovalRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DecideApproval")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DecideApprovalResponseObject); ok {
+		if err := validResponse.VisitDecideApprovalResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ExportD1 operation middleware
+func (sh *strictHandler) ExportD1(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, name StoreName) {
+	var request ExportD1RequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ExportD1(ctx, request.(ExportD1RequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ExportD1")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ExportD1ResponseObject); ok {
+		if err := validResponse.VisitExportD1Response(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// QueryD1 operation middleware
+func (sh *strictHandler) QueryD1(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, name StoreName) {
+	var request QueryD1RequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Name = name
+
+	var body QueryD1JSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.QueryD1(ctx, request.(QueryD1RequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "QueryD1")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(QueryD1ResponseObject); ok {
+		if err := validResponse.VisitQueryD1Response(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListWorkloadDeployments operation middleware
+func (sh *strictHandler) ListWorkloadDeployments(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, params ListWorkloadDeploymentsParams) {
+	var request ListWorkloadDeploymentsRequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListWorkloadDeployments(ctx, request.(ListWorkloadDeploymentsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListWorkloadDeployments")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListWorkloadDeploymentsResponseObject); ok {
+		if err := validResponse.VisitListWorkloadDeploymentsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetWorkloadLogs operation middleware
+func (sh *strictHandler) GetWorkloadLogs(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, params GetWorkloadLogsParams) {
+	var request GetWorkloadLogsRequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetWorkloadLogs(ctx, request.(GetWorkloadLogsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetWorkloadLogs")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetWorkloadLogsResponseObject); ok {
+		if err := validResponse.VisitGetWorkloadLogsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ApplyWorkloadPolicy operation middleware
+func (sh *strictHandler) ApplyWorkloadPolicy(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, params ApplyWorkloadPolicyParams) {
+	var request ApplyWorkloadPolicyRequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Params = params
+
+	var body ApplyWorkloadPolicyJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ApplyWorkloadPolicy(ctx, request.(ApplyWorkloadPolicyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ApplyWorkloadPolicy")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ApplyWorkloadPolicyResponseObject); ok {
+		if err := validResponse.VisitApplyWorkloadPolicyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListWorkloadPreviews operation middleware
+func (sh *strictHandler) ListWorkloadPreviews(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName) {
+	var request ListWorkloadPreviewsRequestObject
+
+	request.ID = id
+	request.Workload = workload
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListWorkloadPreviews(ctx, request.(ListWorkloadPreviewsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListWorkloadPreviews")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListWorkloadPreviewsResponseObject); ok {
+		if err := validResponse.VisitListWorkloadPreviewsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreatePromotion operation middleware
+func (sh *strictHandler) CreatePromotion(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, params CreatePromotionParams) {
+	var request CreatePromotionRequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Params = params
+
+	var body CreatePromotionJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreatePromotion(ctx, request.(CreatePromotionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreatePromotion")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreatePromotionResponseObject); ok {
+		if err := validResponse.VisitCreatePromotionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -11838,6 +24246,741 @@ func (sh *strictHandler) UpdateWorkloadPublic(w http.ResponseWriter, r *http.Req
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UpdateWorkloadPublicResponseObject); ok {
 		if err := validResponse.VisitUpdateWorkloadPublicResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateRollback operation middleware
+func (sh *strictHandler) CreateRollback(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, params CreateRollbackParams) {
+	var request CreateRollbackRequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Params = params
+
+	var body CreateRollbackJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateRollback(ctx, request.(CreateRollbackRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateRollback")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateRollbackResponseObject); ok {
+		if err := validResponse.VisitCreateRollbackResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateWorkloadSecretGrant operation middleware
+func (sh *strictHandler) CreateWorkloadSecretGrant(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, params CreateWorkloadSecretGrantParams) {
+	var request CreateWorkloadSecretGrantRequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateWorkloadSecretGrant(ctx, request.(CreateWorkloadSecretGrantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateWorkloadSecretGrant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateWorkloadSecretGrantResponseObject); ok {
+		if err := validResponse.VisitCreateWorkloadSecretGrantResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListWorkloadSecrets operation middleware
+func (sh *strictHandler) ListWorkloadSecrets(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, params ListWorkloadSecretsParams) {
+	var request ListWorkloadSecretsRequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListWorkloadSecrets(ctx, request.(ListWorkloadSecretsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListWorkloadSecrets")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListWorkloadSecretsResponseObject); ok {
+		if err := validResponse.VisitListWorkloadSecretsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteWorkloadSecret operation middleware
+func (sh *strictHandler) DeleteWorkloadSecret(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, name SecretName) {
+	var request DeleteWorkloadSecretRequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteWorkloadSecret(ctx, request.(DeleteWorkloadSecretRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteWorkloadSecret")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteWorkloadSecretResponseObject); ok {
+		if err := validResponse.VisitDeleteWorkloadSecretResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PutWorkloadSecret operation middleware
+func (sh *strictHandler) PutWorkloadSecret(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, name SecretName) {
+	var request PutWorkloadSecretRequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Name = name
+
+	var body PutWorkloadSecretJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PutWorkloadSecret(ctx, request.(PutWorkloadSecretRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutWorkloadSecret")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PutWorkloadSecretResponseObject); ok {
+		if err := validResponse.VisitPutWorkloadSecretResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetServiceBindingTarget operation middleware
+func (sh *strictHandler) GetServiceBindingTarget(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, binding string, params GetServiceBindingTargetParams) {
+	var request GetServiceBindingTargetRequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Binding = binding
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetServiceBindingTarget(ctx, request.(GetServiceBindingTargetRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetServiceBindingTarget")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetServiceBindingTargetResponseObject); ok {
+		if err := validResponse.VisitGetServiceBindingTargetResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListWorkloadStores operation middleware
+func (sh *strictHandler) ListWorkloadStores(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, params ListWorkloadStoresParams) {
+	var request ListWorkloadStoresRequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListWorkloadStores(ctx, request.(ListWorkloadStoresRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListWorkloadStores")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListWorkloadStoresResponseObject); ok {
+		if err := validResponse.VisitListWorkloadStoresResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListKVKeys operation middleware
+func (sh *strictHandler) ListKVKeys(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, name StoreName, params ListKVKeysParams) {
+	var request ListKVKeysRequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Name = name
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListKVKeys(ctx, request.(ListKVKeysRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListKVKeys")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListKVKeysResponseObject); ok {
+		if err := validResponse.VisitListKVKeysResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteKVValue operation middleware
+func (sh *strictHandler) DeleteKVValue(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, name StoreName, params DeleteKVValueParams) {
+	var request DeleteKVValueRequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Name = name
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteKVValue(ctx, request.(DeleteKVValueRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteKVValue")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteKVValueResponseObject); ok {
+		if err := validResponse.VisitDeleteKVValueResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetKVValue operation middleware
+func (sh *strictHandler) GetKVValue(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, name StoreName, params GetKVValueParams) {
+	var request GetKVValueRequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Name = name
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetKVValue(ctx, request.(GetKVValueRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetKVValue")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetKVValueResponseObject); ok {
+		if err := validResponse.VisitGetKVValueResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PutKVValue operation middleware
+func (sh *strictHandler) PutKVValue(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, name StoreName, params PutKVValueParams) {
+	var request PutKVValueRequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Name = name
+	request.Params = params
+
+	var body PutKVValueJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PutKVValue(ctx, request.(PutKVValueRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutKVValue")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PutKVValueResponseObject); ok {
+		if err := validResponse.VisitPutKVValueResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListR2Objects operation middleware
+func (sh *strictHandler) ListR2Objects(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, name StoreName, params ListR2ObjectsParams) {
+	var request ListR2ObjectsRequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Name = name
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListR2Objects(ctx, request.(ListR2ObjectsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListR2Objects")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListR2ObjectsResponseObject); ok {
+		if err := validResponse.VisitListR2ObjectsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteWorkloadStore operation middleware
+func (sh *strictHandler) DeleteWorkloadStore(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, kind StoreKind, name StoreName) {
+	var request DeleteWorkloadStoreRequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Kind = kind
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteWorkloadStore(ctx, request.(DeleteWorkloadStoreRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteWorkloadStore")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteWorkloadStoreResponseObject); ok {
+		if err := validResponse.VisitDeleteWorkloadStoreResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetWorkloadStore operation middleware
+func (sh *strictHandler) GetWorkloadStore(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, kind StoreKind, name StoreName) {
+	var request GetWorkloadStoreRequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Kind = kind
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetWorkloadStore(ctx, request.(GetWorkloadStoreRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetWorkloadStore")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetWorkloadStoreResponseObject); ok {
+		if err := validResponse.VisitGetWorkloadStoreResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PutWorkloadStore operation middleware
+func (sh *strictHandler) PutWorkloadStore(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, kind StoreKind, name StoreName) {
+	var request PutWorkloadStoreRequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Kind = kind
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PutWorkloadStore(ctx, request.(PutWorkloadStoreRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutWorkloadStore")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PutWorkloadStoreResponseObject); ok {
+		if err := validResponse.VisitPutWorkloadStoreResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReadStoreJournal operation middleware
+func (sh *strictHandler) ReadStoreJournal(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, kind StoreKind, name StoreName, params ReadStoreJournalParams) {
+	var request ReadStoreJournalRequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Kind = kind
+	request.Name = name
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReadStoreJournal(ctx, request.(ReadStoreJournalRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReadStoreJournal")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReadStoreJournalResponseObject); ok {
+		if err := validResponse.VisitReadStoreJournalResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AppendStoreJournal operation middleware
+func (sh *strictHandler) AppendStoreJournal(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, kind StoreKind, name StoreName, params AppendStoreJournalParams) {
+	var request AppendStoreJournalRequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Kind = kind
+	request.Name = name
+	request.Params = params
+
+	var body AppendStoreJournalJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AppendStoreJournal(ctx, request.(AppendStoreJournalRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AppendStoreJournal")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AppendStoreJournalResponseObject); ok {
+		if err := validResponse.VisitAppendStoreJournalResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RepairStore operation middleware
+func (sh *strictHandler) RepairStore(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, kind StoreKind, name StoreName) {
+	var request RepairStoreRequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Kind = kind
+	request.Name = name
+
+	var body RepairStoreJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RepairStore(ctx, request.(RepairStoreRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RepairStore")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RepairStoreResponseObject); ok {
+		if err := validResponse.VisitRepairStoreResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReportStoreStatus operation middleware
+func (sh *strictHandler) ReportStoreStatus(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, kind StoreKind, name StoreName, params ReportStoreStatusParams) {
+	var request ReportStoreStatusRequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Kind = kind
+	request.Name = name
+	request.Params = params
+
+	var body ReportStoreStatusJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReportStoreStatus(ctx, request.(ReportStoreStatusRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReportStoreStatus")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReportStoreStatusResponseObject); ok {
+		if err := validResponse.VisitReportStoreStatusResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateTelemetryGrant operation middleware
+func (sh *strictHandler) CreateTelemetryGrant(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, params CreateTelemetryGrantParams) {
+	var request CreateTelemetryGrantRequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateTelemetryGrant(ctx, request.(CreateTelemetryGrantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateTelemetryGrant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateTelemetryGrantResponseObject); ok {
+		if err := validResponse.VisitCreateTelemetryGrantResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListUpgrades operation middleware
+func (sh *strictHandler) ListUpgrades(w http.ResponseWriter, r *http.Request) {
+	var request ListUpgradesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListUpgrades(ctx, request.(ListUpgradesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListUpgrades")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListUpgradesResponseObject); ok {
+		if err := validResponse.VisitListUpgradesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateUpgrade operation middleware
+func (sh *strictHandler) CreateUpgrade(w http.ResponseWriter, r *http.Request) {
+	var request CreateUpgradeRequestObject
+
+	var body CreateUpgradeJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateUpgrade(ctx, request.(CreateUpgradeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateUpgrade")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateUpgradeResponseObject); ok {
+		if err := validResponse.VisitCreateUpgradeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetUpgrade operation middleware
+func (sh *strictHandler) GetUpgrade(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetUpgradeRequestObject
+
+	request.ID = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetUpgrade(ctx, request.(GetUpgradeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetUpgrade")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetUpgradeResponseObject); ok {
+		if err := validResponse.VisitGetUpgradeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ActOnUpgrade operation middleware
+func (sh *strictHandler) ActOnUpgrade(w http.ResponseWriter, r *http.Request, id string) {
+	var request ActOnUpgradeRequestObject
+
+	request.ID = id
+
+	var body ActOnUpgradeJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ActOnUpgrade(ctx, request.(ActOnUpgradeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ActOnUpgrade")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ActOnUpgradeResponseObject); ok {
+		if err := validResponse.VisitActOnUpgradeResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

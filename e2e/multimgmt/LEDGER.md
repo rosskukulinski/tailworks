@@ -35,7 +35,7 @@
 > **Still open:**
 > 1. **H22: FIXED** after the loop (F22, option b): a durable audit
 >    outbox written in the same transaction (see the F22 note).
-> 2. **H12: mostly done (2026-11-13).** `twd-mgmt -tsnet-service svc:twd-mgmt`.
+> 2. **H12: mostly done (2026-11-13).** `tw-mgmt -tsnet-service svc:tw-mgmt`.
 >    Each replica hosts the Service on its own node and advertises it only
 >    while its store answers (`mgmt.ServiceGate`: 3 failed checks withdraw
 >    it, 1 good check restores it, SIGTERM withdraws first). A withdraw also
@@ -87,7 +87,7 @@ FIX_MODE: fix
 
 | Item | Priority | Status | Evidence / test |
 |---|---|---|---|
-| Harness | P0 | slice 1 built (PG container, fake TS API, fake setec, N real replicas, unix-socket client, pg_locks probe). + slice 4: scenario runner (`chaos_test.go`): client-side load balancing over running replicas with transport retry (stands in for the svc VIP), seeded 6-worker workload (create/spawn/credential+ready/kill-cascade/status, history.jsonl), host heartbeat loop, oracle I3/I5/I6/I7/I8/I9/I11 → report.json and op-codes.txt, pending-object diagnostics; replica state mutex. + slice 3: per-replica Postgres fault proxy (pass/delay/blackhole/reset, `pgproxy_test.go`), fake TS policy endpoint, configurable twd.jsonc. + slice 2: tenant/host/deploy setup, fake host heartbeat, fakeTS hold switch and per-object key counts. TODO: PG fault proxy, front proxy, fake hosts, workload gen, PG sampler, oracle | `e2e/multimgmt/harness_test.go` |
+| Harness | P0 | slice 1 built (PG container, fake TS API, fake setec, N real replicas, unix-socket client, pg_locks probe). + slice 4: scenario runner (`chaos_test.go`): client-side load balancing over running replicas with transport retry (stands in for the svc VIP), seeded 6-worker workload (create/spawn/credential+ready/kill-cascade/status, history.jsonl), host heartbeat loop, oracle I3/I5/I6/I7/I8/I9/I11 → report.json and op-codes.txt, pending-object diagnostics; replica state mutex. + slice 3: per-replica Postgres fault proxy (pass/delay/blackhole/reset, `pgproxy_test.go`), fake TS policy endpoint, configurable tailworks.jsonc. + slice 2: tenant/host/deploy setup, fake host heartbeat, fakeTS hold switch and per-object key counts. TODO: PG fault proxy, front proxy, fake hosts, workload gen, PG sampler, oracle | `e2e/multimgmt/harness_test.go` |
 | H01 | P0 | **REFUTED** (3/3 runs) — latent fragility noted | `TestMM_H01_StartupAdvisoryLock` |
 | H02 | P0 | **FIXED by F3** (was: every double-minted object lost its credential) | `TestMM_H02_DoubleMint` |
 | H03 | P1 | **FIXED by F7** (was: 3 replicas minted 45 keys in 9 s against a 60/min limit, ≈2.8× the window limit) | `TestMM_H03_ThrottlePerReplica`, `TestStoreSharedThrottle` |
@@ -104,13 +104,14 @@ FIX_MODE: fix
 | H14 | P2 | **FIXED by F12**. Was CONFIRMED (2/2 runs, 10/10 names): concurrent same-name creates through 3 replicas → one 202 and two `409 exists`, not the idempotent existing object | `TestMM_H14_ConcurrentSameNameCreate` |
 | H15 | P2 | **CONFIRMED and FIXED** (F15): a lowered `registrationsPerMinute` never reached an existing throttle; now applied on the mint worker's next attempt, on every replica | `TestMM_H15_ThrottleFollowsTenantLimit` |
 | H17 | P2 | **CHANGED (FOR SHARE), effect not isolated** (iter30). Was open (from S6: fenced commits hold the workload's lease row FOR UPDATE across several round trips; a slow replica stalls everyone's credential/ready/renew for that workload; p99 3.6 s on fast replicas) | S6 locks.txt |
-| H19 | P1 | **CONFIRMED and FIXED** (F19): each replica's Postgres pool was unbounded; a 500-request burst opened enough connections to hit `max_connections` ("sorry, too many clients already", SQLSTATE 53300), failing requests on every replica. Pool now bounded (default 16, `?twd_max_conns=K`) | S9 seed 2; `TestTakeMaxConns` |
+| H19 | P1 | **CONFIRMED and FIXED** (F19): each replica's Postgres pool was unbounded; a 500-request burst opened enough connections to hit `max_connections` ("sorry, too many clients already", SQLSTATE 53300), failing requests on every replica. Pool now bounded (default 16, `?tw_max_conns=K`) | S9 seed 2; `TestTakeMaxConns` |
 | H20 | P1 | **CONFIRMED and FIXED**: `CreateObject` and `PreflightBundle` mapped *any* tenant, parent or namespace lookup error to a 404 (`unknown_tenant`, …), so store outages looked like permanent not-founds that clients wouldn't retry, and the I8 oracle didn't count them. They now keep their 503 or 500 mapping; real not-founds stay 404 | S9, S5 op-codes |
 | H21 | P1 | **CONFIRMED (soak 101) and FIXED** (F20): a device-delete claim was terminal (`-1`); a kill during a Postgres restart claimed it, the delete failed, and so did the reschedule, so the device was never deleted. Claims are now a 2-min lease and success is recorded explicitly | `TestStoreDeviceDeleteClaimLapses` |
 | H23 | P1 | **CONFIRMED (soak 101 re-run) and FIXED** (F21): the kill's device-delete intent was a separate, unchecked write after the kill; while Postgres was starting up the kill committed, that write failed, and the device was never deleted. Also `Ready` on a killed object deleted its new device inline with no durable record. Both now record `device_delete_at` in the same write as the state change | `TestMM_F21_DeviceDeleteIntentIsAtomic` |
 | H22 | P1 | **FIXED and verified (F22, option b chosen by Ross)**: durable audit outbox; 2 soaks with AuditComplete clean; see F22 note. Was CONFIRMED (soak 101), design: audit appends are separate from the state change; during a store blip the kill committed but its audit record was dropped (`audit append failed`). Needs a decision: audit in the same transaction as the change, or a durable audit outbox | r1.log |
 | H18 | P3 | **FIXED** (iter30): store unavailable, lock timeout or idle-transaction timeout → `503 store_unavailable` with Retry-After | `TestStoreUnavailableMapping` |
 | H16 | P2 | **CONFIRMED and FIXED** (F17): 2/10 runs ended with 12 live objects against maxObjects 10; after 0/20 | `TestMM_H16_TenantQuotaRace`, `TestStoreTenantQuota` |
+| H24 | P1 | **CONFIRMED and FIXED** (#578, found by e2e/dataplane's deploys loop): a workload's secrets are one custody entry changed by read-modify-write under a per-process mutex; two writes through two replicas lost one (a deleted secret came back). with a slow setec, every round of 2 concurrent puts lost one (10 missing-secret checks in 4 rounds); now none, under a Postgres advisory lock per workload | `TestMM_H24_SecretWritesAcrossReplicas`, `TestStoreLockName` |
 | S2 | — | **3/3 clean seeds** (1, 2, 3) after F18 | `TestMM_S2_RandomKills` |
 | S3 | — | **3/3 clean seeds** (SIGSTOP 50 s > 45 s lease) | `TestMM_S3_StallLongerThanLease` |
 | S4 | — | **3/3 clean seeds** (PG blackhole 30 s, one replica) | `TestMM_S4_PostgresPartitionOneReplica` |
@@ -122,7 +123,7 @@ FIX_MODE: fix
 | S9 | — | **3/3 clean seeds** after F19 + H20 (500-op burst: 300 created, 200 spawn_budget_exceeded, quota held at exactly 1000) | `TestMM_S9_HotTenant` |
 | S5 (re-verified) | — | 3/3 again after H20 (store errors now 503 inside the declared outage; 0.05–0.09% outside) | |
 | S10 | — | **3/3 clean seeds** (kill storm: overlapping cascade kills of the same trees through every replica every 3 s; KillOnce 0, I6 ok) | `TestMM_S10_KillStorm` |
-| S11 | — | **3/3 clean runs** (failover protocol across replicas with **fake hosts**: takeover_unconfirmed → lease_held → forced takeover to h2 at epoch+1 at 47 s, audited → h1 revoked and fenced (lease_lost via every replica) → h2 joins at the new epoch). A real twd-hostd is not used | `TestMM_S11_HostFailover` |
+| S11 | — | **3/3 clean runs** (failover protocol across replicas with **fake hosts**: takeover_unconfirmed → lease_held → forced takeover to h2 at epoch+1 at 47 s, audited → h1 revoked and fenced (lease_lost via every replica) → h2 joins at the new epoch). A real tw-hostd is not used | `TestMM_S11_HostFailover` |
 | Soaks | — | **2/2 clean after F21** (seed 101: 309,741 ops; seed 103: 245,726 ops), plus seed 102 before F21. Before: 101 failed I6 twice (→ F20, F21), and 103 crashed the harness (fixed) | `TestMM_Soak` |
 
 ## Hypotheses (seeded from a code read on 2026-11-11, commit 84b4246)
@@ -205,9 +206,9 @@ would go wrong, and which invariant it threatens.
   - **Probe:** run the harness with file custody once to show the failure,
     then use fake setec.
 - **H12 (P1, I8, design): hosts can't fail over to another replica.**
-  - Hosts take a single `-mgmt` address (`cmd/twd-hostd/main.go:52`).
-  - Replicas can't all register the tsnet name `twd-mgmt`.
-  - `svc:twd-mgmt` (Tailscale Services) isn't wired up.
+  - Hosts take a single `-mgmt` address (`cmd/tw-hostd/main.go:52`).
+  - Replicas can't all register the tsnet name `tw-mgmt`.
+  - `svc:tw-mgmt` (Tailscale Services) isn't wired up.
   - So without a VIP, hosts have no failover path. The harness front proxy
     stands in for the VIP. Record what the real fix needs.
 - **H13 (P1): per-replica secrets diverge.**
@@ -218,7 +219,7 @@ would go wrong, and which invariant it threatens.
     replicas.
 
 - **H14 (P2, I8/I10): each replica has its own `id.secret`.**
-  `cmd/twd-mgmt/main.go` loads `id.secret` from each replica's local state
+  `cmd/tw-mgmt/main.go` loads `id.secret` from each replica's local state
   dir. That key is the HMAC key for object IDs, which double as node
   hostnames (`mgmt/service.go:781`).
   - **Consequence 1:** an object's ID depends on which replica created it.
@@ -255,7 +256,7 @@ The extra keys themselves were deleted, so no live duplicate keys leaked.
 - `mintOne` (`:~1108`) checks the status, then calls `CreateKey`, with
   nothing to claim the object in between.
 - The loser calls `custody.Put` under the **same name**
-  (`custodyName(o)` = `twd/<tenant>/<object>/authkey`), overwriting the
+  (`custodyName(o)` = `tw/<tenant>/<object>/authkey`), overwriting the
   winner's key.
 - Its fenced `UpdateObject` then finds status `minted`, so it sets
   `killed=true` and runs `api.DeleteKey` **and `custody.Delete(custodyName(o))`**
@@ -268,7 +269,7 @@ which includes every rolling restart. A single replica can't trigger it.
 1. **Claim before minting.** Conditional update
    `pending → minting(claimed_by, claimed_at)`. Only the claimer calls
    `CreateKey`. A claim older than about 30 s can be stolen.
-2. **Key custody per key.** Use `twd/<tenant>/<object>/authkey/<keyID>`, and
+2. **Key custody per key.** Use `tw/<tenant>/<object>/authkey/<keyID>`, and
    have `Credential` read the name for the row's `key_id`, so writers can't
    overwrite each other.
 3. **Make the "not pending" path delete only its own custody entry**, never
@@ -315,7 +316,7 @@ from getting new credentials, but not from serving.
 
 **Is it realistic?** NTP-synced machines are within milliseconds, so this
 needs a broken clock: a VM resumed from suspend, a host with NTP blocked, or
-a laptop replica. With `twd up` on Macs, sleep/wake is a plausible source.
+a laptop replica. With `tw up` on Macs, sleep/wake is a plausible source.
 Nothing detects or refuses skew today.
 
 **Fix sketch.**
@@ -533,7 +534,7 @@ these hold:
 - the bundle is stateful.
 
 The message names the host, when mgmt last heard from it, and the guarded
-classes. It gives three ways out: `twd host rm <h> --drain`,
+classes. It gives three ways out: `tw host rm <h> --drain`,
 `--force-takeover`, or `"fence": "never"`.
 
 It **allows** the move when:
@@ -545,7 +546,7 @@ It **allows** the move when:
   `deploy` record with `takeoverFrom` and `forced`.
 
 **`BundleStateful`** is conservative. It counts as DO classes:
-- `twd.jsonc` `tailnet.objects`, including `node:false` classes;
+- `tailworks.jsonc` `tailnet.objects`, including `node:false` classes;
 - `wrangler.jsonc`/`.json` `durable_objects`.
 
 A `wrangler.toml`, or anything unreadable, counts as stateful.
@@ -554,8 +555,8 @@ A `wrangler.toml`, or anything unreadable, counts as stateful.
 **Spec and CLI.**
 - New `DeploymentCreate.forceTakeover` and catalog code
   `takeover_unconfirmed` (spec first).
-- CLI: `twd deploy --force-takeover`.
-- New `twd.jsonc` field: `tailnet.objects.<Class>.fence`.
+- CLI: `tw deploy --force-takeover`.
+- New `tailworks.jsonc` field: `tailnet.objects.<Class>.fence`.
 
 **Found along the way.** A pinned move away from a **live** holder was
 already refused (`lease_held`), but F5's message said "redeploy after the
@@ -634,7 +635,7 @@ In fact, since M3 (`ede3258`):
   successful sync redeploys them, as before.
 - `DefaultFenceAfter` is 30 s (was 9 s). `MaxFenceAfter` is 40 s, and `New`
   refuses anything larger.
-- New flag: `twd-hostd -fence-after`.
+- New flag: `tw-hostd -fence-after`.
 - The stale "below the 10 s lease TTL" comment is replaced.
 
 **Tests.**
@@ -656,7 +657,7 @@ accepted this.
 ### H07: CONFIRMED, then FIXED by F10. Device deletes lost on a crash.
 
 **Repro.** `TestMM_H07_DeviceDeleteLostOnCrash` with
-`-device-delete-delay 3s` (`twd up` uses 8 s):
+`-device-delete-delay 3s` (`tw up` uses 8 s):
 - **Control:** kill through r0 with r0 staying up. The device was deleted
   after about 3 s.
 - **Crash:** kill through r0, then SIGKILL r0 0.5 s later. The device was
@@ -713,9 +714,9 @@ replica would serve, and sign with, a different key behind one issuer URL.
   `ChooseSecret` inserts the first offer and does nothing on conflict, then
   returns the winner.
 - **`oboKey`, uncached:** read the choice. If there's none:
-  - if a pre-F11 key exists under `twd/<t>/obo-root`, offer `legacy`, so
+  - if a pre-F11 key exists under `tw/<t>/obo-root`, offer `legacy`, so
     every replica adopts it unchanged;
-  - otherwise put a new seed under `twd/<t>/obo-root/<obo_id>`, then offer
+  - otherwise put a new seed under `tw/<t>/obo-root/<obo_id>`, then offer
     it.
 
   A loser deletes its own candidate. Everyone loads the winner's seed.
@@ -728,15 +729,15 @@ replica would serve, and sign with, a different key behind one issuer URL.
 
 ### F11b: the WIF issuer key is shared through custody and `secret_choice`
 
-`twd-mgmt` now calls `LoadSharedIssuer(ctx, url, <state-dir>/issuer.key,
+`tw-mgmt` now calls `LoadSharedIssuer(ctx, url, <state-dir>/issuer.key,
 store, custody)`:
 - **Choice row:** `issuer:<url>`.
 - **Candidate:** the replica's existing `issuer.key`, which keeps keys
   Tailscale may already trust, or a new P-256 key. It's stored at
-  `twd/mgmt/issuer/<iss_id>`, the first offer wins, and losers delete
+  `tw/mgmt/issuer/<iss_id>`, the first offer wins, and losers delete
   theirs.
 - **The old key file is left in place** and no new files are written.
-  `LoadOrCreateIssuer` stays for callers outside `twd-mgmt`.
+  `LoadOrCreateIssuer` stays for callers outside `tw-mgmt`.
 
 The test is `TestMM_F11b_SharedIssuer` (unit, `-race`). An end-to-end WIF
 check needs Funnel on a real tailnet: run `make e2e-keyless` before
@@ -754,7 +755,7 @@ replica returns the existing object for a repeated create, because
 miss and only one insert wins.
 
 **When it matters.** It needs creates for one object spread over replicas
-at once: a host behind a load-balanced mgmt (`svc:twd-mgmt`) retrying, or
+at once: a host behind a load-balanced mgmt (`svc:tw-mgmt`) retrying, or
 two callers touching a new DO together. There's no split brain, because
 the constraint holds.
 
@@ -768,7 +769,7 @@ hostname. Fix in F12(b).
 re-reads by name and returns the existing object (or 410 if it's dead).
 A lookup error other than not-found is surfaced as-is, not mislabelled.
 
-**(b) Shared ID secret.** `twd-mgmt` loads the ID secret with
+**(b) Shared ID secret.** `tw-mgmt` loads the ID secret with
 `LoadSharedIDSecret` (custody plus a `secret_choice` "id-secret" row,
 adopting the first replica's existing `id.secret`). Object IDs and
 hostnames no longer depend on which replica created them.
@@ -777,7 +778,7 @@ hostnames no longer depend on which replica created them.
 1. **The second file-custody replica crashed instead of refusing.** With
    file custody, it found the chosen ID secret missing from its own
    custody and exited with `custody: id secret …: not found`, before F6's
-   clear refusal could run; `TestMM_H11` caught it. Fix: `twd-mgmt` runs
+   clear refusal could run; `TestMM_H11` caught it. Fix: `tw-mgmt` runs
    `PreflightReplica` (the F6 custody check, now `replicaConflictFor`)
    before loading any shared secret. The missing-secret error also
    explains itself now.
@@ -796,7 +797,7 @@ hostnames no longer depend on which replica created them.
 ### F13: deployment status is shared (fixes H08)
 
 - **Before:** host-reported status lived in each replica's memory. After
-  the host reported `active` to r0, r1 said `assigned`, so `twd deploy`
+  the host reported `active` to r0, r1 said `assigned`, so `tw deploy`
   (which waits for `active`) could wait on the wrong replica behind a
   load-balanced mgmt.
 - **Now:** `deployments.host_status/host_error`, written by `setDepStatus`
@@ -938,7 +939,7 @@ separately.
   connections (the kernel's accept queue), so every request routed to it
   waits out the client timeout (5 s here) before retrying elsewhere.
   Throughput roughly halved (about 1,100 ops in S3 against 2,200–2,400 in
-  S4). A real `svc:twd-mgmt` VIP needs **active health checks** (e.g.
+  S4). A real `svc:tw-mgmt` VIP needs **active health checks** (e.g.
   `GET /v1/status` with a short timeout) to eject a stalled replica. A dead
   one is ejected by connection refusals anyway. Record this in the
   deployment docs when the VIP is built (H12).
@@ -1011,15 +1012,15 @@ passes because of the client and VIP behavior. The mgmt changes are kept
 as defense in depth: they bound how long a sick replica can stall the
 others, and H18 is a real fix. Their effect on S6 isn't demonstrated.
 
-**Requirement for the real `svc:twd-mgmt` VIP (H12), from S3 and S6:**
+**Requirement for the real `svc:tw-mgmt` VIP (H12), from S3 and S6:**
 retry on a different backend, plus passive and active health checks
 (eject on timeouts, probe `GET /v1/status`).
 
 ### Iteration 32: S8 and S9, and two bugs S9 dug out (H19, H20)
 
 **S8 (clock skew, process level).** I added a test-only hook,
-`TWD_TEST_WALL_CLOCK_OFFSET` (honoured only with `-local-dev`; otherwise
-`twd-mgmt` refuses to start). It shifts mgmt's wall-clock reads (`realClock`
+`TW_TEST_WALL_CLOCK_OFFSET` (honoured only with `-local-dev`; otherwise
+`tw-mgmt` refuses to start). It shifts mgmt's wall-clock reads (`realClock`
 and the store clock's offset measurement), simulating a wrong machine
 clock. With r1 at +20 s and r2 at −20 s:
 - `/v1/status` reports `clock.ok=false` with offsets of −19,999 ms and
@@ -1042,11 +1043,11 @@ clock. With r1 at +20 s and r2 at −20 s:
 2. **H19 (connection storm).** With the masking gone, the errors were
    `FATAL: sorry, too many clients already`. Each replica's pool had no
    limit. Pools are now bounded (`DefaultMaxConns` = 16; DSN
-   `twd_max_conns`), and requests queue for a connection.
+   `tw_max_conns`), and requests queue for a connection.
    - **Deadlock check:** with a pool of **2**, the Postgres API suites and
      the whole multi-replica hypothesis e2e suite pass with no hang. Two
      store tests failed only because they `sql.Open` the DSN directly, so
-     pgx forwarded the twd-only parameter.
+     pgx forwarded the tw-only parameter.
 3. **After:** S9 seeds 1, 2, 3 are identical. 300 created and 200
    `spawn_budget_exceeded`, 0 store errors, and the tenant holds at
    exactly 1,000 objects.
@@ -1074,7 +1075,7 @@ No other scenario had masked 404s.
      credential requests get `409 lease_lost` through **every** replica
      (I1/I2).
   5. h2 joins an object at the new epoch.
-- **Gap.** LOOP.md asked for one real `twd-hostd` in S11. In `-local-dev`,
+- **Gap.** LOOP.md asked for one real `tw-hostd` in S11. In `-local-dev`,
   hostd needs workerd, a real JS bundle and a tsnet control plane, and it
   can only point at one replica (H12). I used fake hosts. hostd's own side
   (stateful-only fencing at 30 s) is unit-tested (F9) but not run end to
@@ -1212,7 +1213,7 @@ changes aren't yet in the same transaction as their records. Follow-up.
 2026-11-11T16:38Z | H02 | n/a ×3 | CONFIRMED | I3 (custody) | results/20261111T1638{26,40,51}Z-H02 | 14–17 double-minted per run, all of them left without a credential (custody 404); first custody-oracle run discarded (it treated 201 as failure)
 2026-11-11 iter3 PLAN | H10 (in-process: 2 Mgmt, one store, skewed clocks) | n/a | confirm if a healthy heartbeating holder is displaced by a redeploy through a skewed replica at any skew; report the threshold (ahead and behind); refute if no displacement up to 20 s | I1
 2026-11-11T16:4xZ | H10 | n/a | CONFIRMED | I1, I8 | in-process (SQLite) | sweep 0–20 s: refused ≥10 s, displaced ≥15 s, ahead and behind. First run aborted at 10 s (a test bug: deploy errors were fatal); fixed to record outcomes
-2026-11-11T16:4xZ | H10 | n/a | CONFIRMED | I1, I8 | in-process (Postgres twd-mm-pg) | refused ≥10 s; displaced ≥12 s ahead / ≥15 s behind (sub-cases share host rows: approximate)
+2026-11-11T16:4xZ | H10 | n/a | CONFIRMED | I1, I8 | in-process (Postgres tw-mm-pg) | refused ≥10 s; displaced ≥12 s ahead / ≥15 s behind (sub-cases share host rows: approximate)
 2026-11-11 | LOOP STOPPED | — | I1 violated (H10) → stop rule | — | — | needs a decision: accept skew as out of scope (and resume), or fix H10 first. Open: H03–H09, H11–H14; harness slices 3+; scenarios S1–S11 not started
 2026-11-11 iter4 | F1 | n/a | FIXED | — | in-process + make test-go/test-pg/lint | H10 test fails before (10/15 s), passes after; H01 e2e still green with the dbClock
 2026-11-11 iter5 | F2 | n/a | DONE | — | make test-go/test-pg green; lint/api-check re-run after commit | status reports clock; warns at >2 s or a 30 s-stale sample

@@ -10,12 +10,15 @@ import (
 	"time"
 )
 
-// Replica is one twd-mgmt process sharing the store (F6, H11).
+// Replica is one tw-mgmt process sharing the store (F6, H11).
 type Replica struct {
 	ID        string `json:"id"`
 	Custody   string `json:"custody"` // CustodyFingerprint
 	StartedAt int64  `json:"startedAt"`
 	LastSeen  int64  `json:"lastSeen"` // store clock, unix ms; 0 = shut down cleanly
+	// Version is the replica's tw-mgmt version ("" = from before version
+	// reporting).
+	Version string `json:"version,omitempty"`
 }
 
 // ReplicaLiveTTL: a replica not seen for this long is treated as gone. It is
@@ -53,7 +56,7 @@ func replicaConflictFor(myID, mine string, rs []Replica, now time.Time) string {
 		seen := now.Sub(time.UnixMilli(r.LastSeen)).Round(time.Second)
 		switch {
 		case strings.HasPrefix(mine, "file:"):
-			return fmt.Sprintf("another twd-mgmt replica (%s, seen %v ago) shares this store, but this replica keeps auth keys in file custody on this machine only, so the other replica could not release them. Run every replica with -custody setec -setec-url <same URL>, or run a single replica", r.ID, seen)
+			return fmt.Sprintf("another tw-mgmt replica (%s, seen %v ago) shares this store, but this replica keeps auth keys in file custody on this machine only, so the other replica could not release them. Run every replica with -custody setec -setec-url <same URL>, or run a single replica", r.ID, seen)
 		case strings.HasPrefix(r.Custody, "file:"):
 			return fmt.Sprintf("replica %s (seen %v ago) shares this store with file custody on another machine; its keys are unreadable here. Run every replica with -custody setec", r.ID, seen)
 		case r.Custody != mine:
@@ -63,7 +66,7 @@ func replicaConflictFor(myID, mine string, rs []Replica, now time.Time) string {
 	return ""
 }
 
-// PreflightReplica runs the replica-registry custody check before twd-mgmt
+// PreflightReplica runs the replica-registry custody check before tw-mgmt
 // loads any shared secret (ID secret, issuer key), so a misconfigured
 // replica is refused with the explanation rather than failing later on a
 // secret that lives in another replica's custody.
@@ -89,7 +92,7 @@ func (m *Mgmt) registerReplica(ctx context.Context) (string, error) {
 		m.startedAt = now.UnixMilli()
 	}
 	if err := m.store.UpsertReplica(ctx, Replica{ID: m.replicaID, Custody: CustodyFingerprint(m.custody),
-		StartedAt: m.startedAt, LastSeen: now.UnixMilli()}); err != nil {
+		StartedAt: m.startedAt, LastSeen: now.UnixMilli(), Version: m.Version()}); err != nil {
 		return "", err
 	}
 	rs, err := m.store.ListReplicas(ctx)
@@ -103,6 +106,9 @@ func (m *Mgmt) registerReplica(ctx context.Context) (string, error) {
 		}
 	}
 	msg := m.replicaConflict(rs, now)
+	if msg == "" {
+		msg = m.replicaSkew(rs) // versions.go
+	}
 	m.mu.Lock()
 	changed := msg != m.replicaMsg
 	m.replicaMsg, m.liveReplicas = msg, live
@@ -116,7 +122,7 @@ func (m *Mgmt) registerReplica(ctx context.Context) (string, error) {
 // unregisterReplica marks this replica gone (clean shutdown), so a
 // replacement may start at once.
 func (m *Mgmt) unregisterReplica(ctx context.Context) {
-	m.store.UpsertReplica(ctx, Replica{ID: m.replicaID, Custody: CustodyFingerprint(m.custody), StartedAt: m.startedAt, LastSeen: 0})
+	m.store.UpsertReplica(ctx, Replica{ID: m.replicaID, Custody: CustodyFingerprint(m.custody), StartedAt: m.startedAt, LastSeen: 0, Version: m.Version()})
 }
 
 // ReplicaStatus is the "replicas" object of GET /v1/status.

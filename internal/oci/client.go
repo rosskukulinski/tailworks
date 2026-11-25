@@ -17,10 +17,10 @@ import (
 // Client speaks the OCI distribution API to one registry.
 type Client struct {
 	// Base is the registry's origin ("https://registry-1.docker.io",
-	// "http://mgmt" for twd's unix socket).
+	// "http://mgmt" for tailworks' unix socket).
 	Base string
 	HTTP *http.Client
-	// Edit, if set, adds headers to every request (twd: the host token or
+	// Edit, if set, adds headers to every request (tailworks: the host token or
 	// host ID on the local-dev socket; tailnet callers need nothing, mgmt
 	// authenticates the connection by WhoIs).
 	Edit func(*http.Request)
@@ -76,7 +76,7 @@ func (c *Client) do(ctx context.Context, method, path, repo string, hdr http.Hea
 		u = c.Base + path
 	}
 	// body is called once per attempt (a 401 challenge retries once), so
-	// every body twd sends can be produced again.
+	// every body tailworks sends can be produced again.
 	for attempt := 0; ; attempt++ {
 		var rb io.Reader
 		if body != nil {

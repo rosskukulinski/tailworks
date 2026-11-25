@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rosskukulinski/twd/guest/proto"
+	"github.com/rosskukulinski/tailworks/guest/proto"
 )
 
 // VMCheckReport is POST /v1/vm/check: a workload microVM's guest stats,

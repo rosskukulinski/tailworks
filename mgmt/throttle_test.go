@@ -55,6 +55,7 @@ func (c *fakeClock) Advance(d time.Duration) {
 }
 
 func TestThrottleRate(t *testing.T) {
+	t.Parallel()
 	c := newFakeClock()
 	th := NewThrottle(200, c)
 	// Burst is 20; then 200/min = one token per 300 ms.
@@ -82,6 +83,7 @@ func TestThrottleRate(t *testing.T) {
 }
 
 func TestThrottleDefaultAndBackoff(t *testing.T) {
+	t.Parallel()
 	c := newFakeClock()
 	th := NewThrottle(0, c)
 	if th.Rate() != DefaultRegistrationsPerMinute {
@@ -125,6 +127,7 @@ func TestThrottleDefaultAndBackoff(t *testing.T) {
 }
 
 func TestThrottleWait(t *testing.T) {
+	t.Parallel()
 	c := newFakeClock()
 	th := NewThrottle(60, c) // burst 6, then 1/s
 	for range 6 {
@@ -154,6 +157,7 @@ func TestThrottleWait(t *testing.T) {
 }
 
 func TestThrottleWaitCancel(t *testing.T) {
+	t.Parallel()
 	th := NewThrottle(1, newFakeClock())
 	th.Reserve()
 	ctx, cancel := context.WithCancel(context.Background())

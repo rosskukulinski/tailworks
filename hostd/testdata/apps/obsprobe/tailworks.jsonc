@@ -1,0 +1,10 @@
+{
+  "name": "obsprobe",
+  "tailnet": {
+    "tags": ["tag:ttest"],
+    "objects": {
+      "Obj": { "tags": ["tag:ttest"] },
+      "Plain": { "tags": ["tag:ttest"], "egress": "workload" },
+    },
+  },
+}

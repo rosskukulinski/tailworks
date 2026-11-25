@@ -7,25 +7,26 @@ import (
 	"testing"
 )
 
-// Tailscale Services for workloads (twd.jsonc tailnet.service): deploy
-// creates the Service definition under twd's ownership marker, the
+// Tailscale Services for workloads (tailworks.jsonc tailnet.service): deploy
+// creates the Service definition under tailworks' ownership marker, the
 // assignment and deployment carry it, a Service owned by anyone else (or
 // named like a device) is refused, and preflight checks autoApprovers.
 
 const svcPolicy = `{
-  "tagOwners": { "tag:twd": ["autogroup:admin"], "tag:twd-web": ["tag:twd"] },
-  "autoApprovers": { "services": { "svc:web": ["tag:twd-web"], "svc:shop": ["tag:twd-web"] } },
+  "tagOwners": { "tag:tw": ["autogroup:admin"], "tag:tw-web": ["tag:tw"] },
+  "autoApprovers": { "services": { "svc:web": ["tag:tw-web"], "svc:shop": ["tag:tw-web"] } },
   "grants": [ { "src": ["tag:ttest"], "dst": ["svc:web"], "ip": ["tcp:80"] } ],
 }`
 
 func svcBundle(t *testing.T, service string) string {
 	t.Helper()
-	jsonc := `{ "tailnet": { "tags": ["tag:twd-web"]` + service + ` } }`
-	return base64.StdEncoding.EncodeToString(makeBundle(t, map[string]string{"twd.jsonc": jsonc, "dist/index.js": "export default {}"}))
+	jsonc := `{ "tailnet": { "tags": ["tag:tw-web"]` + service + ` } }`
+	return base64.StdEncoding.EncodeToString(makeBundle(t, map[string]string{"tailworks.jsonc": jsonc, "dist/index.js": "export default {}"}))
 }
 
 func TestServiceDeploy(t *testing.T) {
-	e := newTestEnv(t, nil)
+	t.Parallel()
+	e := newTestEnv(t)
 	e.ts.policy = svcPolicy
 	tn := v1Tenant(t, e, "ttest.ts.net", nil)
 	h := v1Host(t, e, "h1")
@@ -65,7 +66,7 @@ func TestServiceDeploy(t *testing.T) {
 	t.Run("OtherWorkloadsServiceRefused", func(t *testing.T) {
 		// svc:web belongs to workload web: another workload can't take it.
 		eb := c.fail("POST", "/v1/deployments", map[string]any{"tenantID": tn, "workload": "evil", "bundle": svcBundle(t, `, "service": "svc:web"`)}, 409, "service_conflict")
-		if !strings.Contains(eb["message"].(string), "not managed by twd") {
+		if !strings.Contains(eb["message"].(string), "not managed by tailworks") {
 			t.Fatalf("message %v", eb["message"])
 		}
 		// Nothing was recorded for the refused deploy.
@@ -81,7 +82,7 @@ func TestServiceDeploy(t *testing.T) {
 	t.Run("UnmanagedServiceRefused", func(t *testing.T) {
 		e.ts.services["svc:admin-made"] = map[string]any{"name": "svc:admin-made", "comment": "", "ports": []string{"tcp:443"}}
 		c.fail("POST", "/v1/deployments", map[string]any{"tenantID": tn, "workload": "x", "bundle": svcBundle(t, `, "service": "admin-made"`)}, 409, "service_conflict")
-		// Handing it over: the admin sets the ownership comment; twd adds its port.
+		// Handing it over: the admin sets the ownership comment; tailworks adds its port.
 		e.ts.services["svc:admin-made"]["comment"] = serviceOwner(tn, "x")
 		c.ok("POST", "/v1/deployments", map[string]any{"tenantID": tn, "workload": "x", "bundle": svcBundle(t, `, "service": "admin-made"`)}, nil)
 		if p := js(e.ts.services["svc:admin-made"]["ports"]); !strings.Contains(p, "tcp:443") || !strings.Contains(p, ServicePort) {
@@ -102,7 +103,7 @@ func TestServiceDeploy(t *testing.T) {
 
 	t.Run("BadConfig", func(t *testing.T) {
 		noTags := base64.StdEncoding.EncodeToString(makeBundle(t, map[string]string{
-			"twd.jsonc": `{ "tailnet": { "service": true, "objects": { "A": { "tags": ["tag:twd-web"] } } } }`, "dist/index.js": ""}))
+			"tailworks.jsonc": `{ "tailnet": { "service": true, "objects": { "A": { "tags": ["tag:tw-web"] } } } }`, "dist/index.js": ""}))
 		eb := c.fail("POST", "/v1/deployments", map[string]any{"tenantID": tn, "workload": "q", "bundle": noTags}, 400, "bad_bundle")
 		if !strings.Contains(eb["message"].(string), "tailnet.tags") {
 			t.Fatalf("message %v", eb["message"])
@@ -133,7 +134,7 @@ func TestServiceDeploy(t *testing.T) {
 		}
 		var bad PreflightResult
 		c.ok("POST", "/v1/deployments?dryRun=true", map[string]any{"tenantID": tn, "workload": "other", "bundle": svcBundle(t, `, "service": true`)}, &bad)
-		if bad.OK || !bad.ServiceUnapproved || !strings.Contains(bad.ServiceSnippet, `"svc:other": ["tag:twd-web"]`) {
+		if bad.OK || !bad.ServiceUnapproved || !strings.Contains(bad.ServiceSnippet, `"svc:other": ["tag:tw-web"]`) {
 			t.Fatalf("unapproved preflight %+v", bad)
 		}
 		if _, ok := e.ts.services["svc:other"]; ok {

@@ -219,7 +219,7 @@ func configArch(ctx context.Context, src Source, repo string, m *Manifest) (stri
 		return "", err
 	}
 	if cfg.OS != "" && cfg.OS != "linux" {
-		return "", fmt.Errorf("image is %s/%s; twd runs linux images", cfg.OS, cfg.Architecture)
+		return "", fmt.Errorf("image is %s/%s; tailworks runs linux images", cfg.OS, cfg.Architecture)
 	}
 	return cfg.Architecture, nil
 }

@@ -1,5 +1,5 @@
-// Package registry is twd's OCI distribution registry (ADR-032 D3): the
-// push/pull subset of the distribution spec v1.1, served by twd-mgmt on its
+// Package registry is tailworks' OCI distribution registry (ADR-032 D3): the
+// push/pull subset of the distribution spec v1.1, served by tw-mgmt on its
 // tsnet listeners (and the local-dev socket), behind mgmt's WhoIs
 // authentication.
 //
@@ -37,11 +37,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rosskukulinski/twd/internal/oci"
+	"github.com/rosskukulinski/tailworks/internal/oci"
 )
 
-// PublicNamespace holds operator-marked public base images (twd image
-// public add) and the alias targets (twd's arm64 rebuilds): readable by
+// PublicNamespace holds operator-marked public base images (tw image
+// public add) and the alias targets (tailworks' arm64 rebuilds): readable by
 // every host and admin, writable by admins. No tenant may be called this.
 const PublicNamespace = "public"
 
@@ -103,8 +103,8 @@ func (g *Registry) blobPath(d string) string {
 	return filepath.Join(g.Dir, "blobs", "sha256", oci.Hex(d))
 }
 
-// regErr is a distribution-spec error. The body also carries twd's error
-// fields (code, message, status) so the twd CLI reports it like any API
+// regErr is a distribution-spec error. The body also carries tailworks' error
+// fields (code, message, status) so the tailworks CLI reports it like any API
 // error.
 type regErr struct {
 	status int
@@ -118,7 +118,7 @@ func errOf(status int, code, format string, a ...any) *regErr {
 	return &regErr{status: status, code: code, msg: fmt.Sprintf(format, a...)}
 }
 
-var twdCodes = map[int]string{400: "bad_request", 401: "unauthorized", 403: "forbidden", 404: "not_found", 405: "unsupported", 413: "too_large", 416: "bad_range", 500: "internal"}
+var twCodes = map[int]string{400: "bad_request", 401: "unauthorized", 403: "forbidden", 404: "not_found", 405: "unsupported", 413: "too_large", 416: "bad_range", 500: "internal"}
 
 func writeErr(w http.ResponseWriter, r *http.Request, err error) {
 	var e *regErr
@@ -131,15 +131,15 @@ func writeErr(w http.ResponseWriter, r *http.Request, err error) {
 		e = errOf(500, "UNKNOWN", "%v", err)
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Twd-Error", twdCodes[e.status])
+	w.Header().Set("Tw-Error", twCodes[e.status])
 	w.WriteHeader(e.status)
 	if r.Method == http.MethodHead {
 		return
 	}
 	json.NewEncoder(w).Encode(map[string]any{
 		"errors": []map[string]any{{"code": e.code, "message": e.msg}},
-		"code":   twdCodes[e.status], "message": e.msg, "status": e.status,
-		"docURL": "https://twd.dev/errors/registry",
+		"code":   twCodes[e.status], "message": e.msg, "status": e.status,
+		"docURL": "https://github.com/rosskukulinski/tailworks/blob/master/docs/errors.md#registry",
 	})
 }
 
@@ -235,7 +235,7 @@ func (g *Registry) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case http.MethodPut:
 			err = g.putManifest(ctx, w, r, rt)
 		default:
-			err = errOf(405, "UNSUPPORTED", "%s manifests is not supported (twd's registry never deletes by request; see docs/containers.md)", r.Method)
+			err = errOf(405, "UNSUPPORTED", "%s manifests is not supported (tailworks' registry never deletes by request; see docs/containers.md)", r.Method)
 		}
 	case "blob":
 		switch r.Method {

@@ -15,7 +15,7 @@ const config :Workerd.Config = (
   ],
   sockets = [
     (name = "ingress", address = "unix:/nonexistent/ingress.sock", service = "platform",
-     http = (cfBlobHeader = "x-twd-cf")),   # stripped by workerd; JSON becomes request.cf
+     http = (cfBlobHeader = "x-tw-cf")),   # stripped by workerd; JSON becomes request.cf
   ],
 );
 
@@ -25,7 +25,7 @@ const platform :Workerd.Worker = (
     (name = "platform.js", esModule = embed "platform.js"),
     (name = "tenant.js.txt", text = embed "tenant.js"),
   ],
-  durableObjectNamespaces = [ (className = "HostDO", uniqueKey = "twd-hostdo", enableSql = true) ],
+  durableObjectNamespaces = [ (className = "HostDO", uniqueKey = "tw-hostdo", enableSql = true) ],
   durableObjectStorage = (localDisk = "do-storage"),
   bindings = [
     (name = "LOADER", workerLoader = ()),

@@ -1,7 +1,13 @@
 {
-  "name": "@twd/mcp",
-  "version": "0.1.0",
-  "description": "withTailnet, caller(), authorizeTool and budget() for stateless MCP servers on twd",
+  "name": "@tailworks/mcp",
+  "version": "0.5.0",
+  "description": "withTailnet, caller(), authorizeTool and budget() for stateless MCP servers on tw",
+  "keywords": [
+    "tw",
+    "tailscale",
+    "mcp",
+    "workers"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -19,11 +25,22 @@
     "dist"
   ],
   "dependencies": {
-    "@twd/tailnet": "0.1.0"
+    "@tailworks/tailnet": "0.5.0"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
     "test": "node --test test/*.test.js"
   },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rosskukulinski/tailworks.git",
+    "directory": "js/packages/mcp"
+  },
+  "homepage": "https://github.com/rosskukulinski/tailworks#readme",
+  "bugs": "https://github.com/rosskukulinski/tailworks/issues",
   "license": "BSD-3-Clause"
 }

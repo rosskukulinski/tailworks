@@ -1,0 +1,7 @@
+{
+  // Test fixture: a Worker that takes locks from the lock template's service
+  // over the tailnet with the template's client (src/client.ts) and writes to
+  // a fenced external store with the token.
+  "name": "lockuser",
+  "tailnet": { "tags": ["tag:ttest"] },
+}

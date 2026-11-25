@@ -1,8 +1,8 @@
-// Package vzapi is the contract between twd-hostd and twd-vz, the
+// Package vzapi is the contract between tw-hostd and tw-vz, the
 // per-VM Virtualization.framework VMM on macOS (ADR-032 D7).
 //
-// twd-hostd stays a pure-Go (CGO_ENABLED=0) binary. Every microVM is one
-// twd-vz process: it is the only code that links Virtualization.framework,
+// tw-hostd stays a pure-Go (CGO_ENABLED=0) binary. Every microVM is one
+// tw-vz process: it is the only code that links Virtualization.framework,
 // it carries the com.apple.security.virtualization entitlement, and it is
 // spawned by hostd with everything it needs as inherited descriptors:
 //
@@ -12,7 +12,7 @@
 //	      only network (ADR-019).
 //	fd 4  control: AF_UNIX SOCK_STREAM, newline-delimited JSON (Ctl).
 //	fd 5  vsock: AF_UNIX SOCK_STREAM; for every connection the guest opens
-//	      to the host on Config.VsockPort, twd-vz sends one byte with the
+//	      to the host on Config.VsockPort, tw-vz sends one byte with the
 //	      connection's descriptor attached (SCM_RIGHTS). The VMM is not in
 //	      the data path of the guest agent's channel.
 //	fd 6  (optional) the decrypted DO volume block device (/dev/rdiskN,
@@ -26,6 +26,21 @@
 // closes (hostd died or dropped it), so a VM never outlives its hostd.
 package vzapi
 
+import (
+	"fmt"
+
+	"github.com/rosskukulinski/tailworks/internal/version"
+)
+
+// CheckProto is tw-vz's check of a hostd's Config.Proto: 0 (a hostd
+// from before protocol reporting) and version.VZProtocol are accepted.
+func CheckProto(p int) error {
+	if p != 0 && p != version.VZProtocol {
+		return fmt.Errorf("hostd speaks tw-vz protocol %d, this tw-vz %d: tw-vz is from a different tw release; reinstall tailworks (./install.sh from one release)", p, version.VZProtocol)
+	}
+	return nil
+}
+
 // Inherited descriptor numbers in the VMM.
 const (
 	FDNet    = 3
@@ -36,6 +51,11 @@ const (
 
 // Config is the VMM's boot configuration (stdin, JSON).
 type Config struct {
+	// Proto is the hostd ↔ tw-vz protocol (internal/version.VZProtocol;
+	// 0 = a hostd from before protocol reporting). Both ship in one
+	// tarball; tw-vz refuses a non-zero Proto it doesn't speak
+	// (CheckProto).
+	Proto   int    `json:"proto,omitempty"`
 	Kernel  string `json:"kernel"`
 	Initrd  string `json:"initrd,omitempty"`
 	Cmdline string `json:"cmdline"`

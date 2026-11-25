@@ -9,14 +9,28 @@ import (
 	"time"
 )
 
+// secretChooser is the part of Store that arbitrates shared secrets.
+type secretChooser interface {
+	ChooseSecret(ctx context.Context, name, keyID string, now int64) (string, error)
+	SecretChoice(ctx context.Context, name string) (string, error)
+}
+
+// idSecretChoice is the secret_choice row naming the shared ID secret.
+const idSecretChoice = "id-secret"
+
+// idSecretCustodyName is where candidate kid of the ID secret lives. It is
+// not in custody_names (that index is per tenant, and tenant purge deletes
+// what it lists); the custody migration derives it from the choice row.
+func idSecretCustodyName(kid string) string { return "tw/mgmt/id-secret/" + kid }
+
 // LoadSharedIDSecret returns the object-ID HMAC key (RFC §4.3) shared by
 // every mgmt replica of the store (mm-loop F12, H14), so an object's ID and
 // hostname don't depend on which replica created it. The first replica to
 // start offers its existing <state-dir>/id.secret (keeping the IDs it has
 // already issued) or a new 32-byte secret; the others use the chosen one.
 func LoadSharedIDSecret(ctx context.Context, path string, st secretChooser, cust Custody) ([]byte, error) {
-	const choice = "id-secret"
-	name := func(kid string) string { return "twd/mgmt/id-secret/" + kid }
+	const choice = idSecretChoice
+	name := idSecretCustodyName
 	kid, err := st.SecretChoice(ctx, choice)
 	if errors.Is(err, ErrNotFound) {
 		var secret []byte

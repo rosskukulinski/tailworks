@@ -1,9 +1,9 @@
 // M5 conformance app: Vercel's MCP server adapter (`mcp-handler`, MCP SDK v2)
-// hosted on twd and wrapped with @twd/mcp withTailnet: per-request verified
+// hosted on tailworks and wrapped with @tailworks/mcp withTailnet: per-request verified
 // caller, per-tool authorization from the tailnet app capability. No OAuth.
 import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
-import { withTailnet, caller, authorizeTool } from "@twd/mcp";
+import { withTailnet, caller, authorizeTool } from "@tailworks/mcp";
 
 interface Env {
   MCP_CAP?: string;

@@ -20,7 +20,8 @@ import (
 	"tailscale.com/envknob"
 	"time"
 
-	"github.com/rosskukulinski/twd/internal/tssvc"
+	"github.com/rosskukulinski/tailworks/internal/tsnetlc"
+	"github.com/rosskukulinski/tailworks/internal/tssvc"
 	"tailscale.com/client/local"
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/ipnstate"
@@ -31,13 +32,13 @@ import (
 // Header names shared with the platform wrapper running in workerd.
 const (
 	// HeaderCF carries the JSON cf blob; workerd's socket is configured with
-	// http.cfBlobHeader = "x-twd-cf", strips it, and exposes it as request.cf.
-	HeaderCF = "x-twd-cf"
+	// http.cfBlobHeader = "x-tw-cf", strips it, and exposes it as request.cf.
+	HeaderCF = "x-tw-cf"
 	// HeaderObject names the object on ingress (set by netd) and on egress
 	// (set by the trusted platform Egress entrypoint, never by tenant code).
-	HeaderObject = "x-twd-object"
+	HeaderObject = "x-tw-object"
 	// HeaderError carries the error code on typed netd refusals.
-	HeaderError = "twd-error"
+	HeaderError = "tw-error"
 )
 
 // State is an object's node lifecycle state.
@@ -57,6 +58,12 @@ type Config struct {
 	// host can never silently join Tailscale's default control plane:
 	// pass "https://controlplane.tailscale.com" explicitly for SaaS.
 	ControlURL string
+
+	// KeyTagsOnly: nodes take their tags from their auth key alone and
+	// advertise none. Headscale (ADR-015) refuses a pre-auth-key
+	// registration that also requests tags.
+	KeyTagsOnly bool
+
 	// StateRoot holds one 0700 directory per object (tsnet state, object.json).
 	StateRoot string
 	// Keys supplies auth keys for objects without saved state.
@@ -65,7 +72,7 @@ type Config struct {
 	// workerd ingress socket). Nil answers 503 upstream_unavailable.
 	Upstream http.Handler
 	// CallerCerts resolves callers' node certificates (RT-01, ADR-010): a
-	// twd object's WhoIs CapMap is narrowed to CapMap ∩ cert.lim before it
+	// tailworks object's WhoIs CapMap is narrowed to CapMap ∩ cert.lim before it
 	// reaches Upstream; a lookup failure withholds the caps. Nil: callers'
 	// policy caps apply unchanged (no spawn narrowing is enforced).
 	CallerCerts CertSource
@@ -78,17 +85,29 @@ type Config struct {
 	// ReadyTimeout bounds how long egress waits for a pending object before
 	// failing with identity_pending. Default 30 s.
 	ReadyTimeout time.Duration
+
+	// EgressGate, if set, is asked before each egress once the node is up
+	// (egressgate.go, issue #331); an error refuses it.
+	EgressGate func(ctx context.Context, objectID, stableNodeID string) error
 	// Ephemeral and Tags are defaults for objects that don't override them.
 	Ephemeral bool
 	Tags      []string
-	// Hostname maps an object ID to its node hostname. Default "twd-"+id.
+	// Hostname maps an object ID to its node hostname. Default "tw-"+id.
 	Hostname func(objectID string) string
-	// AllowSiblings lets an object's egress reach other objects hosted by this
-	// registry. Default false: same-host object calls must go through the
-	// platform's policy-checked path (RFC §4.5), not a hairpin over WireGuard.
+	// AllowSiblings dials other objects hosted by this registry over
+	// WireGuard (a hairpin). Default false: a flow to a sibling is delivered
+	// in process to its attributed ingress, after the same netmap and packet
+	// filter checks (samehost.go, RFC §4.8).
 	AllowSiblings bool
 	// ExtraForbidden prefixes are always refused on egress (platform endpoints).
 	ExtraForbidden []netip.Prefix
+
+	// Internet is the internet egress path for destinations that are not
+	// on the tailnet (internet.go, ADR-049). Nil: there
+	// is none; internet names are refused with internet_egress_unavailable
+	// and non-tailnet IPs with forbidden_destination.
+	Internet *InternetConfig
+
 	// OnDelete, if set, is called after a killed object's node is closed
 	// (kill tier 2: delete the device at the coordination server).
 	OnDelete func(ctx context.Context, info ObjectInfo) error
@@ -105,11 +124,23 @@ type Config struct {
 	// ListenFunnel(":443", FunnelOnly()). Tests inject a listener whose
 	// conns are *ipn.FunnelConn (testcontrol issues no certificates).
 	PublicListen func(srv *tsnet.Server) (net.Listener, error)
+
+	// HTTPSCert supplies the certificate of a node's tailnet HTTPS
+	// listener (tailnethttps.go). Nil: the node's own ts.net certificate
+	// from its LocalAPI, refused when the tailnet issues none. Tests
+	// inject a self-signed one (testcontrol issues no certificates).
+	HTTPSCert HTTPSCertFunc
 	// OnPublicRequest is called after each public request (audit, D7).
 	OnPublicRequest func(PublicRequestRecord)
 	// OnPublicRejected is called at most once per PublicRejectWindow per
 	// public node with the requests the limits refused.
 	OnPublicRejected func(PublicRejectSummary)
+
+	// OnRejected is called after control rejected a READY node (issue
+	// #200, rejected.go): the object is failed and its node state dropped.
+	// The owner restarts it with Create, which re-mints under the same
+	// hostname. Nil: the object stays failed.
+	OnRejected func(objectID string)
 }
 
 // ObjectOptions override registry defaults for one object.
@@ -119,13 +150,17 @@ type ObjectOptions struct {
 	Ephemeral *bool
 	// Public makes this a public (Funnel) node: see public.go.
 	Public *PublicOptions
+
+	// HTTPS also serves the node's ingress on :443 with its ts.net
+	// certificate once it is ready (tailnethttps.go, SetTailnetHTTPS).
+	HTTPS bool
 }
 
 // Registry holds every object node for one tenant on this host.
 type Registry struct {
 	cfg  Config
 	log  *slog.Logger
-	sem  chan struct{}
+	sem  *joinSlots
 	ctx  context.Context
 	stop context.CancelFunc
 
@@ -167,7 +202,7 @@ func New(cfg Config) (*Registry, error) {
 		cfg.KillFlushDelay = 50 * time.Millisecond
 	}
 	if cfg.Hostname == nil {
-		cfg.Hostname = func(id string) string { return "twd-" + id }
+		cfg.Hostname = func(id string) string { return "tw-" + id }
 	}
 	var h slog.Handler = slog.DiscardHandler
 	if cfg.Logger != nil {
@@ -183,7 +218,7 @@ func New(cfg Config) (*Registry, error) {
 	r := &Registry{
 		cfg:      cfg,
 		log:      slog.New(NewRedactingHandler(h)),
-		sem:      make(chan struct{}, cfg.JoinParallel),
+		sem:      newJoinSlots(cfg.JoinParallel),
 		ctx:      ctx,
 		stop:     cancel,
 		objects:  map[string]*Object{},
@@ -250,9 +285,23 @@ type Object struct {
 	svcLn    *tssvc.ConnListener
 	svcHTTP  *http.Server
 	services []string // Services this node advertises
+
+	// hopLn feeds same-host flows from sibling objects to hopHTTP (the
+	// same handler as httpSrv; samehost.go).
+	hopLn   *tssvc.ConnListener
+	hopHTTP *http.Server
 	// pub is non-nil for a public (Funnel) node (ADR-029); set at Create
 	// and never changed.
 	pub *publicState
+
+	// rejectedCancel stops the ready node's watchRejected (rejected.go).
+	rejectedCancel context.CancelFunc
+
+	// tomb ends a kill's tombstone once (tombstone_end.go).
+	tomb tombstoneEnd
+
+	// https is the tailnet HTTPS listener on :443 (tailnethttps.go).
+	https httpsState
 }
 
 // ObjectInfo is a snapshot of an object, safe to serialize.
@@ -282,6 +331,9 @@ type ObjectInfo struct {
 
 // objectMeta is persisted next to the tsnet state so Rejoin can restore it.
 type objectMeta struct {
+	// V is the format version (ADR-041 §4): 0 = written
+	// before versioning (the same layout as 1). readMeta refuses newer.
+	V         int      `json:"v"`
 	ID        string   `json:"id"`
 	Hostname  string   `json:"hostname"`
 	Tags      []string `json:"tags,omitempty"`
@@ -304,6 +356,7 @@ func (r *Registry) Create(id string, opts ObjectOptions) (*Object, error) {
 	if !ValidObjectID(id) {
 		return nil, fmt.Errorf("netd: invalid object id %q (want a lowercase DNS label)", id)
 	}
+	r.endTombstoneOf(id) // tombstone_end.go (#364): before the new node takes the dir
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
@@ -331,6 +384,7 @@ func (r *Registry) Create(id string, opts ObjectOptions) (*Object, error) {
 	if opts.Public != nil {
 		o.pub = newPublicState(*opts.Public)
 	}
+	o.https.want = opts.HTTPS && opts.Public == nil // tailnethttps.go
 	if o.hostname == "" {
 		o.hostname = r.cfg.Hostname(id)
 	}
@@ -353,9 +407,10 @@ func (r *Registry) Create(id string, opts ObjectOptions) (*Object, error) {
 	}
 	r.objects[id] = o
 	r.joins.Add(1)
+	slot := r.sem.enqueue() // in line now, so objects join in Create order
 	go func() {
 		defer r.joins.Done()
-		r.join(o)
+		r.join(o, slot)
 	}()
 	return o, nil
 }
@@ -390,18 +445,31 @@ func readMeta(dir string) (*objectMeta, error) {
 	if err != nil {
 		return nil, err
 	}
-	var m objectMeta
-	return &m, json.Unmarshal(b, &m)
+	return decodeMeta(b)
 }
 
-func (r *Registry) join(o *Object) {
-	select {
-	case r.sem <- struct{}{}:
-	case <-r.ctx.Done():
+// ObjectMetaVersion is the object.json format version this netd writes.
+const ObjectMetaVersion = 1
+
+// decodeMeta parses an object.json, refusing a version newer than this
+// netd knows (a newer tailworks wrote it: rolling back past a format change).
+func decodeMeta(b []byte) (*objectMeta, error) {
+	var m objectMeta
+	if err := json.Unmarshal(b, &m); err != nil {
+		return &m, err
+	}
+	if m.V > ObjectMetaVersion {
+		return &m, fmt.Errorf("object.json format v%d was written by a newer tailworks (this one reads up to v%d); upgrade tw", m.V, ObjectMetaVersion)
+	}
+	return &m, nil
+}
+
+func (r *Registry) join(o *Object, slot *slotTicket) {
+	if r.sem.wait(r.ctx, slot) != nil {
 		o.fail(ErrClosed)
 		return
 	}
-	defer func() { <-r.sem }()
+	defer r.sem.release()
 	if o.State() != StatePending {
 		return // killed while queued
 	}
@@ -424,11 +492,12 @@ func (r *Registry) join(o *Object) {
 }
 
 // errSavedStateRejected: a rejoin from saved node state left the backend in
-// NeedsLogin (control expired or removed the device).
-var errSavedStateRejected = errors.New("saved node state rejected by control (NeedsLogin)")
+// NeedsLogin, or failing to log in (control expired or removed the device).
+var errSavedStateRejected = errors.New("saved node state rejected by control (NeedsLogin or a login error)")
 
-// needsLoginGrace is how long NeedsLogin must persist during a rejoin before
-// it counts as a rejection (the backend may pass through it briefly).
+// needsLoginGrace is how long NeedsLogin, or a login error, must persist
+// during a rejoin before it counts as a rejection (the backend may pass
+// through either briefly).
 var needsLoginGrace = 2 * time.Second
 
 func (o *Object) start(ctx context.Context) error {
@@ -438,18 +507,21 @@ func (o *Object) start(ctx context.Context) error {
 	}
 	rejoin := hasState(o.dir)
 	var key string
+	reminted := false
 	if !rejoin {
 		if r.cfg.Keys == nil {
 			return errors.New("no saved state and no KeySource")
 		}
-		k, err := r.cfg.Keys.AuthKey(ctx, KeyRequest{ObjectID: o.id, Hostname: o.hostname, Tags: o.tags, Ephemeral: o.ephemeral})
+		// Control rejected this object's last node after it was ready.
+		reminted = hasRemintMark(o.dir) // rejected.go
+		k, err := r.cfg.Keys.AuthKey(ctx, KeyRequest{ObjectID: o.id, Hostname: o.hostname, Tags: o.tags, Ephemeral: o.ephemeral, Remint: reminted})
 		if err != nil {
 			return fmt.Errorf("auth key: %w", err)
 		}
 		key = k
 		o.spans.at(func(s *JoinSpans) *float64 { return &s.Key })
 	}
-	meta := objectMeta{ID: o.id, Hostname: o.hostname, Tags: o.tags, Ephemeral: o.ephemeral}
+	meta := objectMeta{V: ObjectMetaVersion, ID: o.id, Hostname: o.hostname, Tags: o.tags, Ephemeral: o.ephemeral}
 	if o.pub != nil {
 		o.pub.mu.Lock()
 		po := o.pub.opts
@@ -462,7 +534,6 @@ func (o *Object) start(ctx context.Context) error {
 	}
 	st := time.Now()
 	lc, sst, err := o.up(ctx, key, rejoin)
-	reminted := false
 	if errors.Is(err, errSavedStateRejected) {
 		// The device is gone from control (an ephemeral node that was
 		// offline during a restart, or one an admin removed). Drop the
@@ -482,6 +553,9 @@ func (o *Object) start(ctx context.Context) error {
 	}
 	if err != nil {
 		return err
+	}
+	if reminted {
+		clearRemintMark(o.dir)
 	}
 	joinDur := time.Since(st)
 	o.mu.Lock()
@@ -505,9 +579,10 @@ func (o *Object) start(ctx context.Context) error {
 		IdleConnTimeout:     30 * time.Second,
 		ForceAttemptHTTP2:   false,
 	}
+	// limits.md#object-ingress-server
 	hs := &http.Server{
 		Handler:           http.HandlerFunc(o.serveIngress),
-		ReadHeaderTimeout: 30 * time.Second,
+		ReadHeaderTimeout: 30 * time.Second, // limits.md#object-ingress-header-timeout
 		ErrorLog:          slog.NewLogLogger(r.log.Handler(), slog.LevelDebug),
 	}
 
@@ -536,7 +611,13 @@ func (o *Object) start(ctx context.Context) error {
 	o.svcHTTP = &http.Server{Handler: hs.Handler, ReadHeaderTimeout: hs.ReadHeaderTimeout, ErrorLog: hs.ErrorLog}
 	o.svcHTTP.SetKeepAlivesEnabled(false) // until a Service is advertised
 	svcHS := o.svcHTTP
+	hopHS, hopLn := o.startHopLocked(hs) // samehost.go
 	o.state = StateReady
+	// Control can still reject the node now that it is ready (#200,
+	// rejected.go).
+	rctx, rcancel := context.WithCancel(r.ctx)
+	o.rejectedCancel = rcancel
+	go o.watchRejected(rctx, lc)
 	hostname := o.hostname // SetHostname may change it once ready
 	if o.pub == nil {
 		close(o.ready)
@@ -568,8 +649,10 @@ func (o *Object) start(ctx context.Context) error {
 		close(o.ready)
 	} else {
 		go hs.Serve(o.ln)
+		o.openHTTPSIfWanted() // tailnethttps.go
 	}
 	go svcHS.Serve(svcLn)
+	go hopHS.Serve(hopLn)
 	r.log.Info("object ready", "object", o.id, "hostname", hostname, "ip", ip4.String(),
 		"node", string(o.nodeID), "join_ms", joinDur.Milliseconds(), "rejoined", rejoin, "reminted", reminted, "spans", o.spans.get())
 	return nil
@@ -596,6 +679,9 @@ func (o *Object) up(ctx context.Context, key string, rejoin bool) (*local.Client
 		Logf:          logf,
 		UserLogf:      logf,
 	}
+	if r.cfg.KeyTagsOnly {
+		srv.AdvertiseTags = nil
+	}
 	o.mu.Lock()
 	if o.state != StatePending {
 		o.mu.Unlock()
@@ -613,15 +699,19 @@ func (o *Object) up(ctx context.Context, key string, rejoin bool) (*local.Client
 		return nil, nil, fmt.Errorf("start %s: %w", o.hostname, err)
 	}
 	o.spans.at(func(s *JoinSpans) *float64 { return &s.Start })
-	lc0, err := srv.LocalClient()
+	lc, err := tsnetlc.Client(srv) // Close drains it (#245)
 	if err != nil {
 		return nil, nil, err
 	}
-	lc0.OmitAuth = true
-	go o.spans.watch(upCtx, lc0)
+	// ADR-019 rule 4: without this every LocalClient call on macOS execs lsof
+	// and sends the *system* Tailscale.app's token (~25 ms/call). tsnet
+	// returns the same *local.Client on every call, so set it once, here,
+	// before the watchers below start reading it (issue #134).
+	lc.OmitAuth = true
+	go o.spans.watch(upCtx, lc)
 	if rejoin && key == "" {
 		var once sync.Once
-		go watchNeedsLogin(upCtx, lc0, func() { once.Do(func() { close(rejected); upCancel() }) })
+		go watchNeedsLogin(upCtx, lc, func() { once.Do(func() { close(rejected); upCancel() }) })
 	}
 	if _, err := srv.Up(upCtx); err != nil {
 		select {
@@ -632,13 +722,6 @@ func (o *Object) up(ctx context.Context, key string, rejoin bool) (*local.Client
 		return nil, nil, fmt.Errorf("up %s: %w", o.hostname, err)
 	}
 	o.spans.at(func(s *JoinSpans) *float64 { return &s.Running })
-	lc, err := srv.LocalClient()
-	if err != nil {
-		return nil, nil, err
-	}
-	// ADR-019 rule 4: without this every LocalClient call on macOS execs lsof
-	// and sends the *system* Tailscale.app's token (~25 ms/call).
-	lc.OmitAuth = true
 	sst, err := lc.StatusWithoutPeers(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -646,15 +729,22 @@ func (o *Object) up(ctx context.Context, key string, rejoin bool) (*local.Client
 	return lc, sst, nil
 }
 
-// watchNeedsLogin calls onRejected once the backend has sat in NeedsLogin
-// for needsLoginGrace without reaching Starting/Running.
+// watchNeedsLogin calls onRejected once the backend has sat in NeedsLogin,
+// or kept reporting a login error, for needsLoginGrace without reaching
+// Starting/Running. A node whose saved key control has expired doesn't
+// always reach NeedsLogin: it can stay in NoState, retrying its login and
+// reporting "NodeKeyExpired" errors, forever. Without the error case that
+// rejoin never ends, and it holds a join slot (JoinParallel) while it waits
+// (issue #75). Those errors arrive as a health warning, not an ErrMessage
+// (loginRejectedNotify, issue #182).
 func watchNeedsLogin(ctx context.Context, lc *local.Client, onRejected func()) {
-	w, err := lc.WatchIPNBus(ctx, ipn.NotifyInitialState)
+	w, err := lc.WatchIPNBus(ctx, ipn.NotifyInitialState|ipn.NotifyInitialHealthState)
 	if err != nil {
 		return
 	}
 	defer w.Close()
 	var timer *time.Timer
+	up := false // reached Starting/Running: errors after that aren't a rejection
 	defer func() {
 		if timer != nil {
 			timer.Stop()
@@ -665,6 +755,9 @@ func watchNeedsLogin(ctx context.Context, lc *local.Client, onRejected func()) {
 		if err != nil {
 			return
 		}
+		if loginRejectedNotify(&n) && !up && timer == nil { // rejoin.go
+			timer = time.AfterFunc(needsLoginGrace, onRejected)
+		}
 		if n.State == nil {
 			continue
 		}
@@ -674,6 +767,7 @@ func watchNeedsLogin(ctx context.Context, lc *local.Client, onRejected func()) {
 				timer = time.AfterFunc(needsLoginGrace, onRejected)
 			}
 		case ipn.Starting, ipn.Running:
+			up = true
 			if timer != nil {
 				timer.Stop()
 				timer = nil
@@ -690,7 +784,7 @@ func (o *Object) dropSavedState() {
 	o.srv = nil
 	o.mu.Unlock()
 	if srv != nil {
-		srv.Close()
+		tsnetlc.Close(srv)
 	}
 	os.Remove(filepath.Join(o.dir, "tailscaled.state"))
 }
@@ -720,15 +814,24 @@ func (o *Object) teardown() {
 	}
 	o.closePublic()
 	o.stopPublicFlusher()
+	o.stopCertPrefetch()
+	o.stopHTTPS() // tailnethttps.go
 	o.mu.Lock()
 	srv, hs, tr, ts, shs := o.srv, o.httpSrv, o.tr, o.tombSrv, o.svcHTTP
+	hop := o.hopHTTP
 	o.services = nil // a closed node advertises nothing
+	if o.rejectedCancel != nil {
+		o.rejectedCancel() // before srv.Close, which waits on open LocalAPI streams
+	}
 	o.mu.Unlock()
 	if hs != nil {
 		hs.Close()
 	}
 	if shs != nil {
 		shs.Close()
+	}
+	if hop != nil {
+		hop.Close()
 	}
 	if ts != nil {
 		ts.Close()
@@ -737,7 +840,7 @@ func (o *Object) teardown() {
 		tr.CloseIdleConnections()
 	}
 	if srv != nil {
-		srv.Close()
+		tsnetlc.Close(srv)
 	}
 	o.reg.forgetIPs(o)
 }
@@ -753,7 +856,7 @@ func (r *Registry) forgetIPs(o *Object) {
 }
 
 // Get returns the object with the given ID, or nil.
-// RemoveState deletes a killed object's saved node state (twd down
+// RemoveState deletes a killed object's saved node state (tw down
 // --purge). A kill with a tombstone removes the dir only when the tombstone
 // expires; if the host stops before that, the next object of the same ID
 // would find the dead node's state and spend a re-mint round trip on it.
@@ -963,7 +1066,7 @@ func (o *Object) SetHostname(ctx context.Context, hostname string) (string, erro
 	}
 	o.mu.Lock()
 	o.hostname = hostname
-	mb, _ := json.Marshal(objectMeta{ID: o.id, Hostname: o.hostname, Tags: o.tags, Ephemeral: o.ephemeral})
+	mb, _ := json.Marshal(objectMeta{V: ObjectMetaVersion, ID: o.id, Hostname: o.hostname, Tags: o.tags, Ephemeral: o.ephemeral})
 	o.mu.Unlock()
 	if err := os.WriteFile(filepath.Join(o.dir, "object.json"), mb, 0o600); err != nil {
 		return "", err

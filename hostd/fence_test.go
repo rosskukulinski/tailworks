@@ -5,13 +5,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd/mgmtapi"
-	"github.com/rosskukulinski/twd/mgmt"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/mgmt"
 )
 
 // TestMM_F9_FenceStatefulOnly (ADR-028 §3): heartbeat loss stops only
 // workloads whose assignment says fence; a missing field (older mgmt) fences.
 func TestMM_F9_FenceStatefulOnly(t *testing.T) {
+	t.Parallel()
 	h := &Host{workloads: map[string]*workload{}}
 	add := func(name string, fence *bool) {
 		w := &workload{h: h, name: name}
@@ -33,6 +34,7 @@ func TestMM_F9_FenceStatefulOnly(t *testing.T) {
 
 // The host must stop serving before mgmt can hand its lease to another host.
 func TestFenceBelowLease(t *testing.T) {
+	t.Parallel()
 	const margin = 5 * time.Second
 	if MaxFenceAfter+margin > mgmt.NamespaceLeaseTTL {
 		t.Fatalf("MaxFenceAfter %v + margin %v must be ≤ mgmt.NamespaceLeaseTTL %v", MaxFenceAfter, margin, mgmt.NamespaceLeaseTTL)

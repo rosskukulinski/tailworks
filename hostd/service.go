@@ -8,10 +8,10 @@ import (
 	"slices"
 	"time"
 
-	"github.com/rosskukulinski/twd/netd"
+	"github.com/rosskukulinski/tailworks/netd"
 )
 
-// Tailscale Services (twd.jsonc tailnet.service): the workload entry node
+// Tailscale Services (tailworks.jsonc tailnet.service): the workload entry node
 // advertises the Service only while this host should be serving it. That is
 // the Service's health gate: Tailscale itself doesn't health-check Service
 // hosts, so a host that keeps advertising while its workload is down or
@@ -99,9 +99,10 @@ func (h *Host) syncService(w *workload, probe bool) {
 		h.mu.Lock()
 		ready := wl.live && wl.Status == statusReady
 		netdID = wl.NetdID
+		wlStatus := wl.Status // awaitNode writes it under h.mu (#586)
 		h.mu.Unlock()
 		if !ready {
-			want, reason = false, "workload node "+wl.Status
+			want, reason = false, "workload node "+wlStatus
 		}
 	}
 	if want && probe {
@@ -177,8 +178,8 @@ func (inst *instance) probe(ctx context.Context) bool {
 	if inst.node != nil {
 		req, _ = http.NewRequestWithContext(ctx, "GET", "http://app"+inst.app.Node.Health, nil)
 	} else {
-		blob, _ := json.Marshal(map[string]any{"twd": map[string]any{"kind": "admin", "op": "health"}})
-		req, _ = http.NewRequestWithContext(ctx, "POST", "http://platform/_twd/admin", nil)
+		blob, _ := json.Marshal(map[string]any{"tw": map[string]any{"kind": "admin", "op": "health"}})
+		req, _ = http.NewRequestWithContext(ctx, "POST", "http://platform/_tw/admin", nil)
 		req.Header.Set(netd.HeaderCF, string(blob))
 	}
 	resp, err := inst.direct.Do(req)

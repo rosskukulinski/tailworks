@@ -1,4 +1,4 @@
-// Package mgmtapi is twd-hostd's (and the twd CLI's) client for the mgmt
+// Package mgmtapi is tw-hostd's (and the tailworks CLI's) client for the mgmt
 // /v1 API. The wire is the generated client in hostd/mgmtapi/v1 (from
 // api/openapi.yaml, the contract's source of truth); the hostd-facing
 // types here are the subset hostd works with, converted at the edge.
@@ -7,8 +7,8 @@ package mgmtapi
 import (
 	"encoding/json"
 
-	"github.com/rosskukulinski/twd/internal/container"
-	"github.com/rosskukulinski/twd/internal/publicspec"
+	"github.com/rosskukulinski/tailworks/internal/container"
+	"github.com/rosskukulinski/tailworks/internal/publicspec"
 )
 
 // Error is every non-2xx body (DX.md catalog shape).
@@ -36,14 +36,13 @@ type Tenant struct {
 	TenantID               string `json:"tenantID,omitempty"`
 	Tailnet                string `json:"tailnet"`
 	ControlURL             string `json:"controlURL,omitempty"`
-	MintMode               string `json:"mintMode"` // "apikey" | "wif" | "static" (v0.1, tests only)
-	APIKeyFile             string `json:"apiKeyFile,omitempty"`
+	MintMode               string `json:"mintMode"`                  // "oauth" | "headscale" | "static" (tests only)
+	APIKeyFile             string `json:"apiKeyFile,omitempty"`      // headscale mode: the Headscale API key file (path only)
 	OAuthClientFile        string `json:"oauthClientFile,omitempty"` // oauth mode: the 0600 client file (path only)
-	WIFClientID            string `json:"wifClientID,omitempty"`
 	RegistrationsPerMinute int    `json:"registrationsPerMinute,omitempty"`
 	MaxObjects             int    `json:"maxObjects,omitempty"`
 	// Tier (v0.1, optional) is the tenant's default isolation tier
-	// ("process" | "microvm"); a deployment's twd.jsonc "tier" overrides it.
+	// ("process" | "microvm"); a deployment's tailworks.jsonc "tier" overrides it.
 	Tier string `json:"tier,omitempty"`
 	// OBOPublicKey (RT-01) is the base64 Ed25519 key that verifies this
 	// tenant's node certificates. hostd pins it when it opens the tenant.
@@ -88,12 +87,24 @@ type RegisterRequest struct {
 	// PushPort is hostd's push listener on its own tsnet node; mgmt pushes
 	// to the WhoIs node's address at this port (tsnet transport).
 	PushPort int `json:"pushPort,omitempty"`
-	// AuditPubKey: base64 ed25519 key for hostSig.
+	// AuditPubKey: base64 ed25519 key for hostSig (pinned by mgmt on the
+	// first registration; later ones may only repeat it).
 	AuditPubKey string `json:"auditPubKey,omitempty"`
 	Pool        string `json:"pool,omitempty"`
+	// RegistrationSecret is the one-time secret `tw host add` / `tw up`
+	// put in the join file (TW_REGISTRATION_SECRET); mgmt requires it on
+	// the first tailnet registration of a host ID and ignores it after.
+	RegistrationSecret string `json:"registrationSecret,omitempty"`
 	// Arch is GOARCH; Capacity the capacity vector (ADR-032 D9).
 	Arch     string        `json:"arch,omitempty"`
 	Capacity *HostCapacity `json:"capacity,omitempty"`
+
+	// Version, OS, Protocols and Features: what this hostd runs and offers
+	// (ADR-041 §7).
+	Version   string         `json:"version,omitempty"`
+	OS        string         `json:"os,omitempty"`
+	Protocols map[string]int `json:"protocols,omitempty"`
+	Features  []string       `json:"features,omitempty"`
 }
 
 // HostCapacity is the spec's HostCapacity: what a host can run.
@@ -165,7 +176,7 @@ type Lease struct {
 
 type DeploymentStatus struct {
 	DeploymentID string `json:"deploymentID"`
-	Status       string `json:"status"` // "starting" | "active" | "draining" | "stopped" | "failed"
+	Status       string `json:"status"` // "starting" | "active" | "crashloop" | "draining" | "stopped" | "failed"
 	Error        string `json:"error,omitempty"`
 }
 
@@ -180,6 +191,10 @@ type HeartbeatRequest struct {
 	// an empty list means none run, so mgmt releases this host's
 	// reservations). Always set it (null is not in the spec).
 	Containers []RunningContainer `json:"containers"`
+
+	// PurgedTenants are deleted tenants (from PurgeTenants) whose local
+	// state this host has removed.
+	PurgedTenants []string `json:"purgedTenants,omitempty"`
 }
 
 type KillOrder struct {
@@ -197,18 +212,22 @@ type HeartbeatResponse struct {
 	RevokeObjects []string `json:"revokeObjects"`
 	// AssignmentsChanged hints that a push could not be delivered.
 	AssignmentsChanged bool `json:"assignmentsChanged,omitempty"`
+
+	// PurgeTenants are deleted tenants whose local state (tenants/<id>/,
+	// R2 blobs) this host must remove; repeated until reported purged.
+	PurgeTenants []string `json:"purgeTenants,omitempty"`
 }
 
 type DeployRequest struct {
 	TenantID string `json:"tenantID"`
 	Workload string `json:"workload"`
 	Bundle   []byte `json:"bundle"` // base64 in JSON
-	// ContainerImages are images twd deploy built and pushed, by class:
+	// ContainerImages are images tw deploy built and pushed, by class:
 	// {"<Class>": {"image": ref, "images": {name: ref}}} (ADR-032 D3).
 	ContainerImages map[string]BuiltImages `json:"containerImages,omitempty"`
 }
 
-// BuiltImages are one class's built image refs (twd.local/<tenant>/…@sha256).
+// BuiltImages are one class's built image refs (tw.local/<tenant>/…@sha256).
 type BuiltImages struct {
 	Image  string            `json:"image,omitempty"`
 	Images map[string]string `json:"images,omitempty"`
@@ -240,7 +259,6 @@ type DeployResponse struct {
 type NamespaceSpec struct {
 	Class string   `json:"class"`
 	Tags  []string `json:"tags"`
-	Agent bool     `json:"agent,omitempty"`
 }
 
 type Assignment struct {
@@ -266,7 +284,7 @@ type Assignment struct {
 	// pinned at deploy (ADR-032 D3); they replace the bundle's classes.
 	Containers []container.Class `json:"containers,omitempty"`
 	// Public (ADR-029) is the workload's public ingress. nil: tailnet-only
-	// (no twd.jsonc "public", or the tenant's publicIngress is not allow).
+	// (no tailworks.jsonc "public", or the tenant's publicIngress is not allow).
 	Public *PublicAssignment `json:"public,omitempty"`
 	// PlacementTargets (smart placement, ADR-033) are what this host should
 	// measure tailnet paths to, from this tenant's nodes.
@@ -282,9 +300,9 @@ type PublicAssignment struct {
 	Upgrade []string          `json:"upgrade,omitempty"`
 	Limits  publicspec.Limits `json:"limits"` // effective (defaults filled)
 	Tags    []string          `json:"tags"`
-	// Exposed is false after `twd expose off`: the public node stays
+	// Exposed is false after `tw expose off`: the public node stays
 	// joined (its certificate stays warm) but its Funnel listener is
-	// closed and its flows reset. `twd expose on` reopens it.
+	// closed and its flows reset. `tw expose on` reopens it.
 	Exposed bool `json:"exposed"`
 }
 
@@ -328,6 +346,9 @@ type CreateObjectRequest struct {
 	// PoolObjectID offers a ready pre-joined "_pool" node for this object
 	// (ADR-031); mgmt answers status "assigned" if it took it.
 	PoolObjectID string `json:"poolObjectID,omitempty"`
+	// Epoch is the lease epoch this host holds for the workload; mgmt fences
+	// the create on it (a host may only create objects on its own leases).
+	Epoch int64 `json:"epoch,omitempty"`
 }
 
 // CreateObjectResponse is the part of the Object resource hostd uses
@@ -482,7 +503,7 @@ type Page[T any] struct {
 
 // WorkloadNamespace is the object namespace of a workload's entry node
 // (contract gap, see STATUS.md M3: mgmt must declare it like a class, with
-// the twd.jsonc tailnet.tags).
+// the tailworks.jsonc tailnet.tags).
 const WorkloadNamespace = "_workload"
 
 // StatusAssigned is the status of an object created on a pre-joined pool

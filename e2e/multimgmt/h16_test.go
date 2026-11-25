@@ -29,12 +29,12 @@ func TestMM_H16_TenantQuotaRace(t *testing.T) {
 	keyFile := r.dir + "/api.env"
 	writeAPIKey(t, keyFile)
 	var tn struct{ TenantID string }
-	c.must(0, "", "POST", "/v1/tenants", map[string]any{"tailnet": "q.ts.net", "mintMode": "apikey", "apiKeyFile": keyFile,
+	c.must(0, "", "POST", "/v1/tenants", map[string]any{"tailnet": "q.ts.net", "mintMode": "oauth", "oauthClientFile": keyFile,
 		"registrationsPerMinute": 6000, "maxObjects": quota}, &tn)
 	c.must(0, "h1", "PUT", "/v1/hosts/h1", map[string]any{"capacityNodes": 10000, "tiers": []string{"process"}}, nil)
 	var dep struct{ Epoch int64 }
 	c.must(0, "", "POST", "/v1/deployments", map[string]any{"tenantID": tn.TenantID, "workload": "w",
-		"bundle": makeBundle(map[string]string{"twd.jsonc": twdJSONC, "dist/index.js": "export default {}"})}, &dep)
+		"bundle": makeBundle(map[string]string{"tailworks.jsonc": twJSONC, "dist/index.js": "export default {}"})}, &dep)
 	stop := make(chan struct{})
 	defer close(stop)
 	c.heartbeat(setup{tenantID: tn.TenantID, workload: "w", epoch: dep.Epoch}, stop)

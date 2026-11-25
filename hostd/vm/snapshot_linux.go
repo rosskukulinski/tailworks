@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rosskukulinski/twd/guest/proto"
-	"github.com/rosskukulinski/twd/hostd/vm/helperapi"
+	"github.com/rosskukulinski/tailworks/guest/proto"
+	"github.com/rosskukulinski/tailworks/hostd/vm/helperapi"
 )
 
 // Snapshot restore (vm.Config.Snapshot; off by default — see the ADR
@@ -43,6 +43,10 @@ type baseSnap struct {
 	info  map[string]any
 	err   error
 	built time.Time
+	// guest is the GuestIdentity the base was built from. A base is only
+	// restored while the configured guest still has that identity
+	// (ADR-041 §5): never under a different guest.
+	guest string
 	// ctlToken is the base VM's control-channel token: every copy restored
 	// from this base holds it in guestd's memory, so it authenticates a
 	// copy's pre-claim connection only (no tenant code has run in it yet);
@@ -100,6 +104,7 @@ func (b *Backend) startBase() {
 			old := b.base
 			b.base = nb
 			b.baseRotations++
+			b.baseStale = false
 			b.baseMu.Unlock()
 			b.cfg.Log.Info("microVM base snapshot rotated", "old", old.id, "new", nb.id)
 			if b.pool != nil {
@@ -142,7 +147,12 @@ func (b *Backend) buildBase(ctx context.Context, bs *baseSnap) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	err := b.makeBase(ctx, bs)
+	gid, err := GuestIdentity(b.cfg.Kernel, b.cfg.Rootfs)
+	if err != nil {
+		return fmt.Errorf("guest identity: %w", err)
+	}
+	bs.guest = gid
+	err = b.makeBase(ctx, bs)
 	if err != nil && ctx.Err() == nil {
 		b.cfg.Log.Warn("microVM base snapshot failed; booting instead of restoring", "err", err)
 	}
@@ -152,7 +162,7 @@ func (b *Backend) buildBase(ctx context.Context, bs *baseSnap) error {
 
 func (b *Backend) makeBase(ctx context.Context, bs *baseSnap) error {
 	st := time.Now()
-	m, err := b.boot(ctx, bootOpts{name: "base", pool: true})
+	m, err := b.boot(ctx, bootOpts{name: "base", pool: true, base: true})
 	if err != nil {
 		return err
 	}
@@ -212,6 +222,18 @@ func (b *Backend) baseID(ctx context.Context, wait bool) string {
 		}
 	}
 	if bs.err != nil {
+		return ""
+	}
+	if gid, err := GuestIdentity(b.cfg.Kernel, b.cfg.Rootfs); err != nil || gid != bs.guest {
+		// The guest changed under the base (an install swapped
+		// share/tailworks/vm): boot cold until a base of the new guest is built.
+		b.baseMu.Lock()
+		warn := !b.baseStale
+		b.baseStale = true
+		b.baseMu.Unlock()
+		if warn {
+			b.cfg.Log.Warn("microVM guest changed since the base snapshot; booting cold until the next base", "base", bs.id, "err", err)
+		}
 		return ""
 	}
 	return bs.id

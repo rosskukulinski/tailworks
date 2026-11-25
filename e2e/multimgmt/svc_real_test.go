@@ -1,7 +1,7 @@
 //go:build e2emultimgmt && e2ereal
 
-// H12 on a real tailnet: two twd-mgmt replicas on one Postgres, each on its
-// own tsnet node (tag:twd-mgmt) on tailnet 1, both hosting the Tailscale
+// H12 on a real tailnet: two tw-mgmt replicas on one Postgres, each on its
+// own tsnet node (tag:tw-mgmt) on tailnet 1, both hosting the Tailscale
 // Service svc:ttest-mgmt (-tsnet-service). A tag:ttest client calls the
 // Service name only. Checks:
 //
@@ -14,11 +14,11 @@
 //
 //   - a SIGTERMed replica withdraws before exiting and traffic moves.
 //
-//     TWD_E2E_API_KEY_FILE=~/.config/tailnet-agents-design/tailnet1_api.env TWD_E2E_TAILNET=tail7906d5.ts.net \
+//     TW_E2E_API_KEY_FILE=~/.config/tailnet-agents-design/tailnet1_api.env TW_E2E_TAILNET=tail7906d5.ts.net \
 //     go test -tags 'e2emultimgmt e2ereal' -run TestRealMgmtService -v -timeout 20m ./e2e/multimgmt/
 //
-// Policy (tailnet 1): autoApprovers.services "svc:ttest-mgmt": ["tag:twd-mgmt"]
-// and a grant tag:ttest → svc:ttest-mgmt tcp:80 (with twd.dev/cap/admin).
+// Policy (tailnet 1): autoApprovers.services "svc:ttest-mgmt": ["tag:tw-mgmt"]
+// and a grant tag:ttest → svc:ttest-mgmt tcp:80 (with github.com/rosskukulinski/tailworks/cap/admin).
 // Cleanup deletes exactly this run's devices, keys and the Service.
 package multimgmt
 
@@ -37,8 +37,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/internal/tsapi"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/internal/tsapi"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 )
 
 const (
@@ -48,9 +48,9 @@ const (
 )
 
 func TestRealMgmtService(t *testing.T) {
-	keyFile, tailnet := os.Getenv("TWD_E2E_API_KEY_FILE"), os.Getenv("TWD_E2E_TAILNET")
+	keyFile, tailnet := os.Getenv("TW_E2E_API_KEY_FILE"), os.Getenv("TW_E2E_TAILNET")
 	if keyFile == "" || tailnet == "" {
-		t.Skip("TWD_E2E_API_KEY_FILE / TWD_E2E_TAILNET not set")
+		t.Skip("TW_E2E_API_KEY_FILE / TW_E2E_TAILNET not set")
 	}
 	if tailnet != realTailnet1 {
 		t.Fatalf("refusing to run against tailnet %q (not in the allow list)", tailnet)
@@ -72,7 +72,7 @@ func TestRealMgmtService(t *testing.T) {
 	r := newRun(t, "svc-real")
 	c := newCluster(t, r, 2)
 
-	if _, err := api.PutService(ctx, tsapi.Service{Name: realMgmtSvc, Comment: "twd e2e H12 " + runID, Ports: []string{"tcp:80"}}); err != nil {
+	if _, err := api.PutService(ctx, tsapi.Service{Name: realMgmtSvc, Comment: "tw e2e H12 " + runID, Ports: []string{"tcp:80"}}); err != nil {
 		t.Fatalf("put service: %v", err)
 	}
 	t.Cleanup(func() {
@@ -102,7 +102,7 @@ func TestRealMgmtService(t *testing.T) {
 		}
 	})
 	mint := func(tag string) string {
-		k, err := api.CreateKey(ctx, tsapi.KeyOptions{Tags: []string{tag}, Ephemeral: true, Preauthorized: true, ExpirySeconds: 1800, Description: "twd e2e H12"})
+		k, err := api.CreateKey(ctx, tsapi.KeyOptions{Tags: []string{tag}, Ephemeral: true, Preauthorized: true, ExpirySeconds: 1800, Description: "tw e2e H12"})
 		if err != nil {
 			t.Fatalf("mint %s: %v", tag, err)
 		}
@@ -112,7 +112,7 @@ func TestRealMgmtService(t *testing.T) {
 	c.argsFor = map[int][]string{}
 	for i := range c.replicas {
 		kf := filepath.Join(r.dir, fmt.Sprintf("r%d.authkey", i))
-		if err := os.WriteFile(kf, []byte("TS_AUTHKEY="+mint("tag:twd-mgmt")+"\n"), 0o600); err != nil {
+		if err := os.WriteFile(kf, []byte("TS_AUTHKEY="+mint("tag:tw-mgmt")+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		c.argsFor[i] = []string{"-tsnet-hostname", fmt.Sprintf("%sr%d", prefix, i), "-tsnet-control-url", prodControl,

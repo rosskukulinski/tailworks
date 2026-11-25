@@ -11,8 +11,9 @@ import (
 )
 
 // TestStoreMintClaim: one replica at a time may mint a pending object
-// (mm-loop F3, H02). Runs on SQLite and, with TWD_TEST_POSTGRES_DSN, Postgres.
+// (mm-loop F3, H02). Runs on SQLite and, with TW_TEST_POSTGRES_DSN, Postgres.
 func TestStoreMintClaim(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		t0 := time.Unix(1_800_000_000, 0)
@@ -72,12 +73,13 @@ func TestStoreMintClaim(t *testing.T) {
 // Custody names are per key, so concurrent mints can't overwrite or delete
 // each other's entry; objects minted before keyed names keep the legacy one.
 func TestCustodyNamesPerKey(t *testing.T) {
+	t.Parallel()
 	o := Object{TenantID: "tn", ID: "o1"}
-	if got := custodyName(o); got != "twd/tn/o1/authkey" {
+	if got := custodyName(o); got != "tw/tn/o1/authkey" {
 		t.Fatalf("unminted/legacy name = %q", got)
 	}
 	o.KeyID = "k7"
-	if a, b := custodyName(o), custodyKeyName(o, "k8"); a == b || a != "twd/tn/o1/authkey/k7" {
+	if a, b := custodyName(o), custodyKeyName(o, "k8"); a == b || a != "tw/tn/o1/authkey/k7" {
 		t.Fatalf("keyed names must differ per key: %q vs %q", a, b)
 	}
 }
@@ -86,6 +88,7 @@ func TestCustodyNamesPerKey(t *testing.T) {
 // is durable; only one claimer runs it, not before it is due, and a retry
 // makes it due again.
 func TestStoreDeviceDelete(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		if err := s.CreateObject(ctx, Object{ID: "dd1", TenantID: "tn", Workload: "w", Namespace: "A", Name: "dd1", Hostname: "dd1",
@@ -122,6 +125,7 @@ func TestStoreDeviceDelete(t *testing.T) {
 // TestStoreCreateChildBudget (mm-loop F14, H04): concurrent spawns under one
 // root never exceed maxLive, on SQLite and Postgres.
 func TestStoreCreateChildBudget(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		root := "root-" + strings.ReplaceAll(t.Name(), "/", "-")
@@ -161,10 +165,11 @@ func TestStoreCreateChildBudget(t *testing.T) {
 // TestStoreTenantQuota (mm-loop F17, H16): concurrent creates never exceed
 // the tenant's maxObjects, on SQLite and Postgres.
 func TestStoreTenantQuota(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		tid := "tnq-" + strings.ReplaceAll(t.Name(), "/", "-")
-		if err := s.CreateTenant(ctx, Tenant{ID: tid, Tailnet: tid + ".ts.net", MintMode: "apikey", MaxObjects: 7, CreatedAt: 1}); err != nil {
+		if err := s.CreateTenant(ctx, Tenant{ID: tid, Tailnet: tid + ".ts.net", MintMode: MintOAuth, MaxObjects: 7, CreatedAt: 1}); err != nil {
 			t.Fatal(err)
 		}
 		var wg sync.WaitGroup
@@ -176,7 +181,7 @@ func TestStoreTenantQuota(t *testing.T) {
 				defer wg.Done()
 				id := fmt.Sprintf("%s-o%02d", tid, i)
 				err := s.CreateObjectChecked(ctx, Object{ID: id, TenantID: tid, Workload: "w", Namespace: "A", Name: id, Hostname: id,
-					RootID: id, Status: StatusPending}, 7, 0)
+					RootID: id, Status: StatusPending}, 7, 0, nil)
 				mu.Lock()
 				defer mu.Unlock()
 				switch {
@@ -201,6 +206,7 @@ func TestStoreTenantQuota(t *testing.T) {
 // so neither "done" nor "retry" could be written) becomes due again after
 // DeviceDeleteClaimTTL; a recorded success (-1) never does.
 func TestStoreDeviceDeleteClaimLapses(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		id := "ddl-" + strings.ReplaceAll(t.Name(), "/", "-")

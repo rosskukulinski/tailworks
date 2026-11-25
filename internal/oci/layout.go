@@ -41,7 +41,7 @@ func OpenLayout(p string) (*Layout, error) {
 	}
 	l := &Layout{dir: p}
 	if !st.IsDir() {
-		d, err := os.MkdirTemp("", "twd-oci-layout-")
+		d, err := os.MkdirTemp("", "tw-oci-layout-")
 		if err != nil {
 			return nil, err
 		}

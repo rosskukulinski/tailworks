@@ -1,0 +1,12 @@
+{
+  // e2e/vm alarms_test.go: Durable Object alarms on the microVM tier.
+  "name": "vmalarm",
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-01",
+  "durable_objects": {
+    "bindings": [
+      { "name": "CLOCK", "class_name": "Clock" },
+      { "name": "PLAIN", "class_name": "PlainClock" },
+    ],
+  },
+}

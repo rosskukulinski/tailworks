@@ -1,6 +1,6 @@
 //go:build e2e
 
-// Package local runs the twd-netd binary as a real process against a local
+// Package local runs the tw-netd binary as a real process against a local
 // control plane (testcontrol + DERP + STUN) and a stock workerd.
 package local
 
@@ -18,8 +18,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/netd"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/netd"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 )
 
 type proc struct {
@@ -29,7 +29,7 @@ type proc struct {
 
 func startNetd(t *testing.T, bin string, args ...string) *proc {
 	t.Helper()
-	lf, err := os.CreateTemp("", "twd-netd-*.log")
+	lf, err := os.CreateTemp("", "tw-netd-*.log")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func (p *proc) stop(t *testing.T) time.Duration {
 	case <-done:
 	case <-time.After(15 * time.Second):
 		p.cmd.Process.Kill()
-		t.Error("twd-netd did not exit on SIGTERM")
+		t.Error("tw-netd did not exit on SIGTERM")
 	}
 	return time.Since(st)
 }
@@ -94,14 +94,14 @@ func TestNetdBinary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir, err := os.MkdirTemp("/tmp", "twd-e2e-")
+	dir, err := os.MkdirTemp("/tmp", "tw-e2e-")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(dir)
 	os.Chmod(dir, 0o700)
-	bin := filepath.Join(dir, "twd-netd")
-	if out, err := exec.Command("go", "build", "-o", bin, filepath.Join(root, "cmd", "twd-netd")).CombinedOutput(); err != nil {
+	bin := filepath.Join(dir, "tw-netd")
+	if out, err := exec.Command("go", "build", "-o", bin, filepath.Join(root, "cmd", "tw-netd")).CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	ctl, err := nettest.StartControl()
@@ -125,7 +125,7 @@ func TestNetdBinary(t *testing.T) {
 	defer func() {
 		if t.Failed() {
 			b, _ := os.ReadFile(p.log)
-			t.Logf("twd-netd log:\n%s", b)
+			t.Logf("tw-netd log:\n%s", b)
 		}
 	}()
 	cc := ctlClient(filepath.Join(runDir, "ctl.sock"))
@@ -186,13 +186,18 @@ func TestNetdBinary(t *testing.T) {
 		code, b := get("http://" + ips[id] + "/egress?url=http://ttest-echo/")
 		var er nettest.EchoReply
 		json.Unmarshal(b, &er)
-		if code != 200 || !strings.HasPrefix(er.Caller.Node, "twd-"+id+".") {
+		if code != 200 || !strings.HasPrefix(er.Caller.Node, "tw-"+id+".") {
 			t.Fatalf("egress %s: %d %s", id, code, b)
 		}
 	}
+	// A same-host sibling is delivered in process (netd/samehost.go): b
+	// answers, and sees a as its caller.
+	if code, b := get("http://" + ips["a"] + "/egress?url=http://" + ips["b"] + "/"); code != 200 || !strings.Contains(string(b), `"hostname":"tw-a"`) {
+		t.Errorf("same-host hop a -> b: %d %s", code, b)
+	}
 	// SSRF + peer_not_visible through the binary
-	for u, want := range map[string]string{"http://" + ips["b"] + "/": netd.CodeForbiddenDestination,
-		"http://127.0.0.1/": netd.CodeForbiddenDestination, "http://example.com/": netd.CodePeerNotVisible} {
+	for u, want := range map[string]string{
+		"http://127.0.0.1/": netd.CodeForbiddenDestination, "http://example.com/": netd.CodeInternetEgressUnavailable} {
 		_, b := get("http://" + ips["a"] + "/egress?url=" + u)
 		var e netd.Error
 		json.Unmarshal(b, &e)

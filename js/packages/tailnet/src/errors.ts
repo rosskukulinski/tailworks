@@ -1,12 +1,14 @@
 // The typed error catalog (DX.md "Error catalog", RFC §6.1). Every denial
-// has the same shape: from fetch() an HTTP status with a `twd-error: <code>`
+// has the same shape: from fetch() an HTTP status with a `tw-error: <code>`
 // header and a JSON body {code, message|detail, missing?, snippet?, doc_url,
-// trace_id?}; from ctx.tailnet.* and the @twd/mcp helpers a thrown
+// trace_id?}; from ctx.tailnet.* and the @tailworks/mcp helpers a thrown
 // TailnetError.
 
 export type TailnetErrorCode =
   | "peer_not_visible"
   | "forbidden_destination"
+  | "internet_egress_unavailable"
+  | "internet_port_refused"
   | "acl_denied"
   | "cap_missing"
   | "cap_limit_exceeded"
@@ -17,6 +19,8 @@ export type TailnetErrorCode =
   | "identity_pending"
   | "derp_unreachable"
   | "plan_feature_missing"
+  | "not_supported"
+  | "socket_limit"
   | "killed"
   | "object_killed"
   | "no_identity"
@@ -24,11 +28,15 @@ export type TailnetErrorCode =
   | "namespace_conflict"
   | "bad_request"
   | "unknown_object"
+  | "service_not_found"
+  | "binding_forbidden"
+  | "rpc_not_forwardable"
   | "dial_failed"
   | "upstream_unavailable"
   | "hostd_unavailable"
   | "public_request"
   | "public_create_denied"
+  | "create_not_admitted"
   | "public_ingress_not_allowed"
   | "public_name_taken"
   | "rate_limited"
@@ -44,11 +52,13 @@ export interface CatalogEntry {
   title: string;
 }
 
-export const DOC_BASE = "https://github.com/rosskukulinski/twd/blob/main/docs/errors.md#";
+export const DOC_BASE = "https://github.com/rosskukulinski/tailworks/blob/master/docs/errors.md#";
 
 export const CATALOG: Readonly<Record<TailnetErrorCode, CatalogEntry>> = Object.freeze({
   peer_not_visible: { status: 403, title: "the destination is not in this node's netmap (a grant is missing, or the name does not exist)" },
   forbidden_destination: { status: 403, title: "the destination class is refused by netd (loopback, self, sibling, host, non-tailnet)" },
+  internet_egress_unavailable: { status: 403, title: "internet egress is turned off for this workload or host (tailnet.egress.internet), or the host is not on its allowlist" },
+  internet_port_refused: { status: 403, title: "internet egress to TCP port 25 is refused unless tailnet.egress.internet names the destination with that port" },
   acl_denied: { status: 403, title: "the peer is visible but the port or service is not granted" },
   cap_missing: { status: 403, title: "the caller lacks the app capability (or the tool) required" },
   cap_limit_exceeded: { status: 403, title: "within the granted tool, but above a numeric limit or budget" },
@@ -58,19 +68,25 @@ export const CATALOG: Readonly<Record<TailnetErrorCode, CatalogEntry>> = Object.
   bootstrap_failed: { status: 502, title: "the object's node could not be created (mint, token exchange or join failed)" },
   identity_pending: { status: 503, title: "the object's node is not ready yet" },
   derp_unreachable: { status: 502, title: "no direct path and no reachable DERP relay" },
-  plan_feature_missing: { status: 501, title: "the tailnet's plan or control server lacks a feature twd can use" },
+  plan_feature_missing: { status: 501, title: "the tailnet's plan or control server lacks a feature tailworks can use" },
+  not_supported: { status: 501, title: "tailworks doesn't support this call here (yet)" },
+  socket_limit: { status: 429, title: "too many open sockets for this object" },
   killed: { status: 410, title: "the object was killed" },
   object_killed: { status: 410, title: "a new request reached a killed object (its node's tombstone answered)" },
   no_identity: { status: 401, title: "the request carries no verified tailnet caller" },
   lease_lost: { status: 409, title: "this host no longer holds the namespace lease" },
-  namespace_conflict: { status: 409, title: "mgmt returned another identity's object for this workload's class + object name (an invariant violation; twd fails closed rather than share a node)" },
+  namespace_conflict: { status: 409, title: "mgmt returned another identity's object for this workload's class + object name (an invariant violation; tailworks fails closed rather than share a node)" },
   bad_request: { status: 400, title: "the request is malformed" },
   unknown_object: { status: 404, title: "no such object" },
+  service_not_found: { status: 404, title: "a service binding's target workload (or its entrypoint) does not exist in this tenant" },
+  binding_forbidden: { status: 403, title: "a named entrypoint or RPC method was called by something that is not a tailworks node of the same tenant" },
+  rpc_not_forwardable: { status: 400, title: "an RPC argument or result is passed by reference on Cloudflare (a function, RpcTarget, stream, Request or Response) and cannot cross a service binding" },
   dial_failed: { status: 502, title: "the tailnet dial failed" },
   upstream_unavailable: { status: 503, title: "the platform upstream is unavailable" },
   hostd_unavailable: { status: 503, title: "the host agent is unavailable" },
   public_request: { status: 403, title: "a public (Funnel) request reached code that needs a tailnet caller; use getRequester()" },
   public_create_denied: { status: 403, title: "a public request may not create a new object (or spawn); only existing objects, or classes with public.create" },
+  create_not_admitted: { status: 403, title: "the object does not exist and nothing admitted its creation: reach new objects through the env tailworks hands your handler (not a raw or cached binding, not from a public request)" },
   public_ingress_not_allowed: { status: 403, title: "the tenant does not allow public ingress (operator setting publicIngress)" },
   public_name_taken: { status: 409, title: "the workload's public node name is taken on the tailnet (MagicDNS would rename it)" },
   rate_limited: { status: 429, title: "too many public requests (per workload or per client IP)" },
@@ -98,7 +114,7 @@ export interface TailnetErrorInit {
   [k: string]: unknown;
 }
 
-const BRAND = Symbol.for("twd.TailnetError");
+const BRAND = Symbol.for("tw.TailnetError");
 
 export class TailnetError extends Error {
   readonly code: TailnetErrorCode | string;
@@ -107,7 +123,7 @@ export class TailnetError extends Error {
   docUrl: string;
   traceId: string;
   status: number;
-  /** Human-readable detail (message may be JSON; see @twd/mcp). */
+  /** Human-readable detail (message may be JSON; see @tailworks/mcp). */
   detail: string;
   [k: string]: unknown;
 
@@ -136,11 +152,11 @@ export class TailnetError extends Error {
     return o;
   }
 
-  /** Render as an HTTP response with the twd-error header. */
+  /** Render as an HTTP response with the tw-error header. */
   toResponse(): Response {
     return new Response(JSON.stringify(this.toJSON()), {
       status: this.status,
-      headers: { "content-type": "application/json", "twd-error": String(this.code), "cache-control": "no-store" },
+      headers: { "content-type": "application/json", "tw-error": String(this.code), "cache-control": "no-store" },
     });
   }
 
@@ -159,11 +175,11 @@ export function isTailnetError(e: unknown): e is TailnetError {
 }
 
 /**
- * fromResponse returns a TailnetError if r is a typed twd/netd denial
- * (it has a twd-error header), else null. The body is read from a clone.
+ * fromResponse returns a TailnetError if r is a typed tw/netd denial
+ * (it has a tw-error header), else null. The body is read from a clone.
  */
 export async function fromResponse(r: Response): Promise<TailnetError | null> {
-  const code = r.headers.get("twd-error");
+  const code = r.headers.get("tw-error");
   if (!code) return null;
   let body: Record<string, any> = { code };
   try {

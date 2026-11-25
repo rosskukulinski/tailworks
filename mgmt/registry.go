@@ -10,20 +10,24 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/rosskukulinski/twd/internal/container"
-	"github.com/rosskukulinski/twd/internal/oci"
-	"github.com/rosskukulinski/twd/internal/registry"
+	"github.com/rosskukulinski/tailworks/internal/container"
+	"github.com/rosskukulinski/tailworks/internal/oci"
+	"github.com/rosskukulinski/tailworks/internal/registry"
 )
 
-// The OCI registry (ADR-032 D3). twd-mgmt serves the distribution API at
+// The OCI registry (ADR-032 D3). tw-mgmt serves the distribution API at
 // /v2/ on the same listeners as /v1 (tsnet :80/:443, and the local-dev
 // socket), behind the same WhoIs gate:
 //
 //   - admins (AdminCap, -admins, the local operator) push and pull every
 //     namespace: a tenant's ("<tenantID>/…") and the operator's "public/…";
-//   - hosts (tag:twd-host) pull only: "public/…" and the namespaces of
+//   - hosts (tag:tw-host) pull only: "public/…" and the namespaces of
 //     tenants they hold a deployment of. A host never pushes;
-//   - everyone else was already refused by TailnetHandler (403 not_admin).
+//   - tenant admins (TenantAdminCap) pull their tenants' namespaces with
+//     "read" and "public/…" with "read" in any tenant, and push their
+//     tenants' namespaces with "deploy" (tenantscope_registry.go);
+//   - everyone else is refused (TailnetHandler's 403 not_admin, or
+//     Handler's 403 for approvers and MCP-only callers).
 //
 // Blobs are content-addressed files under Config.RegistryDir (shared by
 // every replica that serves the registry: put it on shared storage, or run
@@ -38,7 +42,7 @@ import (
 // and every host caches once (hostd's "public" cache scope).
 type PublicImage struct {
 	ID         string `json:"id"`
-	Ref        string `json:"ref"`        // normalised upstream ref (docker.io/cloudflare/sandbox:0.12.14) or twd.local/…
+	Ref        string `json:"ref"`        // normalised upstream ref (docker.io/cloudflare/sandbox:0.12.14) or tw.local/…
 	Arch       string `json:"arch"`       // amd64 | arm64
 	Repository string `json:"repository"` // public/…
 	Digest     string `json:"digest"`     // the linux/arch image manifest
@@ -88,15 +92,18 @@ func (m *Mgmt) registryAuthorize(r *http.Request, ns string, push bool) error {
 	case "host":
 		host = p.HostID
 	case "local":
-		host = r.Header.Get("Twd-Host-ID") // hostd on the local-dev socket: host rules
+		host = r.Header.Get("Tw-Host-ID") // hostd on the local-dev socket: host rules
 	case "user":
-		// TailnetHandler admits a user principal only as an admin.
+		if scoped, _ := r.Context().Value(registryTenantScopeKey{}).(bool); scoped {
+			return registryTenantAuthorize(p, ns, push) // tenantscope_registry.go
+		}
+		// Otherwise an admin: Handler refuses every other user.
 	default:
 		return &registry.Denied{Reason: "unauthenticated"}
 	}
 	if host != "" {
 		if push {
-			return &registry.Denied{Reason: "hosts pull from twd's registry; they never push (caller " + p.Kind + " host " + host + ")"}
+			return &registry.Denied{Reason: "hosts pull from tailworks' registry; they never push (caller " + p.Kind + " host " + host + ")"}
 		}
 		if ns == "" || ns == registry.PublicNamespace {
 			return nil
@@ -159,12 +166,12 @@ func (pl publicLookup) LookupPublic(ctx context.Context, ref, arch string) (stri
 }
 
 // AddPublicImage marks ref (an upstream image, mirrored now into
-// public/<host>/<repository>, or a twd.local ref already pushed to the
+// public/<host>/<repository>, or a tw.local ref already pushed to the
 // public namespace) as a public base for each arch (empty: every linux
 // arch it has). Re-adding refreshes the pinned digest.
 func (m *Mgmt) AddPublicImage(ctx context.Context, ref string, arches []string, by string) ([]PublicImage, error) {
 	if m.reg == nil {
-		return nil, errf(409, "registry_unavailable", "this twd-mgmt has no registry (-registry-dir)")
+		return nil, errf(409, "registry_unavailable", "this tw-mgmt has no registry (-registry-dir)")
 	}
 	r, err := oci.ParseRef(ref)
 	if err != nil {
@@ -182,7 +189,7 @@ func (m *Mgmt) AddPublicImage(ctx context.Context, ref string, arches []string, 
 		repo = srcRepo
 	} else {
 		if m.resolver.Upstream == nil {
-			return nil, errf(409, "mirror_disabled", "this twd-mgmt does not mirror external images (-no-mirror)")
+			return nil, errf(409, "mirror_disabled", "this tw-mgmt does not mirror external images (-no-mirror)")
 		}
 		src, srcRepo = m.resolver.Upstream(r.Registry), r.Repository
 		repo = registry.PublicNamespace + "/" + strings.NewReplacer(":", "-").Replace(r.Registry) + "/" + r.Repository
@@ -234,7 +241,7 @@ func (m *Mgmt) ListPublicImages(ctx context.Context) ([]PublicImage, error) {
 	return ps, err
 }
 
-// ImageAliases is the alias map deploys apply (twd deploy applies the same
+// ImageAliases is the alias map deploys apply (tw deploy applies the same
 // map as BuildKit named contexts when it builds a Dockerfile).
 func (m *Mgmt) ImageAliases() []registry.Alias {
 	if m.resolver == nil {

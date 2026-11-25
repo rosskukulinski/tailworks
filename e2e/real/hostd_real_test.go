@@ -2,7 +2,7 @@
 
 package real
 
-// M3 on tailnet 1: twd-hostd + fakemgmt (apikey mode via internal/tsapi)
+// M3 on tailnet 1: tw-hostd + fakemgmt (apikey mode via internal/tsapi)
 // on production control. hello: verified caller + workload egress; probe:
 // 3 DO objects, each with its own node and attributed egress; kill. Every
 // node is ephemeral tag:ttest named ttest-m3-<run>-*; cleanup deletes exactly
@@ -23,18 +23,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd/fakemgmt"
-	"github.com/rosskukulinski/twd/hostd/hostdtest"
-	"github.com/rosskukulinski/twd/hostd/mgmtapi"
-	"github.com/rosskukulinski/twd/internal/tsapi"
-	"github.com/rosskukulinski/twd/netd"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/e2e/cliflow"
+	"github.com/rosskukulinski/tailworks/hostd/fakemgmt"
+	"github.com/rosskukulinski/tailworks/hostd/hostdtest"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/internal/tsapi"
+	"github.com/rosskukulinski/tailworks/netd"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 )
 
 func TestRealHostd(t *testing.T) {
-	keyFile, tailnet := os.Getenv("TWD_E2E_API_KEY_FILE"), os.Getenv("TWD_E2E_TAILNET")
+	keyFile, tailnet := os.Getenv("TW_E2E_API_KEY_FILE"), os.Getenv("TW_E2E_TAILNET")
 	if keyFile == "" || tailnet == "" {
-		t.Skip("TWD_E2E_API_KEY_FILE / TWD_E2E_TAILNET not set")
+		t.Skip("TW_E2E_API_KEY_FILE / TW_E2E_TAILNET not set")
 	}
 	if !allowedTailnets[tailnet] {
 		t.Fatalf("refusing to run against tailnet %q (not in the allow list)", tailnet)
@@ -47,10 +48,10 @@ func TestRealHostd(t *testing.T) {
 	b := make([]byte, 3)
 	rand.Read(b)
 	run := hex.EncodeToString(b)
-	// TWD_E2E_TIER=microvm runs the same suite with every workload in a
+	// TW_E2E_TIER=microvm runs the same suite with every workload in a
 	// Firecracker microVM (M8; Linux + KVM + root, guest image from
-	// TWD_VM_KERNEL / TWD_VM_ROOTFS). Its nodes are ttest-m8-<run>-*.
-	tier, milestone := os.Getenv("TWD_E2E_TIER"), "m3"
+	// TW_VM_KERNEL / TW_VM_ROOTFS). Its nodes are ttest-m8-<run>-*.
+	tier, milestone := os.Getenv("TW_E2E_TIER"), "m3"
 	var vmb vmBackendT
 	if tier == "microvm" {
 		milestone = "m8"
@@ -71,8 +72,9 @@ func TestRealHostd(t *testing.T) {
 		ControlURL: prodControl, Ephemeral: true, HostnamePrefix: prefix, HeartbeatEvery: time.Second,
 		KillTombstone: 10 * time.Second,
 		Fake:          fakemgmt.Config{ForceTags: []string{testTag}},
-		Tenant:        mgmtapi.Tenant{Tailnet: tailnet, ControlURL: prodControl, MintMode: "apikey", APIKeyFile: keyFile, Tier: tier},
-		VM:            vmb,
+		Tenant: mgmtapi.Tenant{Tailnet: tailnet, ControlURL: prodControl, MintMode: "oauth",
+			OAuthClientFile: cliflow.RealOAuthClient(t, keyFile, tailnet, t.TempDir(), prefix+"oauth", testTag), Tier: tier},
+		VM: vmb,
 	})
 	var nodes []*nettest.Node
 	// Cleanup (registered after hostdtest's, so it runs FIRST): track every

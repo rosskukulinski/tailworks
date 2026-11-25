@@ -9,12 +9,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/netd"
+	"github.com/rosskukulinski/tailworks/hostd/bundle"
+	"github.com/rosskukulinski/tailworks/netd"
 )
 
 // Tenant code reaches objects by (class, name); it must never be able to
 // create or act as a pool node, which a later object is handed.
 func TestEnsureRefusesReservedClasses(t *testing.T) {
+	t.Parallel()
 	h := &Host{}
 	for _, cls := range []string{PoolClass, "_workload"} {
 		_, err := h.ensure(context.Background(), &workload{tenantID: "tn", name: "w"}, cls, "SupportAgent/x", nil, nil, "")
@@ -26,6 +28,7 @@ func TestEnsureRefusesReservedClasses(t *testing.T) {
 
 // A pool node serves nothing: ingress to it is refused before workerd.
 func TestIngressRefusesPoolNodes(t *testing.T) {
+	t.Parallel()
 	p := &object{ID: "pool-abc", NetdID: "pool-abc", TenantID: "tn", Workload: "w", Class: PoolClass, Name: "SupportAgent/x", Status: statusReady, live: true}
 	h := &Host{objects: map[string]*object{p.ID: p}, byNetd: map[string]*object{p.NetdID: p},
 		workloads: map[string]*workload{"tn/w": {tenantID: "tn", name: "w"}}}
@@ -43,6 +46,7 @@ func TestIngressRefusesPoolNodes(t *testing.T) {
 // they are old enough (a restart forgets demand; it must not drop a warm
 // pool), never while reserved for an assignment in flight.
 func TestIdlePoolSelection(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	mk := func(id, class string, age time.Duration, reserved bool) *object {
 		return &object{ID: id, TenantID: "tn", Workload: "w", Class: PoolClass, Name: class + "/" + id, Status: statusReady,
@@ -76,9 +80,39 @@ func TestIdlePoolSelection(t *testing.T) {
 // Only Durable Object classes use or warm a pool: never the workload entry
 // node, a pool node, or the public (Funnel) node.
 func TestPoolable(t *testing.T) {
+	t.Parallel()
 	for class, want := range map[string]bool{"SupportAgent": true, "": false, PoolClass: false, "_workload": false, "_public": false} {
 		if got := poolable(class); got != want {
 			t.Errorf("poolable(%q) = %v, want %v", class, got, want)
+		}
+	}
+}
+
+// A host restart rejoins idle pool nodes from saved state, like the
+// objects they will be handed to (ADR-031), but only for a class that
+// still has its own node in the app being started. (Before the fix, a
+// pool node never matched: its Class is PoolClass, not one of app's.)
+func TestRejoinsWithPoolNodes(t *testing.T) {
+	t.Parallel()
+	app := &bundle.App{Classes: map[string]*bundle.Class{
+		"SupportAgent": {Name: "SupportAgent", Node: true},
+		"Counter":      {Name: "Counter"},
+	}}
+	for _, tc := range []struct {
+		o    *object
+		want bool
+	}{
+		{&object{ID: "entry"}, true},
+		{&object{ID: "agent", Class: "SupportAgent", Name: "a"}, true},
+		{&object{ID: "counter", Class: "Counter", Name: "c"}, false},
+		{&object{ID: "gone", Class: "Removed", Name: "g"}, false},
+		{&object{ID: "pool-agent", Class: PoolClass, Name: "SupportAgent/x"}, true},
+		{&object{ID: "pool-counter", Class: PoolClass, Name: "Counter/x"}, false},
+		{&object{ID: "pool-gone", Class: PoolClass, Name: "Removed/x"}, false},
+		{&object{ID: "pool-bad", Class: PoolClass}, false},
+	} {
+		if got := rejoinsWith(tc.o, app); got != tc.want {
+			t.Errorf("rejoinsWith(%s) = %v, want %v", tc.o.ID, got, tc.want)
 		}
 	}
 }

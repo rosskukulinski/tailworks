@@ -12,11 +12,12 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
 // OAuth client support (M12): a Tailscale OAuth client (scope auth_keys,
-// tag tag:twd; optionally devices:core and policy_file:read) is exchanged
+// tag tag:tw; optionally devices:core and policy_file:read) is exchanged
 // for a short-lived API access token with the client-credentials grant
 // (POST /api/v2/oauth/token). The secret never expires and lives only in a
 // 0600 file on the host; it is re-read at every exchange and never logged.
@@ -42,7 +43,45 @@ type InsecureFileError struct {
 }
 
 func (e *InsecureFileError) Error() string {
-	return fmt.Sprintf("%s has mode %v: an OAuth client secret file must be readable by its owner only (chmod 600 %s)", e.Path, e.Mode.Perm(), e.Path)
+	return fmt.Sprintf("%s has mode %v: a credential file must be readable by its owner only (chmod 600 %s)", e.Path, e.Mode.Perm(), e.Path)
+}
+
+// OpenSecretFile opens a credential file for reading without following a
+// symlink at the final path element and checks the mode of the file it
+// actually opened (fstat, so a swap between a Stat and the Open cannot
+// slip a group/world-readable file past the check). Any access for group
+// or others is an InsecureFileError.
+func OpenSecretFile(path string) (*os.File, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, err
+	}
+	st, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	if !st.Mode().IsRegular() {
+		f.Close()
+		return nil, fmt.Errorf("%s is not a regular file", path)
+	}
+	if st.Mode().Perm()&0o077 != 0 {
+		f.Close()
+		return nil, &InsecureFileError{Path: path, Mode: st.Mode()}
+	}
+	return f, nil
+}
+
+// LoadSecretEnvFile is LoadEnvFile for files that hold a secret (API keys,
+// join keys): the file must be a regular file, not a symlink, with no
+// group/other access (InsecureFileError otherwise).
+func LoadSecretEnvFile(path, name string) (string, error) {
+	f, err := OpenSecretFile(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	return scanEnv(f, path, name)
 }
 
 // IsInsecureFile reports an InsecureFileError.
@@ -59,14 +98,7 @@ const OAuthSecretPrefix = "tskey-client-"
 // group or others. TS_OAUTH_CLIENT_ID may be omitted: it is the third
 // segment of the secret (tskey-client-<id>-<random>).
 func LoadOAuthFile(path string) (OAuthCredentials, error) {
-	st, err := os.Stat(path)
-	if err != nil {
-		return OAuthCredentials{}, err
-	}
-	if st.Mode().Perm()&0o077 != 0 {
-		return OAuthCredentials{}, &InsecureFileError{Path: path, Mode: st.Mode()}
-	}
-	f, err := os.Open(path)
+	f, err := OpenSecretFile(path)
 	if err != nil {
 		return OAuthCredentials{}, err
 	}

@@ -10,14 +10,14 @@ import (
 	"os"
 	"time"
 
-	"github.com/rosskukulinski/twd/guest/proto"
-	"github.com/rosskukulinski/twd/hostd/sandbox"
-	"github.com/rosskukulinski/twd/hostd/vm/helperapi"
+	"github.com/rosskukulinski/tailworks/guest/proto"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/hostd/vm/helperapi"
 )
 
 // ContainersUsable reports whether BootContainer can work on this host: the
 // helper speaks container guests and the container kernel has erofs (the
-// image format). twd-hostd offers containers only then (a host that can't
+// image format). tw-hostd offers containers only then (a host that can't
 // run them doesn't advertise them, so placement never sends it any).
 func (b *Backend) ContainersUsable() error {
 	if err := b.helperContainers(); err != nil {
@@ -45,7 +45,7 @@ func (b *Backend) helperContainers() error {
 			return nil
 		}
 	}
-	return errors.New("the microVM helper predates container guests (re-run `sudo twd host setup --microvm`)")
+	return errors.New("the microVM helper predates container guests (re-run `sudo tw host setup --microvm`)")
 }
 
 // BootContainer implements sandbox.ContainerBackend: one Firecracker VM

@@ -7,11 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rosskukulinski/twd/netd"
+	"github.com/rosskukulinski/tailworks/netd"
 )
 
 // A tenant's netd registry only ever gets keys for its own objects.
 func TestKeySourceRefusesOtherTenantsObjects(t *testing.T) {
+	t.Parallel()
 	h := &Host{byNetd: map[string]*object{"ob": {ID: "ob", TenantID: "tnB", Workload: "agent"}},
 		workloads: map[string]*workload{"tnB/agent": {}}}
 	_, err := (&keySource{h: h, tenantID: "tnA"}).AuthKey(context.Background(), netd.KeyRequest{ObjectID: "ob"})
@@ -21,6 +22,7 @@ func TestKeySourceRefusesOtherTenantsObjects(t *testing.T) {
 }
 
 func TestTenantIDsAreSafePathElements(t *testing.T) {
+	t.Parallel()
 	for id, ok := range map[string]bool{"tn_tail7906d5": true, "tn_a-b.c": true, "..": false, "a/b": false, "": false, "../x": false, "a..b": false} {
 		if got := tenantIDRE.MatchString(id) && !strings.Contains(id, ".."); got != ok {
 			t.Errorf("%q: safe=%v, want %v", id, got, ok)
@@ -29,6 +31,7 @@ func TestTenantIDsAreSafePathElements(t *testing.T) {
 }
 
 func TestSeatbeltProfile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	p := SeatbeltProfile([]string{dir + "/run/i1", dir + "/data/tenants/A/workloads/w/do"}, []string{"/opt/workerd"},
 		[]string{dir + "/data", dir + "/run", "", dir + "/data"})
@@ -45,7 +48,7 @@ func TestSeatbeltProfile(t *testing.T) {
 	}
 	deny := idx(`(deny file-read* file-write* (subpath "` + rd + `/data"))`)
 	allow := idx(`(allow file-read* file-write* (subpath "` + rd + `/data/tenants/A/workloads/w/do"))`)
-	idx(`(deny network-outbound (remote unix-socket (subpath "` + rd + `/run")))`)
+	idx(`(deny network*)`)
 	idx(`(allow network-outbound (remote unix-socket (subpath "` + rd + `/run/i1")))`)
 	idx(`(allow file-read* (literal "/opt/workerd"))`)
 	idx(`(allow file-read-metadata (literal "` + rd + `/data/tenants"))`)
@@ -63,6 +66,7 @@ func TestSeatbeltProfile(t *testing.T) {
 // The Node tier's profile: the node install prefix is readable (nvm puts it
 // under the denied home dir), never writable, and denies still precede it.
 func TestSeatbeltProfileNodePrefix(t *testing.T) {
+	t.Parallel()
 	dir := realPath(t.TempDir())
 	bin := dir + "/home/.nvm/versions/node/v25/bin/node"
 	if got := nodePrefix(bin); len(got) != 1 || got[0] != dir+"/home/.nvm/versions/node/v25" {
@@ -74,7 +78,7 @@ func TestSeatbeltProfileNodePrefix(t *testing.T) {
 		}
 	}
 	p := seatbeltProfile([]string{dir + "/run/i2", dir + "/data/tenants/A/workloads/w/node"}, []string{bin}, nodePrefix(bin),
-		[]string{dir + "/home", dir + "/data", dir + "/run"})
+		[]string{dir + "/home", dir + "/data", dir + "/run"}, nil, nil)
 	lines := strings.Split(p, "\n")
 	at := func(s string) int {
 		for i, l := range lines {
@@ -100,6 +104,7 @@ func TestSeatbeltProfileNodePrefix(t *testing.T) {
 // The Landlock profile shape (Linux): sandboxOf maps a recorded profile to
 // its sandbox, and "landlock" is refused where the kernel lacks it.
 func TestSandboxKinds(t *testing.T) {
+	t.Parallel()
 	for p, want := range map[string]string{"/r/i1-ab/sandbox.sb": SandboxSeatbelt, "/r/i1-ab/sandbox.json": SandboxLandlock, "": SandboxNone} {
 		if got := sandboxOf(p); got != want {
 			t.Fatalf("sandboxOf(%q) = %q, want %q", p, got, want)

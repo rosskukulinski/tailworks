@@ -4,7 +4,7 @@
 # here before use; a mismatch deletes the file and fails the build. Bumping a
 # version means bumping its hash in the same commit.
 #
-# Arch names: twd uses Go's (amd64, arm64); kernel.org, Firecracker and the
+# Arch names: tailworks uses Go's (amd64, arm64); kernel.org, Firecracker and the
 # Firecracker CI bucket use x86_64/aarch64; npm names amd64 "64".
 
 # Ubuntu 24.04 base rootfs (cdimage.ubuntu.com, SHA256SUMS of 24.04.5): the
@@ -23,7 +23,7 @@ CA_DEB_SHA256=641de77d8f142cfd62a1a6f964ba67b20754d3337c480efb529d086075a06c9a
 
 # Guest kernel: kernel.org 6.1 LTS with Firecracker's CI config for that
 # kernel line (firecracker-ci/v1.15/<arch>/vmlinux-6.1.155.config, the build
-# ~/fc/vmlinux came from) plus guest/kernel/twd.config (erofs + overlayfs for
+# ~/fc/vmlinux came from) plus guest/kernel/tw.config (erofs + overlayfs for
 # container mode).
 KERNEL_VERSION=6.1.155
 KERNEL_URL=https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-$KERNEL_VERSION.tar.xz
@@ -42,6 +42,13 @@ FIRECRACKER_SHA256_amd64=99ad0f5cd0514a88aad0e9ae8cfdb3cc3b4ab9d190e1194602406c7
 FIRECRACKER_SHA256_arm64=fe726e0b43c04363ac07e358be4dee982c3947c65ed3ae10c770fef5e1cd756c
 JAILER_SHA256_amd64=65ef226e96f0ceda55ba643f445801ef2cc0ea667ef67cad8ac4f406c9c8434f
 JAILER_SHA256_arm64=4d8d2dd4dfc1d47932b2bd261479181dd0c54f0a2f32714421a7e7f9f07ddec8
+
+# Pyodide bundles for Python Workers (ADR-055): the files, digests and sizes
+# are internal/pyodide/bundles.txt (shared with hostd's process tier); they
+# come from where workerd itself downloads them.
+PYODIDE_URL=https://pyodide-capnp-bin.edgeworker.net
+PYODIDE_LIST=${ROOT:?}/internal/pyodide/bundles.txt
+PYODIDE_GUEST_DIR=usr/share/tailworks/pyodide # internal/pyodide.GuestDir
 
 # GUEST_CACHE: downloads (content-checked, so safe to share between builds).
 GUEST_CACHE=${GUEST_CACHE:-${ROOT:?}/dist/cache/guest}

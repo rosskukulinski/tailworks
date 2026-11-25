@@ -1,0 +1,16 @@
+{
+  // Type-checking only (`npx tsc --noEmit`): tailworks bundles the app itself.
+  // worker-configuration.d.ts is the Env interface `tw types` writes.
+  "compilerOptions": {
+    "target": "ES2024",
+    "lib": ["ES2024"],
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "types": ["@cloudflare/workers-types", "@tailworks/tailnet"],
+    "strict": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "skipLibCheck": true
+  },
+  "include": ["src", "worker-configuration.d.ts"]
+}

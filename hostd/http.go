@@ -10,11 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd/bundle"
-	"github.com/rosskukulinski/twd/hostd/gen"
-	"github.com/rosskukulinski/twd/hostd/mgmtapi"
-	"github.com/rosskukulinski/twd/hostd/sandbox"
-	"github.com/rosskukulinski/twd/netd"
+	"github.com/rosskukulinski/tailworks/hostd/bundle"
+	"github.com/rosskukulinski/tailworks/hostd/gen"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/internal/wallclock"
+	"github.com/rosskukulinski/tailworks/netd"
 )
 
 // errStatus maps catalog codes to HTTP statuses for hostd-originated errors.
@@ -24,11 +25,20 @@ var errStatus = map[string]int{
 	"lease_lost": 409, "namespace_conflict": 409, "spawn_budget_exceeded": 429, "bootstrap_failed": 502,
 	"cap_missing": 403, "delegation_exceeds_parent": 403, "delegation_invalid": 403,
 	"forbidden_destination": 403, "peer_not_visible": 403, "acl_denied": 403,
+	"internet_egress_unavailable": 403,
+	"internet_port_refused":       403,
 	// Containers (ADR-032): local capacity, the tenant quota (mgmt), mgmt
 	// unreachable (fail closed), a second start of a running container.
 	"capacity_exhausted": 503, "container_quota_exceeded": 429, "quota_unavailable": 503, "container_running": 409,
 	"tier_unavailable":     409,
 	"public_create_denied": 403, "public_request": 403, "not_public": 404,
+	// Create admission (docs/create-admission.md): a new name nobody admitted.
+	"create_not_admitted": 403,
+	"push_unauthorized":   403,
+	// Object names (objname.go): a new name with a control character.
+	"bad_object_name": 400,
+	// Approvals (approvals.go): nothing is waiting for that decision.
+	"approval_not_pending": 409,
 }
 
 func writeAPIError(w http.ResponseWriter, e *apiError) {
@@ -48,11 +58,12 @@ func writeAPIError(w http.ResponseWriter, e *apiError) {
 }
 
 // ingressHandler is the tenant registry's netd Upstream: netd has done
-// WhoIs and set the cf blob; hostd adds cf.twd routing (only hostd can, as
+// WhoIs and set the cf blob; hostd adds cf.tw routing (only hostd can, as
 // only it reaches the ingress socket) and forwards to the active workerd.
 func (h *Host) ingressHandler(t *tenant) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get(netd.HeaderObject)
+		stripRoutingHeaders(r.Header) // routingheaders.go (#303)
 		h.mu.Lock()
 		o := h.byNetd[id]
 		var wl *workload
@@ -69,14 +80,25 @@ func (h *Host) ingressHandler(t *tenant) http.Handler {
 			writeAPIError(w, &apiError{Code: "no_identity", Detail: "missing cf blob"})
 			return
 		}
+		if why := h.stallFenced(wl); why != "" { // stallfence.go (#501)
+			writeAPIError(w, &apiError{Code: "upstream_unavailable", Detail: why})
+			return
+		}
+		if h.serveApprovals(w, r, wl, blob) { // approvals.go: /_tw/approvals
+			return
+		}
 		route := map[string]any{"kind": "workload", "workload": o.Workload, "objectID": o.ID}
 		if o.Class != "" {
 			route = map[string]any{"kind": "object", "class": o.Class, "name": o.Name, "workload": o.Workload, "objectID": o.ID}
 		}
-		blob["twd"] = route
-		blob["traceId"] = newTraceID()
-		b, _ := json.Marshal(blob)
-		r.Header.Set(netd.HeaderCF, string(b))
+		if !h.bindingIngress(w, r, o, blob, route) { // servicebind.go
+			return
+		}
+		trace := newTraceID()
+		markHTTPSRoute(r, o, blob, route) // tailnethttps.go
+		blob["tw"] = route
+		blob["traceId"] = trace
+		// limits.md#redeploy-wait
 		ctx, cancel := context.WithTimeout(r.Context(), h.cfg.DrainTimeout+5*time.Second)
 		inst, release := wl.acquire(ctx)
 		cancel()
@@ -85,11 +107,30 @@ func (h *Host) ingressHandler(t *tenant) http.Handler {
 			return
 		}
 		defer release()
-		inst.ingress.ServeHTTP(w, r)
+		if !publicBlob(blob) {
+			// A tailnet request may create objects: its ticket (hostd-issued,
+			// hostd-verified) is what the runtime's guarded env presents to
+			// "admit". Public requests get none (RT3-06/07).
+			route["ticket"] = gen.CreateTicket(inst.macKey(), trace, wallclock.Now())
+			sealCaller(blob, inst.macKey(), wallclock.Now()) // sealcf.go (#148)
+		}
+		b, _ := json.Marshal(blob)
+		r.Header.Set(netd.HeaderCF, string(b))
+		sp, ow := h.tel.startIngress(wl, inst, o, r, blob, trace, w) // telemetry.go
+		inst.ingress.ServeHTTP(ow, r)
+		sp.end()
 	})
 }
 
-// statusRecorder captures the status and twd-error of a proxied response.
+// publicBlob reports whether netd's cf blob marks the request as public
+// (Funnel): tailscale.requester.kind == "public".
+func publicBlob(blob map[string]any) bool {
+	ts, _ := blob["tailscale"].(map[string]any)
+	rq, _ := ts["requester"].(map[string]any)
+	return rq["kind"] == "public"
+}
+
+// statusRecorder captures the status and tw-error of a proxied response.
 type statusRecorder struct {
 	http.ResponseWriter
 	code int
@@ -106,12 +147,21 @@ func (s *statusRecorder) Flush() {
 	}
 }
 
+// Unwrap lets netd's proxy hijack the connection for a WebSocket upgrade
+// (http.ResponseController).
+func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
+
 // egressObjHandler serves a facet's egress (platform Egress entrypoint):
 // verify the MAC, map class+name to the object (creating it on first use),
 // and hand the request to netd, which dials from the object's own node.
 func (h *Host) egressObjHandler(inst *instance) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cls, name, ok := gen.VerifyEgressOnce(inst.res.MACKey, r.Header, r.Method, r.RequestURI, time.Now(), &inst.nonces)
+		if r.Method == http.MethodConnect {
+			h.serveConnect(w, r, inst, h.connectAsFacet(inst)) // connect.go
+			return
+		}
+		cls, name, ok := gen.VerifyEgressOnce(inst.res.MACKey, r.Header, r.Method, r.RequestURI, wallclock.Now(), &inst.nonces)
+		bc := takeBinding(r) // servicebind.go
 		if !ok {
 			writeAPIError(w, &apiError{Code: "unknown_object", Detail: "egress request failed platform authentication"})
 			return
@@ -121,16 +171,25 @@ func (h *Host) egressObjHandler(inst *instance) http.Handler {
 			writeAPIError(w, &apiError{Code: "unknown_object", Detail: "no facet class " + cls})
 			return
 		}
-		o, err := h.ensure(r.Context(), inst.w, cls, name, nil, nil, "")
+		o, err := h.facetEgressObject(r.Context(), inst, cls, name) // nodeless.go
 		if err != nil {
 			writeAPIError(w, asAPIError(err))
 			return
 		}
-		if o.Status == statusKilled {
+		h.mu.Lock() // the node's join rewrites Status (objects.go)
+		killed := o.Status == statusKilled
+		h.mu.Unlock()
+		if killed {
 			writeAPIError(w, &apiError{Code: "killed", Detail: "object " + o.ID + " was killed"})
 			return
 		}
 		gen.StripPlatformHeaders(r.Header)
+		if bc != nil {
+			var ok bool
+			if w, ok = h.routeBinding(w, r, inst, o, bc); !ok {
+				return
+			}
+		}
 		h.serveEgress(w, r, inst, o)
 	})
 }
@@ -139,13 +198,24 @@ func (h *Host) egressObjHandler(inst *instance) http.Handler {
 // plain-DO objects): it leaves as the workload node.
 func (h *Host) egressWLHandler(inst *instance) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodConnect {
+			h.serveConnect(w, r, inst, h.connectAsWorkload(inst)) // connect.go
+			return
+		}
 		gen.StripPlatformHeaders(r.Header)
+		bc := takeBinding(r) // servicebind.go
 		inst.w.mu.Lock()
 		o := inst.w.wl
 		inst.w.mu.Unlock()
 		if o == nil {
 			writeAPIError(w, &apiError{Code: "identity_pending", Detail: "workload node not created yet"})
 			return
+		}
+		if bc != nil {
+			var ok bool
+			if w, ok = h.routeBinding(w, r, inst, o, bc); !ok {
+				return
+			}
 		}
 		h.serveEgress(w, r, inst, o)
 	})
@@ -155,7 +225,9 @@ func (h *Host) serveEgress(w http.ResponseWriter, r *http.Request, inst *instanc
 	r.Header.Set(netd.HeaderObject, o.NetdID)
 	t := inst.w.tenant
 	rec := &statusRecorder{ResponseWriter: w, code: 200}
+	sp := h.tel.startEgress(inst, o, r) // telemetry.go
 	t.egress.ServeHTTP(rec, r)
+	sp.end(rec.code, rec.Header().Get(netd.HeaderError))
 	if code := rec.Header().Get(netd.HeaderError); code != "" {
 		h.audit.add(mgmtapi.AuditRecord{ObjectID: o.ID, Kind: "deny", Dst: r.URL.Host, Code: code, TraceID: newTraceID()})
 	}
@@ -216,13 +288,24 @@ type apiReq struct {
 	Records   []map[string]any              `json:"records"`
 	ActingFor string                        `json:"actingFor"`
 	Principal string                        `json:"principal"`
-	// Public: the request being served came from the public internet
-	// (ADR-029); ensure then refuses objects that neither exist nor were
-	// admitted.
-	Public bool `json:"public"`
+	// Ticket is the create ticket of the request being served (cf.tw.ticket,
+	// hostd-issued for tailnet requests and cron runs); it admits creates
+	// ("admit", a workload-level "spawn"). Public requests have none.
+	Ticket string `json:"ticket"`
+
+	// Workflow marks an "admit" from a Workflow's guarded env (no ticket):
+	// admitWorkflow, nodeless.go (#359).
+	Workflow bool `json:"workflow"`
+
+	// Approval is a Workflow's approval wait (op "approval", approvals.go).
+	Approval json.RawMessage `json:"approval"`
 }
 
-func objView(o *object) map[string]any {
+// objView snapshots o for the platform; o's fields are guarded by h.mu
+// (awaitNode writes them while a request may be reading).
+func (h *Host) objView(o *object) map[string]any {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	return map[string]any{"objectID": o.ID, "objectId": o.ID, "status": o.Status, "hostname": o.Hostname, "magicDNS": o.MagicDNS,
 		"kind": map[bool]string{true: "workload", false: "object"}[o.Class == ""], "class": o.Class, "name": o.Name}
 }
@@ -234,6 +317,22 @@ func (h *Host) hostAPI(inst *instance) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/v1/container") {
 			h.containerAPI(inst, w, r) // ctx.container (containers.go)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/v1/store/") {
+			h.storeAPI(inst, w, r) // platform stores (stores.go)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/v1/queue/") {
+			h.queueAPI(inst, w, r) // queue producers (queues.go)
+			return
+		}
+		if p := r.URL.Path; p == "/v1/tail" || p == "/v1/spans" {
+			h.tel.hostAPI(inst, w, r) // telemetry.go
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/v1/r2/") {
+			h.r2API(inst, w, r) // R2 bucket blobs (r2.go)
 			return
 		}
 		var req apiReq
@@ -259,20 +358,24 @@ func (h *Host) hostAPI(inst *instance) http.Handler {
 			if !c.Node {
 				return nil, &apiError{Code: "bad_request", Detail: "class " + req.As.Class + " has no tailnet identity (\"node\": false)"}
 			}
-			if req.Public {
-				if e := h.ensureAllowedPublic(wl, req.As.Class, req.As.Name); e != nil {
-					return nil, e
-				}
-			}
 			return h.ensure(ctx, wl, req.As.Class, req.As.Name, nil, nil, "", req.ActingFor)
 		}
 		fail := func(err error) { writeAPIError(w, asAPIError(err)) }
 		switch strings.TrimPrefix(r.URL.Path, "/v1/") {
 		case "ensure":
+			if req.As != nil {
+				if v, ok := nodelessEnsure(inst.app, req.As.Class, req.As.Name); ok { // nodeless.go
+					writeJSON(w, 200, v)
+					return
+				}
+			}
 			o, err := self()
 			if err != nil {
 				fail(err)
 				return
+			}
+			if req.Wake {
+				h.tel.wake(o)
 			}
 			h.mu.Lock()
 			if req.Wake {
@@ -287,10 +390,23 @@ func (h *Host) hostAPI(inst *instance) http.Handler {
 				h.audit.add(mgmtapi.AuditRecord{ObjectID: o.ID, Kind: "principal", ActingFor: req.ActingFor, Detail: mgmtapi.Note("acting for " + req.ActingFor), TraceID: newTraceID()})
 				h.saveObjects()
 			}
-			writeJSON(w, 200, objView(o))
+			writeJSON(w, 200, h.objView(o))
 		case "admit":
-			// ADR-029 D5: may a public request reach (class, name)?
-			existing, e := h.admitPublic(wl, inst.app, req.Class, req.Name)
+			// May the caller reach, and so create, (class, name)? Creation is
+			// never implied by reaching a binding (RT3-06/07): an attested
+			// object may create (chained creation is the app's logic), a
+			// tailnet request proves itself with its ticket, and a public
+			// request is held to public.create (ADR-029 D5).
+			var existing bool
+			var e *apiError
+			_, ticketOK := gen.VerifyTicket(inst.macKey(), req.Ticket, wallclock.Now())
+			if req.As != nil || ticketOK {
+				existing, e = h.admitCreate(wl, inst.app, req.Class, req.Name)
+			} else if req.Workflow {
+				existing, e = h.admitWorkflow(wl, inst.app, req.Class, req.Name) // nodeless.go
+			} else {
+				existing, e = h.admitPublic(wl, inst.app, req.Class, req.Name)
+			}
 			if e != nil {
 				fail(e)
 				return
@@ -302,7 +418,11 @@ func (h *Host) hostAPI(inst *instance) http.Handler {
 				fail(err)
 				return
 			}
-			writeJSON(w, 200, objView(o))
+			v := h.objView(o)
+			v["epoch"] = wl.epochNow() // the lease epoch: fencing tokens (docs/locks.md)
+			v["workload"] = wl.name
+			v["deploymentId"] = inst.depID
+			writeJSON(w, 200, v)
 		case "spawn":
 			c := inst.app.Classes[req.Class]
 			if c == nil || req.Name == "" || !c.Node {
@@ -321,28 +441,44 @@ func (h *Host) hostAPI(inst *instance) http.Handler {
 			if ttl == "" {
 				ttl = c.TTL
 			}
-			af := req.Principal
-			if af == "" {
-				af = parent.ActingFor
+			if parent.Class == "" {
+				// A spawn from the Worker (workload identity) is admitted by the
+				// request's ticket; a public request has none, and neither has
+				// code that reached __TW some other way (RT3-07).
+				if _, ok := gen.VerifyTicket(inst.macKey(), req.Ticket, wallclock.Now()); !ok {
+					fail(&apiError{Code: "create_not_admitted", Detail: "spawn from the workload needs the request's create ticket (a public request may not spawn)"})
+					return
+				}
+				h.admitLocal(wl, req.Class, req.Name)
+			}
+			// The child acts for its parent's principal (RFC §4.6); tenant code
+			// chooses only "inherit" (default) or "none", never a name (RT3-08).
+			af := parent.ActingFor
+			if req.Principal == "none" {
+				af = ""
 			}
 			o, err := h.ensure(ctx, wl, req.Class, req.Name, parent, req.Caps, ttl, af)
 			if err != nil {
 				fail(err)
 				return
 			}
-			writeJSON(w, 200, objView(o))
+			writeJSON(w, 200, h.objView(o))
 		case "ready":
 			c := inst.app.Classes[req.Class]
 			if c == nil || !c.Node {
 				fail(&apiError{Code: "bad_request", Detail: "ready: unknown class " + req.Class})
 				return
 			}
-			o, err := h.ensure(ctx, wl, req.Class, req.Name, nil, nil, "")
-			if err != nil {
-				fail(err)
+			// ready waits for an object spawn already created; it never creates.
+			h.mu.Lock()
+			o := h.byKey[objKey(wl.tenantID, wl.name, req.Class, req.Name)]
+			h.mu.Unlock()
+			if o == nil {
+				fail(&apiError{Code: "unknown_object", Detail: "no live object " + req.Class + "/" + req.Name + " (ready follows spawn)"})
 				return
 			}
 			to := time.Duration(req.TimeoutMS) * time.Millisecond
+			// limits.md#ready-wait-max
 			if to <= 0 || to > 5*time.Minute {
 				to = h.cfg.ReadyTimeout
 			}
@@ -350,7 +486,7 @@ func (h *Host) hostAPI(inst *instance) http.Handler {
 				fail(err)
 				return
 			}
-			writeJSON(w, 200, objView(o))
+			writeJSON(w, 200, h.objView(o))
 		case "kill":
 			caller, err := self()
 			if err != nil {
@@ -403,10 +539,19 @@ func (h *Host) hostAPI(inst *instance) http.Handler {
 				if n >= maxTenantNotesPerCall {
 					break
 				}
-				h.audit.add(TenantAuditRecord(o.ID, newTraceID(), o.ActingFor, rec))
+				if !h.audit.add(TenantAuditRecord(o.ID, newTraceID(), o.ActingFor, rec)) {
+					break // over the object's note bucket, or the queue is backed up (H03)
+				}
 				n++
 			}
 			writeJSON(w, 200, map[string]any{"ok": true, "accepted": n, "kind": kindTenantNote})
+		case "approval":
+			out, e := h.approvalReport(inst, req.Approval)
+			if e != nil {
+				fail(e)
+				return
+			}
+			writeJSON(w, 200, out)
 		default:
 			fail(&apiError{Code: "bad_request", Detail: "unknown op"})
 		}
@@ -415,32 +560,84 @@ func (h *Host) hostAPI(inst *instance) http.Handler {
 
 // ---- push API (mgmt → hostd) and status ----
 
-func (h *Host) pushAPI() http.Handler {
-	m := http.NewServeMux()
+// pushHandlers registers what mgmt sends a host: the pushes (kill,
+// assignments, probe, upgrade) and its calls for logs, store admin and
+// approvals. They are served on every surface: the tsnet push port, the
+// local socket and in-process (docs/contracts/hostd-api.md).
+func (h *Host) pushHandlers(m *http.ServeMux) {
 	m.HandleFunc("POST /v1/push/kill", func(w http.ResponseWriter, r *http.Request) {
 		var k mgmtapi.KillOrder
 		if err := json.NewDecoder(r.Body).Decode(&k); err != nil || k.ObjectID == "" {
 			writeAPIError(w, &apiError{Code: "bad_request", Detail: "objectID required"})
 			return
 		}
-		h.killLocal(k.ObjectID, k.Reason)
+		if err := h.killLocal(k.ObjectID, k.Reason); err != nil {
+			// The node is cut off, but workerd did not confirm the in-process
+			// kill: not a pushed kill (mgmt reports it; the next heartbeat retries).
+			writeAPIError(w, &apiError{Code: "hostd_unavailable", Detail: err.Error()})
+			return
+		}
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
-	// twd down --purge: forget killed objects (their tombstones) so a
-	// redeploy on this state dir starts from a clean registry.
-	m.HandleFunc("POST /v1/purge", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "purged": h.Purge()})
-	})
-	// Smart placement: measure a tenant's targets now (mgmt, at deploy).
-	m.HandleFunc("POST /v1/push/probe", h.probeHandler)
 	m.HandleFunc("POST /v1/push/assignments", func(w http.ResponseWriter, r *http.Request) {
 		h.TriggerSync()
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
+	// Smart placement (ADR-033): measure a tenant's targets now (mgmt, at deploy).
+	m.HandleFunc("POST /v1/push/probe", h.probeHandler)
+	// upgrade.go: install a release pushed by an upgrade run (Config.SelfUpgrade).
+	m.HandleFunc("POST /v1/push/upgrade", h.upgradeHandler)
+	// logs.go: one workload's app log, for `tw logs` from a linked machine
+	// (mgmt asks the lease holder; on the tsnet surface pushAuth admits
+	// mgmt's node only).
+	m.HandleFunc("GET /v1/logs", h.logsHandler)
+	// storeadmin.go: an operator op on a platform store (tw d1 execute, …).
+	m.HandleFunc("POST /v1/store-admin", h.storeAdminHandler)
+	// approvals.go: tw approvals / tw approve and the admin UI, through mgmt.
+	m.HandleFunc("GET /v1/approvals", h.approvalsListHandler)
+	m.HandleFunc("POST /v1/approvals/decide", h.approvalsDecideHandler)
+}
+
+// tsnetPushAPI is what the host's own tailnet node serves (Config.
+// PushListener): pushHandlers' routes only, each authenticated as coming
+// from mgmt's node (pushAuth). Status, purge, teardown and VM checks are
+// the operator's and stay on the local socket.
+func (h *Host) tsnetPushAPI() http.Handler {
+	m := http.NewServeMux()
+	h.pushHandlers(m)
+	return h.pushAuth.handler(m)
+}
+
+// PushHandler is the push API (pushHandlers' routes) for mgmt running in
+// the same process (Config.PushInProcess): mgmt serves each push through
+// it directly, so there is no peer to authenticate. It routes nothing else
+// (status, purge, teardown and VM checks stay on the local socket).
+func (h *Host) PushHandler() http.Handler {
+	m := http.NewServeMux()
+	h.pushHandlers(m)
+	return m
+}
+
+// pushAPI is the local unix-socket API (<run-dir>/hostd.sock, mode 0600,
+// procsb.Guard): the pushes (local-dev mgmt) plus the operator's status,
+// purge and VM checks (tw status / down --purge / host vmcheck).
+func (h *Host) pushAPI() http.Handler {
+	m := http.NewServeMux()
+	h.pushHandlers(m)
+	// tw down --purge: forget killed objects (their tombstones) so a
+	// redeploy on this state dir starts from a clean registry.
+	m.HandleFunc("POST /v1/purge", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]any{"ok": true, "purged": h.Purge()})
+	})
 	m.HandleFunc("GET /v1/status", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, h.Status())
 	})
-	// Operator checks of a workload's microVM (twd host vmcheck): guest
+	// The operator's local scrape (the tailnet one is MetricsListener).
+	m.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) { h.MetricsHandler().ServeHTTP(w, r) })
+	// teardown.go: no new objects before tw down --purge lists them.
+	m.HandleFunc("POST /v1/teardown", h.teardownHandler)
+
+	// Operator checks of a workload's microVM (tw host vmcheck): guest
 	// stats, DO volume fsync latency, and the no-keys-in-guest scan. The
 	// socket is the user's (0700 dir); answers carry no key material.
 	m.HandleFunc("POST /v1/vm/check", func(w http.ResponseWriter, r *http.Request) {
@@ -506,13 +703,20 @@ type WorkloadStatus struct {
 	// Egress (Node tier) says whether egress attribution is an enforcement
 	// boundary on this host: "enforced" only under a sandbox that confines
 	// the process's network to the egress proxy (Landlock ABI ≥ 4 on Linux,
-	// or a microVM); otherwise "unenforced": the proxy is cooperative and a
+	// Seatbelt on macOS, or a microVM); otherwise "unenforced": the proxy is cooperative and a
 	// hostile app can bypass it with raw sockets (RT-08, docs/node-tier.md).
 	Egress string `json:",omitempty"`
 	// LogFile is the app's log (workerd.log, or app.log for runtime node).
 	LogFile string `json:",omitempty"`
+	// RequestLog is the workload's structured request records
+	// (ADR-045; JSON Lines), whether or not it exists yet.
+	RequestLog string `json:",omitempty"`
 	// Public is the workload's public ingress (ADR-029), if any.
 	Public *PublicStatus `json:",omitempty"`
+
+	// Restarts counts the workerd's exits in a row (restart.go; reset after
+	// it ran 30 s). Status is "crashloop" from the second.
+	Restarts int `json:",omitempty"`
 }
 
 // PublicStatus is a workload's public node as this host runs it.
@@ -529,18 +733,14 @@ const (
 )
 
 // EgressEnforcement reports whether a Node-tier process under the given
-// sandbox can only reach the network through hostd's egress proxy. Neither
-// "none" nor macOS Seatbelt (which confines files, not TCP) does that; the
-// Linux Landlock sandbox (ABI ≥ 4, pinning the process's TCP connects to
-// the proxy port) is the only process-tier sandbox that makes the proxy an
-// enforcement boundary, and a microVM the only other one. Until a sandbox
-// of that kind reports itself here, the Node tier's egress is advisory.
+// sandbox can only reach the network through hostd's egress proxy. macOS
+// Seatbelt does (TCP connects only to localhost:<proxy> and its own port);
+// "none" and "seatbelt-legacy" don't. The Linux Landlock sandbox pins the process's TCP connects to the proxy port
+// only on a kernel with Landlock ABI ≥ 4 (6.7+). Below that, Landlock has
+// no TCP rules and the seccomp filter allows TCP sockets, so the proxy is
+// cooperative there too. A microVM is the only other enforcement boundary.
 func EgressEnforcement(sandbox string) string {
-	switch sandbox {
-	case SandboxLandlock:
-		return EgressEnforced
-	}
-	return EgressUnenforced
+	return egressEnforcement(sandbox, landlockABI(sandbox))
 }
 
 // StatusView is GET /v1/status (hostd's local API).
@@ -550,23 +750,36 @@ type StatusView struct {
 	// or "none".
 	Sandbox string `json:",omitempty"`
 	// Tiers this host offers ("process", and "microvm" with a backend);
-	// VMVia says how microVMs are launched (twd-vmhelper or in-process).
+	// VMVia says how microVMs are launched (tw-vmhelper or in-process).
 	Tiers     []string
 	VMVia     string `json:",omitempty"`
 	Objects   []ObjectStatus
 	Workloads []WorkloadStatus
 	// InsecureSharedHost echoes Config.InsecureSharedHost.
 	InsecureSharedHost bool `json:",omitempty"`
+	// WorkerInternet is "direct" or "exit-node=<node>" when
+	// Config.WorkerInternet is set, else "off" (tw status, tw doctor).
+	// WorkerInternetProblem says why an exit-node path is unusable right
+	// now ("" when it is usable).
+	WorkerInternet        string `json:",omitempty"`
+	WorkerInternetProblem string `json:",omitempty"`
 	// Containers are this host's containers (ADR-032), running and stopped.
 	Containers []ContainerStatus `json:",omitempty"`
 	// ImageCacheBytes is the converted container image cache on disk.
 	ImageCacheBytes int64 `json:",omitempty"`
+
+	// ContainersOff is why this host offers no containers ("" when it
+	// does; containersoff.go).
+	ContainersOff string `json:",omitempty"`
 }
 
 // Status returns a snapshot.
 func (h *Host) Status() StatusView {
 	h.mu.Lock()
 	v := StatusView{HostID: h.cfg.HostID, Sandbox: h.SandboxInfo(), Tiers: h.tiers(), InsecureSharedHost: h.cfg.InsecureSharedHost}
+	v.WorkerInternet = workerInternetMode(h.cfg.WorkerInternet) // internet.go
+	v.WorkerInternetProblem = workerInternetProblem(h.cfg.WorkerInternet)
+	v.ContainersOff = h.containersOff() // containersoff.go
 	if h.cfg.VM != nil {
 		if vv, ok := h.cfg.VM.(interface{ Via() string }); ok {
 			v.VMVia = vv.Via()
@@ -601,6 +814,7 @@ func (h *Host) Status() StatusView {
 				ws.Crons = w.active.app.Crons
 			}
 			ws.LogFile = filepath.Join(w.active.dir, "workerd.log")
+			ws.RequestLog = h.RequestLogPath(w.tenantID, w.name)
 			if w.active.node != nil {
 				ws.Runtime, ws.Node, ws.LogFile = bundle.RuntimeNode, w.active.nodeInfo(), w.active.node.logPath
 			}
@@ -609,6 +823,7 @@ func (h *Host) Status() StatusView {
 			if w.active.cmd != nil && w.active.cmd.Process != nil {
 				ws.PID = w.active.cmd.Process.Pid
 			}
+			ws.Restarts = w.active.restarts
 			if w.active.tier != "microvm" {
 				ws.Sandbox, ws.SandboxProfile = sandboxOf(w.active.profile), w.active.profile
 				ws.LoopbackPorts = w.active.loopPorts

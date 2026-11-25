@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/mgmt"
+	"github.com/rosskukulinski/tailworks/mgmt"
 )
 
 // ---- seeded scenario runner (LOOP.md "Scenarios") ----
@@ -27,14 +27,14 @@ import (
 const chaosMaxLive = 5
 
 func scenarioSeed() uint64 {
-	if s, err := strconv.ParseUint(os.Getenv("TWD_MM_SEED"), 10, 64); err == nil {
+	if s, err := strconv.ParseUint(os.Getenv("TW_MM_SEED"), 10, 64); err == nil {
 		return s
 	}
 	return 1
 }
 
 func scenarioDuration() time.Duration {
-	if d, err := time.ParseDuration(os.Getenv("TWD_MM_DURATION")); err == nil {
+	if d, err := time.ParseDuration(os.Getenv("TW_MM_DURATION")); err == nil {
 		return d
 	}
 	return 60 * time.Second
@@ -108,7 +108,7 @@ func (g *rng) intn(n int) int {
 }
 
 // callAny sends a request to a random running replica, as a load-balanced
-// svc:twd-mgmt would, and retries another replica on a transport error.
+// svc:tw-mgmt would, and retries another replica on a transport error.
 func (c *cluster) callAny(g *rng, host, method, path string, body any) (int, []byte, int, error) {
 	st, b, i, err, _ := c.callAnyTrace(g, host, method, path, body)
 	return st, b, i, err
@@ -444,7 +444,7 @@ func checkInvariants(t *testing.T, c *cluster, g *rng, s setup, h *history, r *r
 	db.QueryRow("SELECT deadlocks FROM pg_stat_database WHERE datname = current_database()").Scan(&deadlocks)
 	add("I11", deadlocks == 0, "deadlocks: %d", deadlocks)
 
-	// Warm-key pool (TWD_MM_WARM_KEYS): a pooled key is adopted by at most
+	// Warm-key pool (TW_MM_WARM_KEYS): a pooled key is adopted by at most
 	// one object, and only by one with exactly its tags and ephemeral flag.
 	var shared int
 	db.QueryRow(`SELECT COUNT(*) FROM (SELECT key_id FROM objects WHERE key_id<>'' GROUP BY key_id HAVING COUNT(*)>1) d`).Scan(&shared)
@@ -495,7 +495,7 @@ func runScenarioWith(t *testing.T, name string, prep func(c *cluster), chaos fun
 	seed := scenarioSeed()
 	r := newRun(t, fmt.Sprintf("%s-seed%d", name, seed))
 	c := newCluster(t, r, 3)
-	c.jsonc = strings.Replace(twdJSONC, `"maxLive": 64`, fmt.Sprintf(`"maxLive": %d`, chaosMaxLive), 1)
+	c.jsonc = strings.Replace(twJSONC, `"maxLive": 64`, fmt.Sprintf(`"maxLive": %d`, chaosMaxLive), 1)
 	if prep != nil {
 		prep(c)
 	}
@@ -759,7 +759,7 @@ func TestMM_S8_ClockSkew(t *testing.T) {
 	runScenarioWith(t, "S8", func(c *cluster) {
 		c.env = map[int][]string{}
 		for i, d := range skew {
-			c.env[i] = []string{"TWD_TEST_WALL_CLOCK_OFFSET=" + d.String()}
+			c.env[i] = []string{"TW_TEST_WALL_CLOCK_OFFSET=" + d.String()}
 		}
 	}, func(ctx context.Context, c *cluster, g *rng, h *history) {
 		time.Sleep(12 * time.Second) // a couple of reaper ticks
@@ -899,7 +899,7 @@ func TestMM_S10_KillStorm(t *testing.T) {
 }
 
 // Soak: a random mix of every fault, one every 10–25 s, for
-// TWD_MM_DURATION (LOOP.md: 2 clean soaks of 10 min with new seeds).
+// TW_MM_DURATION (LOOP.md: 2 clean soaks of 10 min with new seeds).
 func TestMM_Soak(t *testing.T) {
 	runScenario(t, "SOAK", func(ctx context.Context, c *cluster, g *rng, h *history) {
 		db := c.db()

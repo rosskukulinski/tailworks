@@ -1,7 +1,7 @@
 //go:build linux
 
-// Package helper is twd-vmhelper's server: the privileged half of the
-// microVM tier. twd-hostd runs as a normal user and asks the helper (over
+// Package helper is tw-vmhelper's server: the privileged half of the
+// microVM tier. tw-hostd runs as a normal user and asks the helper (over
 // a root-owned unix socket, authorized by peer uid) to boot each VM. The
 // helper:
 //
@@ -42,7 +42,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd/vm/helperapi"
+	"github.com/rosskukulinski/tailworks/hostd/vm/helperapi"
 	"golang.org/x/sys/unix"
 )
 
@@ -61,11 +61,11 @@ type Config struct {
 	UIDBase int `json:"uidBase"`
 	MaxVMs  int `json:"maxVMs"`
 	// Instance distinguishes helpers sharing a host (resource names are
-	// "twd<Instance>-<slot>"; startup cleanup only touches its own).
+	// "tw<Instance>-<slot>"; startup cleanup only touches its own).
 	Instance string `json:"instance"`
 	// CgroupParent (relative to the cgroup2 mount) holds the per-VM
 	// cgroups. "" = the service's delegated subtree under systemd, else
-	// "twd-vm<Instance>".
+	// "tw-vm<Instance>".
 	CgroupParent string `json:"cgroupParent"`
 	// MemOverheadMiB is added to guest memory for memory.max (default 256).
 	MemOverheadMiB int          `json:"memOverheadMiB"`
@@ -74,8 +74,8 @@ type Config struct {
 
 // DefaultConfig is the system helper's configuration.
 func DefaultConfig() Config {
-	return Config{Firecracker: "/usr/local/libexec/twd/firecracker", Jailer: "/usr/local/libexec/twd/jailer",
-		JailBase: "/var/lib/twd-vm/jail", StateDir: "/var/lib/twd-vm", UIDBase: 3900000000, MaxVMs: 1024, Instance: "s"}
+	return Config{Firecracker: "/usr/local/libexec/tailworks/firecracker", Jailer: "/usr/local/libexec/tailworks/jailer",
+		JailBase: "/var/lib/tailworks-vm/jail", StateDir: "/var/lib/tailworks-vm", UIDBase: 3900000000, MaxVMs: 1024, Instance: "s"}
 }
 
 // Server is a running helper.
@@ -152,7 +152,7 @@ func (s *Server) dropBases(c *net.UnixConn) {
 // and removes anything a previous instance left behind.
 func New(cfg Config) (*Server, error) {
 	if os.Geteuid() != 0 {
-		return nil, errors.New("twd-vmhelper must run as root")
+		return nil, errors.New("tw-vmhelper must run as root")
 	}
 	d := DefaultConfig()
 	if cfg.Firecracker == "" {
@@ -210,7 +210,7 @@ func New(cfg Config) (*Server, error) {
 	return s, nil
 }
 
-func (s *Server) prefix() string { return "twd" + s.cfg.Instance + "-" }
+func (s *Server) prefix() string { return "tw" + s.cfg.Instance + "-" }
 
 // Serve accepts connections on ln until it is closed.
 func (s *Server) Serve(ln *net.UnixListener) error {
@@ -235,7 +235,7 @@ func (s *Server) Close() {
 	}
 	s.mu.Unlock()
 	s.wg.Wait()
-	if s.cgroup == "twd-vm"+s.cfg.Instance { // our own parent (not systemd's delegated subtree)
+	if s.cgroup == "tw-vm"+s.cfg.Instance { // our own parent (not systemd's delegated subtree)
 		os.Remove(filepath.Join("/sys/fs/cgroup", s.cgroup)) // rmdir: only if empty
 	}
 }
@@ -280,6 +280,9 @@ func closeAll(fds []int) {
 }
 
 func (s *Server) serveConn(c *net.UnixConn) {
+	// Deferred first so it runs last, after the cleanups below: a panic
+	// fails this connection's session, never the helper (security/LOOP.md I8).
+	defer s.recoverConn(c)
 	s.mu.Lock()
 	s.conns[c] = true
 	s.mu.Unlock()
@@ -310,13 +313,13 @@ func (s *Server) serveConn(c *net.UnixConn) {
 			closeAll(fds)
 			s.log.Warn("unauthorized helper client", "uid", uid, "op", req.Op)
 			helperapi.WriteResponse(c, helperapi.Response{Re: req.Op, Code: helperapi.CodeUnauthorized,
-				Error: fmt.Sprintf("uid %d may not use the microVM helper (run `sudo twd host setup --microvm` as that user)", uid)})
+				Error: fmt.Sprintf("uid %d may not use the microVM helper (run `sudo tw host setup --microvm` as that user)", uid)})
 			return
 		}
 		switch req.Op {
 		case "ping":
 			closeAll(fds)
-			helperapi.WriteResponse(c, helperapi.Response{Re: "ping", OK: true, Version: helperapi.Version, UID: uid,
+			helperapi.WriteResponse(c, helperapi.Response{Re: "ping", OK: true, Version: helperapi.Version, MinVersion: helperapi.MinVersion, UID: uid,
 				Jailer: s.cfg.Jailer, Crypt: "dm-crypt (LUKS2, aes-xts-plain64)", Features: []string{helperapi.FeatureContainer}})
 		case "start":
 			if vm != nil || req.Start == nil {
@@ -477,7 +480,7 @@ func (s *Server) setupCgroup() (string, error) {
 		}
 		return strings.TrimPrefix(self, "/") + "/vms", nil
 	}
-	return "twd-vm" + s.cfg.Instance, nil
+	return "tw-vm" + s.cfg.Instance, nil
 }
 
 // ---- stale state from a previous run ----
@@ -562,7 +565,7 @@ func makeScratch(p string, sizeMiB, uid int) error {
 	if err != nil {
 		return err
 	}
-	if _, err := runStdin(nil, "mkfs.ext4", "-q", "-F", "-O", "^has_journal", "-E", "lazy_itable_init=1,nodiscard", "-m", "0", "-L", "twd-scratch", p); err != nil {
+	if _, err := runStdin(nil, "mkfs.ext4", "-q", "-F", "-O", "^has_journal", "-E", "lazy_itable_init=1,nodiscard", "-m", "0", "-L", "tw-scratch", p); err != nil {
 		return err
 	}
 	return os.Chown(p, uid, uid)

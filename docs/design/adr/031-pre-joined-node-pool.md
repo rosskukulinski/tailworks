@@ -1,9 +1,9 @@
 # ADR-031: Pre-joined node pool: assign an already-registered node to a new object by rename (and, if needed, retag)
 
 **Date:** 2026-11-13
-**Status:** Accepted by Ross (2026-11-14): build variant B. **Implemented** on twd `fast-identity` (`twd-hostd -pool-nodes`, default 1 per hot class). Measured on production control: create → first request on the object's own node 232 ms p50 / 297 ms p95 (was 1.7 s / 4.5 s with the warm-key pool, 7.0 s / 15.9 s before). See twd STATUS.md "Fast identity, Phase 3". Variant A is not built.
+**Status:** Accepted by Ross (2026-11-14): build variant B. **Implemented** on tailworks `fast-identity` (`tw-hostd -pool-nodes`, default 1 per hot class). Measured on production control: create → first request on the object's own node 232 ms p50 / 297 ms p95 (was 1.7 s / 4.5 s with the warm-key pool, 7.0 s / 15.9 s before). See tailworks STATUS.md "Fast identity, Phase 3". Variant A is not built.
 
-**Context.** Measured on tailnet 1 with production control (twd STATUS.md, "Fast identity"):
+**Context.** Measured on tailnet 1 with production control (tailworks STATUS.md, "Fast identity"):
 - After the warm-key pool, the path the key pool can't touch is the join itself: control key fetch ~0.49 s, Noise dial + register ~0.49 s, first map ~0.2 s and netcheck ~0.1 s, about **1.3 s on a clean run**.
 - Registrations also stall: **+2.1–5.4 s** on 9–10 of 20 objects per run. In the last runs this was strictly every other object at one create per ~4 s, which looks like control-side pacing of registrations (a hypothesis, not verified).
 - So a new object's own node is ready 1.3 s (p50) to 4.2 s (p95) after create, and 6+ s in bad runs. Compute is ready in 13–24 ms.
@@ -15,7 +15,7 @@
 **Proposal.** hostd keeps a small pool of pre-joined, idle nodes. On an object's first use it hands one over instead of joining a new one: the node takes the object's hostname, gets the object's tags (variant A only), and mgmt records the assignment and signs the node certificate. Expected create → own node ready: **~0.2–0.35 s**, with no registration on the critical path.
 
 **Variants.**
-- **A. One neutral pool per (host, tenant).** Nodes join as `twd-pool-<rand>` with a pool tag (e.g. `tag:twd-pool`, owned by `tag:twd`) that has **no grants**, so an idle pool node reaches nothing and nothing reaches it. Assignment = retag to the object's tags + hostname change.
+- **A. One neutral pool per (host, tenant).** Nodes join as `tw-pool-<rand>` with a pool tag (e.g. `tag:tw-pool`, owned by `tag:tw`) that has **no grants**, so an idle pool node reaches nothing and nothing reaches it. Assignment = retag to the object's tags + hostname change.
   - Fewest devices.
   - Needs device-write scope on the credential that assigns (API key: yes; OAuth: Devices › Core › Write; WIF: the lifecycle credential), and tagOwners must let that credential set every object tag (minting already needs this).
   - A ~190 ms window in which peers still see the old tags.
@@ -38,7 +38,7 @@
    - The stable ID predates the object; receivers already key on the certificate, not on join time.
 4. **Audit names nodes.**
    - Two records: a tenant-level `pool_join` (the registration: it spends a registration-throttle token and is a mint), and an `assign` record on the object (object ID, stable node ID, old and new hostname, tags), in the same transaction as the object's status change (H22).
-   - `twd audit <object>` then shows which pre-joined node became the object.
+   - `tw audit <object>` then shows which pre-joined node became the object.
    - Flow logs before assignment carry the pool hostname; with no grants (A) or no routing (B) there should be no such flows, and hostd can assert it.
 5. **Costs.**
    - Every pool node is a device: plan limits, and every peer's netmap is bigger.

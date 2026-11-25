@@ -105,7 +105,7 @@ func TestCheckArchRefusesForeignGuest(t *testing.T) {
 func TestDefaultBootArgs(t *testing.T) {
 	for _, a := range []string{"amd64", "arm64"} {
 		ba := DefaultBootArgs(a)
-		for _, w := range []string{"console=ttyS0", "panic=1", "reboot=k", " ro ", "init=/sbin/twd-guestd"} {
+		for _, w := range []string{"console=ttyS0", "panic=1", "reboot=k", " ro ", "init=/sbin/tw-guestd"} {
 			if !strings.Contains(ba, w) {
 				t.Errorf("%s: %q lacks %q", a, ba, w)
 			}

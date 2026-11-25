@@ -1,20 +1,22 @@
 //go:build e2elinux
 
-// E2E-LINUX (LINUX-PLAN DoD 2): the e2e-mbp flow against a fresh Lima VM
-// that mounts nothing from this Mac. From here: `limactl copy` the linux
-// release tarball and the tailnet-1 API key file into the VM
-// (~/.twd-e2e, 0700 dir, 0600 key), run install.sh and `twd doctor`
-// there, then `twd up --service` (a systemd user unit) / `twd init` /
-// `twd deploy` in the VM over ssh. The tag:ttest test client and the
+// E2E-LINUX (docs/install-testing.md, "Linux requirements" item 2): the
+// e2e-mbp flow against a fresh Lima VM that mounts nothing from this Mac. From here: `limactl copy` the linux
+// release tarball and this run's own OAuth client file into the VM
+// (~/.tailworks-e2e, 0700 dir, 0600 file; tailworks mints in OAuth mode and
+// never sees the harness's API key, which stays on this Mac to create and
+// delete that client and to clean up), run install.sh and `tw doctor`
+// there, then `tw up --service` (a systemd user unit) / `tw init` /
+// `tw deploy` in the VM over ssh. The tag:ttest test client and the
 // private echo run HERE as tsnet nodes, so checks (a)–(f) cross machines
-// over tailnet 1. Then `systemctl --user restart twd` must come back and
-// stay reachable, `twd down` + `twd down --service`, uninstall, remove
-// ~/.twd-e2e (the key file goes even on failure: t.Cleanup here, and the
+// over tailnet 1. Then `systemctl --user restart tw` must come back and
+// stay reachable, `tw down` + `tw down --service`, uninstall, remove
+// ~/.tailworks-e2e (the OAuth client file goes even on failure: t.Cleanup here, and the
 // trap in scripts/e2e-linux-one.sh), and zero leftover devices and keys
 // from this run, by ID.
 //
-// Safety: tailnet 1 only (allow list); no policy writes (M4 added the
-// grants); keys are never printed; the VM's own tailscaled (if any) is
+// Safety: tailnet 1 only (allow list); no policy writes unless
+// TW_E2E_APPLY_POLICY=1 (additions only, with a saved copy); keys are never printed; the VM's own tailscaled (if any) is
 // never logged in or used.
 package linux
 
@@ -40,11 +42,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/e2e/cliflow"
-	"github.com/rosskukulinski/twd/internal/policy"
-	"github.com/rosskukulinski/twd/internal/tsapi"
-	"github.com/rosskukulinski/twd/netd"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/e2e/cliflow"
+	"github.com/rosskukulinski/tailworks/internal/policy"
+	"github.com/rosskukulinski/tailworks/internal/tsapi"
+	"github.com/rosskukulinski/tailworks/netd"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 	"tailscale.com/tailcfg"
 )
 
@@ -77,11 +79,31 @@ func (v *vm) must(cmd string) string {
 	return so
 }
 
+// matrixVM reports whether name is a matrix VM this suite may wipe:
+// twl-<distro> (scripts/e2e-linux-one.sh), or twdl-<distro> from before the
+// rename (TW_E2E_VM_PREFIX=twdl-).
+func matrixVM(name string) bool {
+	return strings.HasPrefix(name, "twl-") || strings.HasPrefix(name, "twdl-")
+}
+
+// warmKeyIDs returns the distinct keyIDs in mgmt's "warm key minted" log lines.
+func warmKeyIDs(log string) []string {
+	var ids []string
+	for _, m := range warmKeyRE.FindAllStringSubmatch(log, -1) {
+		if !slices.Contains(ids, m[1]) {
+			ids = append(ids, m[1])
+		}
+	}
+	return ids
+}
+
+var warmKeyRE = regexp.MustCompile(`keyID=([A-Za-z0-9]+)`)
+
 func shq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 // timed runs argv in dir in the VM; the VM measures its own wall time
 // (GNU date +%s%N), so ssh round trips are not counted.
-var wallRE = regexp.MustCompile(`\n?__twd_wall_us=([0-9]+)\n?$`)
+var wallRE = regexp.MustCompile(`\n?__tw_wall_us=([0-9]+)\n?$`)
 
 func (v *vm) timed(dir string, argv ...string) (string, string, time.Duration, error) {
 	q := make([]string, len(argv))
@@ -89,7 +111,7 @@ func (v *vm) timed(dir string, argv ...string) (string, string, time.Duration, e
 		q[i] = shq(a)
 	}
 	cmd := "cd " + shq(dir) + " 2>/dev/null || cd; s=$(date +%s%N); " + strings.Join(q, " ") +
-		"; r=$?; e=$(date +%s%N); printf '\\n__twd_wall_us=%d\\n' $(( (e - s) / 1000 )) >&2; exit $r"
+		"; r=$?; e=$(date +%s%N); printf '\\n__tw_wall_us=%d\\n' $(( (e - s) / 1000 )) >&2; exit $r"
 	st := time.Now()
 	so, se, err := v.run(cmd, nil)
 	d := time.Since(st)
@@ -129,22 +151,22 @@ func (d doctorOut) get(name string) (status, detail string) {
 }
 
 func TestE2ELinux(t *testing.T) {
-	keyFile, tailnet, vmName, tarball := os.Getenv("TWD_E2E_API_KEY_FILE"), os.Getenv("TWD_E2E_TAILNET"), os.Getenv("TWD_E2E_LIMA_VM"), os.Getenv("TWD_E2E_TARBALL")
+	keyFile, tailnet, vmName, tarball := os.Getenv("TW_E2E_API_KEY_FILE"), os.Getenv("TW_E2E_TAILNET"), os.Getenv("TW_E2E_LIMA_VM"), os.Getenv("TW_E2E_TARBALL")
 	if keyFile == "" || tailnet == "" || vmName == "" || tarball == "" {
-		t.Skip("TWD_E2E_API_KEY_FILE / TWD_E2E_TAILNET / TWD_E2E_LIMA_VM / TWD_E2E_TARBALL not set")
+		t.Skip("TW_E2E_API_KEY_FILE / TW_E2E_TAILNET / TW_E2E_LIMA_VM / TW_E2E_TARBALL not set")
 	}
 	if !allowedTailnets[tailnet] {
 		t.Fatalf("refusing to run against tailnet %q (not in the allow list)", tailnet)
 	}
-	if !strings.HasPrefix(vmName, "twdl-") {
-		t.Fatalf("refusing to use VM %q (matrix VMs are twdl-*)", vmName)
+	if !matrixVM(vmName) {
+		t.Fatalf("refusing to use VM %q (matrix VMs are twl-* or twdl-*)", vmName)
 	}
 	if _, err := os.Stat(tarball); err != nil {
 		t.Fatalf("tarball: %v (make release)", err)
 	}
-	slow, _ := strconv.ParseFloat(os.Getenv("TWD_E2E_SLOW"), 64)
-	doReboot := os.Getenv("TWD_E2E_REBOOT") == "1"       // enable-linger + limactl stop/start; the service must come back
-	doEphemeral := os.Getenv("TWD_E2E_EPHEMERAL") == "1" // a second, --ephemeral run: a sub-agent across a service restart
+	slow, _ := strconv.ParseFloat(os.Getenv("TW_E2E_SLOW"), 64)
+	doReboot := os.Getenv("TW_E2E_REBOOT") == "1"       // enable-linger + limactl stop/start; the service must come back
+	doEphemeral := os.Getenv("TW_E2E_EPHEMERAL") == "1" // a second, --ephemeral run: a sub-agent across a service restart
 	scale := func(d time.Duration) time.Duration {
 		if slow > 1 {
 			return time.Duration(float64(d) * slow)
@@ -159,11 +181,34 @@ func TestE2ELinux(t *testing.T) {
 	b := make([]byte, 3)
 	rand.Read(b)
 	run := hex.EncodeToString(b)
-	testPrefix, twdPrefix, _ := cliflow.RunPrefixes("l1", run) // this Mac's client + echo; every node twd creates in the VM
+	// TW_E2E_APPLY_POLICY=1 (make e2e-linux LINUX_APPLY_POLICY=1): add the
+	// scenario's tagOwners and grants first (additions only, validated,
+	// If-Match; the previous policy is saved next to the credentials), as
+	// e2e/mac does. Otherwise the policy is only read, below.
+	var policyNote string
+	if os.Getenv("TW_E2E_APPLY_POLICY") == "1" {
+		pctx, pcancel := context.WithTimeout(context.Background(), time.Minute)
+		ar, err := policy.ApplyWith(pctx, api, cliflow.Policy(), policy.Options{AllowTags: []string{cliflow.TestTag}})
+		pcancel()
+		if err != nil {
+			t.Fatalf("policy: %v", netd.RedactError(err))
+		}
+		if ar.Changed {
+			bk := filepath.Join(filepath.Dir(keyFile), "tailnet1_acl.pre-l1-"+run+"-"+time.Now().Format("20060102")+".hujson")
+			if err := os.WriteFile(bk, ar.Before, 0o600); err != nil {
+				t.Fatalf("policy backup: %v", err)
+			}
+			policyNote = "policy changed (validated, If-Match " + ar.OldETag + "): added " + ar.Added.HuJSON() + " (previous copy: " + filepath.Base(bk) + ")"
+		}
+	}
+	// tailworks mints with an OAuth client: this run's own, created with the
+	// harness's API key and deleted when the test ends.
+	oauthFile := cliflow.RealOAuthClient(t, keyFile, tailnet, t.TempDir(), "tw-e2e-linux-oauth")
+	testPrefix, twPrefix, _ := cliflow.RunPrefixes("l1", run) // this Mac's client + echo; every node tw creates in the VM
 	root, _ := nettest.FindRepoRoot()
 	res := cliflow.NewResults("l1-"+vmName+"-"+run, tailnet)
-	res.Notes = append(res.Notes, "twd in Lima VM "+vmName+" (no mounts) from "+filepath.Base(tarball)+"; test client + echo on this Mac")
-	resultsDir := os.Getenv("TWD_E2E_RESULTS_DIR")
+	res.Notes = append(res.Notes, "tw in Lima VM "+vmName+" (no mounts) from "+filepath.Base(tarball)+"; test client + echo on this Mac")
+	resultsDir := os.Getenv("TW_E2E_RESULTS_DIR")
 	if resultsDir == "" {
 		resultsDir = filepath.Join(root, "e2e", "real", "results")
 	}
@@ -178,7 +223,11 @@ func TestE2ELinux(t *testing.T) {
 	if miss, err := policy.Missing(pol, cliflow.Policy()); err != nil || !miss.Empty() {
 		t.Fatalf("tailnet 1's policy lacks the scenario's grants/tagOwners (not writing it in this run): %v %s", err, miss.HuJSON())
 	}
-	res.Notes = append(res.Notes, "policy has the scenario's tagOwners and grants (read only; not written)")
+	if policyNote != "" {
+		res.Notes = append(res.Notes, policyNote)
+	} else {
+		res.Notes = append(res.Notes, "policy has the scenario's tagOwners and grants (read only; not written)")
+	}
 
 	home, _ := os.UserHomeDir()
 	v := &vm{t: t, name: vmName, cfg: filepath.Join(home, ".lima", vmName, "ssh.config")}
@@ -186,12 +235,12 @@ func TestE2ELinux(t *testing.T) {
 	if vhome == "" || !strings.HasPrefix(vhome, "/") {
 		t.Fatalf("VM $HOME = %q", vhome)
 	}
-	R := vhome + "/.twd-e2e"
-	rKey, rState, rWork := R+"/tailnet1_api.env", R+"/state", R+"/work"
-	rTwd := vhome + "/.twd/bin/twd"
+	R := vhome + "/.tailworks-e2e"
+	rKey, rState, rWork := R+"/oauth.env", R+"/state", R+"/work"
+	rTw := vhome + "/.tailworks/bin/tw"
 
-	if so := v.must(`[ -e ~/.twd ] && echo twd; [ -e ~/.twd-e2e ] && echo e2e; [ -e ~/.config/systemd/user/twd.service ] && echo unit; true`); strings.TrimSpace(so) != "" {
-		t.Fatalf("VM is not clean (%s): remove ~/.twd-e2e, ~/.twd and the unit first", strings.TrimSpace(so))
+	if so := v.must(`[ -e ~/.tailworks ] && echo tw; [ -e ~/.tailworks-e2e ] && echo e2e; [ -e ~/.config/systemd/user/tw.service ] && echo unit; true`); strings.TrimSpace(so) != "" {
+		t.Fatalf("VM is not clean (%s): remove ~/.tailworks-e2e, ~/.tailworks and the unit first", strings.TrimSpace(so))
 	}
 	if so := v.must(`grep -E ' (virtiofs|9p|fuse.sshfs) ' /proc/mounts; true`); strings.TrimSpace(so) != "" {
 		t.Fatalf("VM %s has host mounts (must mount nothing from the Mac):\n%s", vmName, so)
@@ -205,7 +254,7 @@ func TestE2ELinux(t *testing.T) {
 	osInfo := strings.TrimSpace(v.must(`. /etc/os-release; printf '%s | ' "$PRETTY_NAME"; uname -rm | tr '\n' ' '; printf '| glibc '; getconf GNU_LIBC_VERSION 2>/dev/null | cut -d' ' -f2; nproc | tr '\n' ' '; echo cpus`))
 	res.Notes = append(res.Notes, "VM: "+osInfo)
 	res.Checks["os"] = "INFO " + osInfo
-	res.Checks["sandbox"] = "INFO sandbox: checked while twd runs (below)"
+	res.Checks["sandbox"] = "INFO sandbox: checked while tailworks runs (below)"
 
 	quiet := slog.New(netd.NewRedactingHandler(slog.NewTextHandler(io.Discard, nil)))
 	minter := tsapi.MintSource(api, quiet)
@@ -216,14 +265,16 @@ func TestE2ELinux(t *testing.T) {
 	var client *nettest.Node
 	var mcpIP string
 
-	e := &cliflow.Env{T: t, BinDir: "(" + vmName + ")", StateDir: rState, WorkDir: rWork, Tailnet: tailnet, APIKeyFile: rKey,
-		ControlURL: prodControl, Prefix: twdPrefix, Res: res, ClientTagged: true, Slow: slow,
-		// twd up's defaults (persistent nodes, as a real install) under
+	e := &cliflow.Env{T: t, BinDir: "(" + vmName + ")", StateDir: rState, WorkDir: rWork, Tailnet: tailnet, OAuthClientFile: rKey,
+		ControlURL: prodControl, Prefix: twPrefix, Res: res, ClientTagged: true, Slow: slow,
+		// tw up's defaults (persistent nodes, as a real install) under
 		// --service: an --ephemeral node that goes offline for a restart
 		// may be removed by control and then can't rejoin (see STATUS L1).
 		UpArgs: []string{"--service"}, Persistent: true,
+		// TW_E2E_LAYOUT=single: tw up's default single-process layout (else --separate-host).
+		SingleProcess: os.Getenv("TW_E2E_LAYOUT") == "single",
 		Exec: func(args []string) (string, string, time.Duration, error) {
-			return v.timed(rWork, append([]string{rTwd}, args...)...)
+			return v.timed(rWork, append([]string{rTw}, args...)...)
 		},
 		PatchFile: func(path string, edit func([]byte) []byte) error {
 			so, se, err := v.run("cat "+shq(path), nil)
@@ -270,25 +321,38 @@ func TestE2ELinux(t *testing.T) {
 
 	t.Cleanup(func() {
 		if !downDone {
-			if _, se, _, err := e.Twd("down", "--purge", "--service"); err != nil {
-				t.Logf("twd down (cleanup): %v %s", err, netd.Redact(se))
+			if _, se, _, err := e.Tw("down", "--purge", "--service"); err != nil {
+				t.Logf("tw down (cleanup): %v %s", err, netd.Redact(se))
 			}
 		}
 		if t.Failed() {
-			so, _, _ := v.run(`for c in supervisor mgmt hostd; do echo "== $c"; tail -c 6000 ~/.twd-e2e/state/logs/$c.log 2>/dev/null; done; systemctl --user status twd.service 2>&1 | tail -20`, nil)
+			so, _, _ := v.run(`for c in supervisor mgmt hostd; do echo "== $c"; tail -c 6000 ~/.tailworks-e2e/state/logs/$c.log 2>/dev/null; done; systemctl --user status tw.service 2>&1 | tail -20`, nil)
 			t.Logf("VM logs (tail):\n%s", netd.Redact(so))
 		}
 		for _, n := range nodes {
 			n.Close()
 		}
+		// Warm keys (mgmt's pre-minted join keys) appear in mgmt's log, not
+		// the audit chain: read their IDs before the state dir goes, so the
+		// check below can see whether tw down revoked them (#158).
+		warmLog, _, _ := v.run(`grep -ho 'warm key minted.*keyID=[A-Za-z0-9]*' ~/.tailworks-e2e/state/logs/mgmt.log* 2>/dev/null; true`, nil)
+		warmKeys := warmKeyIDs(warmLog)
+		// The VM's tailworks logs (and the unit's journal), kept next to the
+		// results: the timings above are explained by them (#245).
+		if logs, _, err := v.run(`for f in $(find ~/.tailworks-e2e -name '*.log' -path '*logs*' 2>/dev/null); do echo "==== $f"; cat "$f"; done
+			echo "==== journalctl --user -u tw.service"; journalctl --user -u tw.service --no-pager -o short-precise 2>/dev/null | tail -400; true`, nil); err == nil {
+			if err := os.WriteFile(strings.TrimSuffix(resultsTo, ".json")+".logs.txt", []byte(netd.Redact(logs)), 0o600); err != nil {
+				t.Logf("saving the VM logs: %v", err)
+			}
+		}
 		us := time.Now()
-		so, se, err := v.run(`systemctl --user disable --now twd.service >/dev/null 2>&1; rm -f ~/.config/systemd/user/twd.service; systemctl --user daemon-reload 2>/dev/null
-			pkill -TERM -f "$HOME/.twd/bin/" 2>/dev/null; sleep 0.5; pkill -KILL -f "$HOME/.twd/bin/" 2>/dev/null
-			u=$(ls -d ~/.twd-e2e/twd-*/install.sh 2>/dev/null | head -1)
+		so, se, err := v.run(`systemctl --user disable --now tw.service >/dev/null 2>&1; rm -f ~/.config/systemd/user/tw.service; systemctl --user daemon-reload 2>/dev/null
+			pkill -TERM -f "$HOME/.tailworks/bin/" 2>/dev/null; sleep 0.5; pkill -KILL -f "$HOME/.tailworks/bin/" 2>/dev/null
+			u=$(ls -d ~/.tailworks-e2e/tailworks-*/install.sh 2>/dev/null | head -1)
 			if [ -n "$u" ]; then "$u" --uninstall --purge --force; fi
-			rm -rf ~/.twd-e2e
-			[ -e ~/.twd ] && echo LEFT ~/.twd; [ -e ~/.twd-e2e ] && echo LEFT ~/.twd-e2e; [ -e ~/.config/systemd/user/twd.service ] && echo LEFT unit
-			pgrep -fa "$HOME/.twd/" && echo LEFT processes; true`, nil)
+			rm -rf ~/.tailworks-e2e
+			[ -e ~/.tailworks ] && echo LEFT ~/.tailworks; [ -e ~/.tailworks-e2e ] && echo LEFT ~/.tailworks-e2e; [ -e ~/.config/systemd/user/tw.service ] && echo LEFT unit
+			pgrep -fa "$HOME/.tailworks/" && echo LEFT processes; true`, nil)
 		res.Numbers["uninstall_ms"] = msOf(time.Since(us))
 		if err != nil || strings.Contains(so, "LEFT") {
 			t.Errorf("VM cleanup: %v %s %s", err, netd.Redact(so), netd.Redact(se))
@@ -300,15 +364,32 @@ func TestE2ELinux(t *testing.T) {
 		cctx, ccancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer ccancel()
 		devs, keys := cliflow.Leftovers(cctx, api, res)
-		res.Cleanup["twd_devices_tracked"] = len(res.NodeIDs)
-		res.Cleanup["twd_keys_tracked"] = len(res.KeyIDs)
-		res.Cleanup["twd_devices_left_after_down"] = len(devs)
-		res.Cleanup["twd_keys_valid_after_down"] = len(keys)
+		res.Cleanup["tw_devices_tracked"] = len(res.NodeIDs)
+		res.Cleanup["tw_keys_tracked"] = len(res.KeyIDs)
+		res.Cleanup["tw_devices_left_after_down"] = len(devs)
+		res.Cleanup["tw_keys_valid_after_down"] = len(keys)
+		var warmLeft []string
+		for _, id := range warmKeys {
+			if k, err := api.GetKey(cctx, id); err == nil && !k.Invalid && k.Revoked == "" {
+				warmLeft = append(warmLeft, id)
+				api.DeleteKey(cctx, id)
+			}
+		}
+		res.Cleanup["warm_keys_minted"] = len(warmKeys)
+		res.Cleanup["warm_keys_valid_after_down"] = len(warmLeft)
+		if len(warmLeft) > 0 {
+			t.Errorf("after tw down: %d of %d warm keys still valid (deleted by cleanup): %v", len(warmLeft), len(warmKeys), warmLeft)
+		}
 		for _, id := range res.NodeIDs {
-			tracker.Track(id, "twd")
+			tracker.Track(id, "tw")
+		}
+		for _, id := range res.InfraNodeIDs {
+			tracker.Track(id, "tw-infra") // mgmt's and the host's own nodes: kept by tw down, deleted here by ID (as e2e/linuxvm)
 		}
 		crep := tracker.Cleanup(cctx, testPrefix)
-		trep := tracker.Cleanup(cctx, twdPrefix)
+		trep := tracker.Cleanup(cctx, twPrefix)
+		hrep := tracker.Cleanup(cctx, "tw-host-"+twPrefix) // the host's node is named tw-host-<host id>
+		trep.Untracked = append(trep.Untracked, hrep.Untracked...)
 		for _, k := range keys {
 			api.DeleteKey(cctx, k)
 		}
@@ -329,7 +410,7 @@ func TestE2ELinux(t *testing.T) {
 		os.WriteFile(resultsTo, out, 0o644)
 		t.Logf("results: %s\n%s", resultsTo, out)
 		if len(devs) > 0 || len(keys) > 0 {
-			t.Errorf("after twd down: leftover twd devices %v, valid keys %d", devs, len(keys))
+			t.Errorf("after tw down: leftover tw devices %v, valid keys %d", devs, len(keys))
 		}
 		if crep.Left != 0 || len(crep.Untracked) > 0 || len(trep.Untracked) > 0 {
 			t.Errorf("cleanup left devices: %+v %+v", crep, trep)
@@ -339,20 +420,20 @@ func TestE2ELinux(t *testing.T) {
 	// Copy the tarball and the key file in with `limactl copy` (as a user
 	// would get them; the key is 0600 inside a 0700 dir, never on a
 	// command line, never printed).
-	v.must(`umask 077; mkdir -p ~/.twd-e2e/work && chmod 700 ~/.twd-e2e`)
+	v.must(`umask 077; mkdir -p ~/.tailworks-e2e/work && chmod 700 ~/.tailworks-e2e`)
 	st := time.Now()
 	if out, err := exec.Command("limactl", "copy", tarball, vmName+":"+R+"/").CombinedOutput(); err != nil {
 		t.Fatalf("limactl copy tarball: %v %s", err, out)
 	}
 	res.Numbers["copy_tarball_ms"] = msOf(time.Since(st))
-	if out, err := exec.Command("limactl", "copy", keyFile, vmName+":"+rKey).CombinedOutput(); err != nil {
+	if out, err := exec.Command("limactl", "copy", oauthFile, vmName+":"+rKey).CombinedOutput(); err != nil {
 		t.Fatalf("limactl copy key file: %v %s", err, netd.Redact(string(out)))
 	}
 	v.must("chmod 600 " + shq(rKey))
 	if m := strings.TrimSpace(v.must("stat -c %a " + shq(rKey))); m != "600" {
 		t.Fatalf("key file mode in the VM: %s", m)
 	}
-	res.Checks["copy"] = "PASS tarball + key file (0600, in a 0700 dir) via limactl copy"
+	res.Checks["copy"] = "PASS tarball + OAuth client file (0600, in a 0700 dir) via limactl copy"
 
 	// install.sh
 	tgz := filepath.Base(tarball)
@@ -372,28 +453,28 @@ func TestE2ELinux(t *testing.T) {
 		t.Fatalf("install.sh did not print PATH instructions:\n%s", so)
 	}
 	so2, se, d2, err := v.timed(R, R+"/"+dirName+"/install.sh")
-	if err != nil || !strings.Contains(so2, "installed twd") {
+	if err != nil || !strings.Contains(so2, "installed tw") {
 		t.Fatalf("install.sh (again): %v\n%s\n%s", err, so2, se)
 	}
 	res.Numbers["install_again_ms"] = msOf(d2)
-	ver := strings.TrimSpace(v.must(`cat ~/.twd/VERSION; ~/.twd/bin/workerd --version`))
-	res.Pass("install", fmt.Sprintf("install.sh %.1f s (again %.1f s), no sudo, ~/.twd: %s", msOf(d)/1000, msOf(d2)/1000, strings.Join(strings.Fields(ver), " ")))
+	ver := strings.TrimSpace(v.must(`cat ~/.tailworks/VERSION; ~/.tailworks/bin/workerd --version`))
+	res.Pass("install", fmt.Sprintf("install.sh %.1f s (again %.1f s), no sudo, ~/.tailworks: %s", msOf(d)/1000, msOf(d2)/1000, strings.Join(strings.Fields(ver), " ")))
 
-	// twd doctor before up: no check may fail. The Linux checks must be ok
+	// tw doctor before up: no check may fail. The Linux checks must be ok
 	// (the microVM pieces may be skip: they're optional).
 	var doc doctorOut
-	so, se, d, err = e.Twd("doctor", "--tailnet", tailnet, "--api-key-file", rKey, "--json")
+	so, se, d, err = e.Tw("doctor", "--json")
 	if err != nil || json.Unmarshal([]byte(so), &doc) != nil || !doc.OK {
-		t.Fatalf("twd doctor in the VM: %v\n%s\n%s", err, so, netd.Redact(se))
+		t.Fatalf("tw doctor in the VM: %v\n%s\n%s", err, so, netd.Redact(se))
 	}
 	res.Numbers["doctor_ms"] = msOf(d)
-	mustOK := []string{"binaries", "glibc", "workerd", "bundler", "twd_home_writable", "state_dir_writable", "api_key", "kernel", "cgroups_v2", "systemd", "system_tailscaled_not_used"}
+	mustOK := []string{"binaries", "glibc", "workerd", "bundler", "tw_home_writable", "state_dir_writable", "kernel", "cgroups_v2", "systemd", "system_tailscaled_not_used"}
 	var summary []string
 	for _, c := range doc.Checks {
 		summary = append(summary, c.Name+"="+c.Status)
 		res.Checks["doctor_"+c.Name] = strings.ToUpper(c.Status) + " " + c.Detail
 		if c.Status == "fail" || (slices.Contains(mustOK, c.Name) && c.Status != "ok") {
-			t.Fatalf("twd doctor in the VM: %s is %s: %s", c.Name, c.Status, c.Detail)
+			t.Fatalf("tw doctor in the VM: %s is %s: %s", c.Name, c.Status, c.Detail)
 		}
 	}
 	if st, d := doc.get("landlock"); st == "" {
@@ -405,20 +486,20 @@ func TestE2ELinux(t *testing.T) {
 	res.Checks["microvm_tier"] = "INFO " + mv
 	res.Pass("doctor", fmt.Sprintf("%d checks in %.0f ms, none failed: %s", len(doc.Checks), msOf(d), strings.Join(summary, " ")))
 
-	if _, se, _, err := e.Twd("init", rWork+"/ai", "--template", "ai-agent", "--json"); err != nil {
-		t.Fatalf("twd init --template ai-agent in the VM: %v %s", err, se)
+	if _, se, _, err := e.Tw("init", rWork+"/ai", "--template", "ai-agent", "--json"); err != nil {
+		t.Fatalf("tw init --template ai-agent in the VM: %v %s", err, se)
 	}
-	res.Pass("init_ai_agent_offline", "twd init --template ai-agent in the VM (no npm); bundled offline by doctor")
+	res.Pass("init_ai_agent_offline", "tw init --template ai-agent in the VM (no npm); bundled offline by doctor")
 
-	// Checks (a)–(f), with twd under `twd up --service`.
+	// Checks (a)–(f), with tailworks under `tw up --service`.
 	e.Run()
 
 	// The service: the unit exists, is active, and its main PID is the
 	// supervisor's.
-	unit := vhome + "/.config/systemd/user/twd.service"
+	unit := vhome + "/.config/systemd/user/tw.service"
 	svcState := func() (active, pid string) {
 		// key=value: the order of --value output differs across systemd versions.
-		so, _, _ := v.run(`systemctl --user show -p ActiveState -p MainPID twd.service`, nil)
+		so, _, _ := v.run(`systemctl --user show -p ActiveState -p MainPID tw.service`, nil)
 		for _, l := range strings.Split(so, "\n") {
 			if x, ok := strings.CutPrefix(l, "ActiveState="); ok {
 				active = strings.TrimSpace(x)
@@ -430,26 +511,26 @@ func TestE2ELinux(t *testing.T) {
 		return active, pid
 	}
 	sup := func() string {
-		return strings.TrimSpace(v.must(`cat ~/.twd-e2e/state/supervisor.pid 2>/dev/null; true`))
+		return strings.TrimSpace(v.must(`cat ~/.tailworks-e2e/state/supervisor.pid 2>/dev/null; true`))
 	}
 	if _, _, err := v.run("test -f "+shq(unit), nil); err != nil {
-		t.Fatalf("twd up --service didn't write %s", unit)
+		t.Fatalf("tw up --service didn't write %s", unit)
 	}
 	act, pid1 := svcState()
 	if act != "active" || pid1 == "" || pid1 != sup() {
-		t.Fatalf("twd.service: ActiveState=%s MainPID=%s supervisor.pid=%s", act, pid1, sup())
+		t.Fatalf("tw.service: ActiveState=%s MainPID=%s supervisor.pid=%s", act, pid1, sup())
 	}
 	linger := strings.TrimSpace(v.must(`loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null; true`))
-	res.Pass("service", fmt.Sprintf("twd up --service: %s active, MainPID %s = supervisor (linger=%s)", unit, pid1, linger))
+	res.Pass("service", fmt.Sprintf("tw up --service: %s active, MainPID %s = supervisor (linger=%s)", unit, pid1, linger))
 
-	// systemctl --user restart: a new supervisor, twd healthy again, and the
+	// systemctl --user restart: a new supervisor, tailworks healthy again, and the
 	// mcp workload answers this Mac over the tailnet again.
 	if client == nil || mcpIP == "" {
 		t.Fatal("no client / mcp IP from the run")
 	}
 	rs := time.Now()
-	if _, se, rd, err := v.timed(R, "systemctl", "--user", "restart", "twd.service"); err != nil {
-		t.Fatalf("systemctl --user restart twd: %v %s", err, se)
+	if _, se, rd, err := v.timed(R, "systemctl", "--user", "restart", "tw.service"); err != nil {
+		t.Fatalf("systemctl --user restart tw: %v %s", err, se)
 	} else {
 		res.Numbers["service_restart_cmd_ms"] = msOf(rd)
 	}
@@ -458,14 +539,14 @@ func TestE2ELinux(t *testing.T) {
 		var stt struct {
 			Healthy bool `json:"healthy"`
 		}
-		if so, _, _, err := e.Twd("status", "--json"); err == nil && json.Unmarshal([]byte(so), &stt) == nil && stt.Healthy {
+		if so, _, _, err := e.Tw("status", "--json"); err == nil && json.Unmarshal([]byte(so), &stt) == nil && stt.Healthy {
 			healthyAt = time.Since(rs)
 			break
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
 	if healthyAt == 0 {
-		t.Fatalf("twd not healthy within %v of systemctl --user restart", scale(3*time.Minute))
+		t.Fatalf("tw not healthy within %v of systemctl --user restart", scale(3*time.Minute))
 	}
 	act, pid2 := svcState()
 	if act != "active" || pid2 == pid1 || pid2 != sup() {
@@ -486,7 +567,7 @@ func TestE2ELinux(t *testing.T) {
 	}
 	res.Numbers["service_restart_healthy_ms"] = msOf(healthyAt)
 	res.Numbers["service_restart_reachable_ms"] = msOf(reachAt)
-	res.Pass("service_restart", fmt.Sprintf("systemctl --user restart twd: new MainPID %s, healthy after %.1f s, mcp workload answers this Mac (same tailnet IP) after %.1f s",
+	res.Pass("service_restart", fmt.Sprintf("systemctl --user restart tw: new MainPID %s, healthy after %.1f s, mcp workload answers this Mac (same tailnet IP) after %.1f s",
 		pid2, healthyAt.Seconds(), reachAt.Seconds()))
 
 	// Reboot survival: lingering on (sudo inside the VM only), then the VM
@@ -502,7 +583,7 @@ func TestE2ELinux(t *testing.T) {
 			t.Fatalf("linger after enable-linger: %q", l)
 		}
 		// Lines written from here on: tail -n +K is inclusive, so K = lines+1.
-		hostdLines := strconv.Itoa(atoi(strings.TrimSpace(v.must(`wc -l < ~/.twd-e2e/state/logs/hostd.log`))) + 1)
+		hostdLines := strconv.Itoa(atoi(strings.TrimSpace(v.must(`wc -l < ~/.tailworks-e2e/state/logs/hostd.log`))) + 1)
 		var ls struct {
 			Objects []cliflow.Object `json:"objects"`
 		}
@@ -543,21 +624,21 @@ func TestE2ELinux(t *testing.T) {
 			time.Sleep(500 * time.Millisecond)
 		}
 		if activeAt == 0 {
-			so, _, _ := v.run(`systemctl --user status twd.service 2>&1 | tail -15; loginctl list-users 2>&1`, nil)
-			t.Fatalf("twd.service not active within 5 min of boot:\n%s", so)
+			so, _, _ := v.run(`systemctl --user status tw.service 2>&1 | tail -15; loginctl list-users 2>&1`, nil)
+			t.Fatalf("tw.service not active within 5 min of boot:\n%s", so)
 		}
 		for time.Since(t0) < scale(5*time.Minute) {
 			var stt struct {
 				Healthy bool `json:"healthy"`
 			}
-			if so, _, _, err := e.Twd("status", "--json"); err == nil && json.Unmarshal([]byte(so), &stt) == nil && stt.Healthy {
+			if so, _, _, err := e.Tw("status", "--json"); err == nil && json.Unmarshal([]byte(so), &stt) == nil && stt.Healthy {
 				healthyAt = time.Since(t0)
 				break
 			}
 			time.Sleep(500 * time.Millisecond)
 		}
 		if healthyAt == 0 {
-			t.Fatal("twd not healthy within 5 min of boot")
+			t.Fatal("tw not healthy within 5 min of boot")
 		}
 		for time.Since(t0) < scale(6*time.Minute) {
 			if ms, ok := toolsList(hc, mcpIP); ok {
@@ -588,8 +669,8 @@ func TestE2ELinux(t *testing.T) {
 			}
 			time.Sleep(time.Second)
 		}
-		joins := strings.TrimSpace(v.must(`tail -n +` + hostdLines + ` ~/.twd-e2e/state/logs/hostd.log | grep -c 'object node ready.*rejoined=true reminted=false' || true`))
-		reminted := strings.TrimSpace(v.must(`tail -n +` + hostdLines + ` ~/.twd-e2e/state/logs/hostd.log | grep -c 'reminted=true' || true`))
+		joins := strings.TrimSpace(v.must(`tail -n +` + hostdLines + ` ~/.tailworks-e2e/state/logs/hostd.log | grep -c 'object node ready.*rejoined=true reminted=false' || true`))
+		reminted := strings.TrimSpace(v.must(`tail -n +` + hostdLines + ` ~/.tailworks-e2e/state/logs/hostd.log | grep -c 'reminted=true' || true`))
 		if joins != strconv.Itoa(len(beforeNodes)) || reminted != "0" {
 			t.Fatalf("hostd log after reboot: %s rejoins (want %d), %s reminted", joins, len(beforeNodes), reminted)
 		}
@@ -598,22 +679,22 @@ func TestE2ELinux(t *testing.T) {
 		res.Numbers["reboot_service_active_ms"] = msOf(activeAt)
 		res.Numbers["reboot_healthy_ms"] = msOf(healthyAt)
 		res.Numbers["reboot_serving_ms"] = msOf(servingAt)
-		res.Pass("reboot", fmt.Sprintf("enable-linger %s, limactl stop (%.1f s) + start: ssh %.1f s, twd.service active %.1f s (MainPID %s → %s), healthy %.1f s, mcp workload answers this Mac %.1f s; %d objects rejoined with their old node IDs, 0 re-minted",
+		res.Pass("reboot", fmt.Sprintf("enable-linger %s, limactl stop (%.1f s) + start: ssh %.1f s, tw.service active %.1f s (MainPID %s → %s), healthy %.1f s, mcp workload answers this Mac %.1f s; %d objects rejoined with their old node IDs, 0 re-minted",
 			user, stopDur.Seconds(), sshAt.Seconds(), activeAt.Seconds(), pidBefore, pidAfter, healthyAt.Seconds(), servingAt.Seconds(), len(beforeNodes)))
 	}
 
-	// doctor while twd runs: no twd process holds tailscaled's socket; the
+	// doctor while tailworks runs: no tailworks process holds tailscaled's socket; the
 	// workloads have no sandbox yet (L2).
-	so, se, _, err = e.Twd("doctor", "--json")
+	so, se, _, err = e.Tw("doctor", "--json")
 	if err != nil || json.Unmarshal([]byte(so), &doc) != nil || !doc.OK {
-		t.Fatalf("twd doctor (running): %v\n%s\n%s", err, so, netd.Redact(se))
+		t.Fatalf("tw doctor (running): %v\n%s\n%s", err, so, netd.Redact(se))
 	}
 	if st, d := doc.get("system_tailscaled_not_used"); st != "ok" || !strings.Contains(d, "hold no tailscaled LocalAPI socket") {
 		t.Fatalf("doctor (running): system_tailscaled_not_used %s %s", st, d)
 	} else {
 		res.Pass("system_tailscaled_not_used", d)
 	}
-	if st, d := doc.get("systemd"); !strings.Contains(d, "twd.service installed (active)") {
+	if st, d := doc.get("systemd"); !strings.Contains(d, "tw.service installed (active)") {
 		t.Fatalf("doctor (running): systemd %s %s", st, d)
 	}
 	var sbst struct {
@@ -641,7 +722,7 @@ func TestE2ELinux(t *testing.T) {
 	res.Pass("sandbox", fmt.Sprintf("workloads %s; doctor sandbox %s: %s", strings.Join(sbs, " "), sbSt, sbD))
 
 	// Persistent nodes: purge (kill every object, delete its device), and
-	// remove the unit, in one `twd down`.
+	// remove the unit, in one `tw down`.
 	var dr struct {
 		Killed         []string `json:"killed"`
 		Flushed        int      `json:"devicesDeleted"`
@@ -650,34 +731,34 @@ func TestE2ELinux(t *testing.T) {
 	dd := e.MustJSON(&dr, "down", "--purge", "--service")
 	res.Numbers["down_ms"] = msOf(dd)
 	if !dr.ServiceRemoved {
-		t.Fatal("twd down --purge --service: serviceRemoved false")
+		t.Fatal("tw down --purge --service: serviceRemoved false")
 	}
-	res.Pass("down", fmt.Sprintf("twd down --purge --service: %d objects purged, %d devices deleted, %v", len(dr.Killed), dr.Flushed, dd.Round(time.Millisecond)))
+	res.Pass("down", fmt.Sprintf("tw down --purge --service: %d objects purged, %d devices deleted, %v", len(dr.Killed), dr.Flushed, dd.Round(time.Millisecond)))
 	if _, _, err := v.run("test -e "+shq(unit), nil); err == nil {
-		t.Fatalf("twd down --service left %s", unit)
+		t.Fatalf("tw down --service left %s", unit)
 	}
-	if so, _, _ := v.run(`systemctl --user is-enabled twd.service 2>&1; true`, nil); strings.TrimSpace(so) == "enabled" {
-		t.Fatal("twd.service still enabled after twd down --service")
+	if so, _, _ := v.run(`systemctl --user is-enabled tw.service 2>&1; true`, nil); strings.TrimSpace(so) == "enabled" {
+		t.Fatal("tw.service still enabled after tw down --service")
 	}
-	res.Pass("service_removed", "twd down --purge --service: unit disabled and removed")
+	res.Pass("service_removed", "tw down --purge --service: unit disabled and removed")
 	downDone = true
 
-	// Ephemeral nodes across a service restart. A second `twd up` on the
+	// Ephemeral nodes across a service restart. A second `tw up` on the
 	// same state, now --ephemeral: the agent plus a spawned sub-agent, then
-	// `systemctl --user restart twd`. Control removes ephemeral devices that
+	// `systemctl --user restart tw`. Control removes ephemeral devices that
 	// go offline, so their saved state is rejected (NeedsLogin): hostd must
 	// re-mint under the same hostname and both must answer this Mac again
 	// with new node IDs. (Before this fix, they hung in tsnet.Up and failed.)
 	if doEphemeral {
 		downDone = false
-		// The SAME state dir (and app dir): `twd down --purge` forgets the
+		// The SAME state dir (and app dir): `tw down --purge` forgets the
 		// killed workload-node objects (mgmt rows + revocations, hostd
-		// tombstones), so `twd up && twd deploy` works again here. Before
+		// tombstones), so `tw up && tw deploy` works again here. Before
 		// that fix this phase needed a fresh state dir (bootstrap_failed
 		// "the workload node for agent is killed").
-		ephLog := "~/.twd-e2e/state/logs/hostd.log"
-		e.MustJSON(nil, "up", "--tailnet", tailnet, "--api-key-file", rKey, "--yes", "--ephemeral",
-			"--hostname-prefix", twdPrefix, "--control-url", prodControl, "--service")
+		ephLog := "~/.tailworks-e2e/state/logs/hostd.log"
+		e.MustJSON(nil, "up", "--oauth-client-file", rKey, "--tailnet", tailnet, "--yes", "--ephemeral",
+			"--hostname-prefix", twPrefix, "--control-url", prodControl, "--service")
 		var dep struct {
 			Endpoint struct{ MagicDNS string } `json:"endpoint"`
 		}
@@ -727,10 +808,21 @@ func TestE2ELinux(t *testing.T) {
 		e.TrackObjectNodes()
 		// Lines written from here on: tail -n +K is inclusive, so K = lines+1.
 		hostdLines := strconv.Itoa(atoi(strings.TrimSpace(v.must(`wc -l < `+ephLog+``))) + 1)
-		if _, se, _, err := v.timed(R, "systemctl", "--user", "restart", "twd.service"); err != nil {
-			t.Fatalf("ephemeral: systemctl --user restart twd: %v %s", err, se)
+		if _, se, _, err := v.timed(R, "systemctl", "--user", "restart", "tw.service"); err != nil {
+			t.Fatalf("ephemeral: systemctl --user restart tw: %v %s", err, se)
 		}
 		t0 := time.Now()
+		// `tw ls` fails (t.Fatal in FindObject) until the new supervisor's
+		// mgmt is serving again: `systemctl restart` returns before that.
+		for time.Since(t0) < scale(3*time.Minute) {
+			var stt struct {
+				Healthy bool `json:"healthy"`
+			}
+			if so, _, _, err := e.Tw("status", "--json"); err == nil && json.Unmarshal([]byte(so), &stt) == nil && stt.Healthy {
+				break
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
 		var child2 cliflow.Object
 		var readyAt time.Duration
 		for time.Since(t0) < scale(4*time.Minute) {
@@ -781,7 +873,7 @@ func TestE2ELinux(t *testing.T) {
 		}
 		e.MustJSON(&dr2, "down", "--purge", "--service")
 		if !dr2.ServiceRemoved {
-			t.Fatal("ephemeral: twd down --purge --service: serviceRemoved false")
+			t.Fatal("ephemeral: tw down --purge --service: serviceRemoved false")
 		}
 		res.Pass("ephemeral_down", fmt.Sprintf("%d objects purged, %d devices deleted, unit removed", len(dr2.Killed), dr2.Flushed))
 		downDone = true
@@ -923,12 +1015,12 @@ func derpProbe(t testing.TB, res *cliflow.Results, tracker *tsapi.Tracker, key, 
 	}
 	var env []string
 	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, "TWD_E2E_") {
+		if !strings.HasPrefix(kv, "TW_E2E_") {
 			env = append(env, kv)
 		}
 	}
-	env = append(env, "TS_DEBUG_ALWAYS_USE_DERP=1", "TWD_PROBE_KEY_FILE="+kf, "TWD_PROBE_HOSTNAME="+hostname,
-		"TWD_PROBE_TARGET="+target, "TWD_PROBE_OUT="+out, "TWD_PROBE_DIR="+dir)
+	env = append(env, "TS_DEBUG_ALWAYS_USE_DERP=1", "TW_PROBE_KEY_FILE="+kf, "TW_PROBE_HOSTNAME="+hostname,
+		"TW_PROBE_TARGET="+target, "TW_PROBE_OUT="+out, "TW_PROBE_DIR="+dir)
 	cmd := exec.Command(os.Args[0], "-test.run=^TestDERPProbe$", "-test.count=1", "-test.timeout=4m")
 	cmd.Env = env
 	b, err := cmd.CombinedOutput()
@@ -950,14 +1042,14 @@ func derpProbe(t testing.TB, res *cliflow.Results, tracker *tsapi.Tracker, key, 
 
 // TestDERPProbe is derpProbe's child process (skipped otherwise).
 func TestDERPProbe(t *testing.T) {
-	kf := os.Getenv("TWD_PROBE_KEY_FILE")
+	kf := os.Getenv("TW_PROBE_KEY_FILE")
 	if kf == "" {
 		t.Skip("child of TestE2ELinux only")
 	}
 	var po probeOut
 	defer func() {
 		b, _ := json.Marshal(po)
-		os.WriteFile(os.Getenv("TWD_PROBE_OUT"), b, 0o600)
+		os.WriteFile(os.Getenv("TW_PROBE_OUT"), b, 0o600)
 	}()
 	key, err := os.ReadFile(kf)
 	if err != nil {
@@ -966,7 +1058,7 @@ func TestDERPProbe(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	n, err := nettest.NewNode(ctx, prodControl, strings.TrimSpace(string(key)), os.Getenv("TWD_PROBE_HOSTNAME"), os.Getenv("TWD_PROBE_DIR"))
+	n, err := nettest.NewNode(ctx, prodControl, strings.TrimSpace(string(key)), os.Getenv("TW_PROBE_HOSTNAME"), os.Getenv("TW_PROBE_DIR"))
 	if err != nil {
 		po.Err = netd.Redact(err.Error())
 		return
@@ -975,9 +1067,9 @@ func TestDERPProbe(t *testing.T) {
 	if st, err := n.LC.StatusWithoutPeers(ctx); err == nil && st.Self != nil {
 		po.NodeID = string(st.Self.ID)
 		b, _ := json.Marshal(po)
-		os.WriteFile(os.Getenv("TWD_PROBE_OUT"), b, 0o600)
+		os.WriteFile(os.Getenv("TW_PROBE_OUT"), b, 0o600)
 	}
-	target := os.Getenv("TWD_PROBE_TARGET")
+	target := os.Getenv("TW_PROBE_TARGET")
 	if err := n.WaitPeers(ctx, target); err != nil {
 		po.Err = "netmap: " + err.Error()
 		return

@@ -7,15 +7,20 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base32"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/rosskukulinski/tailworks/internal/features"
+	"github.com/rosskukulinski/tailworks/internal/version"
 	"log/slog"
 	"math"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -24,11 +29,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rosskukulinski/twd/internal/container"
-	"github.com/rosskukulinski/twd/internal/oci"
-	"github.com/rosskukulinski/twd/internal/registry"
-	"github.com/rosskukulinski/twd/internal/tsapi"
-	"github.com/rosskukulinski/twd/internal/tssvc"
+	"github.com/rosskukulinski/tailworks/internal/container"
+	"github.com/rosskukulinski/tailworks/internal/oci"
+	"github.com/rosskukulinski/tailworks/internal/policy"
+	"github.com/rosskukulinski/tailworks/internal/registry"
+	"github.com/rosskukulinski/tailworks/internal/tsapi"
+	"github.com/rosskukulinski/tailworks/internal/tssvc"
 )
 
 // Config configures a Mgmt.
@@ -41,7 +47,7 @@ type Config struct {
 	PolicyMaxAge time.Duration
 	Clock        Clock
 	Log          *slog.Logger
-	// ReplicaID is this replica's stable identity (twd-mgmt keeps it in
+	// ReplicaID is this replica's stable identity (tw-mgmt keeps it in
 	// <state-dir>/replica.id). Empty: a fresh per-process ID (tests).
 	ReplicaID string
 	// IDSecret keys the object-name HMAC (RFC §4.3). Required.
@@ -73,7 +79,7 @@ type Config struct {
 	// RegistryUpstream returns the client mgmt mirrors an external image
 	// through (nil: oci.RegistryBase over HTTPS for every host, except the
 	// RegistryInsecure hosts, over plain HTTP). NoMirror refuses external
-	// images (only twd.local refs and public bases deploy). ImageAliases
+	// images (only tw.local refs and public bases deploy). ImageAliases
 	// default to registry.DefaultAliases.
 	RegistryDir      string
 	RegistryUpstream func(host string) *oci.Client
@@ -90,9 +96,33 @@ type Config struct {
 	// WarmPoolInterval is how often pools are refilled and expired
 	// (default 2 s; a take also triggers a refill at once).
 	WarmPoolInterval time.Duration
+
+	// RevokeWarmKeysOnClose: Close revokes every unused pooled key and
+	// deletes its custody entry (warmcustody.go), so a stopped mgmt holds no
+	// preauthorized join keys. For a single mgmt (`tw up`); replicas sharing
+	// a store would revoke each other's pool on every restart.
+	RevokeWarmKeysOnClose bool
+
+	// Version is this replica's tw-mgmt version ("" = internal/version's),
+	// checked against hosts and other replicas (versions.go). ReleaseDir
+	// holds imported release artifacts ("" = none: hosts can't upgrade
+	// themselves through this replica; upgrades.go).
+	Version    string
+	ReleaseDir string
+
+	// BundleRetention is how many of each workload's newest bundles mgmt
+	// keeps for rollback (deployhistory.go): 0 = DefaultBundleRetention,
+	// < 0 = every bundle.
+	BundleRetention int
+
+	// Audit retention (retention.go): delete each chain's records older
+	// than AuditMaxAge and all but its newest AuditMaxRecords, keeping a
+	// checkpoint so the rest still verify. 0 = keep (the default).
+	AuditMaxAge     time.Duration
+	AuditMaxRecords int64
 }
 
-// Mgmt is twd-mgmt's core: tenants, deployments, objects, the mint broker
+// Mgmt is tw-mgmt's core: tenants, deployments, objects, the mint broker
 // and its per-tenant throttle, spawn checks, kill, the reaper and audit.
 type Mgmt struct {
 	cfg      Config
@@ -113,8 +143,11 @@ type Mgmt struct {
 	liveReplicas int
 	waiters      map[string]chan struct{}
 	spawnMu      map[string]*sync.Mutex // per tenant: serialises budget checks
-	pushURLs     map[string]string      // hostID → unix:// push socket (in memory; hosts re-register)
+	pushURLs     map[string]string      // hostID → push target cache (unix://, http://node:port, inproc://)
 	pending      map[string]*pendingDelete
+	// inprocPush are the push handlers of hosts embedded in this process
+	// (single-process tw up): hostID → the host agent's push API.
+	inprocPush map[string]http.Handler
 	// reg is the OCI registry (nil without Config.RegistryDir).
 	reg      *registry.Registry
 	resolver *registry.Resolver
@@ -131,6 +164,15 @@ type Mgmt struct {
 	ctx           context.Context
 	cancel        context.CancelFunc
 	wg            sync.WaitGroup
+
+	// warmGone: tenants being (or already) deleted; a refill that lands
+	// after the delete's drain revokes its own key (warmcustody.go).
+	warmGone map[string]bool
+
+	upgradeKick chan struct{} // wakes the upgrade-run driver (upgrades.go)
+
+	// notify.go: the tenants' notification webhooks.
+	notifs notifyState
 }
 
 // New returns a Mgmt; call Start to run the mint workers and reaper.
@@ -158,9 +200,11 @@ func New(cfg Config) (*Mgmt, error) {
 	}
 	m := &Mgmt{cfg: cfg, store: cfg.Store, custody: cfg.Custody, broker: cfg.Broker, clock: cfg.Clock, log: cfg.Log,
 		throttles: map[string]*Throttle{}, queues: map[string]chan string{}, queued: map[string]bool{}, replicaID: cfg.ReplicaID, waiters: map[string]chan struct{}{},
-		spawnMu: map[string]*sync.Mutex{}, pushURLs: map[string]string{},
-		pending: map[string]*pendingDelete{}, noDeviceScope: map[string]bool{}, deviceKept: map[string]bool{},
+		spawnMu: map[string]*sync.Mutex{}, pushURLs: map[string]string{}, inprocPush: map[string]http.Handler{},
+		upgradeKick: make(chan struct{}, 1),
+		pending:     map[string]*pendingDelete{}, noDeviceScope: map[string]bool{}, deviceKept: map[string]bool{},
 		poolKick: make(chan struct{}, 1), poolPause: map[string]time.Time{}}
+	m.custody = indexCustody(m.custody, m.store, func() int64 { return m.now().UnixMilli() }) // tenantpurge.go
 	if m.cfg.WarmKeyTTL == 0 {
 		m.cfg.WarmKeyTTL = DefaultWarmKeyTTL
 	}
@@ -228,6 +272,9 @@ func (m *Mgmt) Start() error {
 		go m.poolLoop()
 	}
 	m.wg.Add(1)
+	go m.upgradeLoop() // upgrades.go
+	m.startRetention() // retention.go
+	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
 		for {
@@ -265,6 +312,9 @@ func (m *Mgmt) Close() {
 	}
 	m.cancel()
 	m.wg.Wait()
+	if m.cfg.RevokeWarmKeysOnClose {
+		m.revokeWarmOnClose() // after the pool loop stopped: nothing refills
+	}
 }
 
 // now is the shared time source: the store's clock when the store provides
@@ -301,9 +351,7 @@ type TenantRequest struct {
 	Tailnet                string `json:"tailnet"`
 	ControlURL             string `json:"controlURL,omitempty"`
 	MintMode               string `json:"mintMode"`
-	APIKeyFile             string `json:"apiKeyFile,omitempty"`
-	WIFClientID            string `json:"wifClientID,omitempty"`
-	WIFLifecycleClientID   string `json:"wifLifecycleClientID,omitempty"`
+	APIKeyFile             string `json:"apiKeyFile,omitempty"` // headscale
 	OAuthClientID          string `json:"oauthClientID,omitempty"`
 	OAuthClientFile        string `json:"oauthClientFile,omitempty"`
 	RegistrationsPerMinute int    `json:"registrationsPerMinute,omitempty"`
@@ -314,6 +362,11 @@ type TenantRequest struct {
 	MaxContainerVCPU   float64 `json:"maxContainerVCPU,omitempty"`
 	// PublicIngress is the ADR-029 gate: "allow" or "deny" (default).
 	PublicIngress string `json:"publicIngress,omitempty"`
+
+	// Several tenants on one tailnet (teams.go): its owner tag and name
+	// prefix; "" = tag:tw and none.
+	OwnerTag   string `json:"ownerTag,omitempty"`
+	NamePrefix string `json:"namePrefix,omitempty"`
 }
 
 func (m *Mgmt) CreateTenant(ctx context.Context, r TenantRequest) (Tenant, error) {
@@ -324,36 +377,27 @@ func (m *Mgmt) CreateTenant(ctx context.Context, r TenantRequest) (Tenant, error
 		return Tenant{}, err
 	}
 	switch r.MintMode {
-	case MintAPIKey:
-		if r.APIKeyFile == "" {
-			return Tenant{}, errf(400, "bad_request", "mintMode apikey needs apiKeyFile")
-		}
-		if !filepath.IsAbs(r.APIKeyFile) {
-			return Tenant{}, errf(400, "bad_request", "apiKeyFile must be an absolute path")
-		}
-		if _, err := os.Stat(r.APIKeyFile); err != nil {
-			return Tenant{}, errf(400, "bad_request", "apiKeyFile: %v", err)
-		}
-	case MintWIF:
-		if r.WIFClientID == "" {
-			return Tenant{}, errf(400, "bad_request", "mintMode wif needs wifClientID")
-		}
-		if m.broker.Issuer == nil {
-			return Tenant{}, errf(400, "bad_request", "mintMode wif needs twd-mgmt to run with an issuer (-issuer-url)")
-		}
 	case MintOAuth:
 		id, err := checkOAuthFile(r.OAuthClientFile, r.OAuthClientID)
 		if err != nil {
 			return Tenant{}, err
 		}
 		r.OAuthClientID = id
+	case MintHeadscale:
+		if err := checkHeadscaleTenant(r.APIKeyFile, r.ControlURL, r.PublicIngress); err != nil {
+			return Tenant{}, err
+		}
 	default:
-		return Tenant{}, errf(400, "bad_request", "mintMode must be oauth, apikey or wif")
+		if removedMintMode(r.MintMode) {
+			return Tenant{}, errSetRemovedMintMode(r.MintMode)
+		}
+		return Tenant{}, errf(400, "bad_request", "mintMode must be oauth or headscale")
 	}
 	t := Tenant{ID: r.ID, Tailnet: r.Tailnet, ControlURL: r.ControlURL, MintMode: r.MintMode, APIKeyFile: r.APIKeyFile,
-		WIFClientID: r.WIFClientID, WIFLifecycleClientID: r.WIFLifecycleClientID, OAuthClientID: r.OAuthClientID, OAuthClientFile: r.OAuthClientFile,
+		OAuthClientID: r.OAuthClientID, OAuthClientFile: r.OAuthClientFile,
 		RegistrationsPerMinute: r.RegistrationsPerMinute, MaxObjects: r.MaxObjects, PublicIngress: r.PublicIngress, CreatedAt: m.now().UnixMilli(),
-		MaxContainers: r.MaxContainers, MaxContainerMemMiB: r.MaxContainerMemMiB, MaxContainerVCPU: r.MaxContainerVCPU}
+		MaxContainers: r.MaxContainers, MaxContainerMemMiB: r.MaxContainerMemMiB, MaxContainerVCPU: r.MaxContainerVCPU,
+		OwnerTag: r.OwnerTag, NamePrefix: r.NamePrefix}
 	t.containerDefaults()
 	if t.ID == registry.PublicNamespace {
 		return Tenant{}, errf(400, "bad_request", "tenant ID %q is reserved (the registry's operator namespace)", t.ID)
@@ -367,104 +411,14 @@ func (m *Mgmt) CreateTenant(ctx context.Context, r TenantRequest) (Tenant, error
 	if t.MaxObjects <= 0 {
 		t.MaxObjects = DefaultMaxObjects
 	}
+	if err := m.checkTeamFields(ctx, t); err != nil { // teams.go
+		return Tenant{}, err
+	}
 	if err := m.store.CreateTenant(ctx, t); err != nil {
 		return Tenant{}, err
 	}
-	m.audit(ctx, AuditRecord{TenantID: t.ID, Kind: "tenant_create"}, map[string]any{"tailnet": t.Tailnet, "mintMode": t.MintMode, "publicIngress": t.PublicIngress})
+	m.audit(ctx, AuditRecord{TenantID: t.ID, Kind: "tenant_create"}, map[string]any{"tailnet": t.Tailnet, "mintMode": t.MintMode, "publicIngress": t.PublicIngress, "ownerTag": t.Owner(), "namePrefix": t.NamePrefix})
 	return t, nil
-}
-
-// IssuerInfo is what a tenant admin needs to create the WIF trust credentials.
-func (m *Mgmt) IssuerInfo(t Tenant) map[string]any {
-	if m.broker.Issuer == nil {
-		return nil
-	}
-	return map[string]any{"issuer": m.broker.Issuer.TenantIssuer(t.ID), "mintSubject": MintSubject(t.ID),
-		"lifecycleSubject": LifecycleSubject(t.ID)}
-}
-
-// WIFUpdate is PUT /v0/tenants/{id}/wif: switch a tenant to (or re-key)
-// WIF mint mode with new public client IDs. Only client IDs are stored.
-type WIFUpdate struct {
-	WIFClientID          string `json:"wifClientID"`
-	WIFLifecycleClientID string `json:"wifLifecycleClientID,omitempty"`
-}
-
-// UpdateTenantWIF sets the tenant's WIF client IDs and makes wif the mint
-// mode. The cached access tokens of the old IDs are dropped.
-func (m *Mgmt) UpdateTenantWIF(ctx context.Context, tenantID string, u WIFUpdate) (Tenant, error) {
-	t, err := m.store.GetTenant(ctx, tenantID)
-	if err != nil {
-		return Tenant{}, err
-	}
-	if u.WIFClientID == "" {
-		return Tenant{}, errf(400, "bad_request", "wifClientID required")
-	}
-	if m.broker.Issuer == nil {
-		return Tenant{}, errf(400, "bad_request", "mintMode wif needs twd-mgmt to run with an issuer (-issuer-url)")
-	}
-	t.MintMode, t.WIFClientID, t.WIFLifecycleClientID = MintWIF, u.WIFClientID, u.WIFLifecycleClientID
-	if err := m.store.UpdateTenant(ctx, t); err != nil {
-		return Tenant{}, err
-	}
-	m.broker.Forget(t.ID)
-	m.audit(ctx, AuditRecord{TenantID: t.ID, Kind: "tenant_update"}, map[string]any{"tailnet": t.Tailnet, "mintMode": t.MintMode, "wifUpdated": true,
-		"lifecycle": t.WIFLifecycleClientID != ""})
-	return t, nil
-}
-
-// WIFCheckResult is POST /v0/tenants/{id}/wif-check: does each trust
-// credential exchange, and can the lifecycle one read the policy.
-type WIFCheckResult struct {
-	MintMode string `json:"mintMode"`
-	// Mint: the mint credential's token exchange succeeded (its auth_keys
-	// scope is only proven by the first real mint).
-	Mint      bool   `json:"mint"`
-	MintError string `json:"mintError,omitempty"`
-	// Lifecycle: "ok", "absent" (no lifecycle client ID: kill tier 2, the
-	// reaper's device deletes, spawn checks and deploy preflight are off)
-	// or "error".
-	Lifecycle      string `json:"lifecycle"`
-	LifecycleError string `json:"lifecycleError,omitempty"`
-	// PolicyRead: the lifecycle credential read the tailnet policy
-	// (policy_file:read), which preflight and spawn checks need.
-	PolicyRead      bool   `json:"policyRead"`
-	PolicyReadError string `json:"policyReadError,omitempty"`
-	Issuer          string `json:"issuer,omitempty"`
-}
-
-// WIFCheck exercises a wif tenant's trust credentials without minting.
-func (m *Mgmt) WIFCheck(ctx context.Context, tenantID string) (WIFCheckResult, error) {
-	t, err := m.store.GetTenant(ctx, tenantID)
-	if err != nil {
-		return WIFCheckResult{}, err
-	}
-	res := WIFCheckResult{MintMode: t.MintMode, Lifecycle: "absent"}
-	if t.MintMode != MintWIF {
-		return res, errf(400, "bad_request", "tenant %s is in mint mode %s, not wif", t.ID, t.MintMode)
-	}
-	res.Issuer = m.broker.Issuer.TenantIssuer(t.ID)
-	m.broker.Forget(t.ID) // a fresh exchange, not a cached token
-	if _, err := m.broker.API(ctx, t, purposeMint); err != nil {
-		res.MintError = err.Error()
-	} else {
-		res.Mint = true
-	}
-	if t.WIFLifecycleClientID != "" {
-		api, err := m.broker.API(ctx, t, purposeLifecycle)
-		if err != nil {
-			res.Lifecycle, res.LifecycleError = "error", err.Error()
-		} else {
-			res.Lifecycle = "ok"
-			if _, _, _, err := api.GetPolicy(ctx, ""); err != nil {
-				res.PolicyReadError = err.Error()
-			} else {
-				res.PolicyRead = true
-				m.policies.Invalidate(t.ID)
-			}
-		}
-	}
-	return res, nil
 }
 
 // ---- hosts ----
@@ -476,15 +430,54 @@ type RegisterRequest struct {
 	Tiers         []string `json:"tiers"`
 	AuditPubKey   string   `json:"auditPubKey,omitempty"`
 	Pool          string   `json:"pool,omitempty"`
+	// RegistrationSecret is the one-time secret from POST /v1/hosts; a
+	// tailnet node must present it to bind itself to a pending host (M1).
+	RegistrationSecret string `json:"registrationSecret,omitempty"`
 	// PushURL is where mgmt pushes kills and assignment changes on the
-	// local-dev socket (unix:///… only). Over the tailnet hosts give
-	// PushPort instead: mgmt pushes to the WhoIs node's address.
+	// local-dev socket (unix:///… only), or EmbeddedPushURL for the host
+	// agent embedded in mgmt's own process (single-process tw up). Over
+	// the tailnet hosts give PushPort instead: mgmt pushes to the WhoIs
+	// node's address.
 	PushURL  string `json:"pushURL,omitempty"`
 	PushPort int    `json:"pushPort,omitempty"`
 	// Arch (GOARCH) and Capacity, the capacity vector (ADR-032 D9).
 	Arch     string        `json:"arch,omitempty"`
 	Capacity *HostCapacity `json:"capacity,omitempty"`
+
+	// Version, Protocols and Features: what the host runs and offers
+	// (ADR-041 §7; versions.go).
+	Version   string         `json:"version,omitempty"`
+	OS        string         `json:"os,omitempty"`
+	Protocols map[string]int `json:"protocols,omitempty"`
+	Features  []string       `json:"features,omitempty"`
 }
+
+// EmbeddedPushURL is the push "URL" of a host agent that runs inside
+// mgmt's own process (single-process `tw up`): pushes are served through
+// the handler given to SetInProcessPush, nothing is dialled. A
+// registration naming it is accepted only when the request's context
+// carries the embedded-host marker (WithEmbeddedHost), which only the
+// in-process transport sets: no listener (tsnet or unix socket) attaches it.
+const EmbeddedPushURL = "inproc://"
+
+type embeddedHostKey struct{}
+
+// WithEmbeddedHost marks ctx as a request from the host agent embedded in
+// this process (internal/inproc sets it next to the host principal). The
+// marker cannot arrive over the wire: it is a context value, and the
+// listeners' auth wrappers attach only a Principal.
+func WithEmbeddedHost(ctx context.Context, hostID string) context.Context {
+	return context.WithValue(ctx, embeddedHostKey{}, hostID)
+}
+
+// embeddedHostOf returns the embedded host ID of ctx ("" if not embedded).
+func embeddedHostOf(ctx context.Context) string {
+	id, _ := ctx.Value(embeddedHostKey{}).(string)
+	return id
+}
+
+// IsEmbeddedHost reports whether ctx is a request from the embedded host.
+func IsEmbeddedHost(ctx context.Context) bool { return embeddedHostOf(ctx) != "" }
 
 // RegisterHost binds the host record to the calling node (nodeID, nodeAddr
 // are the WhoIs identity and tailnet IP of a tsnet host; "" on the
@@ -493,17 +486,72 @@ func (m *Mgmt) RegisterHost(ctx context.Context, r RegisterRequest, nodeID, node
 	if r.HostID == "" {
 		return Host{}, false, errf(400, "bad_request", "hostID required")
 	}
+	if err := version.CheckHost(r.Version, m.Version()); err != nil {
+		m.audit(ctx, AuditRecord{Kind: "deny", Code: "version_skew", ActingFor: "host:" + r.HostID},
+			map[string]any{"host": r.HostID, "hostVersion": r.Version, "mgmtVersion": m.Version()})
+		return Host{}, false, errf(409, "version_skew", "%v", err)
+	}
 	if r.Capacity != nil { // capacityNodes is the node dimension
 		c := *r.Capacity
 		c.Nodes, r.Capacity = r.CapacityNodes, &c
 	}
 	old, err := m.store.GetHost(ctx, r.HostID)
 	created := errors.Is(err, ErrNotFound)
-	if err == nil && old.NodeID != "" && nodeID != "" && old.NodeID != nodeID {
+	if err != nil && !created {
+		return Host{}, false, err
+	}
+	secretHash := old.RegistrationSecretHash
+	embedded := r.PushURL == EmbeddedPushURL
+	if embedded {
+		// The host agent embedded in this process: no node to bind, no
+		// registration secret (it is the same process). Only the in-process
+		// transport can present the marker; a tsnet or local-dev caller
+		// naming inproc:// is refused.
+		switch {
+		case embeddedHostOf(ctx) != r.HostID || nodeID != "":
+			m.audit(ctx, AuditRecord{Kind: "deny", Code: "host_identity_mismatch", ActingFor: "host:" + r.HostID},
+				map[string]any{"host": r.HostID, "node": nodeID, "reason": "push URL inproc:// from a caller that is not the embedded host"})
+			return Host{}, false, errf(403, "host_identity_mismatch", "host %s: push URL %s is reserved for the host agent embedded in tw-mgmt's process", r.HostID, EmbeddedPushURL)
+		case old.NodeID != "":
+			return Host{}, false, errf(403, "host_identity_mismatch", "host %s is registered to tailnet node %s; `tw host rm %s` before running it embedded", r.HostID, old.NodeID, r.HostID)
+		}
+	}
+	switch {
+	case nodeID == "":
+		// No node to bind: the --local-dev socket (Tw-Host-ID), where the
+		// record may still be created implicitly. A bound node ID is kept.
+		nodeID = old.NodeID
+	case created:
+		// M1: over the tailnet a host ID exists only if an admin added it.
+		return Host{}, false, errf(403, "host_not_registered", "host %s was never added: `tw host add %s` mints its join key and registration secret", r.HostID, r.HostID)
+	case old.NodeID == "":
+		// First bind of an admin-created host: the join key proves
+		// tag:tw-host, the one-time secret proves this host ID.
+		if secretHash == "" || r.RegistrationSecret == "" ||
+			subtle.ConstantTimeCompare([]byte(hashRegistrationSecret(r.RegistrationSecret)), []byte(secretHash)) != 1 {
+			m.audit(ctx, AuditRecord{Kind: "deny", Code: "host_identity_mismatch", ActingFor: "host:" + r.HostID},
+				map[string]any{"host": r.HostID, "node": nodeID, "reason": "registration secret missing or wrong"})
+			return Host{}, false, errf(403, "host_identity_mismatch", "host %s: the registration secret is missing or wrong (`tw host add %s` mints a new join key and secret)", r.HostID, r.HostID)
+		}
+		secretHash = "" // used once
+		created = true  // the record existed (pending); this is the host's first registration
+	case old.NodeID != nodeID:
 		return Host{}, false, errf(403, "host_identity_mismatch", "host %s is registered to another node", r.HostID)
+	}
+	// M4: the audit key is pinned at the first registration that carries
+	// one; later registrations may repeat or omit it, never change it
+	// (rotation is tw host rm + tw host add).
+	auditKey := r.AuditPubKey
+	if old.AuditPubKey != "" {
+		if auditKey != "" && auditKey != old.AuditPubKey {
+			return Host{}, false, errf(403, "host_identity_mismatch", "host %s: auditPubKey is pinned to the key of its first registration (rotate with tw host rm %s --force, then tw host add)", r.HostID, r.HostID)
+		}
+		auditKey = old.AuditPubKey
 	}
 	target := ""
 	switch {
+	case embedded:
+		target = EmbeddedPushURL
 	case strings.HasPrefix(r.PushURL, "unix:///") && nodeID == "":
 		target = r.PushURL
 	case r.PushPort > 0 && nodeAddr != "":
@@ -517,9 +565,10 @@ func (m *Mgmt) RegisterHost(ctx context.Context, r RegisterRequest, nodeID, node
 	}
 	m.mu.Unlock()
 	now := m.now().UnixMilli()
-	h := Host{ID: r.HostID, CapacityNodes: r.CapacityNodes, Tiers: r.Tiers, NodeID: nodeID, AuditPubKey: r.AuditPubKey,
+	h := Host{ID: r.HostID, CapacityNodes: r.CapacityNodes, Tiers: r.Tiers, NodeID: nodeID, AuditPubKey: auditKey,
 		Pool: r.Pool, PushPort: r.PushPort, PushTarget: target, LastSeen: now, UpdatedAt: now, CreatedAt: old.CreatedAt,
-		Arch: r.Arch, Capacity: r.Capacity, Usage: old.Usage}
+		Arch: r.Arch, Capacity: r.Capacity, Usage: old.Usage, RegistrationSecretHash: secretHash,
+		Version: r.Version, OS: r.OS, Protocols: r.Protocols, Features: r.Features, CordonedAt: old.CordonedAt, CordonedBy: old.CordonedBy}
 	if h.CreatedAt == 0 {
 		h.CreatedAt = now
 	}
@@ -529,8 +578,13 @@ func (m *Mgmt) RegisterHost(ctx context.Context, r RegisterRequest, nodeID, node
 	if err := m.store.UpsertHost(ctx, h); err != nil {
 		return Host{}, false, err
 	}
-	m.audit(ctx, AuditRecord{Kind: "host_register", ActingFor: "host:" + r.HostID}, map[string]any{"host": r.HostID, "node": nodeID,
-		"tiers": r.Tiers, "capacity": r.CapacityNodes, "arch": r.Arch, "capacityVector": r.Capacity, "push": m.pushTarget(r.HostID) != "", "new": created})
+	detail := map[string]any{"host": r.HostID, "node": nodeID,
+		"tiers": r.Tiers, "capacity": r.CapacityNodes, "arch": r.Arch, "capacityVector": r.Capacity, "push": m.pushTarget(r.HostID) != "", "new": created,
+		"version": r.Version, "features": r.Features}
+	if embedded {
+		detail["transport"] = "embedded"
+	}
+	m.audit(ctx, AuditRecord{Kind: "host_register", ActingFor: "host:" + r.HostID}, detail)
 	return h, created, nil
 }
 
@@ -556,6 +610,19 @@ func (m *Mgmt) pushTarget(hostID string) string {
 	return h.PushTarget
 }
 
+// SetInProcessPush registers (or with nil forgets) the push API of a host
+// agent running in this process: push serves POST /v1/push/… through h
+// instead of dialling, once the host has registered with EmbeddedPushURL.
+func (m *Mgmt) SetInProcessPush(hostID string, h http.Handler) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if h == nil {
+		delete(m.inprocPush, hostID)
+		return
+	}
+	m.inprocPush[hostID] = h
+}
+
 // HeartbeatLease is one lease a host believes it holds.
 type HeartbeatLease struct {
 	Namespace string `json:"namespace"`
@@ -569,6 +636,10 @@ type HeartbeatResponse struct {
 	OK            bool     `json:"ok"`
 	Revoke        []string `json:"revoke"`
 	RevokeObjects []string `json:"revokeObjects"`
+
+	// PurgeTenants are deleted tenants whose local state this host must
+	// remove (tenantpurge.go); listed until the host reports them done.
+	PurgeTenants []string `json:"purgeTenants,omitempty"`
 }
 
 func (m *Mgmt) Heartbeat(ctx context.Context, hostID string, liveNodes int, leases []HeartbeatLease, deps ...DeploymentStatus) (HeartbeatResponse, error) {
@@ -585,6 +656,10 @@ type HostReport struct {
 	// an empty list means none run.
 	Usage      *HostUsage         `json:"usage"`
 	Containers []RunningContainer `json:"containers"`
+
+	// PurgedTenants are the deleted tenants whose local state this host
+	// removed (the heartbeat reply's PurgeTenants; tenantpurge.go).
+	PurgedTenants []string `json:"purgedTenants"`
 }
 
 // ReportHostStatus is a heartbeat: host liveness and usage, lease renewals,
@@ -593,7 +668,7 @@ func (m *Mgmt) ReportHostStatus(ctx context.Context, hostID string, rep HostRepo
 	liveNodes, leases := rep.LiveNodes, rep.Leases
 	for _, d := range rep.Deployments {
 		if d.DeploymentID != "" {
-			m.setDepStatus(d.DeploymentID, d)
+			m.setDepStatus(hostID, d.DeploymentID, d)
 		}
 	}
 	now := m.now()
@@ -618,6 +693,7 @@ func (m *Mgmt) ReportHostStatus(ctx context.Context, hostID string, rep HostRepo
 		return resp, err
 	}
 	resp.RevokeObjects = append(resp.RevokeObjects, objs...)
+	resp.PurgeTenants = m.tenantPurgesFor(ctx, hostID, rep.PurgedTenants) // tenantpurge.go
 	return resp, nil
 }
 
@@ -645,9 +721,9 @@ func (m *Mgmt) resolveLease(ctx context.Context, hostID, ns string) string {
 // ---- deployments ----
 
 // DeployRequest is POST /v0/deployments. Namespaces and Host are additions
-// to the v0 contract: explicit class config (instead of twd.jsonc in the
+// to the v0 contract: explicit class config (instead of tailworks.jsonc in the
 // bundle) and an explicit host choice.
-// BuiltImages are one class's images built by twd deploy.
+// BuiltImages are one class's images built by tw deploy.
 type BuiltImages = registry.Built
 
 type DeployRequest struct {
@@ -660,11 +736,11 @@ type DeployRequest struct {
 	// stopped heartbeating, is really gone, so a stateful workload may move
 	// off it (ADR-028 §3). Audited.
 	ForceTakeover bool `json:"forceTakeover,omitempty"`
-	// ContainerImages are the images twd deploy built and pushed, by class
-	// (twd.local/<tenant>/…@sha256 refs): they replace the class's Dockerfile
+	// ContainerImages are the images tw deploy built and pushed, by class
+	// (tw.local/<tenant>/…@sha256 refs): they replace the class's Dockerfile
 	// image / images before every ref is pinned (ADR-032 D3).
 	ContainerImages map[string]BuiltImages `json:"containerImages,omitempty"`
-	// Replace re-places the workload (`twd deploy --replace`, ADR-033):
+	// Replace re-places the workload (`tw deploy --replace`, ADR-033):
 	// the current live holder is not kept just because it holds the lease;
 	// the workload moves if another eligible host is clearly better (or to
 	// Host, when pinned). The lease moves at epoch+1 in one conditional
@@ -675,6 +751,20 @@ type DeployRequest struct {
 	// from the request body): a WhoIs login over the tailnet, the local
 	// actor on the unix socket.
 	By string `json:"-"`
+
+	// replica is set by deployGroup (workload_replicas.go): which replica
+	// of which workload this deploy is. nil only on the outer call.
+	replica *replicaCtx
+
+	// rollbackOf is set by Rollback (rollback.go): the deployment whose
+	// stored bundle this deploy redeploys (audited as kind "rollback").
+	rollbackOf string
+
+	// Preview / PreviewAlias: deploy as a preview workload (tw deploy
+	// --preview, ADR-048); preview is set by preview.go.
+	Preview      bool   `json:"preview,omitempty"`
+	PreviewAlias string `json:"previewAlias,omitempty"`
+	preview      *previewCtx
 }
 
 // DeployResponse is the deploy reply.
@@ -689,6 +779,9 @@ type DeployResponse struct {
 		Service *ServiceEndpoint `json:"service,omitempty"`
 	} `json:"endpoint"`
 	Placement *PlacementDecision `json:"placement,omitempty"`
+
+	// Replicas (tailworks.jsonc "replicas" > 1): every copy, this one first.
+	Replicas []ReplicaRef `json:"replicas,omitempty"`
 }
 
 // ServiceEndpoint is a workload's Tailscale Service: a stable name and VIPs
@@ -711,7 +804,54 @@ func validName(s string) bool {
 	return true
 }
 
+// reservedTags are tailworks' own infrastructure tags. The OAuth client (owner
+// of tag:tw) can mint keys for them, so a bundle must never be able to
+// ask for them: a workload node with tag:tw-host would be admitted as a
+// host by mgmt's WhoIs gate.
+var reservedTags = []string{"tag:tw", MgmtTag, HostTag}
+
+// validTagSyntax is Tailscale's tag grammar: ^tag:[a-zA-Z0-9][a-zA-Z0-9._-]*$
+// (no whitespace, no control characters, nothing after a bare "tag:").
+func validTagSyntax(tag string) bool {
+	rest, ok := strings.CutPrefix(tag, "tag:")
+	if !ok || rest == "" {
+		return false
+	}
+	for i, r := range rest {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case i > 0 && (r == '.' || r == '_' || r == '-'):
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// validateObjectTag is the single check every tag a workload asks for goes
+// through (deploy, preflight, spawn): well-formed (400 bad_request) and not
+// one of tailworks' own tags (400 reserved_tag).
+func validateObjectTag(class, tag string) *Error {
+	if !validTagSyntax(tag) {
+		return errf(400, "bad_request", "namespace %q: %q is not a valid tag (want tag:[a-zA-Z0-9][a-zA-Z0-9._-]*)", class, tag)
+	}
+	for _, res := range reservedTags {
+		if strings.EqualFold(tag, res) {
+			return errf(400, "reserved_tag", "namespace %q: %s is one of tailworks' own tags (%s) and cannot be given to a workload", class, tag, strings.Join(reservedTags, ", "))
+		}
+	}
+	return nil
+}
+
 func (m *Mgmt) Deploy(ctx context.Context, r DeployRequest) (DeployResponse, error) {
+	if r.replica == nil && r.preview == nil {
+		if ok, resp, err := m.deployPreview(ctx, r); ok { // previews: preview.go
+			return resp, err
+		}
+	}
+	if r.replica == nil {
+		return m.deployGroup(ctx, r) // replicas: workload_replicas.go
+	}
 	var resp DeployResponse
 	t, err := m.store.GetTenant(ctx, r.TenantID)
 	if err != nil {
@@ -720,16 +860,26 @@ func (m *Mgmt) Deploy(ctx context.Context, r DeployRequest) (DeployResponse, err
 	if !validName(r.Workload) {
 		return resp, errf(400, "bad_request", "workload must be a DNS label ([a-z0-9-], ≤63)")
 	}
+	if err := m.checkReplicaName(ctx, r); err != nil { // workload_replicas.go (#348)
+		return resp, err
+	}
+	if err := m.checkCompatFlags(ctx, r); err != nil { // compatflags.go (#337)
+		return resp, err
+	}
 	classes := slices.Clone(r.Namespaces)
 	maxLive, maxDepth := DefaultMaxLive, DefaultMaxDepth
-	var svcCfg *TwdConfig
+	var svcCfg *TwConfig
 	var pub *DeploymentPublic
-	var bcfg *TwdConfig
+	var bcfg *TwConfig
 	if len(r.Bundle) > 0 {
 		if _, err := BundleCrons(r.Bundle); err != nil {
 			return resp, errf(400, "bad_bundle", "%v", err)
 		}
+		if _, err := BundleQueues(r.Bundle); err != nil {
+			return resp, errf(400, "bad_bundle", "%v", err)
+		}
 		cfg, err := BundleConfig(r.Bundle)
+		r.preview.strip(cfg) // a preview takes no Service or public routes
 		svcCfg = cfg
 		if err != nil && len(classes) == 0 {
 			return resp, errf(400, "bad_bundle", "%v", err)
@@ -741,6 +891,11 @@ func (m *Mgmt) Deploy(ctx context.Context, r DeployRequest) (DeployResponse, err
 			if err := checkPublicDeploy(t, r.Workload, pub); err != nil {
 				return resp, err
 			}
+			if pub != nil {
+				if err := m.claimPublicName(ctx, t, t.Name(r.Workload), r.By); err != nil { // publicnames.go (H10)
+					return resp, err
+				}
+			}
 			bcfg = cfg
 			bundlePlacement(r.Bundle, cfg)
 			if len(classes) == 0 {
@@ -748,6 +903,7 @@ func (m *Mgmt) Deploy(ctx context.Context, r DeployRequest) (DeployResponse, err
 			} else if len(cfg.Tailnet.Tags) > 0 && !slices.ContainsFunc(classes, func(c ClassConfig) bool { return c.Class == WorkloadNamespace }) {
 				classes = append(classes, ClassConfig{Class: WorkloadNamespace, Tags: cfg.Tailnet.Tags})
 			}
+			// limits.md#spawn-lower
 			if cfg.Tailnet.Spawn.MaxLive > 0 {
 				maxLive = min(cfg.Tailnet.Spawn.MaxLive, DefaultMaxLive)
 			}
@@ -757,23 +913,28 @@ func (m *Mgmt) Deploy(ctx context.Context, r DeployRequest) (DeployResponse, err
 		}
 	}
 	if len(classes) == 0 {
-		return resp, errf(400, "bad_request", "no namespaces: the bundle's twd.jsonc declares neither tailnet.tags (the workload node) nor tailnet.objects")
+		return resp, errf(400, "bad_request", "no namespaces: the bundle's tailworks.jsonc declares neither tailnet.tags (the workload node) nor tailnet.objects")
 	}
 	classes = withPublicNamespace(classes, pub)
 	for _, c := range classes {
 		if c.Class == "" || len(c.Tags) == 0 {
-			return resp, errf(400, "bad_request", "namespace %q needs tags", c.Class)
+			return resp, errf(400, "bad_request", "namespace %q needs tags (or \"node\": false for an internal class with no node)", c.Class)
 		}
 		for _, tag := range c.Tags {
-			if !strings.HasPrefix(tag, "tag:") {
-				return resp, errf(400, "bad_request", "namespace %q: %q is not a tag", c.Class, tag)
+			if e := validateObjectTag(c.Class, tag); e != nil {
+				return resp, e
 			}
 		}
 	}
-	svcName, err := applyService(svcCfg, r.Workload, classes)
+	if err := m.checkDeployTeam(ctx, t, r.Workload, classes); err != nil { // teams.go
+		return resp, err
+	}
+	svcName, err := applyTeamService(t, svcCfg, r.replica.owner(r.Workload), classes) // replicas share the group's Service; teams.go
 	if err != nil {
 		return resp, errf(400, "bad_bundle", "%v", err)
 	}
+	r.replica.mark(classes)
+	r.preview.mark(classes)
 	need := placementNeed{}
 	var ctrs []container.Class
 	if len(r.Bundle) > 0 {
@@ -784,6 +945,7 @@ func (m *Mgmt) Deploy(ctx context.Context, r DeployRequest) (DeployResponse, err
 			return resp, errf(400, "bad_bundle", "%v", err)
 		}
 		need.Containers = len(ctrs) > 0
+		need.Features = features.RequiredByBundle(r.Bundle)
 	}
 	if ctrs, err = registry.ApplyBuilt(t.ID, ctrs, r.ContainerImages); err != nil {
 		return resp, errf(400, "bad_request", "%v", err)
@@ -796,16 +958,20 @@ func (m *Mgmt) Deploy(ctx context.Context, r DeployRequest) (DeployResponse, err
 	}
 	// Placement (ADR-033) keeps ADR-032's eligibility: tier, the
 	// "containers" capability and arch, and the capacity vector.
-	dec, held, err := m.place(ctx, t, placementInput{Workload: r.Workload, Pinned: r.Host, Replace: r.Replace, Config: bcfg, Need: need})
+	dec, held, err := m.place(ctx, t, placementInput{Workload: r.Workload, Pinned: r.Host, Replace: r.Replace, Config: bcfg, Need: need,
+		Exclude: r.replica.exclude})
 	if err != nil {
 		return resp, err
 	}
 	host := dec.Host
 	var svcDef *ServiceEndpoint
+	if svcName != "" && t.Headscale() {
+		return resp, errHeadscaleNoService(svcName)
+	}
 	if svcName != "" {
 		// Before the lease and the record: a deploy whose Service can't
 		// exist (name taken, no API scope) fails without side effects.
-		def, err := m.ensureService(ctx, t, r.Workload, svcName)
+		def, err := m.ensureService(ctx, t, r.replica.owner(r.Workload), svcName)
 		if err != nil {
 			return resp, err
 		}
@@ -839,7 +1005,7 @@ func (m *Mgmt) Deploy(ctx context.Context, r DeployRequest) (DeployResponse, err
 			return resp, e
 		}
 		if fence && !r.ForceTakeover {
-			return resp, errf(409, "move_unconfirmed", "workload %q is stateful (%s): moving it from %s to %s starts its Durable Objects with empty storage on %s (DO storage stays on %s's disk). Redeploy with --replace --force-takeover to move it anyway, or pin it with --host %s. Classes that tolerate this can set \"fence\": \"never\" in twd.jsonc",
+			return resp, errf(409, "move_unconfirmed", "workload %q is stateful (%s): moving it from %s to %s starts its Durable Objects with empty storage on %s (DO storage stays on %s's disk). Redeploy with --replace --force-takeover to move it anyway, or pin it with --host %s. Classes that tolerate this can set \"fence\": \"never\" in tailworks.jsonc",
 				r.Workload, stateWhy, held.Holder, host, host, held.Holder, held.Holder)
 		}
 		lease, err = m.store.MoveLease(ctx, name, held.Holder, held.Epoch, host, NamespaceLeaseTTL, m.now())
@@ -859,6 +1025,7 @@ func (m *Mgmt) Deploy(ctx context.Context, r DeployRequest) (DeployResponse, err
 			return resp, err
 		}
 	}
+	m.releaseUndeployedNames(ctx, t.ID, r.Workload) // redeploy.go (#364)
 	d := Deployment{ID: newID("dp_"), TenantID: t.ID, Workload: r.Workload, HostID: host, Namespaces: classes,
 		MaxLive: maxLive, MaxDepth: maxDepth, Epoch: lease.Epoch, Bundle: r.Bundle, DeployedBy: r.By, CreatedAt: m.now().UnixMilli(), Fence: fence,
 		Containers: ctrs, Public: pub, Placement: &dec}
@@ -879,11 +1046,14 @@ func (m *Mgmt) Deploy(ctx context.Context, r DeployRequest) (DeployResponse, err
 			detail["forced"] = true
 		}
 	}
-	actx, ai := m.intend(ctx, AuditRecord{TenantID: t.ID, Kind: "deploy", ActingFor: r.By}, detail)
+	actx, ai := m.intend(ctx, AuditRecord{TenantID: t.ID, Kind: r.auditKind(), ActingFor: r.By}, r.auditDetail(detail))
 	if err := m.store.CreateDeployment(actx, d); err != nil { // the deploy record commits with it (H22)
 		return resp, err
 	}
 	m.recordIntent(ctx, ai, nil)
+	m.afterDeploy(ctx, d, r.rollbackOf) // deployhistory.go: bundle hash, retention
+	// Another host's pool nodes can't be used here (poolstale.go, #567).
+	go m.killStalePoolNodes(context.WithoutCancel(ctx), t.ID, r.Workload, host, r.By)
 	if pub != nil {
 		m.purgeDeadPublicNode(ctx, t.ID, r.Workload)
 	}
@@ -893,10 +1063,10 @@ func (m *Mgmt) Deploy(ctx context.Context, r DeployRequest) (DeployResponse, err
 		m.killPublicNode(ctx, t.ID, r.Workload, "public routes removed", r.By)
 	}
 	resp.DeploymentID, resp.Host, resp.Epoch, resp.Placement = d.ID, host, lease.Epoch, &dec
-	resp.Endpoint.Node = r.Workload + "-" + host
+	resp.Endpoint.Node = t.Name(r.Workload) + "-" + host
 	resp.Endpoint.MagicDNS = resp.Endpoint.Node + "." + t.Tailnet
 	resp.Endpoint.Service = svcDef
-	m.setDepStatus(d.ID, DeploymentStatus{Status: "assigned"})
+	m.setDepStatus(host, d.ID, DeploymentStatus{Status: "assigned"})
 	// Tell the host now instead of at its next heartbeat.
 	go m.push(host, "/v1/push/assignments", map[string]any{})
 	if movedFrom != "" && fence {
@@ -920,12 +1090,13 @@ type DeploymentStatus struct {
 // heartbeats that repeat it every few seconds cost a lookup, not a write. A
 // per-replica cache can't decide that: another replica may have written a
 // different status since.
-func (m *Mgmt) setDepStatus(id string, st DeploymentStatus) {
+func (m *Mgmt) setDepStatus(hostID, id string, st DeploymentStatus) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := m.store.SetDeploymentStatus(ctx, id, st.Status, st.Error); err != nil {
+	if err := m.store.SetDeploymentStatus(ctx, id, hostID, st.Status, st.Error); err != nil {
 		m.log.Warn("deployment status", "deployment", id, "err", err)
 	}
+	m.noteDeploymentStatus(ctx, hostID, id, st) // deployhistory.go
 }
 
 // DeploymentView is GET /v0/deployments/{id}.
@@ -953,6 +1124,9 @@ type DeploymentView struct {
 		Status   string           `json:"status"`
 		Service  *ServiceEndpoint `json:"service,omitempty"`
 	} `json:"endpoint"`
+
+	// Replicas (tailworks.jsonc "replicas" > 1): every copy with its status.
+	Replicas []ReplicaRef `json:"replicas,omitempty"`
 }
 
 // GetDeployment returns a deployment with the host-reported status and its
@@ -973,6 +1147,7 @@ func (m *Mgmt) GetDeployment(ctx context.Context, id string) (DeploymentView, er
 		v.Endpoint.Service = &ServiceEndpoint{Name: svc, MagicDNS: tssvc.Label(svc) + "." + t.Tailnet}
 	}
 	v.Public = m.publicView(ctx, d)
+	v.Replicas = m.replicaView(ctx, d, v.Status)
 	if o, err := m.store.GetObjectByName(ctx, d.TenantID, d.Workload, WorkloadNamespace, d.Workload); err == nil {
 		v.Endpoint.ObjectID, v.Endpoint.MagicDNS, v.Endpoint.Status = o.ID, o.MagicDNS, o.Status
 		v.Endpoint.Node, _, _ = strings.Cut(o.MagicDNS, ".")
@@ -984,7 +1159,7 @@ func (m *Mgmt) GetDeployment(ctx context.Context, id string) (DeploymentView, er
 // stopped heartbeating but is still registered (ADR-028 §3): that host may
 // still be serving the workload's Durable Objects from its own disk, and it
 // can't be told to stop. Allowed when the old host is live (it is revoked at
-// its next heartbeat), was removed (twd host rm), the workload is stateless
+// its next heartbeat), was removed (tw host rm), the workload is stateless
 // or every DO class is "fence": "never", or the deploy sets ForceTakeover.
 // It returns the old host when a forced takeover happens (for the audit).
 func (m *Mgmt) guardTakeover(ctx context.Context, t Tenant, r DeployRequest, host string) (string, error) {
@@ -1014,7 +1189,7 @@ func (m *Mgmt) guardTakeover(ctx context.Context, t Tenant, r DeployRequest, hos
 	if old.LastSeen > 0 {
 		seen = now.Sub(time.UnixMilli(old.LastSeen)).Round(time.Second).String() + " ago"
 	}
-	return "", errf(409, "takeover_unconfirmed", "workload %q runs on host %s, which mgmt last heard from %s; it may still be serving the workload's %s from its own disk, so moving it to %s could run two copies. If %s is gone for good: `twd host rm %s --drain`, or redeploy with --force-takeover. If it is coming back, wait for it. Classes that tolerate two instances can set \"fence\": \"never\" in twd.jsonc",
+	return "", errf(409, "takeover_unconfirmed", "workload %q runs on host %s, which mgmt last heard from %s; it may still be serving the workload's %s from its own disk, so moving it to %s could run two copies. If %s is gone for good: `tw host rm %s --force`, or redeploy with --force-takeover. If it is coming back, wait for it. Classes that tolerate two instances can set \"fence\": \"never\" in tailworks.jsonc",
 		r.Workload, old.ID, seen, why, host, old.ID, old.ID)
 }
 
@@ -1035,8 +1210,8 @@ func (m *Mgmt) leaseHeldError(ctx context.Context, name, workload string) *Error
 	}
 	if herr == nil && h.Live(now) {
 		// A live holder keeps renewing: its lease won't run out.
-		return errf(409, "lease_held", "workload %q runs on host %s (live, epoch %d, last seen %s); it can't be placed elsewhere while %s holds it. To move it, drain that host first (`twd host rm %s --drain`)",
-			workload, l.Holder, l.Epoch, seen, l.Holder, l.Holder)
+		return errf(409, "lease_held", "workload %q runs on host %s (live, epoch %d, last seen %s); it can't be placed elsewhere while %s holds it. Redeploy with --replace to move it (or `tw host drain %s` to move everything off that host); if %s is gone for good, `tw host rm %s --force`",
+			workload, l.Holder, l.Epoch, seen, l.Holder, l.Holder, l.Holder, l.Holder)
 	}
 	left := time.UnixMilli(l.ExpiresAt).Sub(now)
 	if left < 0 {
@@ -1048,10 +1223,10 @@ func (m *Mgmt) leaseHeldError(ctx context.Context, name, workload string) *Error
 }
 
 // placementTier is the tier a host must offer to run the deployment: the
-// bundle's twd.jsonc "tier", else the tenant's default. "" means any host
+// bundle's tailworks.jsonc "tier", else the tenant's default. "" means any host
 // (every host offers the process tier). Node apps always run in the process
 // tier (the microVM guest has no Node.js).
-func placementTier(t Tenant, cfg *TwdConfig) string {
+func placementTier(t Tenant, cfg *TwConfig) string {
 	tier := t.Tier
 	if cfg != nil {
 		if cfg.Runtime == "node" {
@@ -1086,6 +1261,9 @@ type placementNeed struct {
 	// Arches, when set, are the arches the deploy's images were pinned for
 	// (the host's arch must be one of them).
 	Arches []string
+
+	// Features the bundle needs from its host (internal/features).
+	Features []string
 }
 
 func (h Host) offers(n placementNeed) bool {
@@ -1149,7 +1327,7 @@ type Assignment struct {
 	// (ADR-032 D3): hosts pull only these digests.
 	Containers []container.Class `json:"containers,omitempty"`
 	// Public (ADR-029): the workload's public ingress; nil when it has no
-	// twd.jsonc "public" or the tenant's publicIngress is not allow.
+	// tailworks.jsonc "public" or the tenant's publicIngress is not allow.
 	Public *PublicAssignment `json:"public,omitempty"`
 	// PlacementTargets are what the host should measure paths to for this
 	// workload (smart placement, ADR-033; empty = nothing).
@@ -1213,7 +1391,17 @@ type CreateObjectRequest struct {
 	// and the pool node is transferred in the same transaction. Otherwise
 	// it is ignored and the object is minted as usual.
 	PoolObjectID string `json:"poolObjectID,omitempty"`
+	// Epoch is the lease epoch the calling host holds for the workload.
+	// hostd always sends it; mgmt fences the create on it (RT3-01).
+	Epoch int64 `json:"epoch,omitempty"`
+	// hostID is the authenticated host making the request (set by the API
+	// layer from the principal, never from the body). Non-empty: the
+	// create is fenced on the workload's lease being held by this host.
+	hostID string
 }
+
+// WithHost returns r bound to the authenticated host hostID.
+func (r CreateObjectRequest) WithHost(hostID string) CreateObjectRequest { r.hostID = hostID; return r }
 
 // CreateObjectResponse is the reply. Hostname is an addition: the node
 // hostname hostd should use.
@@ -1333,9 +1521,24 @@ func (m *Mgmt) CreateObject(ctx context.Context, r CreateObjectRequest) (CreateO
 		if workload != "" {
 			in = " of workload " + workload
 		}
+		if r.Namespace == PoolNamespace { // name the class the pool node is for (#359)
+			return resp, errf(404, "unknown_namespace", "no deployment%s of tenant %s declares namespace %q (for a %s node)", in, t.ID, classNS, PoolNamespace)
+		}
 		return resp, errf(404, "unknown_namespace", "no deployment%s of tenant %s declares namespace %q", in, t.ID, r.Namespace)
 	}
 	workload = dep.Workload
+	// A host may only create objects on a lease it holds (RT3-01). The
+	// fence is checked again inside the insert transaction; this early read
+	// gives a clear answer and an audit record without touching the row.
+	var fence *Fence
+	if r.hostID != "" || r.Epoch > 0 {
+		fence = &Fence{Lease: LeaseName(t.ID, dep.Workload), Holder: r.hostID, Epoch: r.Epoch}
+		if l, lerr := m.store.GetLease(ctx, fence.Lease); lerr != nil || l.Holder == "" || (fence.Holder != "" && l.Holder != fence.Holder) || (fence.Epoch > 0 && l.Epoch != fence.Epoch) {
+			m.audit(ctx, AuditRecord{TenantID: t.ID, Kind: "deny", Code: "lease_lost", TraceID: r.TraceID},
+				map[string]any{"workload": workload, "namespace": r.Namespace, "name": r.ObjectName, "host": r.hostID, "epoch": r.Epoch, "message": "create on a lease the caller does not hold"})
+			return resp, errf(409, "lease_lost", "host %q does not hold the lease of workload %q at epoch %d; only the host serving a workload may create its objects", r.hostID, workload, r.Epoch)
+		}
+	}
 	ttl, err := ParseTTL(r.TTL)
 	if err != nil {
 		return resp, errf(400, "bad_request", "%v", err)
@@ -1352,6 +1555,9 @@ func (m *Mgmt) CreateObject(ctx context.Context, r CreateObjectRequest) (CreateO
 			return resp, errf(410, "killed", "object %s (%s %s/%s) was %s", o.ID, workload, r.Namespace, r.ObjectName, o.Status)
 		}
 		return CreateObjectResponse{ObjectID: o.ID, Status: o.Status, Tags: o.Tags, Hostname: o.Hostname}, nil
+	}
+	if err := checkObjectName(r.ObjectName); err != nil { // objname.go
+		return resp, err
 	}
 	if n, err := m.store.CountLive(ctx, t.ID, ""); err != nil {
 		return resp, err
@@ -1372,10 +1578,10 @@ func (m *Mgmt) CreateObject(ctx context.Context, r CreateObjectRequest) (CreateO
 		// hand out an existing object's node.
 		return resp, errf(409, "identity_conflict", "object ID %s is already taken by another identity", id)
 	}
-	hostname := id
+	hostname := t.Name(id) // teams.go: the tenant's name prefix, if any
 	if r.Namespace == PublicNamespace {
 		// The public URL is https://<workload>.<tailnet>.ts.net (ADR-029 D2).
-		hostname = workload
+		hostname = t.Name(workload)
 	}
 	o := Object{ID: id, TenantID: t.ID, Workload: workload, Namespace: r.Namespace, Name: r.ObjectName, Hostname: hostname, DeploymentID: dep.ID,
 		Lease: LeaseName(t.ID, dep.Workload), Tags: class.Tags, Caps: r.Caps, RootID: id, TTLSeconds: int64(ttl / time.Second),
@@ -1419,7 +1625,7 @@ func (m *Mgmt) CreateObject(ctx context.Context, r CreateObjectRequest) (CreateO
 	if r.Namespace == PoolNamespace {
 		detail["pool"] = classNS
 	}
-	pool := m.usablePool(ctx, r, o, class)
+	pool := m.usablePool(ctx, r, o, class, dep)
 	if pool != nil {
 		o.Status, o.NodeID, o.StableNodeID = StatusAssigned, pool.NodeID, pool.StableNodeID
 		detail["fromPool"], detail["stableNodeID"] = pool.ID, pool.StableNodeID
@@ -1432,16 +1638,19 @@ func (m *Mgmt) CreateObject(ctx context.Context, r CreateObjectRequest) (CreateO
 		// …and so does the pool node's transfer record.
 		actx, ti = m.intend(actx, AuditRecord{TenantID: t.ID, ObjectID: pool.ID, Kind: "transfer", TraceID: r.TraceID},
 			map[string]any{"to": o.ID, "stableNodeID": pool.StableNodeID, "class": r.Namespace, "name": r.ObjectName})
-		err2 = m.store.(poolStore).TransferPool(actx, o, pool.ID, pool.StableNodeID, t.MaxObjects, spawnLimit)
+		err2 = m.store.(poolStore).TransferPool(actx, o, pool.ID, pool.StableNodeID, t.MaxObjects, spawnLimit, fence)
 		if errors.Is(err2, ErrPoolGone) {
 			// Another create took this pool node first: mint as usual.
 			r.PoolObjectID = ""
 			return m.CreateObject(ctx, r)
 		}
 	} else {
-		err2 = m.store.CreateObjectChecked(actx, o, t.MaxObjects, spawnLimit)
+		err2 = m.store.CreateObjectChecked(actx, o, t.MaxObjects, spawnLimit, fence)
 	}
-	if err := err2; errors.Is(err, ErrQuota) {
+	if err := err2; errors.Is(err, ErrLeaseLost) {
+		// The lease moved between the early read and the insert (RT3-01).
+		return resp, errf(409, "lease_lost", "host %q lost the lease of workload %q while creating %s/%s: %v", r.hostID, workload, r.Namespace, r.ObjectName, err)
+	} else if errors.Is(err, ErrQuota) {
 		// The fast-path CountLive saw room, but concurrent creates (possibly
 		// through other replicas) filled the quota first (H16).
 		return resp, errf(429, "object_quota_exceeded", "tenant %s has reached its maxObjects (%d)", t.ID, t.MaxObjects)
@@ -1483,12 +1692,12 @@ var errWrongNode = errors.New("ready on another node than the assigned one")
 
 // poolStore is implemented by stores that can transfer pool nodes.
 type poolStore interface {
-	TransferPool(ctx context.Context, o Object, poolID, stableID string, maxObjects, maxLive int) error
+	TransferPool(ctx context.Context, o Object, poolID, stableID string, maxObjects, maxLive int, fence *Fence) error
 }
 
 // usablePool returns the pool node r offers for o if every condition of
 // ADR-031 variant B holds, else nil (the object is then minted as usual).
-func (m *Mgmt) usablePool(ctx context.Context, r CreateObjectRequest, o Object, class ClassConfig) *Object {
+func (m *Mgmt) usablePool(ctx context.Context, r CreateObjectRequest, o Object, class ClassConfig, dep Deployment) *Object {
 	// Never for a reserved namespace (_pool, _workload, the public node's).
 	if r.PoolObjectID == "" || strings.HasPrefix(r.Namespace, "_") || r.Namespace == PublicNamespace || o.Ephemeral {
 		return nil
@@ -1511,12 +1720,28 @@ func (m *Mgmt) usablePool(ctx context.Context, r CreateObjectRequest, o Object, 
 		why = "ephemeral"
 	case !slices.Equal(canonTags(p.Tags), canonTags(class.Tags)) || !slices.Equal(canonTags(o.Tags), canonTags(class.Tags)):
 		why = "tags differ from the class's"
+	case r.hostID != "" && !m.poolJoinedBy(ctx, p, dep, r.hostID):
+		// The node's state is on the disk of the host that joined it; another
+		// host adopting it would strand the object (RT3-04).
+		why = "joined by another host"
 	}
 	if why != "" {
 		m.log.Warn("pool node not used", "pool", r.PoolObjectID, "object", o.ID, "why", why)
 		return nil
 	}
 	return &p
+}
+
+// poolJoinedBy reports whether pool node p was joined by hostID: it was
+// created under a deployment of this workload assigned to that host. The
+// current deployment is the common case; an older one of the same
+// workload on the same host (pool nodes outlive redeploys) also counts.
+func (m *Mgmt) poolJoinedBy(ctx context.Context, p Object, dep Deployment, hostID string) bool {
+	if p.DeploymentID == dep.ID {
+		return dep.HostID == hostID
+	}
+	pd, err := m.store.GetDeployment(ctx, p.DeploymentID)
+	return err == nil && pd.HostID == hostID && pd.TenantID == dep.TenantID && pd.Workload == dep.Workload
 }
 
 // findWorkloadClass finds the latest deployment of the workload named name
@@ -1536,7 +1761,7 @@ func (m *Mgmt) findWorkloadClass(ctx context.Context, tenantID, name string) (De
 			}
 		}
 	}
-	return Deployment{}, ClassConfig{}, fmt.Errorf("workload %q has no %s namespace (twd.jsonc tailnet.tags): %w", name, WorkloadNamespace, ErrNotFound)
+	return Deployment{}, ClassConfig{}, fmt.Errorf("workload %q has no %s namespace (tailworks.jsonc tailnet.tags): %w", name, WorkloadNamespace, ErrNotFound)
 }
 
 // checkSpawn enforces depth ≤ maxDepth, live descendants of the root <
@@ -1564,11 +1789,17 @@ func (m *Mgmt) checkSpawn(ctx context.Context, t Tenant, dep Deployment, p, chil
 		return errf(503, "policy_unavailable", "can't read tenant policy to check delegation: %v", err)
 	}
 	for _, tag := range child.Tags {
-		if !pol.TagOwnedBy(tag, p.Tags) {
-			e := errf(403, "delegation_invalid", "child tag %s is not owned by the parent's tags %v", tag, p.Tags)
-			e.Snippet = fmt.Sprintf(`"tagOwners": { %q: ["tag:twd", %q] }`, tag, p.Tags[0])
+		if e := validateObjectTag(child.Namespace, tag); e != nil {
 			return e
 		}
+		if !pol.TagOwnedBy(tag, p.Tags) {
+			e := errf(403, "delegation_invalid", "child tag %s is not owned by the parent's tags %v", tag, p.Tags)
+			e.Snippet = fmt.Sprintf(`"tagOwners": { %q: [%q, %q] }`, tag, t.Owner(), p.Tags[0])
+			return e
+		}
+	}
+	if err := m.checkTenantTags(ctx, t, child.Tags, pol); err != nil { // teams.go
+		return asAPIError(err)
 	}
 	if e := pol.CheckSpawnCaps(p.Tags, child.Caps); e != nil {
 		return e
@@ -1693,7 +1924,7 @@ func (m *Mgmt) enqueue(tenantID, objectID string) {
 	}
 }
 
-// QueueDepth is twd_registration_queue for a tenant.
+// QueueDepth is tw_registration_queue for a tenant.
 func (m *Mgmt) QueueDepth(tenantID string) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1775,7 +2006,7 @@ func custodyKeyName(o Object, keyID string) string {
 	return legacyCustodyName(o) + "/" + keyID
 }
 
-func legacyCustodyName(o Object) string { return "twd/" + o.TenantID + "/" + o.ID + "/authkey" }
+func legacyCustodyName(o Object) string { return "tw/" + o.TenantID + "/" + o.ID + "/authkey" }
 
 // deleteCustody removes the object's current key entry and any legacy one.
 func (m *Mgmt) deleteCustody(ctx context.Context, o Object) {
@@ -1837,7 +2068,7 @@ func (m *Mgmt) mintOne(ctx context.Context, t Tenant, id string, th *Throttle) (
 	}
 	sp.mark(&sp.broker)
 	k, err := api.CreateKey(ctx, tsapi.KeyOptions{Tags: o.Tags, Ephemeral: o.Ephemeral, Preauthorized: true,
-		ExpirySeconds: int(KeyExpiry / time.Second), Description: "twd " + o.ID})
+		ExpirySeconds: int(KeyExpiry / time.Second), Description: "tw " + o.ID})
 	if err != nil {
 		return false, err
 	}
@@ -1872,6 +2103,7 @@ func (m *Mgmt) mintOne(ctx context.Context, t Tenant, id string, th *Throttle) (
 	m.recordIntent(ctx, ai, nil) // committed with the mint (H22)
 	m.notify(id)
 	m.log.Info("mint spans", append([]any{"object", id, "tenant", t.ID, "keyID", k.ID}, sp.attrs()...)...)
+	sp.observe(t.ID, false) // metrics.go
 	return true, nil
 }
 
@@ -1992,8 +2224,8 @@ func (m *Mgmt) Credential(ctx context.Context, id, hostID string, epoch int64, w
 // object, to see a mint done by another replica.
 const credentialPoll = 250 * time.Millisecond
 
-// ReadyRequest is POST /v0/objects/{id}/ready. Epoch is optional (fences
-// the commit when set).
+// ReadyRequest is the host's PATCH {status: ready, …}. Epoch is required:
+// the commit is always fenced on (lease, caller host, epoch) (H2).
 type ReadyRequest struct {
 	NodeID       string `json:"nodeID"`
 	StableNodeID string `json:"stableNodeID"`
@@ -2006,8 +2238,11 @@ func (m *Mgmt) Ready(ctx context.Context, id, hostID string, r ReadyRequest) (Ob
 	if err != nil {
 		return o, err
 	}
+	// Only the host holding the object's lease may report it ready (RT3-02).
+	// hostd always sends the epoch; a host that omits it is still bound to
+	// the holder. Epoch 0 with no host (in-process callers) stays unfenced.
 	var fence *Fence
-	if r.Epoch > 0 {
+	if r.Epoch > 0 || hostID != "" {
 		fence = &Fence{Lease: o.Lease, Holder: hostID, Epoch: r.Epoch}
 	}
 	wasKilled, wrongNode, assignedTo := false, false, ""
@@ -2039,11 +2274,16 @@ func (m *Mgmt) Ready(ctx context.Context, id, hostID string, r ReadyRequest) (Ob
 		return o, errf(409, "identity_conflict", "object %s was assigned node %s, not %s", id, assignedTo, r.StableNodeID)
 	}
 	if err != nil {
+		if errors.Is(err, ErrLeaseLost) {
+			m.audit(ctx, AuditRecord{TenantID: o.TenantID, ObjectID: id, Kind: "deny", Code: "lease_lost"},
+				map[string]any{"host": hostID, "epoch": r.Epoch, "op": "ready"})
+		}
 		return o, err
 	}
 	m.deleteCustody(ctx, o)
 	if wasKilled {
 		// Killed while joining: the device that just appeared must go too.
+		// The fence held above, so this is the lease holder's own report.
 		o.NodeID, o.StableNodeID = r.NodeID, r.StableNodeID
 		m.deleteDeviceClaimed(ctx, o, false) // claimed, recorded; the sweep retries if this fails
 		return o, errf(410, "killed", "object %s was killed while joining; device deleted", id)
@@ -2095,10 +2335,10 @@ func (m *Mgmt) Remint(ctx context.Context, id, hostID string, r RemintRequest) (
 	case StatusFailed:
 		return old, errf(502, "bootstrap_failed", "minting a key for %s failed", id)
 	}
-	var fence *Fence
-	if r.Epoch > 0 {
-		fence = &Fence{Lease: old.Lease, Holder: hostID, Epoch: r.Epoch}
+	if r.Epoch <= 0 {
+		return old, errf(400, "bad_request", "epoch is required for a remint (the lease epoch the host holds)")
 	}
+	fence := &Fence{Lease: old.Lease, Holder: hostID, Epoch: r.Epoch}
 	actx, ai := m.intend(ctx, AuditRecord{TenantID: old.TenantID, ObjectID: id, Kind: "remint"},
 		map[string]any{"host": hostID, "reason": r.Reason, "previousStatus": old.Status, "previousStableNodeID": old.StableNodeID,
 			"hostname": old.Hostname}) // committed with the reset (H22)
@@ -2173,7 +2413,7 @@ type KillWarning struct {
 const CodeDeviceDeleteUnavailable = "device_delete_unavailable"
 
 // DeviceScopeFix tells the operator how to let kills delete devices.
-const DeviceScopeFix = "the OAuth client lacks the devices:core scope: in the admin console (Settings › Trust credentials) generate a new OAuth client with Auth Keys (write) AND Devices › Core (write), both with tag tag:twd, write it to the same credential file (0600), then revoke the old client; until then remove killed devices in the admin console (Machines)"
+const DeviceScopeFix = "the OAuth client lacks the devices:core scope: in the admin console (Settings › Trust credentials) generate a new OAuth client with Auth Keys (write) AND Devices › Core (write), both with tag tag:tw, write it to the same credential file (0600), then revoke the old client; until then remove killed devices in the admin console (Machines)"
 
 // errDeviceDeleteUnavailable wraps a 403 on a device delete.
 var errDeviceDeleteUnavailable = errors.New(CodeDeviceDeleteUnavailable)
@@ -2366,6 +2606,16 @@ func (m *Mgmt) push(hostID, path string, body any) error {
 }
 
 func (m *Mgmt) pushTo(u, hostID, path string, body any) error {
+	if u == EmbeddedPushURL {
+		// A host embedded in this process (single-process tw up): served
+		// through its handler, no dial. Another replica would see the same
+		// persisted target and fail here, which is right: only the process
+		// that embeds the host can reach it.
+		m.mu.Lock()
+		inproc := m.inprocPush[hostID]
+		m.mu.Unlock()
+		return m.pushInProcess(hostID, inproc, path, body)
+	}
 	base := "http://hostd"
 	var dial func(ctx context.Context, network, addr string) (net.Conn, error)
 	if sock, ok := strings.CutPrefix(u, "unix://"); ok {
@@ -2391,6 +2641,27 @@ func (m *Mgmt) pushTo(u, hostID, path string, body any) error {
 	resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
 		return fmt.Errorf("push %s: %s", path, resp.Status)
+	}
+	return nil
+}
+
+// pushInProcess serves one push through the embedded host's handler (no
+// network; bounded by PushTimeout like a dialled push).
+func (m *Mgmt) pushInProcess(hostID string, h http.Handler, path string, body any) error {
+	if h == nil {
+		return fmt.Errorf("embedded host %s has no push handler", hostID)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), m.cfg.PushTimeout)
+	defer cancel()
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "http://hostd"+path, bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "inproc"
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code/100 != 2 {
+		m.log.Debug("push failed", "host", hostID, "path", path, "status", rec.Code)
+		return fmt.Errorf("push %s: %d %s", path, rec.Code, http.StatusText(rec.Code))
 	}
 	return nil
 }
@@ -2526,10 +2797,10 @@ type PurgeResult struct {
 	WarmKeysRevoked int `json:"warmKeysRevoked,omitempty"`
 }
 
-// Purge forgets a tenant's killed and failed objects (twd down --purge):
+// Purge forgets a tenant's killed and failed objects (tw down --purge):
 // pending device deletes run first, then the rows go, so the same
 // (workload, namespace, name) can be created again on the next deploy.
-// Before this, a redeploy on the same state dir after `twd down --purge`
+// Before this, a redeploy on the same state dir after `tw down --purge`
 // was refused: the killed workload-node object (same name, same ID) made
 // CreateObject answer 410 and the deployment's endpoint read "killed".
 // Live objects are never touched; every removal is audited as "purge".
@@ -2655,7 +2926,7 @@ func (m *Mgmt) Reap(ctx context.Context) (int, error) {
 		if err != nil || !cur.Live() {
 			continue // killed by an earlier cascade in this pass
 		}
-		res, err := m.Kill(ctx, o.ID, KillRequest{Cascade: true, Reason: reason, By: "twd-reaper"})
+		res, err := m.Kill(ctx, o.ID, KillRequest{Cascade: true, Reason: reason, By: "tw-reaper"})
 		if err != nil {
 			return n, err
 		}
@@ -2681,8 +2952,18 @@ var PrivilegedKinds = map[string]bool{"allow": true, "deny": true, "egress": tru
 	"create": true, "mint": true, "ready": true, "credential": true, "principal": true, "device_delete": true,
 	"tenant": true, "deploy": true, "obo_root": true, "container_start": true, "container_stop": true,
 	"image_push": true, "image_pin": true, "image_public": true,
+	"rollback": true, // ADR-046: a deploy, from mgmt only
+	"promote":  true, // ADR-048: a deploy, from mgmt only
+	// RT3-03: hostd reports records it refused before chaining them.
+	"audit_dropped": true,
 	// ADR-029: public ingress records come from netd/hostd only.
-	"public_request": true, "public_rejected": true, "public_object_created": true, "expose_on": true, "expose_off": true}
+	"public_request": true, "public_rejected": true, "public_object_created": true, "expose_on": true, "expose_off": true,
+	// Workflow approvals (hostd/approvals.go): decisions are hostd's.
+	"approval_requested": true,
+	"approval_decision":  true,
+	"approval_denied":    true,
+	"approval_timeout":   true,
+}
 
 // checkAuditSource enforces the provenance contract on a host-submitted
 // record: a "tenant" source may only carry a tenant_note, and a tenant_note
@@ -2706,45 +2987,134 @@ func checkAuditSource(source, kind string) *Error {
 	return nil
 }
 
-// IngestAudit stores host-submitted records on the host's chain. Each must
-// carry hash (and prevHash); the response reports whether they link.
+// hostAuditRecord is the part of a host-submitted record mgmt indexes.
+type hostAuditRecord struct {
+	TS        any    `json:"ts"`
+	ObjectID  string `json:"objectID"`
+	Kind      string `json:"kind"`
+	Source    string `json:"source"`
+	TraceID   string `json:"traceID"`
+	ActingFor string `json:"actingFor"`
+	PrevHash  string `json:"prevHash"`
+	Hash      string `json:"hash"`
+	HostSig   string `json:"hostSig"`
+}
+
+// IngestAudit stores host-submitted records on the host's chain. Every
+// record is verified before anything is written (M4): its hash must be
+// the hash of its content, its hostSig must verify with the host's pinned
+// audit key (when the host registered one), and the batch must link:
+// record i's prevHash is record i-1's hash, and the first prevHash is the
+// chain head. A first prevHash of "" on a non-empty chain is a chain
+// restart (hostd keeps its link in memory); it is stored and reported by
+// verification, never spliced into history. A batch that starts behind
+// the head (a retry after a lost response) resumes after the record that
+// is the head. Anything else is 400 and nothing of the batch is stored.
 func (m *Mgmt) IngestAudit(ctx context.Context, hostID string, recs []json.RawMessage) (int, ChainStatus, error) {
 	chain := "host:" + hostID
-	for i, raw := range recs {
-		var r struct {
-			TS        any    `json:"ts"`
-			ObjectID  string `json:"objectID"`
-			Kind      string `json:"kind"`
-			Source    string `json:"source"`
-			TraceID   string `json:"traceID"`
-			ActingFor string `json:"actingFor"`
-			PrevHash  string `json:"prevHash"`
-			Hash      string `json:"hash"`
-			HostSig   string `json:"hostSig"`
+	// Every host record must be signed by the key the host registered
+	// (RT3-05): an unsigned chain would let any host write "host" records,
+	// and VerifyChain only checks signatures when a key exists.
+	host, err := m.store.GetHost(ctx, hostID)
+	if err != nil {
+		return 0, ChainStatus{}, lookupErr(err, errf(404, "host_not_registered", "host %s is not registered", hostID))
+	}
+	if host.AuditPubKey == "" {
+		return 0, ChainStatus{}, errf(403, "audit_key_required", "host %s registered without an auditPubKey; audit records are refused", hostID)
+	}
+	pub, err := decodeB64(host.AuditPubKey)
+	if err != nil || len(pub) != ed25519.PublicKeySize {
+		return 0, ChainStatus{}, errf(403, "audit_key_required", "host %s has an invalid auditPubKey", hostID)
+	}
+	// A host may only write records about objects of workloads it has been
+	// assigned (now or earlier): records naming another tenant's objects are
+	// attribution forgery, whatever the chain says (RT3-05).
+	served := map[string]bool{}
+	servedBy := func(o Object) bool {
+		k := o.TenantID + "/" + o.Workload
+		if v, ok := served[k]; ok {
+			return v
 		}
-		if err := json.Unmarshal(raw, &r); err != nil {
-			return i, ChainStatus{}, errf(400, "bad_request", "record %d: %v", i, err)
+		ds, err := m.store.ListDeployments(ctx, DeploymentFilter{TenantID: o.TenantID, Workload: o.Workload, HostID: hostID}, Page{Limit: 1})
+		v := err == nil && len(ds) > 0
+		served[k] = v
+		return v
+	}
+	parsed := make([]hostAuditRecord, len(recs))
+	canons := make([][]byte, len(recs))
+	for i, raw := range recs {
+		r := &parsed[i]
+		if err := json.Unmarshal(raw, r); err != nil {
+			return 0, ChainStatus{}, errf(400, "bad_request", "record %d: %v", i, err)
 		}
 		if r.Hash == "" || r.Kind == "" {
-			return i, ChainStatus{}, errf(400, "bad_request", "record %d: kind and hash are required", i)
+			return 0, ChainStatus{}, errf(400, "bad_request", "record %d: kind and hash are required", i)
 		}
 		if e := checkAuditSource(r.Source, r.Kind); e != nil {
 			e.Message = fmt.Sprintf("record %d: %s", i, e.Message)
-			return i, ChainStatus{}, e
+			return 0, ChainStatus{}, e
+		}
+		if sig, err := base64.StdEncoding.DecodeString(r.HostSig); err != nil || !ed25519.Verify(pub, []byte(r.Hash), sig) {
+			return i, ChainStatus{}, errf(400, "bad_host_sig", "record %d: hostSig does not verify under host %s's auditPubKey", i, hostID)
 		}
 		canon, err := Canonicalize(raw)
 		if err != nil {
-			return i, ChainStatus{}, errf(400, "bad_request", "record %d: %v", i, err)
+			return 0, ChainStatus{}, errf(400, "bad_request", "record %d: %v", i, err)
 		}
+		want, err := HashRecord(raw)
+		if err != nil {
+			return 0, ChainStatus{}, errf(400, "bad_request", "record %d: %v", i, err)
+		}
+		if want != r.Hash {
+			return 0, ChainStatus{}, errf(400, "bad_request", "record %d: hash does not match the record's content", i)
+		}
+		if i > 0 && r.PrevHash != parsed[i-1].Hash {
+			return 0, ChainStatus{}, errf(400, "bad_request", "record %d: prevHash does not link to record %d", i, i-1)
+		}
+		// RT3-05: a record naming another workload's object is attribution
+		// forgery, whatever the chain says.
+		if o, err := m.store.GetObject(ctx, r.ObjectID); err == nil && !servedBy(o) {
+			return i, ChainStatus{}, errf(403, "audit_object_foreign", "record %d: object %s belongs to workload %s/%s, which host %s has never served", i, o.ID, o.TenantID, o.Workload, hostID)
+		}
+		canons[i] = canon
+	}
+	start := 0
+	if len(parsed) > 0 {
+		_, head, err := m.store.AuditHead(ctx, chain)
+		if err != nil {
+			return 0, ChainStatus{}, err
+		}
+		// A batch the host re-sends (its POST failed after mgmt stored it)
+		// overlaps the stored chain: skip what is stored. That holds for
+		// a batch that starts a new segment (prevHash "") too: storing it
+		// twice would break the chain at the copy (#427).
+		if first := parsed[0].PrevHash; first != head {
+			for k := range parsed {
+				if parsed[k].Hash == head {
+					start = k + 1 // already stored up to here
+				}
+			}
+			if start == 0 && first != "" {
+				return 0, ChainStatus{}, errf(400, "bad_request", "record 0: prevHash does not link to the head of chain %s", chain)
+			}
+		}
+	}
+	for i := start; i < len(parsed); i++ {
+		r := parsed[i]
 		tenant := ""
+		var obj *Object
 		if o, err := m.store.GetObject(ctx, r.ObjectID); err == nil {
-			tenant = o.TenantID
+			if !servedBy(o) {
+				return i, ChainStatus{}, errf(403, "audit_object_foreign", "record %d: object %s belongs to workload %s/%s, which host %s has never served", i, o.ID, o.TenantID, o.Workload, hostID)
+			}
+			tenant, obj = o.TenantID, &o
 		}
 		if _, err := m.store.AppendAudit(ctx, AuditRecord{Chain: chain, TS: fmt.Sprint(r.TS), TenantID: tenant, ObjectID: r.ObjectID,
 			Kind: r.Kind, TraceID: r.TraceID, ActingFor: r.ActingFor, PrevHash: r.PrevHash, Hash: r.Hash, HostSig: r.HostSig,
-			Raw: canon}); err != nil {
+			Raw: canons[i]}); err != nil {
 			return i, ChainStatus{}, err
 		}
+		m.notifyHostRecord(obj, r.Kind, recs[i]) // notify.go
 	}
 	return len(recs), m.VerifyChain(ctx, chain), nil
 }
@@ -2822,16 +3192,16 @@ func auditSource(r AuditRecord) string {
 // ---- deploy preflight ----
 
 // PreflightRequest asks whether the tenant policy lets a workload's tags
-// reach its declared dependencies (twd.jsonc tailnet.connects) and whether
+// reach its declared dependencies (tailworks.jsonc tailnet.connects) and whether
 // every tag it will mint is in tagOwners.
 type PreflightRequest struct {
 	SrcTags  []string `json:"srcTags"`  // workload + object tags
-	Connects []string `json:"connects"` // tags ("tag:db") or "*"; names are reported unchecked
+	Connects []string `json:"connects"` // tags ("tag:db", "tag:db:5432") or "*"; names are reported unchecked
 	Port     string   `json:"port,omitempty"`
 	// Service, with WorkloadTags, checks autoApprovers.services.
 	Service      string   `json:"service,omitempty"`
 	WorkloadTags []string `json:"workloadTags,omitempty"`
-	// Public: the workload declares public routes, so tag:twd-public needs
+	// Public: the workload declares public routes, so tag:tw-public needs
 	// the funnel nodeAttr (ADR-029 D6).
 	Public bool `json:"public,omitempty"`
 }
@@ -2841,6 +3211,9 @@ type PreflightMissing struct {
 	Src     string `json:"src"`
 	Dst     string `json:"dst"`
 	Snippet string `json:"snippet"`
+
+	// IP is the grant's port ("tcp:5432"); older mgmt leaves it out.
+	IP string `json:"ip,omitempty"`
 }
 
 // PreflightResult is the preflight verdict.
@@ -2858,12 +3231,34 @@ type PreflightResult struct {
 	Service           string `json:"service,omitempty"`
 	ServiceUnapproved bool   `json:"serviceUnapproved,omitempty"`
 	ServiceSnippet    string `json:"serviceSnippet,omitempty"`
-	// MissingNodeAttrs names missing nodeAttrs ("funnel on tag:twd-public");
+	// MissingNodeAttrs names missing nodeAttrs ("funnel on tag:tw-public");
 	// NodeAttrsSnippet is the policy to add (ADR-029 D6).
 	MissingNodeAttrs []string `json:"missingNodeAttrs,omitempty"`
 	NodeAttrsSnippet string   `json:"nodeAttrsSnippet,omitempty"`
 	// PublicURL is where the workload's public routes will be served.
 	PublicURL string `json:"publicURL,omitempty"`
+
+	// AccessWarnings: grants to tag:tw-mgmt that don't do what they look
+	// like (tenantscope_lint.go). Never fail the preflight.
+	AccessWarnings []string `json:"accessWarnings,omitempty"`
+
+	// TagOwnerProblems: for a tenant with its own owner tag, tags owned by
+	// another tenant's owner tag, or not by its own (teams.go). Fail it.
+	TagOwnerProblems []string `json:"tagOwnerProblems,omitempty"`
+
+	// UndefinedConnects: tailnet.connects tags in tag:tw* (another app's,
+	// not deployed yet) with no tagOwners entry; TagOwnersSnippet defines
+	// them too (connectstags.go).
+	UndefinedConnects []string `json:"undefinedConnects,omitempty"`
+
+	// Snippet: everything above that is missing as one typed policy
+	// snippet (preflightsnippet.go, #535); the string fields are rendered
+	// from it. Never the caller grant.
+	Snippet *policy.Snippet `json:"snippet,omitempty"`
+
+	// workloadTags: the tags the workload node is deployed with, the only
+	// ones tw policy --apply lets host its Service (policyapply.go).
+	workloadTags []string
 }
 
 // Preflight checks the request against the tenant's current policy (read
@@ -2874,6 +3269,9 @@ func (m *Mgmt) Preflight(ctx context.Context, tenantID string, r PreflightReques
 	if err != nil {
 		return res, lookupErr(err, errf(404, "unknown_tenant", "tenant %q not found", tenantID))
 	}
+	if err := headscalePreflight(t, r); err != nil {
+		return res, err
+	}
 	pol, err := m.policies.Get(ctx, t)
 	if err != nil {
 		return res, errf(503, "policy_unavailable", "can't read the tenant policy: %v", err)
@@ -2882,36 +3280,41 @@ func (m *Mgmt) Preflight(ctx context.Context, tenantID string, r PreflightReques
 	if port == "" {
 		port = "tcp:80"
 	}
-	var owners []string
+	res.TagOwnerProblems = m.tagOwnerProblems(ctx, t, r.SrcTags, pol) // teams.go
 	for _, tag := range r.SrcTags {
 		if _, ok := pol.TagOwners[tag]; !ok && !slices.Contains(res.MissingTagOwners, tag) {
 			res.MissingTagOwners = append(res.MissingTagOwners, tag)
-			owners = append(owners, fmt.Sprintf("%q: [\"autogroup:admin\", \"tag:twd\"]", tag))
 		}
 	}
-	if len(owners) > 0 {
-		res.TagOwnersSnippet = `"tagOwners": { ` + strings.Join(owners, ", ") + ` }`
-	}
-	for _, dst := range r.Connects {
+	res.UndefinedConnects = undefinedConnectsTags(t, pol, r.Connects, r.SrcTags)
+	for _, c := range r.Connects {
+		dst, ip := SplitConnect(c) // connects.go: "tag:db:5432"
 		if dst != "*" && !strings.HasPrefix(dst, "tag:") && !strings.HasPrefix(dst, "autogroup:") {
-			res.Unchecked = append(res.Unchecked, dst)
+			res.Unchecked = append(res.Unchecked, c)
 			continue
 		}
+		want := ip
+		if want == "" {
+			want = port
+		}
 		for _, src := range r.SrcTags {
-			if !pol.HasIPGrant(src, dst) {
-				res.Missing = append(res.Missing, PreflightMissing{Src: src, Dst: dst,
-					Snippet: fmt.Sprintf(`{ "src": [%q], "dst": [%q], "ip": [%q] }`, src, dst, port)})
+			if !pol.HasIPGrantPort(src, dst, ip) {
+				res.Missing = append(res.Missing, missingGrant(src, dst, want)) // preflightsnippet.go
 			}
 		}
 	}
 	if r.Public && !pol.HasNodeAttr(PublicTag, "funnel") {
 		res.MissingNodeAttrs = append(res.MissingNodeAttrs, "funnel on "+PublicTag)
-		res.NodeAttrsSnippet = PublicFunnelSnippet
 	}
 	if r.Service != "" {
 		servicePreflight(pol, &res, r.Service, r.WorkloadTags)
 	}
-	res.OK = len(res.Missing) == 0 && len(res.MissingTagOwners) == 0 && len(res.MissingNodeAttrs) == 0 && !res.ServiceUnapproved
+	// The snippets for what is missing (preflightsnippet.go).
+	res.setSnippets(t)
+	res.AccessWarnings = m.accessWarnings(ctx, t, pol) // tenantscope_lint.go
+	// svccaps_lint.go: caps on the workload tags that calls through its Service lose (#155).
+	res.AccessWarnings = append(res.AccessWarnings, serviceCapWarnings(pol, res.Service, r.WorkloadTags)...)
+	res.OK = len(res.Missing) == 0 && len(res.MissingTagOwners) == 0 && len(res.UndefinedConnects) == 0 && len(res.MissingNodeAttrs) == 0 && !res.ServiceUnapproved && len(res.TagOwnerProblems) == 0
 	return res, nil
 }
 
@@ -2925,7 +3328,7 @@ func (VolumeKeyResponse) String() string { return "mgmt.VolumeKeyResponse{[REDAC
 
 // volumeKeyName is the custody name of a workload's DO volume data key.
 func volumeKeyName(tenantID, workload string) string {
-	return "twd/" + tenantID + "/volumes/" + workload + "/dek"
+	return "tw/" + tenantID + "/volumes/" + workload + "/dek"
 }
 
 // VolumeKey returns the 256-bit data key of the (tenant, workload) DO

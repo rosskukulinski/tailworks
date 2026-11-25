@@ -1,10 +1,10 @@
 //go:build e2eimages
 
-// The developer-machine half of E2E-CONTAINER-REGISTRY (ADR-032 D3): twd
+// The developer-machine half of E2E-CONTAINER-REGISTRY (ADR-032 D3): tailworks
 // deploy's image builder (internal/imagebuild, docker buildx) runs on the
 // acceptance examples' own Dockerfiles, unmodified, with the arm64 alias
 // map as BuildKit named contexts, and writes one OCI layout per image.
-// The Lima half (registry_test.go) pushes them through twd's registry,
+// The Lima half (registry_test.go) pushes them through tailworks' registry,
 // deploys, and boots the containers on Firecracker: hosts never run a
 // container engine, so the build has to happen here.
 //
@@ -19,10 +19,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd/bundle"
-	"github.com/rosskukulinski/twd/internal/container"
-	"github.com/rosskukulinski/twd/internal/imagebuild"
-	"github.com/rosskukulinski/twd/internal/registry"
+	"github.com/rosskukulinski/tailworks/hostd/bundle"
+	"github.com/rosskukulinski/tailworks/internal/container"
+	"github.com/rosskukulinski/tailworks/internal/imagebuild"
+	"github.com/rosskukulinski/tailworks/internal/registry"
 )
 
 // BuiltImage is one entry of built.json.
@@ -36,11 +36,11 @@ type BuiltImage struct {
 }
 
 func TestBuildExampleImages(t *testing.T) {
-	apps, out := os.Getenv("TWD_CTR_APPS"), os.Getenv("TWD_CTR_BUILT")
+	apps, out := os.Getenv("TW_CTR_APPS"), os.Getenv("TW_CTR_BUILT")
 	if apps == "" || out == "" {
-		t.Skip("TWD_CTR_APPS (scripts/e2e-container-prep.sh output) and TWD_CTR_BUILT must be set (make e2e-container-build)")
+		t.Skip("TW_CTR_APPS (scripts/e2e-container-prep.sh output) and TW_CTR_BUILT must be set (make e2e-container-build)")
 	}
-	arch := os.Getenv("TWD_CTR_ARCH")
+	arch := os.Getenv("TW_CTR_ARCH")
 	if arch == "" {
 		arch = "arm64"
 	}
@@ -60,7 +60,7 @@ func TestBuildExampleImages(t *testing.T) {
 			t.Fatal(err)
 		}
 		wj, _ := json.Marshal(w)
-		classes, err := container.Parse(wj, nil) // no twd.jsonc pins: the Dockerfile flow
+		classes, err := container.Parse(wj, nil) // no tailworks.jsonc pins: the Dockerfile flow
 		if err != nil {
 			t.Fatal(err)
 		}

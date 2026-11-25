@@ -1,10 +1,10 @@
 # ADR-033: Smart placement: put a workload on the host with the best measured tailnet path to what it connects to
 
 **Date:** 2026-11-13
-**Status:** Proposed (twd branch `smart-placement`, uncommitted here). If
-accepted, it replaces DX.md's "Location hints … ❌ Ignored. Placement is per
-host" row: placement stays per host, but it now reads the workload's
-declared dependencies.
+**Status:** Accepted (2026-11-16, built and shipped in v0.2.0: `mgmt/placement.go`;
+`tw deploy` prints why it placed a workload). Placement stays per host, but it
+now reads the workload's declared dependencies. (The draft cited a `DX.md`
+compatibility row; the matrix is [docs/COMPAT.md](../../COMPAT.md).)
 
 **Context.**
 - Before this, `pickHost` did three things:
@@ -14,7 +14,7 @@ declared dependencies.
 - It ignored `tailnet.connects`.
 - It also ignored `Host.Tiers`. A `"tier": "microvm"` workload could land on
   a host without KVM, where hostd silently ran it in the **process tier**.
-  That was an isolation downgrade. It was fixed on twd master separately
+  That was an isolation downgrade. It was fixed on tailworks master separately
   (`9f03c48`: `placementTier`, `409 tier_unavailable`), and smart placement
   keeps those semantics as an eligibility input.
 - **Cloudflare Smart Placement**
@@ -28,7 +28,7 @@ declared dependencies.
   - Its status values are absent, `SUCCESS`, `INSUFFICIENT_INVOCATIONS` and
     `UNSUPPORTED_APPLICATION`.
   - It affects fetch handlers only.
-- twd has no locations. It has hosts, and the dependency (Postgres, an
+- tailworks has no locations. It has hosts, and the dependency (Postgres, an
   internal API) sits on the tenant's tailnet at some path from each host:
   direct WireGuard, a peer relay, or DERP.
 
@@ -42,7 +42,7 @@ declared dependencies.
      - `tag:x` matches peers with the tag (at most 4, best kept);
      - a name matches a host name, a MagicDNS name (full or first label)
        or a Tailscale IP;
-     - anything else is reported `unresolved`. twd never guesses.
+     - anything else is reported `unresolved`. Tailworks never guesses.
    - It sends up to 4 WireGuard **disco pings** (`LocalClient.Ping`,
      `PingDisco`), 150 ms apart:
      - the class is the last answered ping's: `Endpoint` → direct,
@@ -108,7 +108,7 @@ declared dependencies.
 4. **Stickiness and moves.**
    - **A running workload never moves on its own**: rule 2 stays.
    - Smart placement applies at first deploy, when the holder is dead, and
-     on an explicit **`twd deploy --replace`**.
+     on an explicit **`tw deploy --replace`**.
    - **Hysteresis**, including for `--replace`: the workload moves only to
      a better path class, or the same class with ≥ 2 ms *and* ≥ 20 % lower
      RTT. Capacity alone never moves it.
@@ -134,21 +134,21 @@ declared dependencies.
    - **No automatic rebalancing** is built. If one is, it is off by
      default and needs the same hysteresis plus a minimum dwell time.
 5. **Config.**
-   - `twd.jsonc` `placement: {mode: "smart" | "off", targets?: [...],
+   - `tailworks.jsonc` `placement: {mode: "smart" | "off", targets?: [...],
      aggregate?: "worst" | "sum"}`.
    - Targets default to `tailnet.connects`.
    - **Smart is the default** whenever there are targets; stickiness makes
      it safe.
    - Cloudflare's `placement.host`/`hostname` become one target (port
      dropped). `placement.region` is ignored with a warning.
-   - `wrangler.jsonc` `placement` is read if `twd.jsonc` has none.
+   - `wrangler.jsonc` `placement` is read if `tailworks.jsonc` has none.
    - `--host` overrides, but must still be eligible.
 6. **Explainability.**
    - Deploy prints the reason, e.g. `placed on h2: tag:db direct 1.8 ms (h1:
      relayed via DERP nyc 24 ms, h3: unmeasured)`.
    - The decision (reason `pinned|sticky|smart|capacity`, summary, and the
      top 8 hosts with per-target paths) is stored with the deployment.
-     `GET /v1/deployments/{id}` `placement` and `twd ls` show it.
+     `GET /v1/deployments/{id}` `placement` and `tw ls` show it.
    - The deploy audit record carries `placement.{reason, summary,
      targets}`, plus `movedFrom`/`replace` on moves.
 
@@ -163,7 +163,7 @@ declared dependencies.
   - a host draining state (`host rm --drain` deletes the host);
   - targets nobody on a host can see in a netmap (no grant → no peer →
     unresolved).
-- Tier eligibility (twd `9f03c48`) is part of the filter. A live holder
+- Tier eligibility (tailworks `9f03c48`) is part of the filter. A live holder
   without the tier is refused with `409 tier_unavailable` unless the deploy
   is `--replace`, which moves it.
 

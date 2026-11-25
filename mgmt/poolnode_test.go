@@ -18,12 +18,13 @@ import (
 // back to a normal mint; concurrent offers of one node give it to one
 // object; a kill deletes the device; transferred rows purge.
 func TestPoolNodeAssignment(t *testing.T) {
-	e := newTestEnv(t, nil)
+	t.Parallel()
+	e := newTestEnv(t)
 	c, h1 := e.c, e.asHost("h1")
 	var tn struct{ TenantID string }
-	c.ok("POST", "/v1/tenants", map[string]any{"tailnet": "t.ts.net", "mintMode": "apikey", "apiKeyFile": e.keyFile}, &tn)
+	c.ok("POST", "/v1/tenants", map[string]any{"tailnet": "t.ts.net", "mintMode": "oauth", "oauthClientFile": e.keyFile}, &tn)
 	h1.ok("PUT", "/v1/hosts/h1", map[string]any{"capacityNodes": 100, "tiers": []string{"process"}}, nil)
-	bundle := makeBundle(t, map[string]string{"twd.jsonc": testTwdJSONC, "dist/index.js": "export default {}"})
+	bundle := makeBundle(t, map[string]string{"tailworks.jsonc": testTwJSONC, "dist/index.js": "export default {}"})
 	c.ok("POST", "/v1/deployments", map[string]any{"tenantID": tn.TenantID, "workload": "support", "bundle": bundle}, nil)
 	ctx := context.Background()
 
@@ -41,7 +42,7 @@ func TestPoolNodeAssignment(t *testing.T) {
 	}
 	pool := join("SupportAgent", "p1", "nPOOL1")
 	po, _ := e.store.GetObject(ctx, pool)
-	if !strings.HasPrefix(pool, "pool-") || !slices.Equal(po.Tags, []string{"tag:twd-agent-support"}) || po.Ephemeral || po.TTLSeconds != 0 {
+	if !strings.HasPrefix(pool, "pool-") || !slices.Equal(po.Tags, []string{"tag:tw-agent-support"}) || po.Ephemeral || po.TTLSeconds != 0 {
 		t.Fatalf("pool node %s: %+v", pool, po)
 	}
 	h1.fail("POST", "/v1/objects", map[string]any{"tenantID": tn.TenantID, "workload": "support", "namespace": PoolNamespace,
@@ -95,8 +96,10 @@ func TestPoolNodeAssignment(t *testing.T) {
 		}
 		return k
 	}
-	if k := kinds(a.ObjectID); strings.Join(k, ",") != "create,ready" {
-		t.Errorf("object audit %v, want create,ready", k)
+	// The wrong host's fenced ready attempt above is audited as a deny
+	// (lease_lost): a cross-host ready is a security event, not noise.
+	if k := kinds(a.ObjectID); strings.Join(k, ",") != "create,deny,ready" {
+		t.Errorf("object audit %v, want create,deny,ready", k)
 	}
 	if k := kinds(pool); strings.Join(k, ",") != "create,mint,credential,ready,transfer" {
 		t.Errorf("pool node audit %v", k)

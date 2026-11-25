@@ -23,18 +23,19 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/rosskukulinski/twd/guest/proto"
-	"github.com/rosskukulinski/twd/hostd/sandbox"
-	"github.com/rosskukulinski/twd/hostd/vm/vzapi"
-	"github.com/rosskukulinski/twd/netd"
+	"github.com/rosskukulinski/tailworks/guest/proto"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/hostd/vm/vzapi"
+	"github.com/rosskukulinski/tailworks/internal/version"
+	"github.com/rosskukulinski/tailworks/netd"
 )
 
 // Config configures the Virtualization.framework (vz) backend: the macOS
-// microVM tier (ADR-032 D7). Each VM is one twd-vz process (hostd/vm/vzapi)
+// microVM tier (ADR-032 D7). Each VM is one tw-vz process (hostd/vm/vzapi)
 // booting the same guest image as Firecracker; hostd itself links no
 // Objective-C and needs no entitlement.
 type Config struct {
-	// VMM is the twd-vz binary, signed with the
+	// VMM is the tw-vz binary, signed with the
 	// com.apple.security.virtualization entitlement (default: next to this
 	// executable).
 	VMM      string
@@ -54,11 +55,11 @@ type Config struct {
 	Log          *slog.Logger
 }
 
-// VZBootArgs: the vz guest's kernel cmdline: the virtio console, panic → reboot, twd-guestd as init,
+// VZBootArgs: the vz guest's kernel cmdline: the virtio console, panic → reboot, tw-guestd as init,
 // read-only root on the first disk. vz restarts a rebooting guest (unlike
 // Firecracker, which exits): a guest that boots a second time is treated
 // as crashed (agent.onBoot), so a panic still ends the VM.
-const VZBootArgs = "console=hvc0 root=/dev/vda reboot=k panic=1 quiet ro rootfstype=ext4 init=/sbin/twd-guestd"
+const VZBootArgs = "console=hvc0 root=/dev/vda reboot=k panic=1 quiet ro rootfstype=ext4 init=/sbin/tw-guestd"
 
 // Backend is the vz microVM backend.
 type Backend struct {
@@ -68,17 +69,17 @@ type Backend struct {
 	rosetta string // the host's Rosetta state from the VMM's check
 }
 
-// DefaultVMM is twd-vz next to the running executable.
+// DefaultVMM is tw-vz next to the running executable.
 func DefaultVMM() string {
 	exe, err := os.Executable()
 	if err != nil {
-		return "twd-vz"
+		return "tw-vz"
 	}
-	return filepath.Join(filepath.Dir(exe), "twd-vz")
+	return filepath.Join(filepath.Dir(exe), "tw-vz")
 }
 
 // Available reports whether this host can run microVMs: the guest kernel
-// and image, and a twd-vz that can configure a VM (Apple silicon or Intel
+// and image, and a tw-vz that can configure a VM (Apple silicon or Intel
 // with Virtualization.framework, and the entitlement on the binary).
 func Available(cfg Config) error {
 	_, err := check(cfg)
@@ -140,7 +141,7 @@ func New(cfg Config) (*Backend, error) {
 	}
 	b := &Backend{cfg: cfg, rosetta: rosetta}
 	if cfg.RunDir == "" {
-		d, err := os.MkdirTemp("", "twd-vz-")
+		d, err := os.MkdirTemp("", "tw-vz-")
 		if err != nil {
 			return nil, err
 		}
@@ -166,7 +167,7 @@ func (b *Backend) Name() string { return "vz" }
 
 // Via says how VMs are launched.
 func (b *Backend) Via() string {
-	return "twd-vz " + b.cfg.VMM + " (Virtualization.framework; rosetta " + b.rosetta + ")"
+	return "tw-vz " + b.cfg.VMM + " (Virtualization.framework; rosetta " + b.rosetta + ")"
 }
 
 // Machine is one running vz microVM.
@@ -275,7 +276,7 @@ func (b *Backend) launch(ctx context.Context, l vzLaunch) (_ *Machine, err error
 				<-m.done
 			}
 			m.teardown()
-			if l.ctr != nil && os.Getenv("TWD_KEEP_INSTANCES") == "" {
+			if l.ctr != nil && os.Getenv("TW_KEEP_INSTANCES") == "" {
 				os.RemoveAll(m.dir) // a container's scratch disk goes with it
 			}
 		}
@@ -342,7 +343,7 @@ func (b *Backend) launch(ctx context.Context, l vzLaunch) (_ *Machine, err error
 	m.ingress = m.ingressProxy()
 
 	// 3. The VMM.
-	vc2 := vzapi.Config{Kernel: b.cfg.Kernel, Cmdline: b.cfg.BootArgs, CPUs: l.cpus, MemMiB: l.memMiB,
+	vc2 := vzapi.Config{Proto: version.VZProtocol, Kernel: b.cfg.Kernel, Cmdline: b.cfg.BootArgs, CPUs: l.cpus, MemMiB: l.memMiB,
 		Disks: disks, Volume: m.vol != nil,
 		Console: m.info.Console, MAC: guestMAC, MTU: b.cfg.MTU, VsockPort: proto.VsockPort, Rosetta: b.cfg.Rosetta}
 	cb, _ := json.Marshal(vc2)
@@ -547,7 +548,7 @@ func (m *Machine) Stop() {
 		m.log.Warn("microVM did not exit after kill")
 	}
 	m.teardown()
-	if os.Getenv("TWD_KEEP_INSTANCES") == "" {
+	if os.Getenv("TW_KEEP_INSTANCES") == "" {
 		os.RemoveAll(m.dir)
 	}
 }

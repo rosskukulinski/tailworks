@@ -13,7 +13,7 @@ func TestValidatePatterns(t *testing.T) {
 			t.Errorf("%q: %v", p, err)
 		}
 	}
-	bad := []string{"", "webhooks", "/a/*/b", "/a*", "/a/", "//a", "/a/../b", "/a/./b", "/_twd/*", "/_twd", "/_twd/o/X/y", "/a?b", "/a#b", "/a%2fb", "/a b", "/*/x", "*"}
+	bad := []string{"", "webhooks", "/a/*/b", "/a*", "/a/", "//a", "/a/../b", "/a/./b", "/_tw/*", "/_tw", "/_tw/o/X/y", "/a?b", "/a#b", "/a%2fb", "/a b", "/*/x", "*"}
 	for _, p := range bad {
 		s := Spec{Routes: []string{p}}
 		if err := s.Validate(); err == nil {
@@ -59,7 +59,8 @@ func TestCanonicalPath(t *testing.T) {
 			t.Errorf("%q: %v", s, err)
 		}
 	}
-	bad := []string{"/a/../b", "/a//b", "/a/./b", "/a%2F..%2Fb", "/a%5cb", "/_twd/o/Room/x", "/_twd", "/x/%2e%2e/y"}
+	bad := []string{"/a/../b", "/a//b", "/a/./b", "/a%2F..%2Fb", "/a%5cb", "/_tw/o/Room/x", "/_tw", "/x/%2e%2e/y",
+		"/x%00", "/x%1b[31m", "/x%0d%0ay", "/x%09", "/x%7F", "/x%1F"}
 	for _, s := range bad {
 		u, err := url.Parse(s)
 		if err != nil {
@@ -94,5 +95,31 @@ func TestEffective(t *testing.T) {
 	e := (&Limits{RPS: 5}).Effective()
 	if e.RPS != 5 || e.Burst != Defaults.Burst {
 		t.Fatalf("%+v", e)
+	}
+}
+
+// An unset burst is derived from rps: min(ceiling, max(default, ceil(2*rps))).
+// It only ever grows, and an explicit burst is kept as written.
+func TestEffectiveDerivesBurst(t *testing.T) {
+	for _, tc := range []struct {
+		in             Limits
+		burst, ipBurst int
+	}{
+		{Limits{RPS: 5}, 100, 20},
+		{Limits{RPS: 200}, 400, 20},
+		{Limits{RPS: 1000}, 2000, 20},
+		{Limits{RPS: 0.6, IPRPS: 0.4}, 100, 20},
+		{Limits{IPRPS: 5}, 100, 20},
+		{Limits{IPRPS: 50.5}, 100, 101},
+		{Limits{IPRPS: 200}, 100, 400},
+		{Limits{RPS: 1000, Burst: 10, IPRPS: 200, IPBurst: 3}, 10, 3},
+	} {
+		e := tc.in.Effective()
+		if e.Burst != tc.burst || e.IPBurst != tc.ipBurst {
+			t.Errorf("%+v: burst %d ipBurst %d, want %d %d", tc.in, e.Burst, e.IPBurst, tc.burst, tc.ipBurst)
+		}
+		if e.Burst > Ceilings.Burst || e.IPBurst > Ceilings.IPBurst {
+			t.Errorf("%+v: above the ceilings: %+v", tc.in, e)
+		}
 	}
 }

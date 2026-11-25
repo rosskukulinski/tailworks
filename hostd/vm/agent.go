@@ -21,12 +21,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/rosskukulinski/twd/guest/proto"
-	"github.com/rosskukulinski/twd/hostd/sandbox"
-	"github.com/rosskukulinski/twd/netd"
+	"github.com/rosskukulinski/tailworks/guest/proto"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/internal/version"
+	"github.com/rosskukulinski/tailworks/netd"
 )
 
-// agent is the host end of one guest: the twd-guestd control channel
+// agent is the host end of one guest: the tw-guestd control channel
 // (guest/proto NDJSON over vsock), the host-side network stack and the
 // ingress proxy through it. Both backends (Firecracker, vz) embed it; they
 // differ only in how the VM, its vsock and its NIC come to exist.
@@ -161,6 +162,14 @@ func (m *agent) route(c net.Conn) {
 		return
 	case "hello":
 		if tokenEqual(first.Token, m.token()) {
+			if p := first.HelloProto(); p != version.GuestProtocol && m.log != nil {
+				// The guest image and hostd ship in one release; another
+				// protocol means a mixed install (an upgrade in progress,
+				// or a hand-built guest). Ops newer than the guest's
+				// protocol get "unknown op" (proto.UnknownOp): feature absent.
+				m.log.Warn("guest speaks a different protocol", "guestProto", p, "hostProto", version.GuestProtocol,
+					"guestVersion", first.GuestVersion, "hostVersion", version.Version)
+			}
 			break
 		}
 		fallthrough
@@ -319,7 +328,7 @@ func (m *agent) ingressProxy() http.Handler {
 			return m.vn.dialGuest(ctx, proto.IngressPort)
 		},
 		MaxIdleConnsPerHost: 64,
-		IdleConnTimeout:     30 * time.Second,
+		IdleConnTimeout:     netd.UpstreamIdleTimeout, // below workerd's idle close (#309)
 	}
 	target := &url.URL{Scheme: "http", Host: "guest"}
 	return &httputil.ReverseProxy{
@@ -328,6 +337,7 @@ func (m *agent) ingressProxy() http.Handler {
 		ErrorLog:      nil,
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
+			netd.KeepBodyEOF(pr) // #138
 			pr.Out.Host = pr.In.Host
 			netd.KeepForwarded(pr)
 		},

@@ -75,7 +75,7 @@ func TestGonetEndpointAccessor(t *testing.T) {
 
 func TestIdentityHeaderStripping(t *testing.T) {
 	h := http.Header{}
-	for _, k := range []string{"X-Twd-Cf", "X-Twd-Object", "Twd-Error", "Cf-Connecting-Ip", "X-Forwarded-For", "X-Forwarded-Host",
+	for _, k := range []string{"X-Tw-Cf", "X-Tw-Object", "Tw-Error", "Cf-Connecting-Ip", "X-Forwarded-For", "X-Forwarded-Host",
 		"Forwarded", "X-Real-Ip", "Tailnet-Assertion", "Tailscale-User-Login", "Tailscale-App-Capabilities", "Proxy-Authorization"} {
 		h.Set(k, "forged")
 	}

@@ -1,0 +1,7 @@
+{
+  "name": "kv",
+  "tailnet": {
+    "tags": ["tag:ttest"],
+    "objects": { "Box": { "tags": ["tag:ttest"] } },
+  },
+}

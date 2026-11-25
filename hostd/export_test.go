@@ -18,3 +18,36 @@ func (h *Host) CronTickAt(now time.Time) int {
 	wg.Wait()
 	return len(due)
 }
+
+// SetCronTimeout changes Config.CronTimeout for runs started after it.
+// Call it only between CronTickAt calls, with no run in flight.
+func (h *Host) SetCronTimeout(d time.Duration) {
+	h.cfg.CronTimeout = d
+}
+
+// ApplyPublicConcurrently runs n applyPublic calls for workload name at once,
+// with the spec mgmt last assigned, and waits for them. It first forgets
+// the options the public node was started with: the state a sync sees
+// while a deploy's applyPublic has created the node but not yet recorded
+// them (issue #133), so every call would take the restart path.
+func (h *Host) ApplyPublicConcurrently(name string, n int) {
+	h.mu.Lock()
+	var w *workload
+	for _, x := range h.workloads {
+		if x.name == name {
+			w = x
+		}
+	}
+	ps := h.public[w.tenantID+"/"+w.name]
+	spec := ps.spec
+	ps.opts = nil
+	h.mu.Unlock()
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for range n {
+		wg.Add(1)
+		go func() { defer wg.Done(); <-start; h.applyPublic(w, spec) }()
+	}
+	close(start)
+	wg.Wait()
+}

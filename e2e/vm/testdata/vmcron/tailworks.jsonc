@@ -1,0 +1,8 @@
+{
+  "name": "vmcron",
+  "tailnet": {
+    "tags": ["tag:ttest"],
+    // internal class: no tailnet node
+    "objects": { "Log": { "node": false } },
+  },
+}

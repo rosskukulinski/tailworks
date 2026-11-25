@@ -1,7 +1,7 @@
-// ctx.container on twd (ADR-032 D1): a polyfill of Cloudflare's
+// ctx.container on tailworks (ADR-032 D1): a polyfill of Cloudflare's
 // Durable Object container API, installed by the platform wrapper on every
 // class that has a wrangler "containers" entry. It drives the object's own
-// container (one Firecracker microVM, owned by twd-hostd) through the
+// container (one Firecracker microVM, owned by tw-hostd) through the
 // platform's TailnetApi, which attests the calling object: an object can
 // only ever reach its own container.
 //
@@ -29,11 +29,11 @@ const NOT_RUNNING = "the container is not running, consider calling start()";
 const UNEXPECTED_EXIT = "Container exited with unexpected exit code: ";
 const RUNTIME_SIGNALLED = "Runtime signalled the container to exit: ";
 
-const STATE_KEY = "__twd_container";
+const STATE_KEY = "__tw_container";
 
 // The handlers each object registered with interceptOutbound*: the
 // platform delivers an intercepted container request to the object
-// (__twd_intercept), which looks the handler up by the key hostd matched.
+// (__tw_intercept), which looks the handler up by the key hostd matched.
 const handlers = new WeakMap<object, Map<string, unknown>>();
 
 /**
@@ -48,7 +48,7 @@ export async function dispatchIntercept(ctx: any, key: string, req: Request): Pr
   if (!fetcher || typeof fetcher.fetch !== "function") {
     return new Response(
       JSON.stringify({ code: "intercept_unavailable", message: "no handler for " + key + " in this object (it was registered before the object restarted; register it again)" }),
-      { status: 502, headers: { "content-type": "application/json", "twd-error": "intercept_unavailable" } },
+      { status: 502, headers: { "content-type": "application/json", "tw-error": "intercept_unavailable" } },
     );
   }
   return await fetcher.fetch(req);
@@ -57,7 +57,7 @@ export async function dispatchIntercept(ctx: any, key: string, req: Request): Pr
 /** notSupportedPreview: Sandbox SDK preview URLs need public ingress (ADR-029). */
 export function notSupportedPreview(): Error {
   return Object.assign(
-    new Error("exposePort()/preview URLs are not supported on twd yet: they need public ingress (ADR-029); reach a container port from its object with ctx.container.getTcpPort(port).fetch()"),
+    new Error("exposePort()/preview URLs are not supported on tailworks yet: they need public ingress (ADR-029); reach a container port from its object with ctx.container.getTcpPort(port).fetch()"),
     { code: "not_supported" },
   );
 }
@@ -79,7 +79,7 @@ async function unwrap(p: Promise<any>): Promise<any> {
 }
 
 async function errorOf(r: Response): Promise<Error> {
-  let body: any = { code: r.headers.get("twd-error") ?? "container_error", message: "HTTP " + r.status };
+  let body: any = { code: r.headers.get("tw-error") ?? "container_error", message: "HTTP " + r.status };
   try {
     body = await r.json();
   } catch {
@@ -284,8 +284,8 @@ export function createContainer(tw: Tw, ctx: any, cls: string, spec: ContainerSp
     },
     start(options: any = {}): void {
       if (running) throw new Error("start() cannot be called on a container that is already running.");
-      if (options?.containerSnapshot) throw Object.assign(new Error("containerSnapshot is not supported on twd yet (ADR-032 D6: v1.1)"), { code: "not_supported" });
-      if (options?.directorySnapshots?.length) throw Object.assign(new Error("directorySnapshots are not supported on twd"), { code: "not_supported" });
+      if (options?.containerSnapshot) throw Object.assign(new Error("containerSnapshot is not supported on tailworks yet (ADR-032 D6: v1.1)"), { code: "not_supported" });
+      if (options?.directorySnapshots?.length) throw Object.assign(new Error("directorySnapshots are not supported on tailworks"), { code: "not_supported" });
       running = true;
       startErr = null;
       save();
@@ -390,14 +390,14 @@ export function createContainer(tw: Tw, ctx: any, cls: string, spec: ContainerSp
                 );
               })
             : await pending;
-          const code = r.headers.get("twd-error");
+          const code = r.headers.get("tw-error");
           if (code && (code === "not_listening" || code === "container_not_running" || code.startsWith("container_"))) {
             throw await errorOf(r);
           }
           return r;
         },
         connect(): never {
-          throw Object.assign(new Error("getTcpPort().connect() is not supported on twd yet (ADR-032: deferred)"), { code: "not_supported" });
+          throw Object.assign(new Error("getTcpPort().connect() is not supported on tailworks yet (ADR-032: deferred)"), { code: "not_supported" });
         },
       };
     },
@@ -426,8 +426,8 @@ export function createContainer(tw: Tw, ctx: any, cls: string, spec: ContainerSp
       };
       const r = await tw.ctrExec({ ...as, spec: execSpec });
       if (!r.ok || !r.body) throw await errorOf(r);
-      const id = r.headers.get("x-twd-exec") ?? "";
-      const pid = Number(r.headers.get("x-twd-exec-pid") ?? 0);
+      const id = r.headers.get("x-tw-exec") ?? "";
+      const pid = Number(r.headers.get("x-tw-exec-pid") ?? 0);
       const { stdout, stderr, exitCode } = demux(r.body, stdoutMode !== "ignore", stderrMode === "pipe");
       let done = false;
       exitCode.then(
@@ -492,7 +492,7 @@ export function createContainer(tw: Tw, ctx: any, cls: string, spec: ContainerSp
       await intercept("all", "*", binding);
     },
     async snapshotContainer(): Promise<never> {
-      throw Object.assign(new Error("snapshotContainer() is not supported on twd yet (ADR-032 D6: v1.1)"), { code: "not_supported" });
+      throw Object.assign(new Error("snapshotContainer() is not supported on tailworks yet (ADR-032 D6: v1.1)"), { code: "not_supported" });
     },
   };
   void cls;

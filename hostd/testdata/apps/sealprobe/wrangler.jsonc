@@ -1,0 +1,11 @@
+{
+  "name": "sealprobe",
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-01",
+  "durable_objects": {
+    "bindings": [
+      { "name": "ROOM", "class_name": "Room" },
+      { "name": "DESK", "class_name": "Desk" },
+    ],
+  },
+}

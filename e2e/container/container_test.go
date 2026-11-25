@@ -1,8 +1,8 @@
 //go:build e2econtainer && (linux || darwin)
 
 // Package container is E2E-CONTAINER (ADR-032 v1 acceptance): Cloudflare's
-// container API on twd's microVM tier. Hermetic: testcontrol + local
-// DERP/STUN, fakemgmt, real twd-hostd, real workerd (the parent DOs,
+// container API on tailworks' microVM tier. Hermetic: testcontrol + local
+// DERP/STUN, fakemgmt, real tw-hostd, real workerd (the parent DOs,
 // process tier) and one real VM per container (erofs image + scratch
 // overlay): Firecracker on Linux (jailer, own uid/netns/cgroup; Lima arm64
 // or an x86-64 KVM host with the stock images) or Virtualization.framework
@@ -38,12 +38,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd"
-	"github.com/rosskukulinski/twd/hostd/fakemgmt"
-	"github.com/rosskukulinski/twd/hostd/hostdtest"
-	"github.com/rosskukulinski/twd/hostd/image"
-	"github.com/rosskukulinski/twd/hostd/mgmtapi"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/hostd"
+	"github.com/rosskukulinski/tailworks/hostd/fakemgmt"
+	"github.com/rosskukulinski/tailworks/hostd/hostdtest"
+	"github.com/rosskukulinski/tailworks/hostd/image"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 	"tailscale.com/tailcfg"
 )
 
@@ -54,15 +54,15 @@ func pct(ds []time.Duration, q float64) time.Duration {
 }
 
 func TestE2EContainer(t *testing.T) {
-	imgs, apps := os.Getenv("TWD_CTR_IMAGES"), os.Getenv("TWD_CTR_APPS")
+	imgs, apps := os.Getenv("TW_CTR_IMAGES"), os.Getenv("TW_CTR_APPS")
 	if imgs == "" || apps == "" {
-		t.Skip("TWD_CTR_IMAGES and TWD_CTR_APPS must be set (make e2e-container / e2e-vz-container)")
+		t.Skip("TW_CTR_IMAGES and TW_CTR_APPS must be set (make e2e-container / e2e-vz-container)")
 	}
 	be, emulated := newBackend(t)
-	// The store as twd-hostd builds it: the arm64 alias map, unless the
+	// The store as tw-hostd builds it: the arm64 alias map, unless the
 	// backend runs amd64 images itself (vz + Rosetta: stock images, no alias).
 	store := &image.Store{Dir: filepath.Join(t.TempDir(), "images"), Sources: []image.Source{image.DirSource{Dir: imgs}}, Aliases: image.DefaultAliases,
-		Public: map[string]bool{"twd.local/cloudflare-sandbox:0.12.14-arm64": true, "docker.io/cloudflare/sandbox:0.12.14": true}}
+		Public: map[string]bool{"tw.local/cloudflare-sandbox:0.12.14-arm64": true, "docker.io/cloudflare/sandbox:0.12.14": true}}
 	if len(emulated) > 0 {
 		store.Emulated, store.Aliases = emulated, nil
 	}
@@ -141,14 +141,14 @@ func TestE2EContainer(t *testing.T) {
 	defer func() {
 		b, _ := json.MarshalIndent(results, "", "  ")
 		t.Logf("results:\n%s", b)
-		if p := os.Getenv("TWD_E2E_RESULTS"); p != "" {
+		if p := os.Getenv("TW_E2E_RESULTS"); p != "" {
 			os.WriteFile(p, b, 0o644)
 		}
 	}()
 
-	// The alias map (ADR-032 D3): on arm64 the stock ref is twd's rebuild;
+	// The alias map (ADR-032 D3): on arm64 the stock ref is tailworks' rebuild;
 	// on amd64 (and under Rosetta) it is the stock image itself.
-	wantRef, wantArch, machine := "twd.local/cloudflare-sandbox:0.12.14-arm64", "arm64", "aarch64"
+	wantRef, wantArch, machine := "tw.local/cloudflare-sandbox:0.12.14-arm64", "arm64", "aarch64"
 	if runtime.GOARCH == "amd64" || len(emulated) > 0 {
 		wantRef, wantArch, machine = "cloudflare/sandbox:0.12.14", "amd64", "x86_64"
 	}
@@ -162,7 +162,7 @@ func TestE2EContainer(t *testing.T) {
 	}
 
 	ctrFiles := build(hostdtest.Fixture("ctr"))
-	ctrFiles["twd.jsonc"] = []byte(strings.ReplaceAll(string(ctrFiles["twd.jsonc"]), "twd.test/box:1", "twd.local/debian-trixie-python:1"))
+	ctrFiles["tailworks.jsonc"] = []byte(strings.ReplaceAll(string(ctrFiles["tailworks.jsonc"]), "tw.test/box:1", "tw.local/debian-trixie-python:1"))
 	dV0 := e.DeployFiles(build(filepath.Join(apps, "v0min")), "sbx0")
 	dV1 := e.DeployFiles(build(filepath.Join(apps, "v1min")), "sbx1")
 	dRaw := e.DeployFiles(build(filepath.Join(apps, "raw10")), "raw10")
@@ -359,7 +359,11 @@ func TestE2EContainer(t *testing.T) {
 		if r := call("/f/other/exec", "argv", `["true"]`); r["error"] == nil {
 			t.Fatalf("another object's exec ran: %v", r)
 		}
-		if r := call("/p/z/forge", "target", "srv", "op", "destroy"); r["ok"] != false {
+		// No tenant env keeps the platform binding (create admission), so a
+		// plain-DO object can't even reach for a facet object's container
+		// (noBinding), as hostd's TestContainers checks; a binding that
+		// refuses (ok: false) would be acceptable too.
+		if r := call("/p/z/forge", "target", "srv", "op", "destroy"); r["noBinding"] != true && r["ok"] != false {
 			t.Fatalf("plain object destroyed a facet object's container: %v", r)
 		}
 		if c := ctrOf("Box", "srv"); c.State != "running" {

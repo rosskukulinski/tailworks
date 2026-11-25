@@ -13,8 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/internal/tsapi"
-	"github.com/rosskukulinski/twd/netd"
+	"github.com/rosskukulinski/tailworks/e2e/cliflow"
+	"github.com/rosskukulinski/tailworks/internal/tsapi"
+	"github.com/rosskukulinski/tailworks/netd"
 )
 
 const prodControl = "https://controlplane.tailscale.com"
@@ -27,9 +28,9 @@ var allowedTailnets = map[string]bool{"tail7906d5.ts.net": true}
 // policy is read or written; cleanup deletes exactly the devices and keys
 // this run created (by ID).
 func TestColdIdentityReal(t *testing.T) {
-	keyFile, tailnet := os.Getenv("TWD_E2E_API_KEY_FILE"), os.Getenv("TWD_E2E_TAILNET")
+	keyFile, tailnet := os.Getenv("TW_E2E_API_KEY_FILE"), os.Getenv("TW_E2E_TAILNET")
 	if keyFile == "" || tailnet == "" {
-		t.Skip("TWD_E2E_API_KEY_FILE / TWD_E2E_TAILNET not set")
+		t.Skip("TW_E2E_API_KEY_FILE / TW_E2E_TAILNET not set")
 	}
 	if !allowedTailnets[tailnet] {
 		t.Fatalf("refusing to run against tailnet %q (not in the allow list)", tailnet)
@@ -45,12 +46,14 @@ func TestColdIdentityReal(t *testing.T) {
 	prefix := "ttest-fi-" + run
 	tracker := tsapi.NewTracker(api)
 	minter := tsapi.MintSource(api, slog.New(netd.NewRedactingHandler(slog.NewTextHandler(io.Discard, nil))))
-	n, _ := strconv.Atoi(os.Getenv("TWD_COLDID_N"))
+	n, _ := strconv.Atoi(os.Getenv("TW_COLDID_N"))
 	if n <= 0 {
 		n = 20
 	}
-	e := env{name: "real", controlURL: prodControl, tailnet: tailnet, apiKeyFile: keyFile, tags: []string{"tag:ttest"},
-		prefix: prefix, n: n, gap: 2 * time.Second, track: tracker.Track, dial: os.Getenv("TWD_COLDID_DIAL"),
+	// mgmt mints with an OAuth client (the run's own; it may tag tag:ttest).
+	oauthFile := cliflow.RealOAuthClient(t, keyFile, tailnet, t.TempDir(), prefix+"-oauth", "tag:ttest")
+	e := env{name: "real", controlURL: prodControl, tailnet: tailnet, oauthFile: oauthFile, tags: []string{"tag:ttest"},
+		prefix: prefix, n: n, gap: 2 * time.Second, track: tracker.Track, dial: os.Getenv("TW_COLDID_DIAL"),
 		callerKey: func(ctx context.Context) (string, error) {
 			return minter.AuthKey(ctx, netd.KeyRequest{ObjectID: "caller", Hostname: prefix + "-caller", Tags: []string{"tag:ttest"}, Ephemeral: true})
 		}}
@@ -59,10 +62,10 @@ func TestColdIdentityReal(t *testing.T) {
 	} else if e.dial != "" && e.dial != "netmap" {
 		e.name += "-dial" + e.dial
 	}
-	if os.Getenv("TWD_COLDID_WARM") != "" {
+	if os.Getenv("TW_COLDID_WARM") != "" {
 		e.name += "-warm"
 	}
-	if os.Getenv("TWD_COLDID_PREJOINED") != "" {
+	if os.Getenv("TW_COLDID_PREJOINED") != "" {
 		e.prejoined = true
 		e.name += "-prejoined"
 	}

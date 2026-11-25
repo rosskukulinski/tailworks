@@ -1,17 +1,17 @@
-// Package imagebuild is twd deploy's container image builder (ADR-032 D3):
+// Package imagebuild is tw deploy's container image builder (ADR-032 D3):
 // a class whose wrangler "image" (or "images.<name>.dockerfile") is a
 // Dockerfile is built on the developer's machine with `docker buildx`,
 // once per target architecture, into an OCI image layout, and pushed to
-// twd's registry (mgmt's /v2/, over the developer's own tailnet
+// tailworks' registry (mgmt's /v2/, over the developer's own tailnet
 // connection) in the tenant's namespace. The result is a digest reference
-// (twd.local/<tenant>/<repo>@sha256:…, an index when built for several
+// (tw.local/<tenant>/<repo>@sha256:…, an index when built for several
 // arches) that mgmt pins at deploy.
 //
 // The arm64 alias map is applied as BuildKit named contexts: a Dockerfile
 // `FROM docker.io/cloudflare/sandbox:0.12.14` (or `COPY --from=` it, or an
-// ARG default naming it) builds for arm64 against twd's rebuild, so the
+// ARG default naming it) builds for arm64 against tailworks' rebuild, so the
 // app's Dockerfile is used as written. The rebuild comes from the local
-// Docker image store when it is there, else from twd's registry (public/)
+// Docker image store when it is there, else from tailworks' registry (public/)
 // as an OCI layout.
 //
 // Hosts never build: only the developer's machine runs a container engine.
@@ -27,12 +27,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
-	"github.com/rosskukulinski/twd/internal/container"
-	"github.com/rosskukulinski/twd/internal/oci"
-	"github.com/rosskukulinski/twd/internal/registry"
+	"github.com/rosskukulinski/tailworks/internal/container"
+	"github.com/rosskukulinski/tailworks/internal/oci"
+	"github.com/rosskukulinski/tailworks/internal/registry"
 )
 
 // Job is one image to build.
@@ -41,6 +42,9 @@ type Job struct {
 	Name  string // images key; "" = the class's default image
 	// Dockerfile and Context are absolute paths.
 	Dockerfile, Context string
+	// BuildArgs are wrangler's image_vars (or images.<name>.build_vars),
+	// passed as --build-arg. Not secrets: they end up in the image.
+	BuildArgs map[string]string
 }
 
 // Repo is the registry repository a job pushes to:
@@ -64,30 +68,41 @@ func sanitize(s string) string {
 }
 
 // Plan lists the Dockerfile builds of classes (relative paths resolve
-// against appDir, as wrangler resolves them against its config file).
+// against appDir, as wrangler resolves them against its config file). The
+// build context is wrangler's image_build_context (or
+// images.<name>.build_context) when set, else the Dockerfile's directory.
 func Plan(appDir string, classes []container.Class) ([]Job, error) {
 	var jobs []Job
-	add := func(class, name, src string) error {
-		p := src
+	abs := func(p string) string {
 		if !filepath.IsAbs(p) {
-			p = filepath.Join(appDir, filepath.FromSlash(src))
+			p = filepath.Join(appDir, filepath.FromSlash(p))
 		}
+		return p
+	}
+	add := func(c container.Class, name, src string) error {
+		p := abs(src)
 		st, err := os.Stat(p)
 		if err != nil {
-			return fmt.Errorf("containers.%s: %s: %w", class, src, err)
+			return fmt.Errorf("containers.%s: %s: %w", c.Class, src, err)
 		}
-		j := Job{Class: class, Name: name}
+		j := Job{Class: c.Class, Name: name, BuildArgs: c.Build.VarsFor(name)}
 		if st.IsDir() {
 			j.Context, j.Dockerfile = p, filepath.Join(p, "Dockerfile")
 		} else {
 			j.Context, j.Dockerfile = filepath.Dir(p), p
+		}
+		if bc := c.Build.ContextFor(name); bc != "" {
+			j.Context = abs(bc)
+			if st, err := os.Stat(j.Context); err != nil || !st.IsDir() {
+				return fmt.Errorf("containers.%s: build context %s is not a directory", jobName(j), bc)
+			}
 		}
 		jobs = append(jobs, j)
 		return nil
 	}
 	for _, c := range classes {
 		if c.Image == "" && c.Source != "" && container.IsBuildSource(c.Source) {
-			if err := add(c.Class, "", c.Source); err != nil {
+			if err := add(c, "", c.Source); err != nil {
 				return nil, err
 			}
 		}
@@ -98,7 +113,7 @@ func Plan(appDir string, classes []container.Class) ([]Job, error) {
 		sort.Strings(names)
 		for _, n := range names {
 			if c.Images[n] == "" {
-				if err := add(c.Class, n, c.ImageSources[n]); err != nil {
+				if err := add(c, n, c.ImageSources[n]); err != nil {
 					return nil, err
 				}
 			}
@@ -113,7 +128,7 @@ type Options struct {
 	// Arches to build for (linux/<arch>).
 	Arches  []string
 	Aliases []registry.Alias
-	// Registry is twd's registry (mgmt /v2/) as the developer: pushes go
+	// Registry is tailworks' registry (mgmt /v2/) as the developer: pushes go
 	// here, and alias targets absent from the local Docker image store come
 	// from here.
 	Registry *oci.Client
@@ -135,7 +150,7 @@ func (o *Options) docker() string {
 // Result is one built and pushed image.
 type Result struct {
 	Job       Job
-	Ref       string            // twd.local/<repo>@sha256:… (index if several arches)
+	Ref       string            // tw.local/<repo>@sha256:… (index if several arches)
 	Platforms map[string]string // arch → image manifest digest
 	Layouts   map[string]string // arch → OCI layout tar (kept only with Options.WorkDir)
 }
@@ -145,7 +160,7 @@ type Result struct {
 func BuildAndPush(ctx context.Context, jobs []Job, o Options) (map[string]registry.Built, []Result, error) {
 	work := o.WorkDir
 	if work == "" {
-		d, err := os.MkdirTemp("", "twd-imagebuild-")
+		d, err := os.MkdirTemp("", "tw-imagebuild-")
 		if err != nil {
 			return nil, nil, err
 		}
@@ -201,9 +216,21 @@ func Build(ctx context.Context, j Job, arch, work string, o Options) (string, er
 	for _, c := range ctxs {
 		args = append(args, "--build-context", c)
 	}
+	// The echoed command shows each build arg's name, not its value.
+	shown := slices.Clone(args)
+	keys := make([]string, 0, len(j.BuildArgs))
+	for k := range j.BuildArgs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		args = append(args, "--build-arg", k+"="+j.BuildArgs[k])
+		shown = append(shown, "--build-arg", k+"=…")
+	}
 	args = append(args, j.Context)
+	shown = append(shown, j.Context)
 	if o.Log != nil {
-		fmt.Fprintf(o.Log, "› build      %s (linux/%s): %s %s\n", jobName(j), arch, o.docker(), strings.Join(args, " "))
+		fmt.Fprintf(o.Log, "› build      %s (linux/%s): %s %s\n", jobName(j), arch, o.docker(), strings.Join(shown, " "))
 	}
 	cmd := exec.CommandContext(ctx, o.docker(), args...)
 	var tail bytes.Buffer
@@ -258,7 +285,7 @@ func aliasContexts(ctx context.Context, dockerfile, arch, work string, o Options
 		if len(written) == 0 {
 			continue
 		}
-		src, dir, err := aliasSource(ctx, a.To, arch, work, o)
+		src, dir, err := aliasSource(ctx, a, arch, work, o)
 		if err != nil {
 			cleanup()
 			return nil, func() {}, fmt.Errorf("alias %s → %s (linux/%s): %w", a.From, a.To, arch, err)
@@ -292,12 +319,15 @@ func refForms(r oci.Ref) []string {
 	return forms
 }
 
-// aliasSource is where BuildKit gets an alias target, always as a local
-// OCI layout (oci-layout://dir@digest): from twd's registry (public/, the
-// very image mgmt pins for this arch), else from the local Docker image
-// store (docker save). A docker-image:// context naming a twd.local image
-// would make BuildKit try to resolve it over the network first.
-func aliasSource(ctx context.Context, to, arch, work string, o Options) (string, string, error) {
+// aliasSource is where BuildKit gets an alias target: as a local OCI
+// layout (oci-layout://dir@digest) from tailworks' registry (public/, the
+// very image mgmt pins for this arch); else the alias's digest-pinned
+// Source as docker-image:// (the bytes mgmt fills the target from); else
+// from the local Docker image store (docker save). A docker-image://
+// context naming a tw.local image would make BuildKit try to resolve it
+// over the network first.
+func aliasSource(ctx context.Context, a registry.Alias, arch, work string, o Options) (string, string, error) {
+	to := a.To
 	r, err := oci.ParseRef(to)
 	if err != nil {
 		return "", "", err
@@ -323,10 +353,20 @@ func aliasSource(ctx context.Context, to, arch, work string, o Options) (string,
 			regErr = err
 		}
 	}
+	if src == nil && a.Source != "" {
+		// Not in tailworks' registry yet: the published rebuild mgmt
+		// fills it from at deploy, pinned by digest.
+		sr, err := a.SourceRef()
+		if err != nil {
+			return fail(err)
+		}
+		os.RemoveAll(dir)
+		return "docker-image://" + sr.String(), "", nil
+	}
 	if src == nil {
-		// Not in twd's registry: the local Docker image, if it has one.
+		// Not in tailworks' registry: the local Docker image, if it has one.
 		if localImageArch(ctx, o.docker(), to) != arch {
-			return fail(fmt.Errorf("%s is neither in twd's registry (%s: %v) nor a local linux/%s Docker image; the operator pushes it with `twd image push`", to, repo, regErr, arch))
+			return fail(fmt.Errorf("%s is neither in tailworks' registry (%s: %v) nor a local linux/%s Docker image; the operator pushes it with `tw image push`", to, repo, regErr, arch))
 		}
 		tar := filepath.Join(dir, "save.tar")
 		if b, err := exec.CommandContext(ctx, o.docker(), "image", "save", "-o", tar, to).CombinedOutput(); err != nil {

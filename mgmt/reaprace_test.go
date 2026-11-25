@@ -3,7 +3,6 @@ package mgmt
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -14,6 +13,7 @@ import (
 // operator) may kill the same object at once. Exactly one kill must win: one
 // kill audit record per object, and the tombstone keeps the winner's record.
 func TestMM_H09_ConcurrentKillOnce(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	st, _ := OpenStore(ctx, filepath.Join(dir, "m.db"))
@@ -29,8 +29,8 @@ func TestMM_H09_ConcurrentKillOnce(t *testing.T) {
 	}
 	a, b := mk(), mk()
 	kf := filepath.Join(dir, "api.env")
-	os.WriteFile(kf, []byte("TS_API_KEY=x\n"), 0o600)
-	tn, _ := a.CreateTenant(ctx, TenantRequest{Tailnet: "t.ts.net", MintMode: "apikey", APIKeyFile: kf})
+	writeTestOAuthFile(t, kf)
+	tn, _ := a.CreateTenant(ctx, TenantRequest{Tailnet: "t.ts.net", MintMode: MintOAuth, OAuthClientFile: kf})
 	const n = 20
 	for i := range n {
 		id := fmt.Sprintf("obj%02d", i)
@@ -72,6 +72,7 @@ func TestMM_H09_ConcurrentKillOnce(t *testing.T) {
 // reaches an existing throttle (the mint worker re-reads the tenant on every
 // attempt and asks m.throttle for it).
 func TestMM_H15_ThrottleFollowsTenantLimit(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	st, _ := OpenStore(ctx, filepath.Join(dir, "m.db"))
@@ -95,6 +96,7 @@ func TestMM_H15_ThrottleFollowsTenantLimit(t *testing.T) {
 // blip after the state change can't lose the cleanup. The broker here has no
 // API, so the inline delete fails: the intent must still be persisted.
 func TestMM_F21_DeviceDeleteIntentIsAtomic(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	st, _ := OpenStore(ctx, filepath.Join(dir, "m.db"))
@@ -106,8 +108,8 @@ func TestMM_F21_DeviceDeleteIntentIsAtomic(t *testing.T) {
 	}
 	defer m.Close()
 	kf := filepath.Join(dir, "api.env")
-	os.WriteFile(kf, []byte("TS_API_KEY=x\n"), 0o600)
-	tn, _ := m.CreateTenant(ctx, TenantRequest{Tailnet: "t.ts.net", MintMode: "apikey", APIKeyFile: kf})
+	writeTestOAuthFile(t, kf)
+	tn, _ := m.CreateTenant(ctx, TenantRequest{Tailnet: "t.ts.net", MintMode: MintOAuth, OAuthClientFile: kf})
 	// A ready object with a device, killed.
 	st.CreateObject(ctx, Object{ID: "rdy", TenantID: tn.ID, Workload: "w", Namespace: "A", Name: "rdy", Hostname: "rdy", RootID: "rdy",
 		Status: StatusReady, NodeID: "1", StableNodeID: "nRDY"})
@@ -117,11 +119,17 @@ func TestMM_F21_DeviceDeleteIntentIsAtomic(t *testing.T) {
 	if o, _ := st.GetObject(ctx, "rdy"); o.DeviceDeleteAt == 0 {
 		t.Fatal("kill of an object with a device must record its device delete in the same write")
 	}
-	// An object killed while minted (no device yet); its node then reports ready.
+	// An object killed while minted (no device yet); its node then reports
+	// ready. Ready is always fenced on the lease holder's epoch (H2), so the
+	// late report comes from the host holding the namespace lease.
+	lease, err := st.AcquireLease(ctx, LeaseName(tn.ID, "w"), "h1", NamespaceLeaseTTL, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
 	st.CreateObject(ctx, Object{ID: "late", TenantID: tn.ID, Workload: "w", Namespace: "A", Name: "late", Hostname: "late", RootID: "late",
-		Status: StatusMinted})
+		Lease: lease.Name, Status: StatusMinted})
 	m.Kill(ctx, "late", KillRequest{Reason: "t"})
-	m.Ready(ctx, "late", "", ReadyRequest{NodeID: "2", StableNodeID: "nLATE", MagicDNS: "late.t.ts.net"})
+	m.Ready(ctx, "late", "h1", ReadyRequest{NodeID: "2", StableNodeID: "nLATE", MagicDNS: "late.t.ts.net", Epoch: lease.Epoch})
 	if o, _ := st.GetObject(ctx, "late"); o.StableNodeID != "nLATE" || o.DeviceDeleteAt == 0 {
 		t.Fatalf("a device that appears after the kill must be recorded for deletion: %+v", o)
 	}

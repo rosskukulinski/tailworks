@@ -1,9 +1,9 @@
 //go:build e2emac
 
-// E2E-MAC (BUILD-PLAN definition of done 1) on this machine against
-// tailnet 1, driven only through the twd CLI: twd up (apikey mode, temp
+// E2E-MAC (the macOS end-to-end acceptance test) on this machine against
+// tailnet 1, driven only through the tailworks CLI: tw up (apikey mode, temp
 // --state-dir) → deploy the agent and mcp templates → a tag:ttest tsnet
-// client + a private tag:ttest echo service check (a)–(f) → twd down →
+// client + a private tag:ttest echo service check (a)–(f) → tw down →
 // zero leftover devices and keys from this run.
 //
 // Safety: only tailnet 1 (allow list). The policy additions the scenario
@@ -24,11 +24,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/e2e/cliflow"
-	"github.com/rosskukulinski/twd/internal/policy"
-	"github.com/rosskukulinski/twd/internal/tsapi"
-	"github.com/rosskukulinski/twd/netd"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/e2e/cliflow"
+	"github.com/rosskukulinski/tailworks/internal/policy"
+	"github.com/rosskukulinski/tailworks/internal/tsapi"
+	"github.com/rosskukulinski/tailworks/netd"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 )
 
 const prodControl = "https://controlplane.tailscale.com"
@@ -36,9 +36,9 @@ const prodControl = "https://controlplane.tailscale.com"
 var allowedTailnets = map[string]bool{"tail7906d5.ts.net": true}
 
 func TestE2EMac(t *testing.T) {
-	keyFile, tailnet := os.Getenv("TWD_E2E_API_KEY_FILE"), os.Getenv("TWD_E2E_TAILNET")
+	keyFile, tailnet := os.Getenv("TW_E2E_API_KEY_FILE"), os.Getenv("TW_E2E_TAILNET")
 	if keyFile == "" || tailnet == "" {
-		t.Skip("TWD_E2E_API_KEY_FILE / TWD_E2E_TAILNET not set")
+		t.Skip("TW_E2E_API_KEY_FILE / TW_E2E_TAILNET not set")
 	}
 	if !allowedTailnets[tailnet] {
 		t.Fatalf("refusing to run against tailnet %q (not in the allow list)", tailnet)
@@ -47,17 +47,20 @@ func TestE2EMac(t *testing.T) {
 	if err != nil {
 		t.Skip(err)
 	}
-	t.Setenv("TWD_WORKERD", wd)
+	t.Setenv("TW_WORKERD", wd)
 	apiKey, err := tsapi.LoadEnvFile(keyFile, "TS_API_KEY")
 	if err != nil {
 		t.Fatal(err)
 	}
 	api := &tsapi.Client{Tailnet: tailnet, APIKey: apiKey}
+	// tailworks mints with an OAuth client: this run's own, created with the
+	// harness's API key and deleted when the test ends.
+	oauthFile := cliflow.RealOAuthClient(t, keyFile, tailnet, t.TempDir(), "tw-e2e-mac-oauth")
 	b := make([]byte, 3)
 	rand.Read(b)
 	run := hex.EncodeToString(b)
-	prefix := "twd-e2e-" + run + "-"
-	if p := os.Getenv("TWD_E2E_PREFIX"); p != "" { // e.g. ttest-rtf-: name test nodes per run
+	prefix := "tw-e2e-" + run + "-"
+	if p := os.Getenv("TW_E2E_PREFIX"); p != "" { // e.g. ttest-rtf-: name test nodes per run
 		prefix = p + run + "-"
 	}
 	root, _ := nettest.FindRepoRoot()
@@ -83,10 +86,10 @@ func TestE2EMac(t *testing.T) {
 	minter := tsapi.MintSource(api, quiet)
 	tracker := tsapi.NewTracker(api)
 	bin := cliflow.BuildBinaries(t)
-	state := filepath.Join("/tmp", "twd-e2e-"+run)
+	state := filepath.Join("/tmp", "tw-e2e-"+run)
 	work := t.TempDir()
 	var nodes []*nettest.Node
-	e := &cliflow.Env{T: t, BinDir: bin, StateDir: state, WorkDir: work, Tailnet: tailnet, APIKeyFile: keyFile,
+	e := &cliflow.Env{T: t, BinDir: bin, StateDir: state, WorkDir: work, Tailnet: tailnet, OAuthClientFile: oauthFile,
 		ControlURL: prodControl, Prefix: prefix, Res: res, ClientTagged: true, PolicyGrantsParentRefund: true,
 		NewNode: func(role string) *nettest.Node {
 			k, err := minter.AuthKey(ctx, netd.KeyRequest{ObjectID: role, Tags: []string{cliflow.TestTag}, Ephemeral: true})
@@ -106,8 +109,8 @@ func TestE2EMac(t *testing.T) {
 	downDone := false
 	t.Cleanup(func() {
 		if !downDone {
-			if _, se, _, err := e.Twd("down", "--purge"); err != nil {
-				t.Logf("twd down (cleanup): %v %s", err, netd.Redact(se))
+			if _, se, _, err := e.Tw("down", "--purge"); err != nil {
+				t.Logf("tw down (cleanup): %v %s", err, netd.Redact(se))
 			}
 		}
 		for _, c := range []string{"supervisor", "mgmt", "hostd"} {
@@ -122,16 +125,16 @@ func TestE2EMac(t *testing.T) {
 		cctx, ccancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer ccancel()
 		devs, keys := cliflow.Leftovers(cctx, api, res)
-		res.Cleanup["twd_devices_tracked"] = len(res.NodeIDs)
-		res.Cleanup["twd_keys_tracked"] = len(res.KeyIDs)
-		res.Cleanup["twd_devices_left_after_down"] = len(devs)
-		res.Cleanup["twd_keys_valid_after_down"] = len(keys)
+		res.Cleanup["tw_devices_tracked"] = len(res.NodeIDs)
+		res.Cleanup["tw_keys_tracked"] = len(res.KeyIDs)
+		res.Cleanup["tw_devices_left_after_down"] = len(devs)
+		res.Cleanup["tw_keys_valid_after_down"] = len(keys)
 		// Safety net: delete exactly this run's leftovers, by ID.
 		for _, id := range res.NodeIDs {
-			tracker.Track(id, "twd")
+			tracker.Track(id, "tw")
 		}
 		for _, id := range res.InfraNodeIDs {
-			tracker.Track(id, "twd-infra") // mgmt's and the host's own nodes: kept by twd down, deleted here by ID
+			tracker.Track(id, "tw-infra") // mgmt's and the host's own nodes: kept by tw down, deleted here by ID
 		}
 		crep := tracker.Cleanup(cctx, prefix)
 		for _, k := range keys {
@@ -154,7 +157,7 @@ func TestE2EMac(t *testing.T) {
 		os.WriteFile(resultsTo, out, 0o644)
 		t.Logf("results: %s\n%s", resultsTo, out)
 		if len(devs) > 0 || len(keys) > 0 {
-			t.Errorf("after twd down: leftover twd devices %v, valid keys %d", devs, len(keys))
+			t.Errorf("after tw down: leftover tw devices %v, valid keys %d", devs, len(keys))
 		}
 		if crep.Left != 0 || len(crep.Untracked) > 0 {
 			t.Errorf("cleanup left devices: %+v", crep)

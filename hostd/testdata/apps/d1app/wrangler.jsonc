@@ -1,0 +1,18 @@
+{
+  // D1 fixture (hostd/d1_test.go): env.DB from the worker and from a facet
+  // (Box), driven over HTTP by the test. Migrations in wrangler's layout.
+  "name": "d1app",
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-01",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "app-db",
+      "database_id": "00000000-0000-4000-8000-000000000001",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "BOX", "class_name": "Box" }],
+  },
+}

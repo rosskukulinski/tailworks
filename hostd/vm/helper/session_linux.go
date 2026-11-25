@@ -21,7 +21,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/rosskukulinski/twd/hostd/vm/helperapi"
+	"github.com/rosskukulinski/tailworks/hostd/vm/helperapi"
 	"golang.org/x/sys/unix"
 )
 
@@ -50,6 +50,9 @@ type session struct {
 	volOnce  sync.Once
 	stopped  bool
 	quota    int // the cpu.max quota (per 100 ms) the VM runs under
+
+	// forBase: started with StartRequest.Base (baseguard_linux.go).
+	forBase bool
 }
 
 func ms(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }
@@ -90,6 +93,9 @@ func (s *Server) start(c *net.UnixConn, uid int, req *helperapi.StartRequest, fd
 	if req.VolumeSlot && req.Volume != nil {
 		return nil, resp, nil, herr(helperapi.CodeBadRequest, "volume and volume slot are exclusive")
 	}
+	if err := checkBaseStart(req); err != nil {
+		return nil, resp, nil, err
+	}
 	var bs *base
 	if req.Restore != "" {
 		if bs = s.lookupBase(uid, req.Restore); bs == nil {
@@ -115,7 +121,7 @@ func (s *Server) start(c *net.UnixConn, uid int, req *helperapi.StartRequest, fd
 		return nil, resp, nil, err
 	}
 	sess := &session{s: s, c: c, uid: uid, slot: slot, id: fmt.Sprintf("%s%d", s.prefix(), slot),
-		jailID: s.cfg.UIDBase + slot, done: make(chan struct{}), base: bs}
+		jailID: s.cfg.UIDBase + slot, done: make(chan struct{}), base: bs, forBase: req.Base}
 	sess.chroot = filepath.Join(s.cfg.JailBase, "firecracker", sess.id, "root")
 	sess.cgroup = s.cgroup + "/" + sess.id
 	defer func() {
@@ -567,8 +573,8 @@ func (sess *session) cleanup() {
 // post-boot: the guest sees a capacity change on /dev/vdc). The guest has
 // not touched the placeholder (it only mounts after its load).
 func (sess *session) attach(f *os.File, req *helperapi.Volume) (resp helperapi.Response, err error) {
-	if !sess.slot2 || sess.vol != nil {
-		return resp, herr(helperapi.CodeBadRequest, "this VM has no free volume slot")
+	if err := sess.canAttach(); err != nil {
+		return resp, err
 	}
 	t0 := time.Now()
 	a, err := sess.s.vols.attach(f, req, sess.uid, sess.id)
@@ -615,15 +621,16 @@ func blockSectors(dev string) (int64, error) {
 // snapshotBase pauses the VM, writes a full snapshot (state + memory)
 // inside its jail, moves the files into dir (root-only, outside every
 // jail) with a copy of its config drive, and kills the VM: the original is
-// never resumed. The caller (hostd) only does this to a pooled VM that has
-// said "pooled" (warm, no tenant code) and that it has not loaded.
+// never resumed. Only a VM started with Base qualifies (canSnapshotBase);
+// any other is refused and left running. The caller (hostd) only does this
+// to a base boot that has said "pooled" (warm, no tenant code).
 func (sess *session) snapshotBase(dir string) (*base, map[string]float64, error) {
+	if err := sess.canSnapshotBase(); err != nil {
+		return nil, nil, err
+	}
 	t0 := time.Now()
 	tm := map[string]float64{}
 	defer sess.stop()
-	if !sess.slot2 || sess.vol != nil {
-		return nil, nil, herr(helperapi.CodeBadRequest, "only a pool VM (volume slot, no volume) can become a base snapshot")
-	}
 	if err := sess.call("PATCH", "/vm", map[string]any{"state": "Paused"}); err != nil {
 		return nil, nil, err
 	}

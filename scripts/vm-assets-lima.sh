@@ -3,18 +3,18 @@
 # amd64) microVM guest assets for the release (vmlinux + kernel.json,
 # rootfs.ext4 + manifest.json, firecracker, jailer), built where they can be
 # built:
-#   - on Linux (e.g. inside Lima twd-dev): `make vm-assets GUEST_ARCH=<arch>
+#   - on Linux (e.g. inside Lima tw-dev): `make vm-assets GUEST_ARCH=<arch>
 #     VM_ASSETS=<outdir>`;
-#   - on macOS: a copy of this tree goes to Lima $TWD_DEV_VM (default
-#     twd-dev, which must be running), `make deps && make vm-assets` run there
-#     in /tmp/twd-vm-assets-<arch>, and the files come back with `limactl
+#   - on macOS: a copy of this tree goes to Lima $TW_DEV_VM (default
+#     tw-dev, which must be running), `make deps && make vm-assets` run there
+#     in /tmp/tw-vm-assets-<arch>, and the files come back with `limactl
 #     copy`. Downloads and the kernel build are kept in the VM's
-#     ~/.cache/twd-guest (both are checked against their pinned inputs).
+#     ~/.cache/tw-guest (both are checked against their pinned inputs).
 # Either arch builds on either: the other arch's kernel needs its cross
 # compiler (gcc-x86-64-linux-gnu on arm64, gcc-aarch64-linux-gnu on amd64).
 # Cached: <outdir>/inputs.sha256 hashes every input (guest/, which pins the
 # kernel, base rootfs, CA and Firecracker downloads; go.mod, go.sum; the
-# workerd version in package-lock.json; the in-repo Go packages twd-guestd
+# workerd version in package-lock.json; the in-repo Go packages tw-guestd
 # depends on; and the builder's compiler), so an unchanged guest is not
 # rebuilt (the image is reproducible anyway).
 # Exit 0: assets are in <outdir>. 3: can't build here (no limactl, the dev
@@ -23,7 +23,7 @@ set -u
 OUT=${1:?outdir}
 ARCH=${2:-arm64}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-DEV=${TWD_DEV_VM:-twd-dev}
+DEV=${TW_DEV_VM:-tw-dev}
 cd "$ROOT" || exit 1
 mkdir -p "$OUT"
 case $OUT in /*) ;; *) OUT=$ROOT/$OUT ;; esac
@@ -49,7 +49,7 @@ ccv=$(remote "$cc --version 2>/dev/null | head -1")
 [ -n "$ccv" ] || { say "the builder has no $cc (the guest kernel's compiler; apt install gcc-$(echo $uarch | tr _ -)-linux-gnu)"; exit 3; }
 
 # Input hash: in-repo inputs + the builder's compiler.
-deps=$(go list -deps -f '{{if not .Standard}}{{.Dir}}{{end}}' ./guest/twd-guestd 2>/dev/null | grep "^$ROOT/" | sed "s|^$ROOT/||")
+deps=$(go list -deps -f '{{if not .Standard}}{{.Dir}}{{end}}' ./guest/tw-guestd 2>/dev/null | grep "^$ROOT/" | sed "s|^$ROOT/||")
 inputs=$( (git ls-files -co --exclude-standard guest go.mod go.sum; for d in $deps; do git ls-files -co --exclude-standard "$d"; done) | sort -u |
 	while read -r f; do [ -f "$f" ] && shasum -a 256 "$f"; done
 	echo "$ARCH"
@@ -69,11 +69,11 @@ if [ "$os" = Linux ]; then
 	make vm-assets GUEST_ARCH="$ARCH" VM_ASSETS="$OUT" >"$OUT/build.log" 2>&1 || { tail -30 "$OUT/build.log" >&2; exit 1; }
 else
 	# A fixed scratch dir in the VM (a fresh copy of the tree each build).
-	W=/tmp/twd-vm-assets-$ARCH
+	W=/tmp/tw-vm-assets-$ARCH
 	say "building in Lima $DEV:$W (first time: make deps, the kernel and the guest image; later builds are cached by input hash)"
 	remote "rm -rf $W && mkdir -p $W" || exit 1
 	git ls-files -co --exclude-standard | tar cf - -T - | limactl shell "$DEV" -- tar xf - -C "$W" || exit 1
-	remote "cd $W && export GUEST_CACHE=\$HOME/.cache/twd-guest && make deps >build.log 2>&1 && make vm-assets GUEST_ARCH=$ARCH KERNEL_OUT=\$HOME/.cache/twd-guest/kernel-$ARCH VM_ASSETS=$W/out >>build.log 2>&1 || { tail -30 build.log; exit 1; }" || exit 1
+	remote "cd $W && export GUEST_CACHE=\$HOME/.cache/tw-guest && make deps >build.log 2>&1 && make vm-assets GUEST_ARCH=$ARCH KERNEL_OUT=\$HOME/.cache/tw-guest/kernel-$ARCH VM_ASSETS=$W/out >>build.log 2>&1 || { tail -30 build.log; exit 1; }" || exit 1
 	for f in $FILES; do
 		limactl copy "$DEV:$W/out/$f" "$OUT/$f" || exit 1
 	done

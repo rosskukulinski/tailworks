@@ -22,13 +22,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/rosskukulinski/twd/guest/proto"
-	"github.com/rosskukulinski/twd/hostd/bundle"
-	"github.com/rosskukulinski/twd/hostd/gen"
-	"github.com/rosskukulinski/twd/hostd/mgmtapi"
-	"github.com/rosskukulinski/twd/hostd/sandbox"
-	"github.com/rosskukulinski/twd/internal/procsb"
-	"github.com/rosskukulinski/twd/netd"
+	"github.com/rosskukulinski/tailworks/guest/proto"
+	"github.com/rosskukulinski/tailworks/hostd/bundle"
+	"github.com/rosskukulinski/tailworks/hostd/gen"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/internal/obs"
+	"github.com/rosskukulinski/tailworks/internal/procsb"
+	"github.com/rosskukulinski/tailworks/netd"
 )
 
 // workload is one deployed app of a tenant on this host. At most one
@@ -51,8 +52,7 @@ type workload struct {
 	active       *instance
 	gate         chan struct{} // non-nil while switching: closed when open
 	wl           *object       // the workload entry node
-	classTags    map[string][]string
-	noFence      bool // assignment fence=false: stateless, keeps serving without mgmt
+	noFence      bool          // assignment fence=false: stateless, keeps serving without mgmt
 
 	// Tailscale Service (service.go): service is the active deployment's
 	// Service; svcAdvertised/svcNetd what the workload node advertises now.
@@ -68,6 +68,9 @@ type workload struct {
 	placementTargets []string
 	cronLast         time.Time       // the last minute whose cron triggers were evaluated (UTC)
 	cronRunning      map[string]bool // cron expressions with a run in progress
+
+	// httpsOn: the workload node serves tailnet HTTPS (tailnethttps.go).
+	httpsOn atomic.Bool
 }
 
 // fences reports whether heartbeat loss must stop this workload (stateful,
@@ -93,7 +96,7 @@ func (w *workload) epochNow() int64 {
 func (w *workload) isActive() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.status == "active" || w.status == "starting"
+	return liveStatus(w.status) // restart.go: crashloop too
 }
 
 func (w *workload) currentWL() *object {
@@ -178,6 +181,7 @@ func (w *workload) stopAll() {
 func (h *Host) deploy(w *workload, a mgmtapi.Assignment) {
 	w.deployMu.Lock()
 	defer w.deployMu.Unlock()
+	// limits.md#deploy-bringup
 	ctx, cancel := context.WithTimeout(h.ctx, 2*time.Minute)
 	defer cancel()
 	st := time.Now()
@@ -206,6 +210,9 @@ func (h *Host) deploy(w *workload, a mgmtapi.Assignment) {
 			c.Tags = ns.Tags
 		}
 	}
+	if off := nodesFromMgmt(app, a.Namespaces); len(off) > 0 { // nodeless.go (#359)
+		h.log.Info("classes without a node of their own (mgmt declares only tailnet.objects)", "workload", w.name, "classes", off)
+	}
 	// Container classes as mgmt resolved them at deploy (ADR-032 D3): the
 	// image refs the polyfill passes and their per-arch pins. A class the
 	// bundle doesn't declare is ignored.
@@ -215,7 +222,13 @@ func (h *Host) deploy(w *workload, a mgmtapi.Assignment) {
 		}
 	}
 	w.mu.Lock()
-	w.tenant, w.epoch = t, a.Epoch
+	w.tenant = t
+	if a.Epoch > w.epoch {
+		// Only ever up: a deploy held up (a slow bundle fetch) may finish
+		// after a newer assignment raised the epoch (#584), and the epoch
+		// is what fencing tokens are built on.
+		w.epoch = a.Epoch
+	}
 	if w.app == nil {
 		w.app = app
 	}
@@ -225,6 +238,11 @@ func (h *Host) deploy(w *workload, a mgmtapi.Assignment) {
 	// starts (no node, no workerd).
 	tier, err := h.tierFor(app, t)
 	if err != nil {
+		w.fail(a.DeploymentID, err)
+		return
+	}
+	// Worker secrets, released to this lease holder only (secrets.go).
+	if app, err = h.deploySecrets(ctx, w, app, tier); err != nil { // deploylease.go
 		w.fail(a.DeploymentID, err)
 		return
 	}
@@ -238,6 +256,10 @@ func (h *Host) deploy(w *workload, a mgmtapi.Assignment) {
 	w.mu.Lock()
 	w.wl = wl
 	w.mu.Unlock()
+	if err := h.applyTailnetHTTPS(ctx, t, w, wl, app); err != nil { // tailnethttps.go
+		w.fail(a.DeploymentID, err)
+		return
+	}
 
 	if tier == bundle.TierProcess {
 		// RT-08: a Node app on a host with NO process sandbox has fully
@@ -249,7 +271,7 @@ func (h *Host) deploy(w *workload, a mgmtapi.Assignment) {
 			if others := h.otherTenants(w.tenantID); len(others) > 0 {
 				w.fail(a.DeploymentID, &apiError{Code: "egress_unenforced", Detail: fmt.Sprintf(
 					"runtime \"node\" on a host serving %d other tenant(s) (%s) with no process sandbox: the Node tier's egress proxy is not an enforcement boundary here (raw sockets bypass it); "+
-						"use the workerd runtime, a single-tenant host, Linux with Landlock, or start twd-hostd with -insecure-shared-host (twd up --insecure-shared-host)",
+						"use the workerd runtime, a single-tenant host, Linux with Landlock, or start tw-hostd with -insecure-shared-host (tw up --insecure-shared-host)",
 					len(others), strings.Join(others, ","))})
 				return
 			}
@@ -301,6 +323,7 @@ func (h *Host) deploy(w *workload, a mgmtapi.Assignment) {
 	}
 	w.mu.Unlock()
 	h.rejoinObjects(w, app)
+	h.tel.workloadStarted(w) // OTLP config (telemetry.go)
 	h.syncService(w, false)
 	go h.applyPublic(w, a.Public)
 	h.log.Info("deployment active", "workload", w.name, "deployment", a.DeploymentID, "epoch", a.Epoch,
@@ -377,6 +400,7 @@ func (h *Host) deploySerial(w *workload, a mgmtapi.Assignment, app *bundle.App, 
 	w.mu.Unlock()
 	open()
 	h.rejoinObjects(w, app)
+	h.tel.workloadStarted(w) // OTLP config (telemetry.go)
 	h.syncService(w, false)
 	go h.applyPublic(w, a.Public)
 	h.log.Info("deployment active", "workload", w.name, "deployment", a.DeploymentID, "epoch", a.Epoch,
@@ -391,7 +415,7 @@ func (h *Host) rejoinObjects(w *workload, app *bundle.App) {
 	defer h.mu.Unlock()
 	for _, o := range h.objects {
 		if o.TenantID == w.tenantID && o.Workload == w.name && !o.live && !o.terminal() {
-			if o.Class == "" || app.Classes[o.Class] != nil && app.Classes[o.Class].Node {
+			if rejoinsWith(o, app) {
 				h.startNodeLocked(o)
 			}
 		}
@@ -412,6 +436,10 @@ func (h *Host) undeploy(w *workload, reason string) {
 	// Withdraw the Service before stopping, so control stops routing new
 	// callers here while the instance goes away.
 	h.syncService(w, false)
+	fence := t != nil && w.fences()
+	if fence {
+		h.closeNodes(w, t, reason) // fencedrain.go (#572): before workerd drains
+	}
 	if inst != nil {
 		inst.stop()
 	}
@@ -424,18 +452,8 @@ func (h *Host) undeploy(w *workload, reason string) {
 	if t == nil {
 		return
 	}
-	for _, o := range h.objectsOf(w.tenantID, w.name) {
-		h.mu.Lock()
-		live := o.live
-		o.live = false
-		if o.Status == statusReady || o.Status == statusPending {
-			o.Status = statusPending
-			o.readyCh = make(chan struct{})
-		}
-		h.mu.Unlock()
-		if live {
-			t.reg.Kill(context.Background(), o.NetdID, netd.KillOptions{Reason: reason, KeepState: true, SkipDelete: true})
-		}
+	if !fence {
+		h.closeNodes(w, t, reason)
 	}
 	h.log.Warn("workload stopped", "workload", w.name, "reason", reason)
 }
@@ -443,6 +461,10 @@ func (h *Host) undeploy(w *workload, reason string) {
 // ---- instance: one workerd process ----
 
 type instance struct {
+	// pyodide is the host's Pyodide bundle dir, for a Python Worker
+	// (pyodide.go): workerd reads it, read-only.
+	pyodide string
+
 	h       *Host
 	w       *workload
 	depID   string
@@ -468,11 +490,19 @@ type instance struct {
 
 	node *nodeProc // Node process tier (runtime "node"); nil for workerd
 
+	// stackMaps: the bundle's parsed source maps (stackmap.go);
+	// inspector: workerd's inspector address, if on (inspector.go).
+	stackMaps stackMaps
+	inspector string
+
 	phases map[string]int64 // startInstance's phases (ms), for the deploy log
 
 	inflight atomic.Int64
 	reqs     atomic.Int64
 	stopping atomic.Bool
+
+	// flows: open connect() sockets (connect.go).
+	flows tcpFlows
 
 	mu       sync.Mutex
 	cmd      *exec.Cmd
@@ -482,14 +512,20 @@ type instance struct {
 	nonces   gen.NonceCache // egress MAC replay cache (RT-05)
 	restarts int
 	started  time.Time
+
+	// Restart policy (restart.go): ready once the instance was healthy;
+	// gaveUp/startErr when it kept exiting before that.
+	ready    atomic.Bool
+	gaveUp   atomic.Bool
+	startErr error
 }
 
-// tierFor picks a deployment's isolation tier: the bundle's twd.jsonc
-// "tier", else the tenant's, else the host default. It never downgrades: a
+// tierFor picks a deployment's isolation tier: the bundle's tailworks.jsonc
+// "tier", else the tenant's, else process. It never downgrades: a
 // microvm deployment on a host without a microVM backend (macOS, no KVM, the
 // backend gone since registration) is refused with tier_unavailable, which
 // the host reports to mgmt as the deployment's error (ADR-032 D5b). The one
-// exception is explicit local development (Config.ForceProcessTier, twd
+// exception is explicit local development (Config.ForceProcessTier, tailworks
 // dev), which runs everything in the process tier and says so.
 func (h *Host) tierFor(app *bundle.App, t *tenant) (string, error) {
 	if app.Runtime == bundle.RuntimeNode {
@@ -498,9 +534,6 @@ func (h *Host) tierFor(app *bundle.App, t *tenant) (string, error) {
 	tier := app.Tier
 	if tier == "" && t != nil {
 		tier = t.info.Tier
-	}
-	if tier == "" {
-		tier = h.cfg.DefaultTier
 	}
 	if tier != bundle.TierMicroVM {
 		return bundle.TierProcess, nil
@@ -520,8 +553,8 @@ func (h *Host) tierFor(app *bundle.App, t *tenant) (string, error) {
 // for VM isolation (ADR-032 D5b).
 func errTierUnavailable(app string) *apiError {
 	return &apiError{Code: "tier_unavailable", Detail: fmt.Sprintf(
-		"%q asks for the microvm tier, but this host has no microVM backend (Linux with KVM and twd-vmhelper); it is not run in the process tier instead. "+
-			"Set the tier up here (`sudo twd host setup --microvm`, then restart twd-hostd), deploy to a host that offers it, or set \"tier\": \"process\" in twd.jsonc", app)}
+		"%q asks for the microvm tier, but this host has no microVM backend (Linux with KVM and tw-vmhelper); it is not run in the process tier instead. "+
+			"Set the tier up here (`sudo tw host setup --microvm`, then restart tw-hostd), deploy to a host that offers it, or set \"tier\": \"process\" in tailworks.jsonc", app)}
 }
 
 func (h *Host) startInstance(w *workload, depID string, app *bundle.App, tier string) (*instance, error) {
@@ -533,11 +566,19 @@ func (h *Host) startInstance(w *workload, depID string, app *bundle.App, tier st
 		return h.startNodeInstance(w, depID, app, n)
 	}
 	dir := h.instanceDir(n)
+	pyDir, err := h.pyodideFor(app, tier) // pyodide.go
+	if err != nil {
+		return nil, err
+	}
 	opts := gen.Options{
 		Dir:          dir,
 		DOStorage:    filepath.Join(h.tenantDir(w.tenantID), "workloads", w.name, "do"),
 		DeploymentID: depID,
 		Workload:     w.name,
+		HeapMiB:      h.workerdHeapMiB(),
+		// Experimental compatibility flags (gen/compatflags.go, #337).
+		AllowExperimentalFlags: h.cfg.AllowExperimentalFlags,
+		WorkerdBin:             h.cfg.WorkerdBin,
 	}
 	vmTier := tier == bundle.TierMicroVM
 	if vmTier {
@@ -588,6 +629,7 @@ func (h *Host) startInstance(w *workload, depID string, app *bundle.App, tier st
 	}
 	inst := &instance{h: h, w: w, depID: depID, dir: dir, app: app, res: res, tier: tier, doStorage: opts.DOStorage,
 		phases: map[string]int64{"generate": time.Since(t0).Milliseconds()}}
+	inst.pyodide = pyDir
 	var vol *sandbox.Volume
 	if vmTier {
 		// The DO volume's key comes from mgmt custody, released only to the
@@ -616,18 +658,18 @@ func (h *Host) startInstance(w *workload, depID string, app *bundle.App, tier st
 			}
 			vm.Ingress().ServeHTTP(rw, r)
 		})
-		inst.direct = &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		inst.direct = &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{IdleConnTimeout: netd.UpstreamIdleTimeout, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			vm := inst.currentVM()
 			if vm == nil {
 				return nil, errors.New("microVM is not running")
 			}
 			return vm.DialGuest(ctx)
 		}}}
-		hc, _ := json.Marshal(map[string]any{"twd": map[string]any{"kind": "admin", "op": "health"}})
+		hc, _ := json.Marshal(map[string]any{"tw": map[string]any{"kind": "admin", "op": "health"}})
 		inst.spec = sandbox.Spec{
 			ID:          fmt.Sprintf("i%d", n),
 			AppDir:      dir,
-			WorkerdArgs: []string{"serve", "config.capnp", "--experimental"},
+			WorkerdArgs: append([]string{"serve", "config.capnp", "--experimental"}, guestPyodideArgs(app)...), // pyodide.go
 			HealthCF:    string(hc),
 			Debug:       h.cfg.VMDebug,
 			Volume:      vol,
@@ -640,7 +682,7 @@ func (h *Host) startInstance(w *workload, depID string, app *bundle.App, tier st
 		}
 	} else {
 		inst.ingress = netd.UnixUpstream(res.Sockets.Ingress)
-		inst.direct = &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		inst.direct = &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{IdleConnTimeout: netd.UpstreamIdleTimeout, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			return (&net.Dialer{}).DialContext(ctx, "unix", res.Sockets.Ingress)
 		}}}
 		if loop != nil {
@@ -698,6 +740,7 @@ func (h *Host) startInstance(w *workload, depID string, app *bundle.App, tier st
 		inst.stop()
 		return nil, err
 	}
+	inst.ready.Store(true) // from now on a crash restarts forever (restart.go)
 	inst.phases["health"] = time.Since(th).Milliseconds()
 	return inst, nil
 }
@@ -716,7 +759,7 @@ func (h *Host) startInstance(w *workload, depID string, app *bundle.App, tier st
 //     keeps AF_UNIX). With every workload denied AF_UNIX, tailscaled's
 //     socket is out of reach and the host may be shared.
 //
-// Config.InsecureSharedHost (twd-hostd -insecure-shared-host) allows all.
+// Config.InsecureSharedHost (tw-hostd -insecure-shared-host) allows all.
 func (h *Host) sharedHostCheck(tenant string, app *bundle.App) error {
 	if h.cfg.InsecureSharedHost {
 		return nil
@@ -727,7 +770,7 @@ func (h *Host) sharedHostCheck(tenant string, app *bundle.App) error {
 	case h.sandbox == SandboxNone:
 		why = "this host has no process sandbox (" + h.noSandboxReason() + ")"
 	case len(hs.Hard) > 0:
-		why = "this user can reach " + strings.Join(hs.Hard, ", ") + " (root-equivalent for twd-hostd itself)"
+		why = "this user can reach " + strings.Join(hs.Hard, ", ") + " (root-equivalent for tw-hostd itself)"
 	case hs.Tailscaled != "" && h.sandbox != SandboxLandlock:
 		why = "this user can reach " + hs.Tailscaled + " (the host's tailnet identity) and the " + h.sandbox + " sandbox doesn't deny unix sockets"
 	case hs.Tailscaled != "" && (nodeListensUnix(app) || h.anyNodeListensUnix()):
@@ -745,7 +788,7 @@ func (h *Host) sharedHostCheck(tenant string, app *bundle.App) error {
 		busy := o.active != nil && o.active.tier != bundle.TierMicroVM
 		o.mu.Unlock()
 		if busy {
-			return fmt.Errorf("sandbox_unavailable: %s, so it runs process-tier workloads of one tenant only, and tenant %s already runs here; fix: run twd as a dedicated user that can't reach those sockets and isn't in the docker/podman/lxd groups, enable Landlock, use TCP listen mode for Node apps, or deploy with tier \"microvm\"; or start twd-hostd with -insecure-shared-host (tenants are then NOT isolated from each other)", why, o.tenantID)
+			return fmt.Errorf("sandbox_unavailable: %s, so it runs process-tier workloads of one tenant only, and tenant %s already runs here; fix: run tailworks as a dedicated user that can't reach those sockets and isn't in the docker/podman/lxd groups, enable Landlock, use TCP listen mode for Node apps, or deploy with tier \"microvm\"; or start tw-hostd with -insecure-shared-host (tenants are then NOT isolated from each other)", why, o.tenantID)
 		}
 	}
 	return nil
@@ -794,6 +837,12 @@ func (h *Host) noSandboxReason() string {
 // (gen.LocalTokenHeader, injected by workerd's config), and strips it.
 func localToken(token string, h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodConnect {
+			// workerd injects no headers on CONNECT: the tunnel's
+			// preamble carries the token (connect.go).
+			h.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), localTokenKey{}, token)))
+			return
+		}
 		got := r.Header.Get(gen.LocalTokenHeader)
 		r.Header.Del(gen.LocalTokenHeader)
 		if subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
@@ -837,6 +886,7 @@ func (inst *instance) currentVM() sandbox.VM {
 // bootVM starts (or restarts) the instance's microVM. Firecracker exiting
 // for any reason other than stop() is handled like a workerd crash.
 func (inst *instance) bootVM() error {
+	// limits.md#vm-boot
 	ctx, cancel := context.WithTimeout(inst.h.ctx, 60*time.Second)
 	defer cancel()
 	vm, err := inst.h.cfg.VM.Boot(ctx, inst.spec)
@@ -875,7 +925,8 @@ func (inst *instance) spawn() error {
 	if inst.tier == bundle.TierMicroVM {
 		return inst.bootVM()
 	}
-	logf, err := os.OpenFile(filepath.Join(inst.dir, "workerd.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	// Size-capped: a noisy workload can't fill the disk (ADR-045).
+	logf, err := obs.OpenRotating(filepath.Join(inst.dir, "workerd.log"), inst.h.tel.opt.AppLogMax)
 	if err != nil {
 		return err
 	}
@@ -886,6 +937,7 @@ func (inst *instance) spawn() error {
 	}
 	cmd.Stdout, cmd.Stderr = logf, logf
 	cmd.Dir = inst.dir
+	cmd.WaitDelay = exitPipeWait // restart.go: a surviving child can't hide the exit
 	// Its own process group: a sandboxed workerd may signal only itself and
 	// its group (seccomp), never hostd's.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -897,6 +949,7 @@ func (inst *instance) spawn() error {
 		logf.Close()
 		return err
 	}
+	inst.h.children.add(cmd.Process.Pid, "workerd "+inst.w.name) // childreap.go
 	ex := make(chan struct{})
 	inst.mu.Lock()
 	inst.cmd, inst.exited, inst.started = cmd, ex, time.Now()
@@ -904,38 +957,16 @@ func (inst *instance) spawn() error {
 	go func() {
 		cmd.Wait()
 		logf.Close()
+		// Nothing of the old workerd may outlive it (restart.go, #43).
+		if err := reapGroup(cmd.Process.Pid); err != nil {
+			inst.h.log.Warn("workerd's process group", "workload", inst.w.name, "err", err)
+		} else {
+			inst.h.children.remove(cmd.Process.Pid)
+		}
 		close(ex)
 		inst.onExit()
 	}()
 	return nil
-}
-
-// onExit restarts a workerd that died unexpectedly (bounded).
-func (inst *instance) onExit() {
-	if inst.stopping.Load() || inst.h.ctx.Err() != nil {
-		return
-	}
-	inst.mu.Lock()
-	if time.Since(inst.started) > 30*time.Second {
-		inst.restarts = 0
-	}
-	inst.restarts++
-	n := inst.restarts
-	inst.mu.Unlock()
-	tail := inst.logTail(2048)
-	if n > 5 {
-		inst.h.log.Error("workerd keeps exiting; giving up", "workload", inst.w.name, "log", tail)
-		inst.w.fail(inst.depID, fmt.Errorf("workerd exited %d times: %s", n, tail))
-		return
-	}
-	inst.h.log.Warn("workerd exited; restarting", "workload", inst.w.name, "attempt", n, "log", tail)
-	time.Sleep(time.Duration(n) * 200 * time.Millisecond)
-	if inst.stopping.Load() {
-		return
-	}
-	if err := inst.spawn(); err != nil {
-		inst.w.fail(inst.depID, err)
-	}
 }
 
 func (inst *instance) logTail(n int) string {
@@ -954,14 +985,17 @@ func (inst *instance) waitHealthy(d time.Duration) error {
 			return nil
 		}
 		inst.mu.Lock()
-		ex := inst.exited
+		ex, restarts := inst.exited, inst.restarts // onExit bumps restarts under mu (#181)
 		inst.mu.Unlock()
 		select {
 		case <-ex:
-			if inst.restarts == 0 {
+			if restarts == 0 {
 				time.Sleep(50 * time.Millisecond)
 			}
 		default:
+		}
+		if err := inst.startupError(); err != nil { // restart.go: kept exiting
+			return err
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("workerd did not become healthy: %s", inst.logTail(4096))
@@ -970,10 +1004,10 @@ func (inst *instance) waitHealthy(d time.Duration) error {
 	}
 }
 
-// admin sends a platform admin request (cf.twd.kind = admin).
-func (inst *instance) admin(twd map[string]any) (int, []byte) {
-	blob, _ := json.Marshal(map[string]any{"twd": twd})
-	req, _ := http.NewRequest("POST", "http://platform/_twd/admin", nil)
+// admin sends a platform admin request (cf.tw.kind = admin).
+func (inst *instance) admin(tw map[string]any) (int, []byte) {
+	blob, _ := json.Marshal(map[string]any{"tw": tw})
+	req, _ := http.NewRequest("POST", "http://platform/_tw/admin", nil)
 	req.Header.Set(netd.HeaderCF, string(blob))
 	resp, err := inst.direct.Do(req)
 	if err != nil {
@@ -992,6 +1026,7 @@ func (inst *instance) interceptClient() *http.Client {
 		tr := &http.Transport{DisableCompression: true, ResponseHeaderTimeout: 5 * time.Minute}
 		if t, ok := inst.direct.Transport.(*http.Transport); ok {
 			tr.DialContext = t.DialContext
+			tr.IdleConnTimeout = t.IdleConnTimeout // below the server's idle close (#309)
 		}
 		inst.ic = &http.Client{Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	})
@@ -1011,7 +1046,7 @@ func (inst *instance) stop() {
 	}
 	if inst.node != nil {
 		inst.stopNode()
-		if os.Getenv("TWD_KEEP_INSTANCES") == "" {
+		if os.Getenv("TW_KEEP_INSTANCES") == "" {
 			os.RemoveAll(inst.dir)
 		}
 		return
@@ -1034,10 +1069,21 @@ func (inst *instance) stop() {
 	for _, s := range inst.servers {
 		s.Close()
 	}
+	inst.flows.closeAll()
 	if inst.ingressLn != nil {
 		inst.ingressLn.Close()
 	}
-	if os.Getenv("TWD_KEEP_INSTANCES") == "" {
+	if os.Getenv("TW_KEEP_INSTANCES") == "" {
 		os.RemoveAll(inst.dir)
 	}
+}
+
+// macKey is the instance root key hostd issues and verifies create tickets
+// and egress MACs with ("" for instances without generated config, e.g. in
+// tests: then no ticket is issued and none verifies).
+func (i *instance) macKey() string {
+	if i == nil || i.res == nil {
+		return ""
+	}
+	return i.res.MACKey
 }

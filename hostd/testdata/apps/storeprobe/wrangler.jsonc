@@ -1,0 +1,11 @@
+{
+  // Platform-store substrate fixture (hostd/stores_test.go): a test-only
+  // "probe" store bound as env.P, used from the worker and from a facet.
+  "name": "storeprobe",
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-01",
+  "tw_test_probes": [{ "binding": "P", "name": "main" }],
+  "durable_objects": {
+    "bindings": [{ "name": "BOX", "class_name": "Box" }],
+  },
+}

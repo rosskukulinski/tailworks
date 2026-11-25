@@ -13,7 +13,9 @@ package netd
 //     is not a FunnelConn is closed at once (fail closed: nothing on this
 //     listener is ever treated as a tailnet caller).
 //   - Per request, in this order:
-//     1. limits: MaxConns (excess connections are closed), MaxHeaderBytes
+//     1. limits: MaxConns and MaxConnsPerIP (excess connections are
+//     closed; a new connection has publicFirstRequestTimeout to send its
+//     first request; an upgrade lasts at most UpgradeLifetime), MaxHeaderBytes
 //     (431), per-workload token bucket RPS/Burst and per-IP bucket
 //     IPRPS/IPBurst keyed by FunnelConn.Src's address (429 with
 //     Retry-After, code rate_limited), MaxBodyBytes (413
@@ -31,12 +33,13 @@ package netd
 //     DeliverTo (the workload node's netd ID, so hostd routes the request
 //     to the workload's default export);
 //     5. Config.Upstream.ServeHTTP.
-//   - Error bodies use WriteError (catalog shape, twd-error header).
-//   - After each request that reached step 5 (or was refused at step 2),
-//     Config.OnPublicRequest (if set) is called with a PublicRequestRecord.
-//     Requests refused at step 1 are NOT reported one by one: they are
-//     counted and Config.OnPublicRejected (if set) is called at most once
-//     per PublicRejectWindow per node with the counts (when non-zero).
+//   - Error bodies use WriteError (catalog shape, tw-error header).
+//   - After each request that matched a route (step 2) and was not refused
+//     by a limit, Config.OnPublicRequest (if set) is called with a
+//     PublicRequestRecord. Requests refused at step 1, and path refusals at
+//     step 2 (bad_request, not_public), are NOT reported one by one: they
+//     are counted and Config.OnPublicRejected (if set) is called at most
+//     once per PublicRejectWindow per node with the counts (when non-zero).
 //   - SetPublicEnabled(id, false) closes the listener and aborts every
 //     public flow (RST, like Kill tier 1) and returns within a second;
 //     SetPublicEnabled(id, true) reopens it. The node stays joined.
@@ -46,7 +49,7 @@ import (
 	"net/netip"
 	"time"
 
-	"github.com/rosskukulinski/twd/internal/publicspec"
+	"github.com/rosskukulinski/tailworks/internal/publicspec"
 )
 
 // PublicOptions make a node a public (Funnel) node.
@@ -59,7 +62,7 @@ type PublicOptions struct {
 	// DeliverTo is the netd object ID stamped as HeaderObject/objectId:
 	// the workload entry node this public node fronts.
 	DeliverTo string `json:"deliverTo"`
-	// Enabled opens the listener once the node is ready (`twd expose`).
+	// Enabled opens the listener once the node is ready (`tw expose`).
 	// It is persisted but NOT restored by a rejoin from saved state alone
 	// (Registry.Rejoin, or Create without Public): such a node comes back
 	// public but closed until SetPublicEnabled(id, true) (fail closed).
@@ -81,9 +84,9 @@ type PublicRequestRecord struct {
 	Time     time.Time
 	Method   string
 	Path     string // canonical path, never the query string
-	Route    string // matched pattern ("" when refused as not_public)
+	Route    string // matched pattern
 	Status   int
-	Code     string // twd-error code when netd refused it
+	Code     string // tw-error code when netd refused it
 	ClientIP netip.Addr
 	BytesIn  int64
 	BytesOut int64
@@ -97,6 +100,9 @@ type PublicRejectSummary struct {
 	RateLimited    int // 429
 	TooLarge       int // 413 + 431
 	ConnsRefused   int // over MaxConns
+	NotPublic      int // 404 not_public: the path is not in Routes
+	BadRequest     int // 400 bad_request: the path was refused
+	IPConnsRefused int // over MaxConnsPerIP
 	TopIPs         []IPCount
 	UniqueIPApprox int
 }

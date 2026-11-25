@@ -22,17 +22,17 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/rosskukulinski/twd/guest/proto"
-	"github.com/rosskukulinski/twd/hostd/sandbox"
-	"github.com/rosskukulinski/twd/hostd/vm/helper"
-	"github.com/rosskukulinski/twd/hostd/vm/helperapi"
-	"github.com/rosskukulinski/twd/netd"
+	"github.com/rosskukulinski/tailworks/guest/proto"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/hostd/vm/helper"
+	"github.com/rosskukulinski/tailworks/hostd/vm/helperapi"
+	"github.com/rosskukulinski/tailworks/netd"
 	"golang.org/x/sys/unix"
 )
 
 // Config configures the Firecracker backend.
 type Config struct {
-	// Helper is twd-vmhelper's socket (installed by `sudo twd host setup
+	// Helper is tw-vmhelper's socket (installed by `sudo tw host setup
 	// --microvm`): the privileged netns/TAP/jailer/dm-crypt half. If it is
 	// "" and this process is root, an in-process helper is used instead
 	// (tests; Firecracker and Jailer name its binaries then).
@@ -67,7 +67,7 @@ type Config struct {
 	// PoolBudgetMiB caps the guest RAM of all of this backend's VMs for
 	// refills (default: the huge-page reservation, vm.nr_hugepages × 2 MiB).
 	PoolBudgetMiB int
-	// Snapshot (off by default; twd-hostd -vm-snapshot): restore VMs from a
+	// Snapshot (off by default; tw-hostd -vm-snapshot): restore VMs from a
 	// base snapshot (a pooled VM: warm, no tenant code, no keys) instead of
 	// booting them — for pool refills, and on demand when the pool is
 	// empty. Guest memory is served lazily (userfaultfd). See
@@ -103,9 +103,12 @@ type Backend struct {
 	base          *baseSnap         // current base snapshot (Snapshot on)
 	baseTokens    map[string]string // base ID → its control-channel token (baseSnap.ctlToken), while the base exists
 	baseRotations int
-	baseStop      context.CancelFunc
-	baseDone      chan struct{}
-	baseWG        sync.WaitGroup
+	// baseStale: the guest changed since the current base was built
+	// (baseID refuses it; logged once until the next base).
+	baseStale bool
+	baseStop  context.CancelFunc
+	baseDone  chan struct{}
+	baseWG    sync.WaitGroup
 }
 
 // Available reports whether this host can run microVMs: KVM, the guest
@@ -125,15 +128,15 @@ func Available(cfg Config) error {
 	if cfg.Helper != "" {
 		r, err := helperapi.Ping(cfg.Helper)
 		if err != nil {
-			return fmt.Errorf("microVM helper at %s: %w (run `sudo twd host setup --microvm`)", cfg.Helper, err)
+			return fmt.Errorf("microVM helper at %s: %w (run `sudo tw host setup --microvm`)", cfg.Helper, err)
 		}
-		if r.Version != helperapi.Version {
-			return fmt.Errorf("microVM helper at %s speaks protocol %d, want %d (re-run `sudo twd host setup --microvm`)", cfg.Helper, r.Version, helperapi.Version)
+		if err := helperapi.Check(r); err != nil {
+			return fmt.Errorf("microVM helper at %s: %w (re-run `sudo tw host setup --microvm`)", cfg.Helper, err)
 		}
 		return nil
 	}
 	if os.Geteuid() != 0 {
-		return errors.New("the microVM tier needs the twd-vmhelper service (run `sudo twd host setup --microvm`)")
+		return errors.New("the microVM tier needs the tw-vmhelper service (run `sudo tw host setup --microvm`)")
 	}
 	return nil
 }
@@ -167,9 +170,9 @@ func New(cfg Config) (*Backend, error) {
 	if err := Available(cfg); err != nil {
 		return nil, err
 	}
-	b := &Backend{cfg: cfg, sock: cfg.Helper, via: "twd-vmhelper " + cfg.Helper}
+	b := &Backend{cfg: cfg, sock: cfg.Helper, via: "tw-vmhelper " + cfg.Helper}
 	if cfg.RunDir == "" {
-		d, err := os.MkdirTemp("/tmp", "twd-vm-")
+		d, err := os.MkdirTemp("/tmp", "tw-vm-")
 		if err != nil {
 			return nil, err
 		}
@@ -202,7 +205,8 @@ func New(cfg Config) (*Backend, error) {
 // process, on a private socket, with its own jail dir and resource names.
 func (b *Backend) startInProcessHelper() error {
 	inst := fmt.Sprintf("p%d", os.Getpid())
-	b.srvBase = filepath.Join("/var/lib", "twd-vm-"+inst)
+	b.srvBase = filepath.Join("/var/lib", "tw-vm-"+inst)
+	helper.SweepDeadInProcess(os.Getpid(), b.cfg.Log.With("component", "vmhelper")) // a crashed predecessor's VMs (#587)
 	srv, err := helper.New(helper.Config{Firecracker: b.cfg.Firecracker, Jailer: b.cfg.Jailer,
 		JailBase: filepath.Join(b.srvBase, "jail"), StateDir: b.srvBase, UIDBase: 3910000000 + (os.Getpid()%1000)*1000,
 		MaxVMs: 1000, Instance: inst, Log: b.cfg.Log.With("component", "vmhelper")})
@@ -232,6 +236,7 @@ func (b *Backend) Close() error {
 	if b.srv != nil {
 		b.srvLn.Close()
 		b.srv.Close()
+		b.srv.Sweep() // what the stopped VMs left (netns, jails)
 		os.RemoveAll(b.srvBase)
 	}
 	if b.ownDir {
@@ -318,6 +323,10 @@ type bootOpts struct {
 	log     *slog.Logger
 	pool    bool
 	restore string // restore this base snapshot (a pooled VM) instead of booting
+
+	// base: a pool boot that becomes the base snapshot (StartRequest.Base:
+	// the helper refuses snapshot-base on any other VM).
+	base bool
 }
 
 // boot turns bootOpts into a launch (the boot path shared with container
@@ -343,6 +352,7 @@ func (b *Backend) boot(ctx context.Context, o bootOpts) (*Machine, error) {
 		l.drive = func(p, _ string) error { return writePoolDrive(p, b.cfg.MTU, "") }
 	case o.pool:
 		req.VolumeSlot = true
+		req.Base = o.base
 		l.pool = true
 		l.drive = func(p, token string) error { return writePoolDrive(p, b.cfg.MTU, token) }
 	default:
@@ -808,7 +818,7 @@ func (m *Machine) Stop() {
 		m.log.Warn("microVM did not exit after kill")
 	}
 	m.teardown()
-	if os.Getenv("TWD_KEEP_INSTANCES") == "" {
+	if os.Getenv("TW_KEEP_INSTANCES") == "" {
 		os.RemoveAll(m.dir)
 	}
 }

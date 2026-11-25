@@ -25,7 +25,7 @@ func TestMM_H04_SpawnBudgetRace(t *testing.T) {
 	)
 	r := newRun(t, "H04")
 	c := newCluster(t, r, replicas)
-	c.jsonc = strings.Replace(twdJSONC, `"maxLive": 64`, fmt.Sprintf(`"maxLive": %d`, maxLive), 1)
+	c.jsonc = strings.Replace(twJSONC, `"maxLive": 64`, fmt.Sprintf(`"maxLive": %d`, maxLive), 1)
 	db := c.db()
 	for i := range replicas {
 		c.start(i)
@@ -79,9 +79,9 @@ func TestMM_H04_SpawnBudgetRace(t *testing.T) {
 	}
 }
 
-// pgDelay is the per-read Postgres latency for H04 (TWD_MM_PG_DELAY, default 5ms).
+// pgDelay is the per-read Postgres latency for H04 (TW_MM_PG_DELAY, default 5ms).
 func pgDelay() time.Duration {
-	if d, err := time.ParseDuration(os.Getenv("TWD_MM_PG_DELAY")); err == nil {
+	if d, err := time.ParseDuration(os.Getenv("TW_MM_PG_DELAY")); err == nil {
 		return d
 	}
 	return 5 * time.Millisecond

@@ -6,8 +6,8 @@
 // device and key it created afterwards. Dials go via tsnet only (this host's
 // system DNS can't resolve the test tailnet's names).
 //
-//	TWD_E2E_API_KEY_FILE=~/.config/tailnet-agents-design/tailnet1_api.env \
-//	TWD_E2E_TAILNET=tail7906d5.ts.net go test -tags e2ereal ./e2e/real/
+//	TW_E2E_API_KEY_FILE=~/.config/tailnet-agents-design/tailnet1_api.env \
+//	TW_E2E_TAILNET=tail7906d5.ts.net go test -tags e2ereal ./e2e/real/
 package real
 
 import (
@@ -29,9 +29,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/internal/tsapi"
-	"github.com/rosskukulinski/twd/netd"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/internal/tsapi"
+	"github.com/rosskukulinski/tailworks/netd"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 )
 
 const (
@@ -40,7 +40,7 @@ const (
 	testCap     = "example.com/cap/ttest"
 )
 
-// allowedTailnets are the only tailnets this suite may touch (BUILD-PLAN safety rule 2).
+// allowedTailnets are the only tailnets this suite may touch (docs/install-testing.md, safety rule 1).
 var allowedTailnets = map[string]bool{"tail7906d5.ts.net": true}
 
 type results struct {
@@ -83,9 +83,9 @@ func pct(ds []time.Duration) (p50, p95, max float64) {
 }
 
 func TestRealTailnet(t *testing.T) {
-	keyFile, tailnet := os.Getenv("TWD_E2E_API_KEY_FILE"), os.Getenv("TWD_E2E_TAILNET")
+	keyFile, tailnet := os.Getenv("TW_E2E_API_KEY_FILE"), os.Getenv("TW_E2E_TAILNET")
 	if keyFile == "" || tailnet == "" {
-		t.Skip("TWD_E2E_API_KEY_FILE / TWD_E2E_TAILNET not set")
+		t.Skip("TW_E2E_API_KEY_FILE / TW_E2E_TAILNET not set")
 	}
 	if !allowedTailnets[tailnet] {
 		t.Fatalf("refusing to run against tailnet %q (not in the allow list)", tailnet)
@@ -112,7 +112,7 @@ func TestRealTailnet(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	dir, err := os.MkdirTemp("/tmp", "twd-real-")
+	dir, err := os.MkdirTemp("/tmp", "tw-real-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,8 +298,8 @@ func TestRealTailnet(t *testing.T) {
 
 	t.Run("ForgedHeadersStripped", func(t *testing.T) {
 		code, _, b, _ := get("http://"+ips["a"]+"/", map[string]string{
-			"x-twd-cf":     `{"tailscale":{"caller":{"nodeId":"nEVIL","tags":["tag:admin"]}},"objectId":"b"}`,
-			"x-twd-object": "b", "cf-connecting-ip": "1.2.3.4", "tailnet-assertion": "x",
+			"x-tw-cf":     `{"tailscale":{"caller":{"nodeId":"nEVIL","tags":["tag:admin"]}},"objectId":"b"}`,
+			"x-tw-object": "b", "cf-connecting-ip": "1.2.3.4", "tailnet-assertion": "x",
 		})
 		var r objResp
 		json.Unmarshal(b, &r)
@@ -328,7 +328,7 @@ func TestRealTailnet(t *testing.T) {
 			json.Unmarshal(b, &r)
 			ok := code == 200 && strings.HasPrefix(r.Caller.Node, prefix+"-obj-"+id+".")
 			for k := range r.Headers {
-				if strings.HasPrefix(strings.ToLower(k), "x-twd") {
+				if strings.HasPrefix(strings.ToLower(k), "x-tw-") {
 					ok = false
 				}
 			}
@@ -342,16 +342,16 @@ func TestRealTailnet(t *testing.T) {
 	t.Run("SelfSSRF", func(t *testing.T) {
 		cases := map[string][2]string{
 			"own_ip":        {"http://" + ips["a"] + "/", netd.CodeForbiddenDestination},
-			"sibling_ip":    {"http://" + ips["b"] + "/", netd.CodeForbiddenDestination},
-			"sibling_name":  {"http://" + prefix + "-obj-b/", netd.CodeForbiddenDestination},
-			"sibling_fqdn":  {"http://" + prefix + "-obj-c." + tailnet + "/", netd.CodeForbiddenDestination},
+			"sibling_ip":    {"http://" + ips["b"] + "/", "hop"},
+			"sibling_name":  {"http://" + prefix + "-obj-b/", "hop"},
+			"sibling_fqdn":  {"http://" + prefix + "-obj-c." + tailnet + "/", "hop"},
 			"loopback":      {"http://127.0.0.1/", netd.CodeForbiddenDestination},
 			"loopback_v6":   {"http://[::1]/", netd.CodeForbiddenDestination},
 			"link_local":    {"http://169.254.169.254/", netd.CodeForbiddenDestination},
 			"quad100":       {"http://100.100.100.100/", netd.CodeForbiddenDestination},
 			"public_ip":     {"http://1.1.1.1/", netd.CodeForbiddenDestination},
 			"localhost":     {"http://localhost/", netd.CodePeerNotVisible},
-			"public_name":   {"http://example.com/", netd.CodePeerNotVisible},
+			"public_name":   {"http://example.com/", netd.CodeInternetEgressUnavailable},
 			"nonexistent":   {"http://" + prefix + "-nonexistent/", netd.CodePeerNotVisible},
 			"unknown_cgnat": {"http://100.127.255.254/", netd.CodePeerNotVisible},
 			"echo_short_ok": {"http://" + prefix + "-echo/", ""},
@@ -361,9 +361,15 @@ func TestRealTailnet(t *testing.T) {
 		for name, c := range cases {
 			code, h, b, _ := get("http://"+ips["a"]+"/egress?url="+c[0], nil)
 			var ok bool
-			if c[1] == "" {
+			switch c[1] {
+			case "":
 				ok = code == 200
-			} else {
+			case "hop":
+				// A same-host object (netd/samehost.go): delivered in process
+				// when the policy grants it, else not in the netmap; never
+				// refused as a sibling.
+				ok = code == 200 || (code == 403 && h.Get(netd.HeaderError) == netd.CodePeerNotVisible)
+			default:
 				ok = code == 403 && h.Get(netd.HeaderError) == c[1]
 			}
 			res.check("ssrf_"+name, ok, fmt.Sprintf("%d %s", code, b))

@@ -1,4 +1,4 @@
-// Package sandbox is the portable interface between twd-hostd and an
+// Package sandbox is the portable interface between tw-hostd and an
 // isolation backend that runs one workerd instance somewhere other than a
 // host process. The microVM tier (hostd/vm, Linux + KVM) implements it; hostd
 // itself never imports Linux-only code, so the process tier keeps building
@@ -6,7 +6,7 @@
 //
 // The contract mirrors the process tier's four sockets:
 //
-//	hostd ──Ingress()──▶ guest workerd ingress (cfBlobHeader x-twd-cf)
+//	hostd ──Ingress()──▶ guest workerd ingress (cfBlobHeader x-tw-cf)
 //	guest ──gateway:port──▶ Spec.Handlers[port]  (facet egress, workload egress, host API)
 //
 // The guest reaches nothing else: every other flow is refused at the
@@ -20,7 +20,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/rosskukulinski/twd/guest/proto"
+	"github.com/rosskukulinski/tailworks/guest/proto"
 )
 
 // Spec describes one sandboxed workerd instance.
@@ -33,7 +33,7 @@ type Spec struct {
 	AppDir string
 	// WorkerdArgs is workerd's argv after the binary.
 	WorkerdArgs []string
-	// HealthCF is the x-twd-cf blob of the platform health request.
+	// HealthCF is the x-tw-cf blob of the platform health request.
 	HealthCF string
 	// Handlers are the host services the guest may reach, by gateway TCP port.
 	Handlers map[uint16]http.Handler

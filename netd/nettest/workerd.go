@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"github.com/rosskukulinski/tailworks/internal/devreap"
 )
 
 // Workerd is a running stock workerd (test supervisor; hostd owns the real one in M3).
@@ -27,6 +29,11 @@ func StartWorkerd(bin, config, rundir, egressSock string) (*Workerd, error) {
 	ingress := filepath.Join(rundir, "ingress.sock")
 	do := filepath.Join(rundir, "do")
 	if err := os.MkdirAll(do, 0o700); err != nil {
+		return nil, err
+	}
+	// The caller's dir: if this process dies without Stop, a watchdog kills
+	// the workerd (its command line names rundir) and leaves the dir.
+	if err := devreap.Guard(rundir, devreap.Options{Programs: []string{bin}, Keep: true}); err != nil {
 		return nil, err
 	}
 	logPath := filepath.Join(rundir, "workerd.log")

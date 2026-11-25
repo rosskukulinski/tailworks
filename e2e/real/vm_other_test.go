@@ -5,12 +5,12 @@ package real
 import (
 	"testing"
 
-	"github.com/rosskukulinski/twd/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
 )
 
 type vmBackendT = sandbox.Backend
 
 func realVMBackend(t *testing.T) sandbox.Backend {
-	t.Fatal("TWD_E2E_TIER=microvm needs Linux + KVM")
+	t.Fatal("TW_E2E_TIER=microvm needs Linux + KVM")
 	return nil
 }

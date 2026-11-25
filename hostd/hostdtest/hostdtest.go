@@ -1,4 +1,4 @@
-// Package hostdtest builds twd app bundles for tests (templates and
+// Package hostdtest builds tailworks app bundles for tests (templates and
 // fixtures) with the repo's esbuild-based bundler (node required).
 package hostdtest
 
@@ -11,14 +11,15 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/rosskukulinski/twd/hostd/bundle"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/hostd/bundle"
+	"github.com/rosskukulinski/tailworks/internal/devreap"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 )
 
-// Template returns the path of a create-twd template.
+// Template returns the path of a create-tailworks template.
 func Template(name string) string {
 	root, _ := nettest.FindRepoRoot()
-	return filepath.Join(root, "js", "packages", "create-twd", "templates", name)
+	return filepath.Join(root, "js", "packages", "create-tailworks", "templates", name)
 }
 
 // Fixture returns the path of a hostd test fixture app.
@@ -30,8 +31,8 @@ func Fixture(name string) string {
 var buildMu sync.Mutex
 
 // Build bundles the app in dir and returns its files (dist/index.js,
-// twd.jsonc, wrangler.jsonc, twd-bundle.json). vars override wrangler vars
-// (written into twd-bundle-vars via a rewritten wrangler.json).
+// tailworks.jsonc, wrangler.jsonc, tw-bundle.json). vars override wrangler vars
+// (written into tw-bundle-vars via a rewritten wrangler.json).
 func Build(dir string, vars map[string]string) (map[string][]byte, error) {
 	buildMu.Lock()
 	defer buildMu.Unlock()
@@ -43,13 +44,13 @@ func Build(dir string, vars map[string]string) (map[string][]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("node not found: %w", err)
 	}
-	out, err := os.MkdirTemp("", "twd-build-")
+	out, err := os.MkdirTemp("", "tw-build-")
 	if err != nil {
 		return nil, err
 	}
 	defer os.RemoveAll(out)
 	outfile := filepath.Join(out, "index.js")
-	cmd := exec.Command(node, filepath.Join(root, "js", "packages", "create-twd", "lib", "build.mjs"), dir, outfile)
+	cmd := exec.Command(node, filepath.Join(root, "js", "packages", "create-tailworks", "lib", "build.mjs"), dir, outfile)
 	cmd.Dir = root
 	if b, err := cmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("build %s: %v: %s", dir, err, b)
@@ -58,8 +59,8 @@ func Build(dir string, vars map[string]string) (map[string][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	files := map[string][]byte{"dist/index.js": js, "twd-bundle.json": []byte(`{"main":"dist/index.js"}`)}
-	for _, f := range []string{"twd.jsonc", "wrangler.jsonc"} {
+	files := map[string][]byte{"dist/index.js": js, "tw-bundle.json": []byte(`{"main":"dist/index.js"}`)}
+	for _, f := range []string{"tailworks.jsonc", "wrangler.jsonc"} {
 		if b, err := os.ReadFile(filepath.Join(dir, f)); err == nil {
 			files[f] = b
 		}
@@ -93,12 +94,18 @@ func MustTar(files map[string][]byte) []byte {
 }
 
 // ShortDir makes a short 0700 temp dir under /tmp (unix socket path limits).
+// If the test binary dies without cleaning up (SIGKILL, a -timeout panic),
+// a watchdog kills the workerd and node processes started in it and removes
+// it (devreap; TW_KEEP_INSTANCES keeps the dir).
 func ShortDir(prefix string) (string, error) {
 	d, err := os.MkdirTemp("/tmp", prefix)
 	if err != nil {
 		return "", err
 	}
-	return d, os.Chmod(d, 0o700)
+	if err := os.Chmod(d, 0o700); err != nil {
+		return d, err
+	}
+	return d, devreap.Guard(d, devreap.Options{Keep: os.Getenv("TW_KEEP_INSTANCES") != ""})
 }
 
 // HasNode reports whether node is on PATH.
@@ -123,7 +130,7 @@ func NodeDeps() string {
 	return filepath.Join(root, "e2e", "node", "node_modules")
 }
 
-// BuildNode builds a runtime "node" app (create-twd lib/build-node.mjs) and
+// BuildNode builds a runtime "node" app (create-tailworks lib/build-node.mjs) and
 // returns its bundle files. The app is copied to a temp dir first (the
 // Workflow SDK writes .well-known/ into the app dir), with node_modules
 // pointing at NodeDeps when the app has none.
@@ -141,7 +148,7 @@ func BuildNode(dir string, vars map[string]string) (map[string][]byte, error) {
 	if _, err := os.Stat(NodeDeps()); err != nil {
 		return nil, fmt.Errorf("node tier deps missing (run make test-node): %w", err)
 	}
-	tmp, err := os.MkdirTemp("", "twd-nbuild-")
+	tmp, err := os.MkdirTemp("", "tw-nbuild-")
 	if err != nil {
 		return nil, err
 	}
@@ -156,13 +163,13 @@ func BuildNode(dir string, vars map[string]string) (map[string][]byte, error) {
 		}
 	}
 	out := filepath.Join(tmp, "out")
-	args := []string{filepath.Join(root, "js", "packages", "create-twd", "lib", "build-node.mjs"), app, out}
+	args := []string{filepath.Join(root, "js", "packages", "create-tailworks", "lib", "build-node.mjs"), app, out}
 	for k, v := range vars {
 		args = append(args, "--var", k+"="+v)
 	}
 	cmd := exec.Command(node, args...)
 	cmd.Dir = root
-	cmd.Env = append(os.Environ(), "TWD_NODE_PATH="+NodeDeps()+":"+filepath.Join(root, "node_modules"))
+	cmd.Env = append(os.Environ(), "TW_NODE_PATH="+NodeDeps()+":"+filepath.Join(root, "node_modules"))
 	if b, err := cmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("build-node %s: %v: %s", dir, err, b)
 	}

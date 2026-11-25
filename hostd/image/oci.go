@@ -17,7 +17,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
-// Config is the part of an OCI image config twd uses (image-spec config.md).
+// Config is the part of an OCI image config tailworks uses (image-spec config.md).
 type Config struct {
 	Architecture string `json:"architecture"`
 	OS           string `json:"os"`
@@ -68,7 +68,7 @@ func openArchive(src string, lim Limits, arches ...string) (*archive, error) {
 	if st.IsDir() {
 		a.dir = src
 	} else {
-		d, err := os.MkdirTemp("", "twd-image-")
+		d, err := os.MkdirTemp("", "tw-image-")
 		if err != nil {
 			return nil, err
 		}

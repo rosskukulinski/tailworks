@@ -1,0 +1,12 @@
+{
+  "name": "ai-agent",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": { "bindings": [{ "name": "AiAgent", "class_name": "AiAgent" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AiAgent"] }],
+  // MCP_URL: a tailworks MCP server on the tailnet. The default is the `mcp`
+  // template deployed as workload "mcp": its node is tw-mcp (tw up's
+  // --hostname-prefix, default "tw-", plus the workload name).
+  "vars": { "MCP_URL": "http://tw-mcp/mcp" }
+}

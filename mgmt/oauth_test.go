@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/internal/tsapi"
+	"github.com/rosskukulinski/tailworks/internal/tsapi"
 )
 
 func getPath(v any, path ...string) any {
@@ -61,7 +61,8 @@ func (e *testEnv) oauthExchanges() int {
 // refusal typed as policy_missing_tag_owners, and no secret or token in
 // any response or log.
 func TestOAuthMintPath(t *testing.T) {
-	e := newTestEnv(t, nil) // no issuer: oauth needs none
+	t.Parallel()
+	e := newTestEnv(t) // no issuer: oauth needs none
 	c, h1 := e.c, e.asHost("h1")
 	full := e.writeOAuthFile(t, "kFULL1CNTRL", 0o600, "auth_keys", "devices:core", "policy_file:read")
 	loose := e.writeOAuthFile(t, "kLOOSE1CNTRL", 0o644, "auth_keys")
@@ -104,7 +105,7 @@ func TestOAuthMintPath(t *testing.T) {
 		if !strings.HasPrefix(cred.AuthKey, "tskey-auth-") {
 			t.Fatalf("no object key via oauth for %s", name)
 		}
-		h1.ok("PATCH", "/v1/objects/"+a.ObjectID, map[string]any{"status": "ready", "stableNodeID": "n-" + name}, nil)
+		h1.ok("PATCH", "/v1/objects/"+a.ObjectID, map[string]any{"status": "ready", "epoch": 1, "stableNodeID": "n-" + name}, nil)
 		return a.ObjectID
 	}
 	a := mintObj(tn.TenantID, "a")
@@ -188,7 +189,9 @@ func TestOAuthMintPath(t *testing.T) {
 	e.ts.refuseTags[HostTag] = true
 	e.ts.mu.Unlock()
 	body := c.fail("POST", "/v1/hosts", map[string]any{"hostID": "h-p", "tenantID": tn.TenantID}, 403, "policy_missing_tag_owners")
-	if sn, _ := body["snippet"].(string); !strings.Contains(sn, `"`+HostTag+`": ["autogroup:admin", "tag:twd"]`) {
+	// Only the tag:tw-host entry, paste-safe inside the existing section (#443).
+	if sn, _ := body["snippet"].(string); !strings.Contains(sn, `"`+HostTag+`": ["autogroup:admin", "tag:tw"]`) ||
+		strings.Contains(sn, MgmtTag) || strings.Contains(sn, `"tagOwners": {`) || !strings.Contains(sn, "existing") {
 		t.Fatalf("policy_missing_tag_owners without the snippet: %v", body)
 	}
 

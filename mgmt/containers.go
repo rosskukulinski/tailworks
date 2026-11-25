@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rosskukulinski/twd/internal/container"
+	"github.com/rosskukulinski/tailworks/internal/container"
 )
 
 // Containers and code sandboxes (ADR-032 D9): quota reservations at
@@ -38,10 +38,6 @@ type ContainerReservation struct {
 	Resources container.Resources `json:"resources"`
 	CreatedAt int64               `json:"createdAt"`
 	RenewedAt int64               `json:"renewedAt"`
-}
-
-func (r ContainerReservation) key() string {
-	return r.TenantID + "|" + r.Workload + "|" + r.Class + "|" + r.Object
 }
 
 // ContainerQuota is what the store checks a new (or grown) reservation
@@ -118,7 +114,7 @@ type ReserveRequest struct {
 // the class's max_instances in the store transaction that inserts it.
 func (m *Mgmt) ReserveContainer(ctx context.Context, hostID string, r ReserveRequest) (ContainerReservation, bool, error) {
 	if hostID == "" {
-		return ContainerReservation{}, false, errf(400, "bad_request", "container reservations need a host (Twd-Host-ID header on the local-dev socket)")
+		return ContainerReservation{}, false, errf(400, "bad_request", "container reservations need a host (Tw-Host-ID header on the local-dev socket)")
 	}
 	if r.TenantID == "" || r.Workload == "" || r.Class == "" || r.Object == "" || len(r.Object) > 256 || strings.ContainsRune(r.Object, 0) {
 		return ContainerReservation{}, false, errf(400, "bad_request", "tenantID, workload, class and object (≤256 bytes) are required")

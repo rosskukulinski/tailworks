@@ -10,11 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rosskukulinski/twd/hostd/sandbox"
-	"github.com/rosskukulinski/twd/hostd/vm"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/hostd/vm"
 )
 
-// Firecracker (Lima twd-dev): jailed VMMs, a full memory snapshot for the
+// Firecracker (Lima tw-dev): jailed VMMs, a full memory snapshot for the
 // no-keys scan.
 const (
 	isolationTest      = "Jailed"
@@ -53,16 +53,16 @@ func (b fcBackend) poolStats() any {
 }
 
 // newBackend: pool as vm.Config.Pool, snapshot as vm.Config.Snapshot
-// (TWD_VM_E2E_SNAPSHOT_REFILL=1 also refills the pool by restore).
+// (TW_VM_E2E_SNAPSHOT_REFILL=1 also refills the pool by restore).
 func newBackend(kernel, rootfs string, vcpus, pool int, snapshot bool) (testBackend, map[string]any, error) {
-	vcfg := vm.Config{Kernel: kernel, Rootfs: rootfs, MemMiB: 512, VCPUs: vcpus, BootArgs: os.Getenv("TWD_VM_BOOTARGS"), HugePages: os.Getenv("TWD_VM_HUGEPAGES"),
-		Helper: os.Getenv("TWD_VM_HELPER"), Pool: pool, Snapshot: snapshot}
-	vcfg.SnapshotRefill = snapshot && pool >= 0 && os.Getenv("TWD_VM_E2E_SNAPSHOT_REFILL") == "1"
+	vcfg := vm.Config{Kernel: kernel, Rootfs: rootfs, MemMiB: 512, VCPUs: vcpus, BootArgs: os.Getenv("TW_VM_BOOTARGS"), HugePages: os.Getenv("TW_VM_HUGEPAGES"),
+		Helper: os.Getenv("TW_VM_HELPER"), Pool: pool, Snapshot: snapshot}
+	vcfg.SnapshotRefill = snapshot && pool >= 0 && os.Getenv("TW_VM_E2E_SNAPSHOT_REFILL") == "1"
 	be, err := vm.New(vcfg)
 	if err != nil {
 		return nil, nil, err
 	}
-	return fcBackend{be}, map[string]any{"hugepages": os.Getenv("TWD_VM_HUGEPAGES"), "free_hugepages_2m_at_start": vm.FreeHugePages2M()}, nil
+	return fcBackend{be}, map[string]any{"hugepages": os.Getenv("TW_VM_HUGEPAGES"), "free_hugepages_2m_at_start": vm.FreeHugePages2M()}, nil
 }
 
 func checkIsolated(t *testing.T, w string, info *sandbox.Info) map[string]any {

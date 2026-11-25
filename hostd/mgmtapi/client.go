@@ -19,11 +19,11 @@ import (
 	"sync"
 	"time"
 
-	v1 "github.com/rosskukulinski/twd/hostd/mgmtapi/v1"
-	"github.com/rosskukulinski/twd/internal/oci"
+	v1 "github.com/rosskukulinski/tailworks/hostd/mgmtapi/v1"
+	"github.com/rosskukulinski/tailworks/internal/oci"
 )
 
-// Client talks to twd-mgmt's /v1 API over HTTP(S) (normal operation: the
+// Client talks to tw-mgmt's /v1 API over HTTP(S) (normal operation: the
 // tsnet transport, authenticated by WhoIs on the connection) or over the
 // local-dev unix socket ("unix:///path/mgmt.sock" + host token). Do and
 // DoHeaders are the generic path-level calls (the CLI); the typed methods
@@ -31,14 +31,16 @@ import (
 type Client struct {
 	Base string // "http://mgmt" for unix sockets
 	HTTP *http.Client
-	// HostID, if set, is sent as the Twd-Host-ID header (homelab/test
+	// HostID, if set, is sent as the Tw-Host-ID header (homelab/test
 	// transports; production mgmt authenticates hosts by WhoIs instead).
+	// Like the other fields, set it before the first request; use
+	// WithHostID for a copy with another identity.
 	HostID string
 	// TokenFile, if set, is the per-host token file mgmt minted (RT-03); its
-	// content is sent as Twd-Host-Token on every request. It is re-read when
+	// content is sent as Tw-Host-Token on every request. It is re-read when
 	// it changes on disk, so a rotation needs no restart.
 	TokenFile string
-	// Token, if set, is sent as Twd-Host-Token (tests; TokenFile wins).
+	// Token, if set, is sent as Tw-Host-Token (tests; TokenFile wins).
 	Token string
 
 	tokMu   sync.Mutex
@@ -51,7 +53,7 @@ type Client struct {
 }
 
 // HostTokenHeader is mgmt's per-host bearer token header (mgmt.HostTokenHeader).
-const HostTokenHeader = "Twd-Host-Token"
+const HostTokenHeader = "Tw-Host-Token"
 
 // hostToken returns the current token ("" if none is configured).
 func (c *Client) hostToken() string {
@@ -97,6 +99,22 @@ func NewClient(addr string) (*Client, error) {
 		return &Client{Base: strings.TrimSuffix(addr, "/"), HTTP: &http.Client{Timeout: 30 * time.Second}}, nil
 	}
 	return nil, fmt.Errorf("mgmtapi: unsupported address %q", addr)
+}
+
+// WithHostID returns a new Client like c (same Base, transport and token
+// source) that sends id as Tw-Host-ID. c itself is not modified: a Client's
+// exported fields are configuration, set before its first request and never
+// written after, because requests on other goroutines read them without a
+// lock (issue #135: hostd.New used to set HostID on a client a previous
+// Host's goroutines were still using).
+func (c *Client) WithHostID(id string) *Client {
+	return &Client{
+		Base:      c.Base,
+		HTTP:      c.HTTP,
+		HostID:    id,
+		TokenFile: c.TokenFile,
+		Token:     c.Token,
+	}
 }
 
 // Do sends a JSON request and decodes a JSON response into out (if non-nil).
@@ -152,6 +170,9 @@ func (c *Client) DoHeaders(ctx context.Context, method, path string, in, out any
 		*raw = b
 		return nil
 	}
+	if len(bytes.TrimSpace(b)) == 0 {
+		return nil // 204 No Content (e.g. DELETE /v1/hosts/{id} with nothing to clean up): out keeps its zero value
+	}
 	return json.Unmarshal(b, out)
 }
 
@@ -162,7 +183,7 @@ func AsError(err error) (*Error, bool) {
 }
 
 // V1 returns the generated /v1 client sharing this client's transport and
-// headers (Twd-Host-ID, Twd-Host-Token); every typed method below goes
+// headers (Tw-Host-ID, Tw-Host-Token); every typed method below goes
 // through it, so URLs and parameters come from api/openapi.yaml.
 func (c *Client) V1() *v1.ClientWithResponses {
 	c.v1Once.Do(func() {
@@ -192,7 +213,7 @@ func (c *Client) OCI() *oci.Client {
 // setHeaders adds the host identity and the local-dev token.
 func (c *Client) setHeaders(req *http.Request) {
 	if c.HostID != "" {
-		req.Header.Set("Twd-Host-ID", c.HostID)
+		req.Header.Set("Tw-Host-ID", c.HostID)
 	}
 	if tok := c.hostToken(); tok != "" {
 		req.Header.Set(HostTokenHeader, tok)
@@ -227,6 +248,19 @@ func jsonBody(v any) (io.Reader, error) {
 
 // Register is PUT /v1/hosts/{id} (idempotent: 201 the first time, 200 after).
 func (c *Client) Register(ctx context.Context, r RegisterRequest) error {
+	_, err := c.RegisterHost(ctx, r)
+	return err
+}
+
+// Registered is the part of RegisterHost's answer hostd uses.
+type Registered struct {
+	// AuditHead is the hash of the last record mgmt stores on this host's
+	// audit chain ("" when it is empty, or from a mgmt that predates it).
+	AuditHead string `json:"auditHead,omitempty"`
+}
+
+// RegisterHost is Register, returning what mgmt answered.
+func (c *Client) RegisterHost(ctx context.Context, r RegisterRequest) (Registered, error) {
 	// The spec's HostRegistration: push is {url} (local-dev unix socket)
 	// or {port} (the host's own tsnet node); nothing else is accepted.
 	reg := map[string]any{"capacityNodes": r.CapacityNodes, "tiers": r.Tiers}
@@ -242,21 +276,38 @@ func (c *Client) Register(ctx context.Context, r RegisterRequest) error {
 	if r.Capacity != nil {
 		reg["capacity"] = r.Capacity
 	}
+	if r.RegistrationSecret != "" {
+		reg["registrationSecret"] = r.RegistrationSecret
+	}
+	if r.Version != "" {
+		reg["version"] = r.Version
+	}
+	if r.OS != "" {
+		reg["os"] = r.OS
+	}
+	if len(r.Protocols) > 0 {
+		reg["protocols"] = r.Protocols
+	}
+	if len(r.Features) > 0 {
+		reg["features"] = r.Features
+	}
 	switch {
 	case r.PushPort > 0:
 		reg["push"] = map[string]any{"port": r.PushPort}
 	case r.PushURL != "":
 		reg["push"] = map[string]any{"url": r.PushURL}
 	}
+	var out Registered
 	body, err := jsonBody(reg)
 	if err != nil {
-		return err
+		return out, err
 	}
 	resp, err := c.V1().RegisterHostWithBodyWithResponse(ctx, r.HostID, "application/json", body)
 	if err != nil {
-		return err
+		return out, err
 	}
-	return result(resp.HTTPResponse, resp.Body, nil)
+	err = result(resp.HTTPResponse, resp.Body, &out)
+	return out, err
 }
 
 // Heartbeat is PUT /v1/hosts/{id}/status.
@@ -516,7 +567,7 @@ func (c *Client) Audit(ctx context.Context, recs []AuditRecord) error {
 
 // NodeCert is GET /v1/certificates/{stableNodeID}?tenant= (RT-01): the
 // certificate of the tenant's object whose node is stableNodeID. A 404
-// means the node is not a twd object of that tenant (ErrNoCert).
+// means the node is not a tailworks object of that tenant (ErrNoCert).
 func (c *Client) NodeCert(ctx context.Context, tenantID, stableNodeID string) (*NodeCert, error) {
 	resp, err := c.V1().GetCertificateWithResponse(ctx, stableNodeID, &v1.GetCertificateParams{Tenant: tenantID})
 	if err != nil {
@@ -533,7 +584,7 @@ func (c *Client) NodeCert(ctx context.Context, tenantID, stableNodeID string) (*
 	return &out, nil
 }
 
-// ErrNoCert: the node is not a (live) twd object of the tenant, so no
+// ErrNoCert: the node is not a (live) tailworks object of the tenant, so no
 // certificate exists and no lim applies.
 var ErrNoCert = errors.New("mgmtapi: no node certificate for that node")
 
@@ -591,4 +642,16 @@ func VerifyChain(recs []AuditRecord) (bool, []string) {
 		prev = r.Hash
 	}
 	return len(problems) == 0, problems
+}
+
+// Raw sends req with the client's headers (Tw-Host-ID, the local-dev
+// token) and returns the response as is: for streaming bodies the JSON
+// helpers don't fit (release artifact uploads).
+func (c *Client) Raw(req *http.Request) (*http.Response, error) {
+	c.setHeaders(req)
+	hc := c.HTTP
+	if hc == nil {
+		hc = http.DefaultClient
+	}
+	return hc.Do(req)
 }

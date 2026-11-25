@@ -20,7 +20,7 @@ before(async () => {
   await new Promise((r) => target.listen(0, "127.0.0.1", r));
   targetPort = target.address().port;
   // A minimal CONNECT proxy like hostd's: records the request, optionally
-  // refuses with a typed twd-error, else splices to the target.
+  // refuses with a typed tw-error, else splices to the target.
   proxy = net.createServer((c) => {
     let buf = "";
     const onData = (d) => {
@@ -31,7 +31,7 @@ before(async () => {
       const head = buf.slice(0, i);
       seen.push(head);
       if (refuseNext) {
-        c.end(`HTTP/1.1 403 Forbidden\r\ntwd-error: ${refuseNext}\r\ncontent-length: 0\r\n\r\n`);
+        c.end(`HTTP/1.1 403 Forbidden\r\ntw-error: ${refuseNext}\r\ncontent-length: 0\r\n\r\n`);
         refuseNext = null;
         return;
       }
@@ -47,7 +47,7 @@ before(async () => {
   });
   await new Promise((r) => proxy.listen(0, "127.0.0.1", r));
   proxyPort = proxy.address().port;
-  process.env.TWD_EGRESS_PROXY = `http://twd:tok@127.0.0.1:${proxyPort}`;
+  process.env.TW_EGRESS_PROXY = `http://tw:tok@127.0.0.1:${proxyPort}`;
   process.env.PORT = String(targetPort + 1); // "our own" app port (nothing listens; only the allow-list matters)
   enforceEgress();
   enforceEgress(); // idempotent
@@ -67,7 +67,7 @@ test("net.connect to a non-local destination becomes a CONNECT tunnel through th
   sock.destroy();
   const head = seen.at(-1);
   assert.match(head, /^CONNECT peer\.ts\.net:8080 HTTP\/1\.1/);
-  assert.match(head, new RegExp("Proxy-Authorization: Basic " + Buffer.from("twd:tok").toString("base64")));
+  assert.match(head, new RegExp("Proxy-Authorization: Basic " + Buffer.from("tw:tok").toString("base64")));
 });
 
 test("the proxy's typed refusal surfaces as the socket error", async () => {

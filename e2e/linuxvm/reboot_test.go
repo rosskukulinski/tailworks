@@ -20,24 +20,24 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/e2e/cliflow"
-	"github.com/rosskukulinski/twd/internal/tsapi"
-	"github.com/rosskukulinski/twd/netd"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/e2e/cliflow"
+	"github.com/rosskukulinski/tailworks/internal/tsapi"
+	"github.com/rosskukulinski/tailworks/netd"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 )
 
 // TestE2ELinuxReboot (make e2e-linux-reboot): DO storage of a microVM
-// workload survives host reboots of twdl-kvm-u24. An agent object in a
+// workload survives host reboots of twl-kvm-u24. An agent object in a
 // jailed microVM writes SQLite; then the whole VM reboots twice (1: a
 // clean `limactl stop` + start; 2: `limactl stop --force`, a power cut).
-// After each boot: twd-vmhelper is back via systemd, `twd up` again (as the
+// After each boot: tw-vmhelper is back via systemd, `tw up` again (as the
 // user, no sudo), and the object rejoins from saved node state (same
 // stable node ID and IP, no new device), the dm-crypt volume re-opens
 // (LUKS2, not re-formatted) with the custody key, and every write is there.
 func TestE2ELinuxReboot(t *testing.T) {
-	keyFile, tailnet, vm, tarball := os.Getenv("TWD_E2E_API_KEY_FILE"), os.Getenv("TWD_E2E_TAILNET"), os.Getenv("TWD_E2E_LIMA_VM"), os.Getenv("TWD_E2E_TARBALL")
+	keyFile, tailnet, vm, tarball := os.Getenv("TW_E2E_API_KEY_FILE"), os.Getenv("TW_E2E_TAILNET"), os.Getenv("TW_E2E_LIMA_VM"), os.Getenv("TW_E2E_TARBALL")
 	if keyFile == "" || tailnet == "" || vm == "" || tarball == "" {
-		t.Skip("TWD_E2E_API_KEY_FILE / TWD_E2E_TAILNET / TWD_E2E_LIMA_VM / TWD_E2E_TARBALL not set (make e2e-linux-reboot)")
+		t.Skip("TW_E2E_API_KEY_FILE / TW_E2E_TAILNET / TW_E2E_LIMA_VM / TW_E2E_TARBALL not set (make e2e-linux-reboot)")
 	}
 	if !allowedTailnets[tailnet] {
 		t.Fatalf("refusing to run against tailnet %q", tailnet)
@@ -47,10 +47,13 @@ func TestE2ELinuxReboot(t *testing.T) {
 		t.Fatal(err)
 	}
 	api := &tsapi.Client{Tailnet: tailnet, APIKey: apiKey}
+	// tailworks mints with an OAuth client: this run's own, created with the
+	// harness's API key and deleted when the test ends.
+	oauthFile := cliflow.RealOAuthClient(t, keyFile, tailnet, t.TempDir(), "tw-e2e-reboot-oauth")
 	b := make([]byte, 3)
 	rand.Read(b)
 	run := hex.EncodeToString(b)
-	testPrefix, twdPrefix, _ := cliflow.RunPrefixes("l3r", run)
+	testPrefix, twPrefix, _ := cliflow.RunPrefixes("l3r", run)
 	root, _ := nettest.FindRepoRoot()
 	res := cliflow.NewResults("l3-reboot-"+run, tailnet)
 	resultsTo := filepath.Join(root, "e2e", "real", "results", "l3-reboot-"+time.Now().Format("20060102-150405")+"-"+run+".json")
@@ -60,10 +63,10 @@ func TestE2ELinuxReboot(t *testing.T) {
 	home, _ := os.UserHomeDir()
 	r := &remote{t: t, vm: vm, cfg: filepath.Join(home, ".lima", vm, "ssh.config")}
 	rhome := strings.TrimSpace(r.must(`printf %s "$HOME"`))
-	R := rhome + "/.twd-e2e"
-	rKey, rState, rWork := R+"/tailnet1_api.env", R+"/state", R+"/work"
-	rTwd := rhome + "/.twd/bin/twd"
-	if so := r.must(`[ -e ~/.twd ] && echo twd; [ -e ~/.twd-e2e ] && echo e2e; [ -e /etc/twd ] && echo etc-twd; true`); strings.TrimSpace(so) != "" {
+	R := rhome + "/.tailworks-e2e"
+	rKey, rState, rWork := R+"/oauth.env", R+"/state", R+"/work"
+	rTw := rhome + "/.tailworks/bin/tw"
+	if so := r.must(`[ -e ~/.tailworks ] && echo tw; [ -e ~/.tailworks-e2e ] && echo e2e; [ -e /etc/tailworks ] && echo etc-tw; true`); strings.TrimSpace(so) != "" {
 		t.Fatalf("%s is not clean (%s)", vm, strings.TrimSpace(so))
 	}
 	quiet := slog.New(netd.NewRedactingHandler(slog.NewTextHandler(io.Discard, nil)))
@@ -71,29 +74,29 @@ func TestE2ELinuxReboot(t *testing.T) {
 	tracker := tsapi.NewTracker(api)
 	work := t.TempDir()
 	var nodes []*nettest.Node
-	e := &cliflow.Env{T: t, StateDir: rState, WorkDir: rWork, Tailnet: tailnet, APIKeyFile: rKey, ControlURL: prodControl,
-		Prefix: twdPrefix, Res: res, ClientTagged: true,
+	e := &cliflow.Env{T: t, StateDir: rState, WorkDir: rWork, Tailnet: tailnet, OAuthClientFile: rKey, ControlURL: prodControl,
+		Prefix: twPrefix, Res: res, ClientTagged: true,
 		Exec: func(args []string) (string, string, time.Duration, error) {
-			return r.timed(rWork, append([]string{rTwd}, args...)...)
+			return r.timed(rWork, append([]string{rTw}, args...)...)
 		}}
 
 	t.Cleanup(func() {
-		if _, se, _, err := e.Twd("down", "--purge"); err != nil {
-			t.Logf("twd down --purge (cleanup): %v %s", err, netd.Redact(se))
+		if _, se, _, err := e.Tw("down", "--purge"); err != nil {
+			t.Logf("tw down --purge (cleanup): %v %s", err, netd.Redact(se))
 		}
 		if t.Failed() {
-			so, _, _ := r.run(`for c in supervisor mgmt hostd; do echo "== $c"; tail -c 5000 ~/.twd-e2e/state/logs/$c.log 2>/dev/null; done; sudo journalctl -u twd-vmhelper -b -n 30 --no-pager`, nil)
+			so, _, _ := r.run(`for c in supervisor mgmt hostd; do echo "== $c"; tail -c 5000 ~/.tailworks-e2e/state/logs/$c.log 2>/dev/null; done; sudo journalctl -u tw-vmhelper -b -n 30 --no-pager`, nil)
 			t.Logf("%s logs:\n%s", vm, netd.Redact(so))
 		}
 		for _, n := range nodes {
 			n.Close()
 		}
-		so, se, err := r.run(`pkill -TERM -f "$HOME/.twd/bin/" 2>/dev/null; sleep 0.5; pkill -KILL -f "$HOME/.twd/bin/" 2>/dev/null
-			if [ -e /etc/twd ] && [ -x ~/.twd/bin/twd ]; then sudo ~/.twd/bin/twd host setup --undo >/dev/null; fi
-			u=$(ls -d ~/.twd-e2e/twd-*/install.sh 2>/dev/null | head -1)
+		so, se, err := r.run(`pkill -TERM -f "$HOME/.tailworks/bin/" 2>/dev/null; sleep 0.5; pkill -KILL -f "$HOME/.tailworks/bin/" 2>/dev/null
+			if [ -e /etc/tailworks ] && [ -x ~/.tailworks/bin/tw ]; then sudo ~/.tailworks/bin/tw host setup --undo >/dev/null; fi
+			u=$(ls -d ~/.tailworks-e2e/tailworks-*/install.sh 2>/dev/null | head -1)
 			if [ -n "$u" ]; then "$u" --uninstall --purge --force >/dev/null; fi
-			rm -rf ~/.twd-e2e
-			for p in ~/.twd ~/.twd-e2e /etc/twd /usr/local/libexec/twd /var/lib/twd-vm; do [ -e "$p" ] && echo "LEFT $p"; done; true`, nil)
+			rm -rf ~/.tailworks-e2e
+			for p in ~/.tailworks ~/.tailworks-e2e /etc/tailworks /usr/local/libexec/tailworks /var/lib/tailworks-vm; do [ -e "$p" ] && echo "LEFT $p"; done; true`, nil)
 		res.Cleanup["vm_clean"] = err == nil && !strings.Contains(so, "LEFT")
 		if !res.Cleanup["vm_clean"].(bool) {
 			t.Errorf("cleanup: %v %s %s", err, so, se)
@@ -102,20 +105,20 @@ func TestE2ELinuxReboot(t *testing.T) {
 		defer ccancel()
 		devs, keys := cliflow.Leftovers(cctx, api, res)
 		for _, id := range res.NodeIDs {
-			tracker.Track(id, "twd")
+			tracker.Track(id, "tw")
 		}
 		for _, id := range res.InfraNodeIDs {
-			tracker.Track(id, "twd-infra") // mgmt's and the host's own nodes: kept by twd down, deleted here by ID
+			tracker.Track(id, "tw-infra") // mgmt's and the host's own nodes: kept by tw down, deleted here by ID
 		}
 		crep := tracker.Cleanup(cctx, testPrefix)
-		trep := tracker.Cleanup(cctx, twdPrefix)
-		hrep := tracker.Cleanup(cctx, "twd-host-"+twdPrefix) // the host's node is named twd-host-<host id>
+		trep := tracker.Cleanup(cctx, twPrefix)
+		hrep := tracker.Cleanup(cctx, "tw-host-"+twPrefix) // the host's node is named tw-host-<host id>
 		trep.Untracked = append(trep.Untracked, hrep.Untracked...)
 		for _, k := range keys {
 			api.DeleteKey(cctx, k)
 		}
 		minter.RevokeAll(cctx)
-		res.Cleanup["twd_devices_left_after_down"], res.Cleanup["twd_keys_valid_after_down"] = len(devs), len(keys)
+		res.Cleanup["tw_devices_left_after_down"], res.Cleanup["tw_keys_valid_after_down"] = len(devs), len(keys)
 		res.Cleanup["devices_left"], res.Cleanup["untracked_run_devices"] = crep.Left, append(crep.Untracked, trep.Untracked...)
 		os.MkdirAll(filepath.Dir(resultsTo), 0o755)
 		out, _ := json.MarshalIndent(res, "", "  ")
@@ -128,26 +131,26 @@ func TestE2ELinuxReboot(t *testing.T) {
 	})
 
 	// Install + one-time setup.
-	r.must(`umask 077; mkdir -p ~/.twd-e2e/work && chmod 700 ~/.twd-e2e`)
+	r.must(`umask 077; mkdir -p ~/.tailworks-e2e/work && chmod 700 ~/.tailworks-e2e`)
 	if out, err := exec.Command("limactl", "copy", tarball, vm+":"+R+"/").CombinedOutput(); err != nil {
 		t.Fatalf("limactl copy tarball: %v %s", err, out)
 	}
-	if out, err := exec.Command("limactl", "copy", keyFile, vm+":"+rKey).CombinedOutput(); err != nil {
+	if out, err := exec.Command("limactl", "copy", oauthFile, vm+":"+rKey).CombinedOutput(); err != nil {
 		t.Fatalf("limactl copy key: %v %s", err, netd.Redact(string(out)))
 	}
-	r.must(`chmod 600 ~/.twd-e2e/tailnet1_api.env`)
+	r.must(`chmod 600 ~/.tailworks-e2e/oauth.env`)
 	tgz := filepath.Base(tarball)
-	r.must("cd ~/.twd-e2e && tar -xzf " + shq(tgz) + " && ./" + shq(strings.TrimSuffix(tgz, ".tar.gz")) + "/install.sh >/dev/null")
-	r.must("sudo " + rTwd + " host setup --microvm >/dev/null")
+	r.must("cd ~/.tailworks-e2e && tar -xzf " + shq(tgz) + " && ./" + shq(strings.TrimSuffix(tgz, ".tar.gz")) + "/install.sh >/dev/null")
+	r.must("sudo " + rTw + " host setup --microvm >/dev/null")
 
 	// Not --ephemeral: these nodes must outlive the reboots.
 	up := func() time.Duration {
-		return e.MustJSON(nil, "up", "--tailnet", tailnet, "--api-key-file", rKey, "--yes", "--hostname-prefix", twdPrefix, "--control-url", prodControl)
+		return e.MustJSON(nil, "up", "--oauth-client-file", rKey, "--tailnet", tailnet, "--yes", "--hostname-prefix", twPrefix, "--control-url", prodControl)
 	}
 	res.Numbers["up_first_ms"] = msOf(up())
 	agentDir := rWork + "/agent"
-	e.MustJSON(nil, "init", agentDir, "--template", "agent")
-	r.must(`sed -i '0,/{/s//{\n  "tier": "microvm",/' ` + shq(agentDir+"/twd.jsonc"))
+	e.MustJSON(nil, cliflow.InitArgs(agentDir, "agent")...)
+	r.must(`sed -i '0,/{/s//{\n  "tier": "microvm",/' ` + shq(agentDir+"/tailworks.jsonc"))
 	var dep struct {
 		Endpoint struct{ MagicDNS string } `json:"endpoint"`
 	}
@@ -209,7 +212,7 @@ func TestE2ELinuxReboot(t *testing.T) {
 		}
 		var out []string
 		for _, d := range ds {
-			if strings.HasPrefix(d.Hostname, twdPrefix) || strings.HasPrefix(d.Name, twdPrefix) {
+			if strings.HasPrefix(d.Hostname, twPrefix) || strings.HasPrefix(d.Name, twPrefix) {
 				out = append(out, d.NodeID)
 			}
 		}
@@ -217,7 +220,7 @@ func TestE2ELinuxReboot(t *testing.T) {
 		return out
 	}
 	devsBefore := runDevices()
-	res.Notes = append(res.Notes, fmt.Sprintf("before reboots: object boot1 node %s (%s, %s), %d twd devices of this run, SQLite calls=%d", stable, obj.MagicDNS, objIP, len(devsBefore), want))
+	res.Notes = append(res.Notes, fmt.Sprintf("before reboots: object boot1 node %s (%s, %s), %d tw devices of this run, SQLite calls=%d", stable, obj.MagicDNS, objIP, len(devsBefore), want))
 
 	// Reboot twice: clean, then a power cut.
 	for i, force := range []bool{false, true} {
@@ -238,19 +241,19 @@ func TestE2ELinuxReboot(t *testing.T) {
 		res.Numbers[tag+"_limactl_start_ms"] = msOf(time.Since(st))
 		// Inside the VM, on its own clock (µs since kernel boot): when the
 		// helper came up, and now (ssh usable).
-		so := r.must(`systemctl is-active twd-vmhelper; systemctl show -p ActiveEnterTimestampMonotonic --value twd-vmhelper; cut -d' ' -f1 /proc/uptime; ls /run/twd/vmhelper.sock; cat /proc/sys/vm/nr_hugepages`)
+		so := r.must(`systemctl is-active tw-vmhelper; systemctl show -p ActiveEnterTimestampMonotonic --value tw-vmhelper; cut -d' ' -f1 /proc/uptime; ls /run/tailworks/vmhelper.sock; cat /proc/sys/vm/nr_hugepages`)
 		f := strings.Fields(so)
 		if len(f) < 5 || f[0] != "active" {
-			t.Fatalf("%s: twd-vmhelper not active after boot: %s", tag, so)
+			t.Fatalf("%s: tw-vmhelper not active after boot: %s", tag, so)
 		}
 		helperUS, _ := strconv.ParseFloat(f[1], 64)
 		upNow, _ := strconv.ParseFloat(f[2], 64)
 		res.Numbers[tag+"_boot_to_helper_active_ms"] = helperUS / 1000
 		res.Numbers[tag+"_boot_to_ssh_ms"] = upNow * 1000
 		res.Notes = append(res.Notes, fmt.Sprintf("%s (%s): helper active %.0f ms after kernel boot; huge pages %s", tag, map[bool]string{false: "clean limactl stop", true: "limactl stop --force (power cut)"}[force], helperUS/1000, f[4]))
-		// twd up again (as the user).
+		// tw up again (as the user).
 		d := up()
-		res.Numbers[tag+"_twd_up_ms"] = msOf(d)
+		res.Numbers[tag+"_tw_up_ms"] = msOf(d)
 		sv := time.Now()
 		// Where do the 12-17 s until this Mac reaches the rejoined node go?
 		// Sample the client's view of the peer (netmap presence, Online,
@@ -297,7 +300,7 @@ func TestE2ELinuxReboot(t *testing.T) {
 			}
 			if time.Since(sv) > 3*time.Minute {
 				close(stopSample)
-				t.Fatalf("%s: object not serving on %s 3 min after twd up: %s", tag, objIP, strings.Join(timeline, "; "))
+				t.Fatalf("%s: object not serving on %s 3 min after tw up: %s", tag, objIP, strings.Join(timeline, "; "))
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
@@ -306,8 +309,8 @@ func TestE2ELinuxReboot(t *testing.T) {
 		timeline = append(timeline, fmt.Sprintf("+%.1fs first HTTP 200 from the object", time.Since(sv).Seconds()))
 		// The VM side: when hostd said the object's node was ready (VM clock,
 		// Lima keeps it in sync), vs. when the Mac client got through.
-		ready := strings.TrimSpace(r.must(`grep 'object node ready' ~/.twd-e2e/state/logs/hostd.log | tail -1 | sed 's/.*time=\([^ ]*\).*join_ms=\([^ ]*\).*/\1 join_ms=\2/'; date -u +%Y-%m-%dT%H:%M:%S.%3NZ`))
-		res.Notes = append(res.Notes, fmt.Sprintf("%s re-find timeline (client view; twd up returned at %s, Mac clock): %s | VM: last 'object node ready' at %s", tag, sv.Format("15:04:05.000"), strings.Join(timeline, "; "), strings.Join(strings.Fields(ready), " now=")))
+		ready := strings.TrimSpace(r.must(`grep 'object node ready' ~/.tailworks-e2e/state/logs/hostd.log | tail -1 | sed 's/.*time=\([^ ]*\).*join_ms=\([^ ]*\).*/\1 join_ms=\2/'; date -u +%Y-%m-%dT%H:%M:%S.%3NZ`))
+		res.Notes = append(res.Notes, fmt.Sprintf("%s re-find timeline (client view; tw up returned at %s, Mac clock): %s | VM: last 'object node ready' at %s", tag, sv.Format("15:04:05.000"), strings.Join(timeline, "; "), strings.Join(strings.Fields(ready), " now=")))
 		want++
 		if callsOf(m) != want {
 			t.Fatalf("%s: SQLite calls %d, want %d: data lost? %v", tag, callsOf(m), want, m)
@@ -343,13 +346,13 @@ func TestE2ELinuxReboot(t *testing.T) {
 		if ws.VM == nil || ws.VM.Jail == nil || ws.VM.VolumeNew {
 			t.Fatalf("%s: agent VM %+v (volume must re-open, not format)", tag, ws.VM)
 		}
-		cs := r.must("sudo cryptsetup status " + shq(ws.VM.Jail.ID) + " | grep -E 'type|cipher' | tr -s ' '; sudo journalctl -u twd-vmhelper -b --no-pager | grep -o 'volume attached.*formatted=[a-z]*' | tail -1")
+		cs := r.must("sudo cryptsetup status " + shq(ws.VM.Jail.ID) + " | grep -E 'type|cipher' | tr -s ' '; sudo journalctl -u tw-vmhelper -b --no-pager | grep -o 'volume attached.*formatted=[a-z]*' | tail -1")
 		if !strings.Contains(cs, "LUKS2") || !strings.Contains(cs, "formatted=false") {
 			t.Fatalf("%s: volume: %s", tag, cs)
 		}
 		res.Numbers[tag+"_vm_ready_ms"] = msOf(ws.VM.Ready)
 		res.Numbers[tag+"_volume_attach_ms"] = ws.VM.VolumeAttachMS
-		res.Pass(tag, fmt.Sprintf("helper back via systemd (%.0f ms after kernel boot), twd up %.1f s, object serving %.1f s later on the same node %s / %s (no new device), all %d SQLite writes present, volume re-opened: %s",
+		res.Pass(tag, fmt.Sprintf("helper back via systemd (%.0f ms after kernel boot), tw up %.1f s, object serving %.1f s later on the same node %s / %s (no new device), all %d SQLite writes present, volume re-opened: %s",
 			helperUS/1000, msOf(d)/1000, res.Numbers[tag+"_up_to_object_serving_ms"]/1000, stable, objIP, want, strings.Join(strings.Fields(cs), " ")))
 		_ = http.StatusOK
 	}

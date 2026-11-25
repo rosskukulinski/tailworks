@@ -1,0 +1,56 @@
+$ tw upgrade --plan
+Upgrade tailworks 9.0.0 → 9.1.0 (<work>/tailworks-9.1.0)
+  1. back up <work>/state/mgmt (store + custody) into <work>/state/backups
+  2. stop tw
+  3. install tw 9.1.0 (the current release is kept as bin.prev / share.prev)
+  4. tw is not running: install only (no health check, no automatic rollback)
+  workerd: <workerd pin> → 1.29990101.0
+  contract migrations (no automatic rollback after these): 0099_drop_legacy
+Breaking changes:
+  - tw-mgmt no longer reads the legacy table. … (drop-legacy.md)
+Operator actions:
+  - A new flag. Operator action: set it. (new-flag.md)
+  - The store drops a column. (contract.md)
+
+$ tw upgrade --plan --json
+{
+  "plan": {
+    "from": "9.0.0",
+    "to": "9.1.0",
+    "source": "<work>/tailworks-9.1.0",
+    "breaking": [
+      {
+        "kind": "breaking",
+        "source": "drop-legacy.md",
+        "text": "tw-mgmt no longer reads the legacy table.\nMore detail."
+      }
+    ],
+    "actions": [
+      {
+        "kind": "feature",
+        "source": "new-flag.md",
+        "text": "A new flag. Operator action: set it."
+      },
+      {
+        "kind": "fix",
+        "upgrade": [
+          "schema-contract"
+        ],
+        "source": "contract.md",
+        "text": "The store drops a column."
+      }
+    ],
+    "contractMigrations": [
+      "0099_drop_legacy"
+    ],
+    "workerd": "<workerd pin> → 1.29990101.0",
+    "steps": [
+      "back up <work>/state/mgmt (store + custody) into <work>/state/backups",
+      "stop tw",
+      "install tw 9.1.0 (the current release is kept as bin.prev / share.prev)",
+      "tw is not running: install only (no health check, no automatic rollback)"
+    ],
+    "warnings": []
+  },
+  "upgraded": false
+}

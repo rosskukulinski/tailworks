@@ -6,23 +6,23 @@ import (
 	"runtime"
 	"sort"
 
-	"github.com/rosskukulinski/twd/hostd/bundle"
-	"github.com/rosskukulinski/twd/hostd/mgmtapi"
-	"github.com/rosskukulinski/twd/internal/container"
-	"github.com/rosskukulinski/twd/internal/registry"
+	"github.com/rosskukulinski/tailworks/hostd/bundle"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/internal/container"
+	"github.com/rosskukulinski/tailworks/internal/registry"
 )
 
-// regAuthorize is twd-mgmt's registry rule on the local-dev socket: a
-// caller naming a host (Twd-Host-ID, what hostd sends) only pulls, and only
+// regAuthorize is tw-mgmt's registry rule on the local-dev socket: a
+// caller naming a host (Tw-Host-ID, what hostd sends) only pulls, and only
 // "public" and the tenants it holds a deployment of; anyone else is the
 // local admin.
 func (s *Server) regAuthorize(r *http.Request, ns string, push bool) error {
-	host := r.Header.Get("Twd-Host-ID")
+	host := r.Header.Get("Tw-Host-ID")
 	if host == "" {
 		return nil
 	}
 	if push {
-		return &registry.Denied{Reason: "hosts pull from twd's registry; they never push"}
+		return &registry.Denied{Reason: "hosts pull from tailworks' registry; they never push"}
 	}
 	if ns == "" || ns == registry.PublicNamespace {
 		return nil
@@ -41,10 +41,10 @@ func (s *Server) regAuthorize(r *http.Request, ns string, push bool) error {
 // that push images in-process.
 func (s *Server) Registry() *registry.Registry { return s.reg }
 
-// badBuilt is a refused containerImages entry (400, like twd-mgmt).
+// badBuilt is a refused containerImages entry (400, like tw-mgmt).
 type badBuilt struct{ error }
 
-// pinContainers is twd-mgmt's deploy-time pinning (ADR-032 D3) for one
+// pinContainers is tw-mgmt's deploy-time pinning (ADR-032 D3) for one
 // host arch. It returns nil classes when there is no registry.
 func (s *Server) pinContainers(ctx context.Context, tenant string, app *bundle.App, built map[string]mgmtapi.BuiltImages, arch string) ([]container.Class, error) {
 	if s.reg == nil || len(app.Containers) == 0 {

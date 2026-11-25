@@ -182,7 +182,7 @@ func FlattenLimited(layers []Layer, w io.Writer, lim Limits) error {
 			}
 			me := ref{li, k}
 			if stash[me] && h.Typeflag == tar.TypeReg {
-				f, err := os.CreateTemp("", "twd-image-link-")
+				f, err := os.CreateTemp("", "tw-image-link-")
 				if err != nil {
 					rc.Close()
 					return err

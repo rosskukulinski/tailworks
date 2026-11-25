@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/internal/container"
+	"github.com/rosskukulinski/tailworks/internal/container"
 )
 
 // TestStoreContainerReservations (ADR-032 D9), on SQLite and Postgres: the
@@ -17,10 +17,11 @@ import (
 // the lease holder reserves, a stale host's reservations stop counting, and
 // heartbeat reconciliation renews, releases and adopts.
 func TestStoreContainerReservations(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		tn := fmt.Sprintf("tn_c%d", time.Now().UnixNano()%1e9)
-		if err := s.CreateTenant(ctx, Tenant{ID: tn, Tailnet: "t.ts.net", MintMode: MintAPIKey, RegistrationsPerMinute: 1, MaxObjects: 1, CreatedAt: 1}); err != nil {
+		if err := s.CreateTenant(ctx, Tenant{ID: tn, Tailnet: "t.ts.net", MintMode: MintOAuth, RegistrationsPerMinute: 1, MaxObjects: 1, CreatedAt: 1}); err != nil {
 			t.Fatal(err)
 		}
 		now := time.UnixMilli(5_000_000)
@@ -160,10 +161,11 @@ func TestStoreContainerReservations(t *testing.T) {
 // objects never exceed maxContainers (the check and the insert are one
 // transaction, serialised on the tenant row).
 func TestStoreContainerQuotaConcurrent(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		tn := fmt.Sprintf("tn_q%d", time.Now().UnixNano()%1e9)
-		if err := s.CreateTenant(ctx, Tenant{ID: tn, Tailnet: "t.ts.net", MintMode: MintAPIKey, RegistrationsPerMinute: 1, MaxObjects: 1, CreatedAt: 1}); err != nil {
+		if err := s.CreateTenant(ctx, Tenant{ID: tn, Tailnet: "t.ts.net", MintMode: MintOAuth, RegistrationsPerMinute: 1, MaxObjects: 1, CreatedAt: 1}); err != nil {
 			t.Fatal(err)
 		}
 		l, _ := s.AcquireLease(ctx, LeaseName(tn, "w"), "h1", time.Hour, time.UnixMilli(1))

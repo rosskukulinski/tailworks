@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd/gen"
+	"github.com/rosskukulinski/tailworks/hostd/gen"
 )
 
 func macHeaders(root, class, name, method, url, ts, nonce string) http.Header {

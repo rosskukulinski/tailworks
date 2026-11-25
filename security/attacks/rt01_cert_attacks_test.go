@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/internal/caps"
-	"github.com/rosskukulinski/twd/internal/nodecert"
+	"github.com/rosskukulinski/tailworks/internal/caps"
+	"github.com/rosskukulinski/tailworks/internal/nodecert"
 )
 
 func TestRT01_CertStaleExpiredAndGarbageLim(t *testing.T) {
@@ -81,7 +81,7 @@ func TestRT01_CertStaleExpiredAndGarbageLim(t *testing.T) {
 	if g := caps.Intersect(whois, json.RawMessage(`{"other.com/cap":[{}]}`)); len(g) != 0 {
 		t.Fatalf("RT-01: a lim omitting the cap key still left caps: %v", g)
 	}
-	// Empty / null lim leaves caps unchanged (a non-twd caller, no narrowing).
+	// Empty / null lim leaves caps unchanged (a non-tw caller, no narrowing).
 	if g := caps.Intersect(whois, nil); len(toolsOf(g)) != 2 {
 		t.Fatalf("RT-01: nil lim must not narrow a non-object caller: %v", toolsOf(g))
 	}

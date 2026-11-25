@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/guest/proto"
+	"github.com/rosskukulinski/tailworks/guest/proto"
 )
 
 // vsockPeer is the guest end of one vsock connection to the agent.

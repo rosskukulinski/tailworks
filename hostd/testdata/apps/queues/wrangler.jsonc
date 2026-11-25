@@ -1,0 +1,21 @@
+{
+  // Queues fixture (hostd/queues_test.go): produces to and consumes "jobs".
+  "name": "queues",
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-01",
+  "durable_objects": {
+    "bindings": [
+      { "name": "LOG", "class_name": "Log" },
+      { "name": "BOX", "class_name": "Box" },
+    ],
+  },
+  "queues": {
+    "producers": [
+      { "binding": "JOBS", "queue": "jobs" },
+      { "binding": "SLOW", "queue": "jobs", "delivery_delay": 2 },
+    ],
+    "consumers": [
+      { "queue": "jobs", "max_batch_size": 3, "max_batch_timeout": 1, "max_retries": 1, "dead_letter_queue": "jobs-dlq" },
+    ],
+  },
+}

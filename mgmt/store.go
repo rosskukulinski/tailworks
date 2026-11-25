@@ -4,12 +4,12 @@ import (
 	"context"
 	"time"
 
-	"github.com/rosskukulinski/twd/internal/registry"
+	"github.com/rosskukulinski/tailworks/internal/registry"
 )
 
-// Store is twd-mgmt's durable state (ADR-011: leases are conditional writes
+// Store is tw-mgmt's durable state (ADR-011: leases are conditional writes
 // on a durable store; mgmt replicas are stateless). Backends: SQLite
-// (homelab / `twd up`) and Postgres.
+// (homelab / `tw up`) and Postgres.
 //
 // Fencing: every lease-holder commit carries (lease, holder, epoch); a stale
 // epoch fails with ErrLeaseLost inside the same transaction as the write.
@@ -19,8 +19,8 @@ type Store interface {
 	// UpdateTenant rewrites mint configuration and limits (not ID/tailnet).
 	UpdateTenant(ctx context.Context, t Tenant) error
 	ListTenants(ctx context.Context, pg Page) ([]Tenant, error)
-	// DeleteTenant removes the tenant row (objects, deployments and leases
-	// of the tenant must already be gone or are removed with it).
+	// DeleteTenant removes the tenant row and every row the tenant owns
+	// (sqlstore_tenantpurge.go). Its custody entries are the caller's.
 	DeleteTenant(ctx context.Context, id string) error
 
 	UpsertHost(ctx context.Context, h Host) error
@@ -81,8 +81,11 @@ type Store interface {
 	CreateChild(ctx context.Context, o Object, maxLive int) error
 	// CreateObjectChecked inserts o only within the tenant quota (maxObjects
 	// > 0) and, for a spawn, the root's budget (maxLive > 0), atomically
-	// across replicas (F14 H04, F17 H16).
-	CreateObjectChecked(ctx context.Context, o Object, maxObjects, maxLive int) error
+	// across replicas (F14 H04, F17 H16). With a non-nil fence, the
+	// workload's lease must be held by fence.Holder (and, if fence.Epoch >
+	// 0, at that epoch) in the same transaction, else ErrLeaseLost
+	// (RT3-01: a host may only create objects on leases it holds).
+	CreateObjectChecked(ctx context.Context, o Object, maxObjects, maxLive int, fence *Fence) error
 	GetObject(ctx context.Context, id string) (Object, error)
 	GetObjectByName(ctx context.Context, tenantID, workload, namespace, name string) (Object, error)
 	ListObjects(ctx context.Context, f ObjectFilter) ([]Object, error)
@@ -94,8 +97,9 @@ type Store interface {
 	// unclaimed, claimed by claimer, or claimed before staleBefore (H02).
 	ClaimMint(ctx context.Context, id, claimer string, now, staleBefore time.Time) (bool, error)
 	// SetDeploymentStatus records the host-reported status of a deployment
-	// so every replica reports it (F13, H08).
-	SetDeploymentStatus(ctx context.Context, id, status, errText string) error
+	// so every replica reports it (F13, H08). Only the host the deployment
+	// is assigned to may set it (RT3-12): a mismatch is a no-op.
+	SetDeploymentStatus(ctx context.Context, id, hostID, status, errText string) error
 	// Durable device deletes (F10, H07): SetDeviceDelete records when a
 	// killed object's device is due for deletion (unix ms); ClaimDeviceDelete
 	// takes a due one (at most one replica wins); DueDeviceDeletes lists them.
@@ -122,12 +126,12 @@ type Store interface {
 	// CountLive counts live objects of a tenant, or (rootID != "") the live
 	// descendants of rootID.
 	CountLive(ctx context.Context, tenantID, rootID string) (int, error)
-	// Public ingress (ADR-029): a workload's `twd expose` setting.
+	// Public ingress (ADR-029): a workload's `tw expose` setting.
 	GetWorkloadPublic(ctx context.Context, tenantID, workload string) (WorkloadPublic, error)
 	SetWorkloadPublic(ctx context.Context, wp WorkloadPublic) error
 	// DeleteDeadObject forgets one killed/failed object (ErrNotFound if live).
 	DeleteDeadObject(ctx context.Context, id string) error
-	// DeleteDeadObjects removes a tenant's killed and failed objects (twd
+	// DeleteDeadObjects removes a tenant's killed and failed objects (tailworks
 	// down --purge), so their names and IDs can be used again. It returns
 	// the removed objects; audit records are untouched.
 	DeleteDeadObjects(ctx context.Context, tenantID string, statuses []string) ([]Object, error)
@@ -156,6 +160,11 @@ type Store interface {
 	CountObjects(ctx context.Context) (map[string]int, error)
 	AuditChains(ctx context.Context) ([]string, error)
 	AuditHead(ctx context.Context, chain string) (seq int64, hash string, err error)
+	// AuditChainSnapshot reads a chain's records (in seq order), its head
+	// and its retention checkpoint from one consistent snapshot, so a
+	// concurrent append or prune is either in all or in none (VerifyChain,
+	// #93).
+	AuditChainSnapshot(ctx context.Context, chain string) (AuditSnapshot, error)
 
 	AddRevocation(ctx context.Context, hostID, objectID string, now time.Time) error
 	Revocations(ctx context.Context, hostID string, since time.Time) ([]string, error)
@@ -183,6 +192,11 @@ type ObjectFilter struct {
 	Status       []string
 	HasParent    bool
 	Page         Page
+
+	// Tag selects objects carrying this tag (exact "tag:<name>"); ActingFor
+	// those whose actingFor is this principal (GET /v1/objects?tag=&human=).
+	Tag       string
+	ActingFor string
 }
 
 // DeploymentFilter selects deployments; empty fields match everything.
@@ -205,4 +219,12 @@ type AuditFilter struct {
 	Until     string
 	Limit     int // deprecated: use Page.Limit
 	Page      Page
+
+	// Desc lists newest first (GET /v1/audit?order=desc); Page.After is
+	// then an upper bound.
+	Desc bool
+
+	// Workload selects records about this workload (the audit_workloads
+	// table, sqlstore_auditworkload.go).
+	Workload string
 }

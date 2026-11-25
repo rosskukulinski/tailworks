@@ -1,0 +1,14 @@
+{
+  "name": "tw-e2e-vitest",
+  "private": true,
+  "type": "module",
+  "description": "Pinned npm deps for make test-vitest: tailworks templates under @cloudflare/vitest-plugin, with @tailworks/tailnet/testing. Kept out of the root workspace so make test stays light.",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.9.0",
+    "@tailworks/tailnet": "file:../../js/packages/tailnet",
+    "vitest": "5.1.1"
+  }
+}

@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd/fakemgmt"
-	"github.com/rosskukulinski/twd/hostd/hostdtest"
-	"github.com/rosskukulinski/twd/hostd/mgmtapi"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/hostd/fakemgmt"
+	"github.com/rosskukulinski/tailworks/hostd/hostdtest"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 	"tailscale.com/tailcfg"
 )
 
@@ -22,6 +22,7 @@ import (
 // cap_missing while admitting the parent's, and must fail closed when the
 // certificate cannot be fetched.
 func TestSpawnLimEnforcedAtReceiver(t *testing.T) {
+	t.Parallel()
 	// The agent and the MCP server share this host: let the child reach the
 	// server over the tailnet (hairpin), as e2e check (d) does.
 	s := startSuiteCapsOpts(t, fakemgmt.Config{}, tailcfg.PeerCapMap{
@@ -37,7 +38,7 @@ func TestSpawnLimEnforcedAtReceiver(t *testing.T) {
 	s.waitPeer(agent.IP)
 	server := "http://" + mcp.IP + "/mcp"
 
-	// The client is not a twd object: its WhoIs caps apply unchanged.
+	// The client is not a tailworks object: its WhoIs caps apply unchanged.
 	code, r := s.getJSON("http://" + agent.IP + "/?agent=alice")
 	if code != 200 {
 		t.Fatalf("alice: %d %v", code, r)
@@ -87,6 +88,7 @@ func TestSpawnLimEnforcedAtReceiver(t *testing.T) {
 // assigns object, trace and principal, and the note can never masquerade
 // as an allow/deny decision.
 func TestTenantAuditIsOnlyANote(t *testing.T) {
+	t.Parallel()
 	s := startSuite(t, fakemgmt.Config{})
 	e := s.e
 	d := e.Deploy(hostdtest.Fixture("probe"), "probe", nil)

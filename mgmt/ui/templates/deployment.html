@@ -1,0 +1,66 @@
+{{define "content"}}
+<h1>{{.Dep.Workload}} {{template "status" .Dep.Status}}</h1>
+<p class="crumbs">Deployment <span class="mono">{{.Dep.DeploymentID}}</span> · tenant <a class="mono" href="/ui/tenants/{{.Dep.TenantID}}">{{if .Tenant.Tailnet}}{{.Tenant.Tailnet}}{{else}}{{.Dep.TenantID}}{{end}}</a> · host <a class="mono" href="/ui/hosts/{{.Dep.Host}}">{{.Dep.Host}}</a>
+  · <a href="/ui/tenants/{{.Dep.TenantID}}/workloads/{{.Dep.Workload}}/logs"><b>Logs</b></a></p>
+{{if .Dep.Error}}<div class="flash bad">{{range errLines .Dep.Error}}<div class="mono small">{{.}}</div>{{end}}</div>{{end}}
+
+<div class="grid">
+  <div class="card">
+    <h2>Deployment</h2>
+    <dl class="kv">
+      <dt>Workload</dt><dd class="mono">{{.Dep.Workload}}</dd>
+      <dt>Status</dt><dd>{{template "status" .Dep.Status}}</dd>
+      <dt>Deployed by</dt><dd>{{or .Dep.DeployedBy "—"}}</dd>
+      <dt>Deployed</dt><dd>{{since .Dep.CreatedAt}} <span class="muted small">({{stamp .Dep.CreatedAt}})</span></dd>
+      <dt>Epoch</dt><dd class="mono">{{.Dep.Epoch}}</dd>
+    </dl>
+  </div>
+  <div class="card">
+    <h2>Endpoint</h2>
+    <dl class="kv">
+      <dt>Address</dt><dd class="mono">{{if .Dep.Endpoint.MagicDNS}}<a href="http://{{.Dep.Endpoint.MagicDNS}}/" rel="noreferrer">{{.Dep.Endpoint.MagicDNS}}</a>{{else}}—{{end}}</dd>
+      <dt>Status</dt><dd>{{template "status" .Dep.Endpoint.Status}}{{if eq .Dep.Status "failed"}} <span class="small muted">(the node is up, but this deployment failed: requests get an error unless an earlier version still serves)</span>{{end}}</dd>
+      <dt>Node</dt><dd class="mono">{{or .Dep.Endpoint.Node "—"}}</dd>
+      {{if .Dep.Endpoint.ObjectID}}<dt>Object</dt><dd class="mono"><a href="/ui/objects/{{.Dep.Endpoint.ObjectID}}">{{.Dep.Endpoint.ObjectID}}</a></dd>{{end}}
+    </dl>
+  </div>
+</div>
+
+<section>
+  <div class="sect-head"><div>
+    <h2>Namespaces <span class="count">{{len .Dep.Namespaces}}</span></h2>
+    <p class="hint">The classes of node this workload can create, and the tags each one gets.</p>
+  </div></div>
+  <div class="tbl">
+  <table>
+    <thead><tr><th>Class</th><th>Tags</th><th>Time to live</th></tr></thead>
+    <tbody>{{range .Dep.Namespaces}}<tr><td class="mono">{{.Class}}</td><td class="mono">{{join .Tags}}</td><td class="mono">{{or .TTL "—"}}</td></tr>{{else}}<tr><td colspan="3" class="empty">None</td></tr>{{end}}</tbody>
+  </table>
+  </div>
+</section>
+
+<section data-live="objects">
+  <div class="sect-head"><div>
+    <h2>Objects <span class="count">{{len .Objects}}</span></h2>
+    <p class="hint">Nodes created by this workload.</p>
+  </div></div>
+  <div class="tbl">
+  <table class="objects">
+    <thead>{{template "objhead"}}</thead>
+    <tbody>{{template "objrows" .Objects}}{{if not .Objects}}<tr><td colspan="9" class="empty">This workload has no objects.</td></tr>{{end}}</tbody>
+  </table>
+  </div>
+</section>
+
+{{if ne .Dep.Status "stopped"}}{{if ne .Dep.Status "superseded"}}
+<section class="card act">
+  <h2>Undeploy</h2>
+  <form method="post" action="/ui/deployments/{{.Dep.DeploymentID}}/undeploy"
+        data-confirm="Undeploy {{.Dep.Workload}} ({{.Dep.DeploymentID}})? Every object of the workload is killed and the lease released.">
+    <input type="text" name="reason" placeholder="Reason (recorded in the audit log)" maxlength="200">
+    <button type="submit" class="danger">Undeploy</button>
+  </form>
+  <p class="small muted">Kills every object of this workload and releases its lease.</p>
+</section>
+{{end}}{{end}}
+{{end}}

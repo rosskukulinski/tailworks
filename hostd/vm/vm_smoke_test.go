@@ -13,14 +13,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/guest/proto"
-	"github.com/rosskukulinski/twd/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/guest/proto"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
 )
 
 const smokeJS = `export default {
   async fetch(req, env) {
     const u = new URL(req.url);
-    if (u.pathname === "/_twd/admin") return new Response("ok");
+    if (u.pathname === "/_tw/admin") return new Response("ok");
     if (u.pathname === "/egress") { const r = await env.GW.fetch("http://anything/x"); return new Response("via host: " + await r.text()); }
     return new Response("hello from the guest " + (req.cf ? JSON.stringify(req.cf) : "nocf"));
   }
@@ -28,14 +28,14 @@ const smokeJS = `export default {
 `
 
 // TestSmoke boots the guest image with a tiny workerd config (needs root,
-// KVM and TWD_VM_KERNEL/TWD_VM_ROOTFS).
+// KVM and TW_VM_KERNEL/TW_VM_ROOTFS).
 func TestSmoke(t *testing.T) {
-	kernel, rootfs := os.Getenv("TWD_VM_KERNEL"), os.Getenv("TWD_VM_ROOTFS")
+	kernel, rootfs := os.Getenv("TW_VM_KERNEL"), os.Getenv("TW_VM_ROOTFS")
 	if kernel == "" || rootfs == "" {
-		t.Skip("TWD_VM_KERNEL / TWD_VM_ROOTFS not set")
+		t.Skip("TW_VM_KERNEL / TW_VM_ROOTFS not set")
 	}
-	b, err := New(Config{Kernel: kernel, Rootfs: rootfs, BootArgs: os.Getenv("TWD_VM_BOOTARGS"), HugePages: os.Getenv("TWD_VM_HUGEPAGES"), VCPUs: envInt("TWD_VM_VCPUS"),
-		Helper: os.Getenv("TWD_VM_HELPER"), Pool: -1 /* the cold path; pool_test.go covers the pool */})
+	b, err := New(Config{Kernel: kernel, Rootfs: rootfs, BootArgs: os.Getenv("TW_VM_BOOTARGS"), HugePages: os.Getenv("TW_VM_HUGEPAGES"), VCPUs: envInt("TW_VM_VCPUS"),
+		Helper: os.Getenv("TW_VM_HELPER"), Pool: -1 /* the cold path; pool_test.go covers the pool */})
 	if err != nil {
 		t.Skip(err)
 	}

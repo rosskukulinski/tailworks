@@ -33,15 +33,16 @@ func (f *fakeAdv) Withdraw(_ context.Context, name string) error {
 	return nil
 }
 
-// TestServiceGate: a replica advertises svc:twd-mgmt only while its store
+// TestServiceGate: a replica advertises svc:tw-mgmt only while its store
 // answers; FailAfter consecutive failures withdraw it, one success restores
 // it, a failing first check never advertises, Close withdraws.
 func TestServiceGate(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	adv := &fakeAdv{}
 	var healthy = true
 	var changes []bool
-	g := &ServiceGate{Adv: adv, Name: "svc:twd-mgmt", Ports: []uint16{80}, FailAfter: 2,
+	g := &ServiceGate{Adv: adv, Name: "svc:tw-mgmt", Ports: []uint16{80}, FailAfter: 2,
 		Check: func(context.Context) error {
 			if healthy {
 				return nil
@@ -75,7 +76,7 @@ func TestServiceGate(t *testing.T) {
 
 	// Unhealthy from the start: never advertised.
 	adv2 := &fakeAdv{}
-	g2 := &ServiceGate{Adv: adv2, Name: "svc:twd-mgmt", Ports: []uint16{80},
+	g2 := &ServiceGate{Adv: adv2, Name: "svc:tw-mgmt", Ports: []uint16{80},
 		Check: func(context.Context) error { return errors.New("down") }}
 	g2.Step(ctx)
 	if len(adv2.calls) != 0 {
@@ -83,7 +84,7 @@ func TestServiceGate(t *testing.T) {
 	}
 	// A failed advertise is retried next step.
 	adv3 := &fakeAdv{fail: errors.New("localapi")}
-	g3 := &ServiceGate{Adv: adv3, Name: "svc:twd-mgmt", Ports: []uint16{80}, Check: func(context.Context) error { return nil }}
+	g3 := &ServiceGate{Adv: adv3, Name: "svc:tw-mgmt", Ports: []uint16{80}, Check: func(context.Context) error { return nil }}
 	g3.Step(ctx)
 	adv3.fail = nil
 	g3.Step(ctx)
@@ -93,8 +94,9 @@ func TestServiceGate(t *testing.T) {
 }
 
 func TestServiceGateClosedStaysWithdrawn(t *testing.T) {
+	t.Parallel()
 	adv := &fakeAdv{}
-	g := &ServiceGate{Adv: adv, Name: "svc:twd-mgmt", Ports: []uint16{80}, Check: func(context.Context) error { return nil }}
+	g := &ServiceGate{Adv: adv, Name: "svc:tw-mgmt", Ports: []uint16{80}, Check: func(context.Context) error { return nil }}
 	g.Step(context.Background())
 	g.Close(context.Background())
 	g.Step(context.Background())

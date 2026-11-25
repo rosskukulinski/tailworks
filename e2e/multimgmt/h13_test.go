@@ -54,7 +54,7 @@ func TestMM_H13_OBORootKeyDiverges(t *testing.T) {
 	badA := 0
 	for k := range rounds {
 		var tn struct{ TenantID string }
-		c.must(k%replicas, "", "POST", "/v1/tenants", map[string]any{"tailnet": fmt.Sprintf("a%d.ts.net", k), "mintMode": "apikey", "apiKeyFile": keyFile}, &tn)
+		c.must(k%replicas, "", "POST", "/v1/tenants", map[string]any{"tailnet": fmt.Sprintf("a%d.ts.net", k), "mintMode": "oauth", "oauthClientFile": keyFile}, &tn)
 		tids = append(tids, tn.TenantID)
 		if d, keys := diverged(tn.TenantID); d {
 			badA++
@@ -67,7 +67,7 @@ func TestMM_H13_OBORootKeyDiverges(t *testing.T) {
 	db := c.db()
 	for _, tid := range tids {
 		db.Exec("DELETE FROM secret_choice WHERE name=$1", "obo/"+tid)
-		setecDeletePrefix("twd/" + tid + "/obo-root")
+		setecDeletePrefix("tw/" + tid + "/obo-root")
 	}
 	for i := range replicas {
 		c.stop(i, syscall.SIGTERM)

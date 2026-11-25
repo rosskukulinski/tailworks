@@ -1,0 +1,26 @@
+{
+  "name": "tw-node-workflow",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "create-tailworks build-node .",
+    "dev": "tw dev",
+    "deploy": "tw deploy",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@tailworks/node": "^0.5.0",
+    "workflow": "5.6.1",
+    "@workflow/world-local": "5.4.1",
+    "@ai-sdk/workflow": "2.0.109",
+    "@ai-sdk/provider": "4.0.39",
+    "ai": "7.0.177",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@tailworks/tailnet": "^0.5.0",
+    "esbuild": "0.28.2",
+    "@types/node": "^24",
+    "typescript": "7.0.2"
+  }
+}

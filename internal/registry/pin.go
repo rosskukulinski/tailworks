@@ -9,42 +9,42 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/rosskukulinski/twd/internal/container"
-	"github.com/rosskukulinski/twd/internal/oci"
+	"github.com/rosskukulinski/tailworks/internal/container"
+	"github.com/rosskukulinski/tailworks/internal/oci"
 )
 
-// LocalRegistry is the registry host of references into twd's own
-// registry: "twd.local/<tenantID>/<name>…" (what twd deploy builds and
-// pushes) and "twd.local/<name>…" (the operator's public namespace: the
-// alias targets, e.g. twd.local/cloudflare-sandbox:0.12.14-arm64).
-const LocalRegistry = "twd.local"
+// LocalRegistry is the registry host of references into tailworks' own
+// registry: "tw.local/<tenantID>/<name>…" (what tw deploy builds and
+// pushes) and "tw.local/<name>…" (the operator's public namespace: the
+// alias targets, e.g. tw.local/cloudflare-sandbox:0.12.14-arm64).
+const LocalRegistry = "tw.local"
 
 // Alias swaps an upstream reference for another on one architecture
 // (ADR-032 D3: Cloudflare publishes cloudflare/sandbox for linux/amd64
-// only; arm64 hosts get twd's rebuild from the Apache-2.0 source).
+// only; arm64 hosts get tailworks' rebuild from the Apache-2.0 source).
 type Alias struct {
 	From string `json:"from"`
 	To   string `json:"to"`
 	Arch string `json:"arch"` // "" = every arch
+
+	// Source, if set, is a digest-pinned external image that fills To
+	// when To is not in tailworks' registry yet (aliassource.go).
+	Source string `json:"source,omitempty"`
 }
 
-// DefaultAliases are twd's arm64 rebuilds (guest/images/README.md). The
-// operator pushes them into the public namespace (twd image push).
+// DefaultAliases are tailworks' arm64 rebuilds (guest/images/README.md).
+// mgmt fills each target from its published Source on first use; without
+// one (or with -no-mirror) the operator pushes it (tw image push).
 var DefaultAliases = []Alias{
-	{From: "docker.io/cloudflare/sandbox:0.12.14", To: "twd.local/cloudflare-sandbox:0.12.14-arm64", Arch: "arm64"},
-	{From: "docker.io/cloudflare/sandbox:1.0.0", To: "twd.local/cloudflare-sandbox:1.0.0-arm64", Arch: "arm64"},
-	{From: "docker.io/cloudflare/sandbox:1.0.1", To: "twd.local/cloudflare-sandbox:1.0.1-arm64", Arch: "arm64"},
+	{From: "docker.io/cloudflare/sandbox:0.12.14", To: "tw.local/cloudflare-sandbox:0.12.14-arm64", Arch: "arm64", Source: sandboxSource("0.12.14")},
+	{From: "docker.io/cloudflare/sandbox:1.0.0", To: "tw.local/cloudflare-sandbox:1.0.0-arm64", Arch: "arm64", Source: sandboxSource("1.0.0")},
+	{From: "docker.io/cloudflare/sandbox:1.0.1", To: "tw.local/cloudflare-sandbox:1.0.1-arm64", Arch: "arm64", Source: sandboxSource("1.0.1")},
 }
 
 // AliasFor returns the alias target of ref on arch ("" = none).
 func AliasFor(aliases []Alias, ref, arch string) string {
-	n := oci.Normalize(ref)
-	for _, a := range aliases {
-		if oci.Normalize(a.From) == n && (a.Arch == "" || a.Arch == arch) {
-			return a.To
-		}
-	}
-	return ""
+	a, _ := aliasFor(aliases, ref, arch)
+	return a.To
 }
 
 // PublicImages finds an operator-marked public base by its upstream
@@ -63,7 +63,7 @@ type Resolver struct {
 	Public   PublicImages
 }
 
-// LocalRepo maps a twd.local reference's repository into the registry: a
+// LocalRepo maps a tw.local reference's repository into the registry: a
 // tenant's own namespace stays, everything else is public/.
 func LocalRepo(tenant, repo string) string {
 	if Namespace(repo) == tenant || Namespace(repo) == PublicNamespace {
@@ -106,7 +106,7 @@ func (rs *Resolver) Pin(ctx context.Context, tenant string, classes []container.
 				if name != "" {
 					src = "images." + name
 				}
-				return nil, nil, fmt.Errorf("containers.%s: image %s is a Dockerfile twd deploy has not built (run `twd deploy`: it builds the image locally and pushes it to twd's registry)", c.Class, src)
+				return nil, nil, fmt.Errorf("containers.%s: image %s is a Dockerfile tw deploy has not built (run `tw deploy`: it builds the image locally and pushes it to tailworks' registry)", c.Class, src)
 			}
 			for _, arch := range arches {
 				p, ok := cache[key{ref, arch}]
@@ -157,22 +157,29 @@ func (rs *Resolver) Pin(ctx context.Context, tenant string, classes []container.
 func (rs *Resolver) pinOne(ctx context.Context, tenant, ref, arch string) (container.Pin, error) {
 	p := container.Pin{Ref: ref, Arch: arch}
 	target := ref
-	if to := AliasFor(rs.Aliases, ref, arch); to != "" {
-		target = to
-		p.From = "alias " + to
+	alias, aliased := aliasFor(rs.Aliases, ref, arch)
+	if aliased {
+		target = alias.To
+		p.From = "alias " + alias.To
 	}
 	r, err := oci.ParseRef(target)
 	if err != nil {
 		return p, err
 	}
 	if r.Registry == LocalRegistry {
-		// A twd.local ref into another tenant's namespace can only ever
+		// A tw.local ref into another tenant's namespace can only ever
 		// name public/<that path>, never the other tenant's images.
 		p.Repository = LocalRepo(tenant, r.Repository)
 		d, err := oci.Resolve(ctx, rs.Reg, p.Repository, r.Reference(), arch)
+		if err != nil && oci.IsNotFound(err) && aliased && alias.Source != "" {
+			d, err = rs.fillAliasTarget(ctx, alias, r, p)
+			if err != nil {
+				return p, err
+			}
+		}
 		if err != nil {
 			if oci.IsNotFound(err) {
-				return p, fmt.Errorf("%s is not in twd's registry (%s): push it (twd deploy builds and pushes; the operator pushes public images with `twd image push`)", target, p.Repository)
+				return p, fmt.Errorf("%s is not in tailworks' registry (%s): push it (tw deploy builds and pushes; the operator pushes public images with `tw image push`)", target, p.Repository)
 			}
 			return p, err
 		}
@@ -193,7 +200,7 @@ func (rs *Resolver) pinOne(ctx context.Context, tenant, ref, arch string) (conta
 		}
 	}
 	if rs.Upstream == nil {
-		return p, fmt.Errorf("%s is an external image and this twd-mgmt does not mirror (no registry egress)", norm)
+		return p, fmt.Errorf("%s is an external image and this tw-mgmt does not mirror (no registry egress)", norm)
 	}
 	repo := MirrorRepo(tenant, r)
 	cp, err := oci.Copy(ctx, rs.Upstream(r.Registry), r.Repository, r.Reference(), rs.Reg, repo, []string{arch}, "")
@@ -205,15 +212,15 @@ func (rs *Resolver) pinOne(ctx context.Context, tenant, ref, arch string) (conta
 	return p, nil
 }
 
-// Built are one class's images built and pushed by twd deploy.
+// Built are one class's images built and pushed by tw deploy.
 type Built struct {
 	Image  string            `json:"image,omitempty"`
 	Images map[string]string `json:"images,omitempty"`
 }
 
-// ApplyBuilt puts the images twd deploy built (a deploy's
+// ApplyBuilt puts the images tw deploy built (a deploy's
 // ContainerImages) into the classes. A built ref must be in the tenant's
-// own namespace of twd's registry (twd.local/<tenantID>/…), so a deploy can
+// own namespace of tailworks' registry (tw.local/<tenantID>/…), so a deploy can
 // never point a class at another tenant's image.
 func ApplyBuilt(tenant string, ctrs []container.Class, built map[string]Built) ([]container.Class, error) {
 	if len(built) == 0 {

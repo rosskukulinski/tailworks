@@ -4,11 +4,11 @@ package hostd
 //
 //   - A workload whose assignment carries Public gets one extra object, the
 //     public node: namespace "_public", object name = the workload, tags
-//     and hostname chosen by mgmt (tag:twd-public, the workload name). Its
+//     and hostname chosen by mgmt (tag:tw-public, the workload name). Its
 //     netd node listens only on Funnel and delivers every request to the
 //     workload's entry node (netd PublicOptions.DeliverTo), so public
 //     traffic reaches the app's default export, never an object directly.
-//   - `twd expose off` (Assignment.Public.Exposed=false) closes the Funnel
+//   - `tw expose off` (Assignment.Public.Exposed=false) closes the Funnel
 //     listener and resets its flows; the node stays joined so its
 //     certificate stays warm. An assignment without Public closes it too
 //     (mgmt deletes the node when the routes are removed).
@@ -31,10 +31,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd/bundle"
-	"github.com/rosskukulinski/twd/hostd/mgmtapi"
-	"github.com/rosskukulinski/twd/internal/publicspec"
-	"github.com/rosskukulinski/twd/netd"
+	"github.com/rosskukulinski/tailworks/hostd/bundle"
+	"github.com/rosskukulinski/tailworks/hostd/gen"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/internal/publicspec"
+	"github.com/rosskukulinski/tailworks/netd"
 )
 
 // OriginPublic is ActingFor for objects a public request created.
@@ -44,6 +45,11 @@ const OriginPublic = "public"
 type publicState struct {
 	spec *mgmtapi.PublicAssignment // nil: not public (close any listener)
 	opts *netd.PublicOptions       // what the live node was started with
+
+	// applyMu serializes applyPublic for the workload. deploy and
+	// syncAssignments both run it; two at once would each restart the
+	// public node and start two awaitNodes for it (issue #133).
+	applyMu sync.Mutex
 }
 
 // publicCreates is the persisted record of names admitted by public
@@ -171,6 +177,10 @@ func (h *Host) applyPublic(w *workload, spec *mgmtapi.PublicAssignment) {
 		ps = &publicState{}
 		h.public[key] = ps
 	}
+	h.mu.Unlock()
+	ps.applyMu.Lock()
+	defer ps.applyMu.Unlock()
+	h.mu.Lock()
 	ps.spec = spec
 	po := h.byKey[objKey(w.tenantID, w.name, mgmtapi.PublicNamespace, w.name)]
 	t := h.tenants[w.tenantID]
@@ -246,6 +256,7 @@ func (h *Host) applyPublic(w *workload, spec *mgmtapi.PublicAssignment) {
 	h.mu.Lock()
 	wasLive := po.live
 	po.live = false
+	po.bumpNodeGenLocked() // the old node's awaitNode must not report the kill below
 	if po.Status == statusReady || po.Status == statusPending {
 		po.Status = statusPending
 		po.readyCh = make(chan struct{})
@@ -281,12 +292,19 @@ func (h *Host) admitPublic(w *workload, app *bundle.App, class, name string) (ex
 	}
 	h.mu.Lock()
 	o := h.byKey[objKey(w.tenantID, w.name, class, name)]
+	killed := o == nil && h.killedLocked(objKey(w.tenantID, w.name, class, name)) // admitkill.go
 	h.mu.Unlock()
 	if o != nil && !o.terminal() {
 		return true, nil
 	}
+	if killed {
+		return false, killedName(class, name)
+	}
 	if h.pubCreates.has(w.tenantID, w.name, class, name) {
 		return true, nil
+	}
+	if e := badObjectName(class, name); e != nil { // objname.go
+		return false, e
 	}
 	if c.Public == nil || !c.Public.Create {
 		return false, &apiError{Code: "public_create_denied", Detail: "a public request may not create " + class + "/" + name +
@@ -302,18 +320,88 @@ func (h *Host) admitPublic(w *workload, app *bundle.App, class, name string) (ex
 	return false, nil
 }
 
-// ensureAllowedPublic is the check for /v1/ensure with "public": true.
-func (h *Host) ensureAllowedPublic(w *workload, class, name string) *apiError {
+// ---- create admission (RT3-06/07) ----
+//
+// Every object name is a tailnet node, so a create is admitted explicitly:
+// by a tailnet request's ticket or an attested object (admitCreate, from
+// the platform's "admit" op), by public.create (admitPublic), or by a spawn.
+// ensure refuses to create a name nobody admitted: code that reaches a raw
+// binding (import { env } from "cloudflare:workers", a cached env, __TW)
+// can wake existing objects but cannot mint nodes.
+
+const maxAdmits = 50_000
+
+// admitCreate records that (class, name) of w may be created once within
+// gen.TicketTTL. Existing objects and node-less classes need no admission.
+func (h *Host) admitCreate(w *workload, app *bundle.App, class, name string) (existing bool, err *apiError) {
+	if class == "" || name == "" {
+		return false, &apiError{Code: "bad_request", Detail: "admit needs class and name"}
+	}
+	c := app.Classes[class]
+	if c == nil {
+		return false, &apiError{Code: "bad_request", Detail: "unknown class " + class}
+	}
+	if !c.Node {
+		return true, nil // no node, nothing to admit
+	}
 	h.mu.Lock()
-	o := h.byKey[objKey(w.tenantID, w.name, class, name)]
-	h.mu.Unlock()
-	if o != nil && !o.terminal() {
-		return nil
+	defer h.mu.Unlock()
+	if o := h.byKey[objKey(w.tenantID, w.name, class, name)]; o != nil && !o.terminal() {
+		return true, nil
 	}
-	if h.pubCreates.has(w.tenantID, w.name, class, name) {
-		return nil
+	if h.killedLocked(objKey(w.tenantID, w.name, class, name)) { // admitkill.go
+		return false, killedName(class, name)
 	}
-	return &apiError{Code: "public_create_denied", Detail: "a public request may not create " + class + "/" + name + " (not admitted)"}
+	if e := badObjectName(class, name); e != nil { // objname.go
+		return false, e
+	}
+	h.admitLocalLocked(w, class, name)
+	return false, nil
+}
+
+func (h *Host) admitLocal(w *workload, class, name string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.admitLocalLocked(w, class, name)
+}
+
+func (h *Host) admitLocalLocked(w *workload, class, name string) {
+	now := time.Now()
+	if len(h.admits) >= maxAdmits {
+		for k, exp := range h.admits {
+			if now.After(exp) {
+				delete(h.admits, k)
+			}
+		}
+		for k := range h.admits { // still full: drop arbitrary entries (they re-admit)
+			if len(h.admits) < maxAdmits {
+				break
+			}
+			delete(h.admits, k)
+		}
+	}
+	h.admits[objKey(w.tenantID, w.name, class, name)] = now.Add(gen.TicketTTL)
+}
+
+// takeAdmissionLocked consumes a live admission for key (h.mu held).
+func (h *Host) takeAdmissionLocked(key string) bool {
+	exp, ok := h.admits[key]
+	if !ok {
+		return false
+	}
+	delete(h.admits, key)
+	return time.Now().Before(exp)
+}
+
+// needsAdmission: creating (class, name) needs an admission unless it is a
+// platform-internal node (the workload's own, the public node) or a spawn
+// by an attested object (parent with a class; the workload node as parent is
+// a Worker-level spawn, admitted by its ticket in the spawn op).
+func needsAdmission(class string, parent *object) bool {
+	if class == "" || class == mgmtapi.PublicNamespace {
+		return false
+	}
+	return parent == nil || parent.Class == ""
 }
 
 func (h *Host) workloadObjectID(w *workload) string {
@@ -342,7 +430,7 @@ func (h *Host) onPublicRequest(rec netd.PublicRequestRecord) {
 		d["code"] = rec.Code
 	}
 	b, _ := json.Marshal(d)
-	h.audit.add(mgmtapi.AuditRecord{ObjectID: o.ID, Kind: "public_request", ActingFor: OriginPublic, Code: rec.Code, Detail: b, TraceID: newTraceID()})
+	h.audit.add(mgmtapi.AuditRecord{ObjectID: o.ID, Kind: kindPublicRequest, ActingFor: OriginPublic, Code: rec.Code, Detail: b, TraceID: newTraceID()})
 }
 
 // onPublicRejected records the per-minute summary of refused requests.
@@ -356,7 +444,10 @@ func (h *Host) onPublicRejected(s netd.PublicRejectSummary) {
 	top := append([]netd.IPCount(nil), s.TopIPs...)
 	sort.Slice(top, func(i, j int) bool { return top[i].Count > top[j].Count })
 	b, _ := json.Marshal(map[string]any{"from": s.From.UTC().Format(time.RFC3339), "to": s.To.UTC().Format(time.RFC3339),
-		"rateLimited": s.RateLimited, "tooLarge": s.TooLarge, "connsRefused": s.ConnsRefused, "topIPs": top, "uniqueIPApprox": s.UniqueIPApprox})
+		"rateLimited": s.RateLimited, "tooLarge": s.TooLarge, "connsRefused": s.ConnsRefused, "notPublic": s.NotPublic, "badRequest": s.BadRequest, "topIPs": top, "uniqueIPApprox": s.UniqueIPApprox,
+		"ipConnsRefused": s.IPConnsRefused,
+	})
+	h.countPublicRejected(o, s)
 	h.audit.add(mgmtapi.AuditRecord{ObjectID: o.ID, Kind: "public_rejected", ActingFor: OriginPublic, Detail: b, TraceID: newTraceID()})
 }
 

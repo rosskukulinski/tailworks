@@ -16,7 +16,7 @@ import (
 	"github.com/getkin/kin-openapi/routers"
 	"github.com/getkin/kin-openapi/routers/gorillamux"
 
-	"github.com/rosskukulinski/twd/api"
+	"github.com/rosskukulinski/tailworks/api"
 )
 
 // Spec returns the embedded (api.OpenAPI), parsed OpenAPI document. The servers list is
@@ -33,10 +33,10 @@ func Spec() (*openapi3.T, error) {
 }
 
 // excludedTags mirrors exclude-tags in api/oapi-codegen.server.yaml: those
-// operations (the OCI registry under /v2) are served by hand-written
-// handlers, not the generated /v1 server, so they are not part of the
-// contract this package validates.
-var excludedTags = []string{"registry"}
+// operations (tailworks' MCP server at /mcp, the OCI registry under /v2) are
+// served by hand-written handlers, not the generated /v1 server, so they
+// are not part of the contract this package validates.
+var excludedTags = []string{"mcp", "registry"}
 
 // dropTagged removes every operation carrying one of tags. Emptied path
 // items stay, matching oapi-codegen's pruning (and TestSpecValid's count).
@@ -96,7 +96,7 @@ func (v *Validator) ValidateRequest(r *http.Request) (*routers.Route, error) {
 		Request:    r,
 		PathParams: pathParams,
 		Route:      route,
-		Options:    &openapi3filter.Options{AuthenticationFunc: authOK, MultiError: true},
+		Options:    &openapi3filter.Options{AuthenticationFunc: authOK, MultiError: true, SchemaValidationOptions: schemaOpts},
 	}
 	if err := openapi3filter.ValidateRequest(r.Context(), in); err != nil {
 		return route, fmt.Errorf("%s %s: request: %w", r.Method, r.URL.Path, err)
@@ -112,13 +112,15 @@ func (v *Validator) ValidateResponse(r *http.Request, route *routers.Route, path
 			Request:    r,
 			PathParams: pathParams,
 			Route:      route,
-			Options:    &openapi3filter.Options{AuthenticationFunc: authOK, IncludeResponseStatus: true},
+			Options:    &openapi3filter.Options{AuthenticationFunc: authOK, IncludeResponseStatus: true, SchemaValidationOptions: schemaOpts},
 		},
 		Status: status,
 		Header: header,
 		Options: &openapi3filter.Options{
 			IncludeResponseStatus: true,
 			MultiError:            true,
+
+			SchemaValidationOptions: schemaOpts, // byteformat.go
 		},
 	}
 	in.SetBodyBytes(body)
@@ -174,6 +176,9 @@ func (r *recorder) WriteHeader(code int) {
 	r.ResponseWriter.WriteHeader(code)
 }
 
+// Unwrap lets http.ResponseController flush a streamed response (logs).
+func (r *recorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
+
 func (r *recorder) Write(p []byte) (int, error) {
 	r.wrote = true
 	r.body = append(r.body, p...)
@@ -181,7 +186,7 @@ func (r *recorder) Write(p []byte) (int, error) {
 }
 
 // OperationRoles maps "METHOD /path" (the spec's path template, which is
-// also the Go 1.22 mux pattern) to the operation's x-twd-role. Public
+// also the Go 1.22 mux pattern) to the operation's x-tw-role. Public
 // operations (empty security) map to "public".
 func OperationRoles() (map[string]string, error) {
 	doc, err := Spec()
@@ -192,7 +197,7 @@ func OperationRoles() (map[string]string, error) {
 	for path, item := range doc.Paths.Map() {
 		for method, op := range item.Operations() {
 			role := ""
-			if v, ok := op.Extensions["x-twd-role"]; ok {
+			if v, ok := op.Extensions["x-tw-role"]; ok {
 				role, _ = v.(string)
 			}
 			if op.Security != nil && len(*op.Security) == 0 {

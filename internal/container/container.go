@@ -1,6 +1,6 @@
-// Package container holds what mgmt and twd-hostd share about containers
+// Package container holds what mgmt and tw-hostd share about containers
 // and code sandboxes on the microVM tier (ADR-032): the container classes a
-// bundle declares (wrangler "containers", twd.jsonc "containers"), Cloudflare's
+// bundle declares (wrangler "containers", tailworks.jsonc "containers"), Cloudflare's
 // instance types and the resource vector a running container reserves.
 package container
 
@@ -65,16 +65,16 @@ const (
 type Class struct {
 	Class string `json:"class"`
 	// Source is the wrangler "image" as written: an image reference or a
-	// Dockerfile path / build dir that twd deploy builds.
+	// Dockerfile path / build dir that tw deploy builds.
 	Source string `json:"source,omitempty"`
 	// Image is the default image reference ctx.container.start() runs: the
-	// wrangler image when it is a reference, else the twd.jsonc pin ("" =
-	// a Dockerfile twd deploy has not built and pinned yet).
+	// wrangler image when it is a reference, else the tailworks.jsonc pin ("" =
+	// a Dockerfile tw deploy has not built and pinned yet).
 	Image string `json:"image,omitempty"`
 	// Images are the named images (Sandbox SDK 1.0 ctx.container images,
 	// wrangler "images"), name -> reference ("" = not built yet).
 	Images map[string]string `json:"images,omitempty"`
-	// ImageSources are the named images twd deploy builds: name -> the
+	// ImageSources are the named images tw deploy builds: name -> the
 	// wrangler Dockerfile (or build dir), as written.
 	ImageSources map[string]string `json:"imageSources,omitempty"`
 	// InstanceType is a named type ("" = DefaultInstanceType) or "custom".
@@ -86,24 +86,65 @@ type Class struct {
 	// Arch is the image's architecture when the bundle states it ("" = not
 	// stated: any host offering containers; pinning at deploy fills it).
 	Arch string `json:"arch,omitempty"`
+	// Build is how tw deploy builds the class's Dockerfile images
+	// (wrangler image_build_context/image_vars, images.<name>.build_context/
+	// build_vars). Developer-machine only (ADR-032 D3): never serialized,
+	// so mgmt and hosts never see it.
+	Build *Build `json:"-"`
 	// Pins are what mgmt resolved every image reference to at deploy, per
-	// architecture (ADR-032 D3): a repository in twd's registry and an
+	// architecture (ADR-032 D3): a repository in tailworks' registry and an
 	// image manifest digest. Hosts pull exactly these and nothing else.
 	Pins []Pin `json:"pins,omitempty"`
 }
 
+// Build holds the build settings of a class's Dockerfile images, as
+// written in wrangler (paths relative to the config, as wrangler resolves
+// them).
+type Build struct {
+	// Context is the default image's build context ("" = the
+	// Dockerfile's directory); Vars are its build args.
+	Context string
+	Vars    map[string]string
+	// ImageContexts and ImageVars are the same per named image.
+	ImageContexts map[string]string
+	ImageVars     map[string]map[string]string
+}
+
+// ContextFor is the build context of image name ("" = the default image),
+// "" when none is set.
+func (b *Build) ContextFor(name string) string {
+	if b == nil {
+		return ""
+	}
+	if name == "" {
+		return b.Context
+	}
+	return b.ImageContexts[name]
+}
+
+// VarsFor is the build args of image name ("" = the default image).
+func (b *Build) VarsFor(name string) map[string]string {
+	if b == nil {
+		return nil
+	}
+	if name == "" {
+		return b.Vars
+	}
+	return b.ImageVars[name]
+}
+
 // Pin is one image reference of a class, resolved once at deploy for one
 // architecture. Retagging the upstream ref later changes nothing: hosts
-// pull Repository@Digest from twd's registry.
+// pull Repository@Digest from tailworks' registry.
 type Pin struct {
 	// Name is the class's image name (wrangler "images" key; "" = the
 	// default image).
 	Name string `json:"name,omitempty"`
 	// Ref is the reference as ctx.container sees it (the wrangler image,
-	// or the twd.local ref twd deploy built).
+	// or the tw.local ref tw deploy built).
 	Ref  string `json:"ref"`
 	Arch string `json:"arch"`
-	// Repository is in twd's registry: "<tenantID>/…" or "public/…".
+	// Repository is in tailworks' registry: "<tenantID>/…" or "public/…".
 	Repository string `json:"repository"`
 	// Digest is the linux/Arch image manifest (never an index).
 	Digest string `json:"digest"`
@@ -176,7 +217,8 @@ func IsBuildSource(s string) bool {
 }
 
 // entry is one "containers" element as written in wrangler.jsonc
-// (class_name, image, images, instance_type, max_instances) or twd.jsonc
+// (class_name, image, images, instance_type, max_instances,
+// image_build_context, image_vars) or tailworks.jsonc
 // (the same keys, plus "arch"; "class" is accepted for class_name, and
 // "images" maps a name straight to a pinned reference).
 type entry struct {
@@ -187,7 +229,18 @@ type entry struct {
 	InstanceType json.RawMessage `json:"instance_type"`
 	MaxInstances *int            `json:"max_instances"`
 	Arch         string          `json:"arch"`
+
+	// Wrangler only: how tw deploy builds the image.
+	ImageBuildContext string            `json:"image_build_context"`
+	ImageVars         map[string]string `json:"image_vars"`
 }
+
+// HonouredKeys are the keys of a wrangler "containers" entry tailworks
+// reads (tw warns once per other key). "name" is Cloudflare's label for
+// the application and changes nothing here; scheduling_policy is honoured
+// only as "default" or "durable_object", which is what tailworks does (a
+// container per Durable Object).
+var HonouredKeys = []string{"arch", "class_name", "image", "image_build_context", "image_vars", "images", "instance_type", "max_instances", "name", "scheduling_policy"}
 
 var (
 	identRE = regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$]*$`)
@@ -195,8 +248,9 @@ var (
 )
 
 // entries reads a "containers" value: an array of entries (Cloudflare's
-// shape), or, in twd.jsonc, an object keyed by class ({"<Class>": {"image":
-// ref, "images": {name: ref}}}: the pins twd deploy writes).
+// shape), or, in tailworks.jsonc, an object keyed by class ({"<Class>": {"image":
+// ref, "images": {name: ref}}}: per-class image refs you pin; mgmt records
+// the digests it resolves in the deployment).
 func entries(src string, b []byte) ([]entry, error) {
 	var doc struct {
 		Containers json.RawMessage `json:"containers"`
@@ -230,17 +284,17 @@ func entries(src string, b []byte) ([]entry, error) {
 	return list, nil
 }
 
-// Parse reads the "containers" of wrangler and twd (plain JSON, comments
-// already stripped; either may be nil). A twd.jsonc entry replaces the
+// Parse reads the "containers" of wrangler and tailworks (plain JSON, comments
+// already stripped; either may be nil). A tailworks.jsonc entry replaces the
 // wrangler entry of the same class field by field (the fields it sets), and
 // may add a class. The result is sorted by class.
-func Parse(wrangler, twd []byte) ([]Class, error) {
+func Parse(wrangler, tw []byte) ([]Class, error) {
 	byClass := map[string]*Class{}
 	fromWrangler := map[string]bool{} // classes wrangler declares
 	for _, src := range []struct {
 		name string
 		b    []byte
-	}{{"wrangler", wrangler}, {"twd.jsonc", twd}} {
+	}{{"wrangler", wrangler}, {"tailworks.jsonc", tw}} {
 		if len(src.b) == 0 {
 			continue
 		}
@@ -274,11 +328,20 @@ func Parse(wrangler, twd []byte) ([]Class, error) {
 				if !IsBuildSource(e.Image) {
 					c.Image = e.Image
 				} else if src.name != "wrangler" {
-					return nil, fmt.Errorf("%s: containers.%s: image %q must be an image reference (twd.jsonc pins what twd deploy built)", src.name, name, e.Image)
+					return nil, fmt.Errorf("%s: containers.%s: image %q must be an image reference (tailworks.jsonc holds per-class image refs you pin; build sources go in wrangler.jsonc)", src.name, name, e.Image)
 				}
 			}
 			if err := c.setImages(src.name, e.Images, fromWrangler); err != nil {
 				return nil, err
+			}
+			if e.ImageBuildContext != "" || len(e.ImageVars) > 0 {
+				if src.name != "wrangler" {
+					return nil, fmt.Errorf("%s: containers.%s: image_build_context and image_vars go in wrangler.jsonc, with the Dockerfile", src.name, name)
+				}
+				if c.Build == nil {
+					c.Build = &Build{}
+				}
+				c.Build.Context, c.Build.Vars = e.ImageBuildContext, e.ImageVars
 			}
 			if e.MaxInstances != nil {
 				if *e.MaxInstances < 0 {
@@ -315,8 +378,8 @@ func Parse(wrangler, twd []byte) ([]Class, error) {
 	return out, nil
 }
 
-// setImages takes wrangler's {name: {dockerfile | image}} or twd.jsonc's
-// {name: ref} pins. A twd.jsonc pin of a class wrangler declares must name
+// setImages takes wrangler's {name: {dockerfile | image}} or tailworks.jsonc's
+// {name: ref} pins. A tailworks.jsonc pin of a class wrangler declares must name
 // one of its wrangler images (a typo is an error, not a new image).
 func (c *Class) setImages(src string, raw json.RawMessage, fromWrangler map[string]bool) error {
 	if len(raw) == 0 || string(raw) == "null" {
@@ -327,8 +390,10 @@ func (c *Class) setImages(src string, raw json.RawMessage, fromWrangler map[stri
 	}
 	if src == "wrangler" {
 		var ims map[string]struct {
-			Dockerfile string `json:"dockerfile"`
-			Image      string `json:"image"`
+			Dockerfile   string            `json:"dockerfile"`
+			Image        string            `json:"image"`
+			BuildContext string            `json:"build_context"`
+			BuildVars    map[string]string `json:"build_vars"`
 		}
 		if err := json.Unmarshal(raw, &ims); err != nil {
 			return fmt.Errorf("%s: containers.%s.images: %w", src, c.Class, err)
@@ -348,6 +413,23 @@ func (c *Class) setImages(src string, raw json.RawMessage, fromWrangler map[stri
 				c.ImageSources[n] = im.Dockerfile
 				if c.ImageSources[n] == "" {
 					c.ImageSources[n] = im.Image
+				}
+			}
+			if im.BuildContext != "" || len(im.BuildVars) > 0 {
+				if c.Build == nil {
+					c.Build = &Build{}
+				}
+				if im.BuildContext != "" {
+					if c.Build.ImageContexts == nil {
+						c.Build.ImageContexts = map[string]string{}
+					}
+					c.Build.ImageContexts[n] = im.BuildContext
+				}
+				if len(im.BuildVars) > 0 {
+					if c.Build.ImageVars == nil {
+						c.Build.ImageVars = map[string]map[string]string{}
+					}
+					c.Build.ImageVars[n] = im.BuildVars
 				}
 			}
 		}

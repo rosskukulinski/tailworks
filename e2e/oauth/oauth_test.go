@@ -1,15 +1,15 @@
 //go:build e2eoauth
 
-// E2E-OAUTH (M12) on tailnet 1: `twd up --oauth-client-file` (mint mode
+// E2E-OAUTH (M12) on tailnet 1: `tw up --oauth-client-file` (mint mode
 // oauth, the default for self-hosted installs): no browser, no Funnel, no
-// public issuer and no API key given to twd. A real OAuth client (scopes
-// auth_keys + devices:core + policy_file:read, tag tag:twd) mints mgmt's
+// public issuer and no API key given to tailworks. A real OAuth client (scopes
+// auth_keys + devices:core + policy_file:read, tag tag:tw) mints mgmt's
 // own node key, the host's node key and every object's key. Then the
-// E2E-MAC scenario (a)–(f), `twd link` from a tsnet developer node over
-// https AND http, a remote deploy / kill / audit, `twd down`, and zero
+// E2E-MAC scenario (a)–(f), `tw link` from a tsnet developer node over
+// https AND http, a remote deploy / kill / audit, `tw down`, and zero
 // leftovers (devices, keys, the OAuth client itself).
 //
-// The API key in TWD_E2E_API_KEY_FILE is used ONLY to (a) create and delete
+// The API key in TW_E2E_API_KEY_FILE is used ONLY to (a) create and delete
 // the OAuth client, (b) mint the test's own client/echo/CLI node keys, (c)
 // apply the policy additions (validated, If-Match) and (d) clean up by ID.
 package oauth
@@ -28,12 +28,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/e2e/cliflow"
-	"github.com/rosskukulinski/twd/internal/policy"
-	"github.com/rosskukulinski/twd/internal/tsapi"
-	"github.com/rosskukulinski/twd/mgmt"
-	"github.com/rosskukulinski/twd/netd"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/e2e/cliflow"
+	"github.com/rosskukulinski/tailworks/internal/policy"
+	"github.com/rosskukulinski/tailworks/internal/tsapi"
+	"github.com/rosskukulinski/tailworks/mgmt"
+	"github.com/rosskukulinski/tailworks/netd"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 )
 
 const prodControl = "https://controlplane.tailscale.com"
@@ -41,11 +41,15 @@ const prodControl = "https://controlplane.tailscale.com"
 var allowedTailnets = map[string]bool{"tail7906d5.ts.net": true}
 
 // Policy is what this scenario needs on tailnet 1: cliflow.Policy (which
-// includes policy.InfraSnippet: tag:twd owns tag:twd-mgmt and
-// tag:twd-host) plus the admin grants (autogroup:admin from the operator
+// includes policy.InfraSnippet: tag:tw owns tag:tw-mgmt and
+// tag:tw-host) plus the admin grants (autogroup:admin from the operator
 // snippet; tag:ttest for the linked CLI node).
 func Policy() policy.Snippet {
 	s := cliflow.Policy()
+	// The remote deploy (step 5) is `tw init mcp2 --template mcp`, and tw
+	// init names the workload tag after the app (tag:tw-wl-mcp2), so
+	// deploy's preflight needs it owned.
+	s.TagOwners["tag:tw-wl-mcp2"] = []string{"autogroup:admin", "tag:tw"}
 	s.Grants = append(s.Grants,
 		policy.AdminGrant("autogroup:admin", mgmt.MgmtTag, mgmt.AdminCap),
 		policy.AdminGrant(cliflow.TestTag, mgmt.MgmtTag, mgmt.AdminCap))
@@ -53,9 +57,9 @@ func Policy() policy.Snippet {
 }
 
 func TestE2EOAuth(t *testing.T) {
-	keyFile, tailnet := os.Getenv("TWD_E2E_API_KEY_FILE"), os.Getenv("TWD_E2E_TAILNET")
+	keyFile, tailnet := os.Getenv("TW_E2E_API_KEY_FILE"), os.Getenv("TW_E2E_TAILNET")
 	if keyFile == "" || tailnet == "" {
-		t.Skip("TWD_E2E_API_KEY_FILE / TWD_E2E_TAILNET not set")
+		t.Skip("TW_E2E_API_KEY_FILE / TW_E2E_TAILNET not set")
 	}
 	if !allowedTailnets[tailnet] {
 		t.Fatalf("refusing to run against tailnet %q (not in the allow list)", tailnet)
@@ -64,7 +68,7 @@ func TestE2EOAuth(t *testing.T) {
 	if err != nil {
 		t.Skip(err)
 	}
-	t.Setenv("TWD_WORKERD", wd)
+	t.Setenv("TW_WORKERD", wd)
 	apiKey, err := tsapi.LoadEnvFile(keyFile, "TS_API_KEY")
 	if err != nil {
 		t.Fatal(err)
@@ -73,7 +77,7 @@ func TestE2EOAuth(t *testing.T) {
 	b := make([]byte, 3)
 	rand.Read(b)
 	run := hex.EncodeToString(b)
-	testPrefix, twdPrefix, label := cliflow.RunPrefixes("m12", run)
+	testPrefix, twPrefix, label := cliflow.RunPrefixes("m12", run)
 	root, _ := nettest.FindRepoRoot()
 	res := cliflow.NewResults(label+"-"+run, tailnet)
 	resultsTo := filepath.Join(root, "e2e", "real", "results", "m12-oauth-"+time.Now().Format("20060102-150405")+"-"+run+".json")
@@ -105,7 +109,7 @@ func TestE2EOAuth(t *testing.T) {
 	// 2. The OAuth client (API key use (a)): what the admin generates in
 	// the console. Its secret goes only into a 0600 file.
 	work := t.TempDir()
-	oc, err := api.CreateOAuthClient(ctx, []string{"auth_keys", "devices:core", "policy_file:read"}, []string{"tag:twd"}, testPrefix+"oauth")
+	oc, err := api.CreateOAuthClient(ctx, []string{"auth_keys", "devices:core", "policy_file:read"}, []string{"tag:tw"}, testPrefix+"oauth")
 	check("create_oauth_client", err == nil, fmt.Sprint(netd.RedactError(err)))
 	clientFile := filepath.Join(work, "oauth.env")
 	if err := os.WriteFile(clientFile, []byte("TS_OAUTH_CLIENT_ID="+oc.ID+"\nTS_OAUTH_CLIENT_SECRET="+oc.Secret+"\n"), 0o600); err != nil {
@@ -117,7 +121,7 @@ func TestE2EOAuth(t *testing.T) {
 	minter := tsapi.MintSource(api, quiet)
 	tracker := tsapi.NewTracker(api)
 	bin := cliflow.BuildBinaries(t)
-	state := filepath.Join("/tmp", "twd-e2e-m12-"+run)
+	state := filepath.Join("/tmp", "tw-e2e-m12-"+run)
 	var nodes []*nettest.Node
 	newNode := func(role string, tags []string) *nettest.Node {
 		k, err := minter.AuthKey(ctx, netd.KeyRequest{ObjectID: role, Tags: tags, Ephemeral: true})
@@ -135,7 +139,7 @@ func TestE2EOAuth(t *testing.T) {
 		return n
 	}
 	e := &cliflow.Env{T: t, BinDir: bin, StateDir: state, WorkDir: work, Tailnet: tailnet, OAuthClientFile: clientFile,
-		ControlURL: prodControl, Prefix: twdPrefix, Res: res, ClientTagged: true, PolicyGrantsParentRefund: true,
+		ControlURL: prodControl, Prefix: twPrefix, Res: res, ClientTagged: true, PolicyGrantsParentRefund: true,
 		NewNode: func(role string) *nettest.Node { return newNode(role, []string{cliflow.TestTag}) }}
 	keyTo := func(name string, tags []string) string {
 		k, err := api.CreateKey(ctx, tsapi.KeyOptions{Tags: tags, Ephemeral: true, Preauthorized: true, ExpirySeconds: 900, Description: testPrefix + name})
@@ -150,8 +154,8 @@ func TestE2EOAuth(t *testing.T) {
 	downDone := false
 	t.Cleanup(func() {
 		if !downDone {
-			if _, se, _, err := e.Twd("down", "--purge"); err != nil {
-				t.Logf("twd down (cleanup): %v %s", err, netd.Redact(se))
+			if _, se, _, err := e.Tw("down", "--purge"); err != nil {
+				t.Logf("tw down (cleanup): %v %s", err, netd.Redact(se))
 			}
 		}
 		for _, c := range []string{"supervisor", "mgmt", "hostd"} {
@@ -166,23 +170,23 @@ func TestE2EOAuth(t *testing.T) {
 		cctx, ccancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer ccancel()
 		devs, keys := cliflow.Leftovers(cctx, api, res)
-		res.Cleanup["twd_devices_tracked"] = len(res.NodeIDs)
-		res.Cleanup["twd_devices_left_after_down"] = len(devs)
-		res.Cleanup["twd_keys_valid_after_down"] = len(keys)
+		res.Cleanup["tw_devices_tracked"] = len(res.NodeIDs)
+		res.Cleanup["tw_devices_left_after_down"] = len(devs)
+		res.Cleanup["tw_keys_valid_after_down"] = len(keys)
 		for _, id := range res.NodeIDs {
-			tracker.Track(id, "twd")
+			tracker.Track(id, "tw")
 		}
 		for _, id := range res.InfraNodeIDs {
-			tracker.Track(id, "twd-infra") // mgmt's and the host's own nodes: kept by twd down, deleted here by ID
+			tracker.Track(id, "tw-infra") // mgmt's and the host's own nodes: kept by tw down, deleted here by ID
 		}
 		time.Sleep(3 * time.Second)
 		crep := tracker.Cleanup(cctx, testPrefix)
-		// twd's own nodes are named twd-<label>-<run>-: report any left.
-		var untrackedTwd []string
+		// tailworks' own nodes are named tw-<label>-<run>-: report any left.
+		var untrackedTw []string
 		if all, err := api.ListDevices(cctx); err == nil {
 			for _, d := range all {
-				if strings.HasPrefix(d.Hostname, twdPrefix) || strings.HasPrefix(d.Name, twdPrefix) || strings.HasPrefix(d.Hostname, "twd-host-"+strings.TrimSuffix(twdPrefix, "-")) {
-					untrackedTwd = append(untrackedTwd, d.Name)
+				if strings.HasPrefix(d.Hostname, twPrefix) || strings.HasPrefix(d.Name, twPrefix) || strings.HasPrefix(d.Hostname, "tw-host-"+strings.TrimSuffix(twPrefix, "-")) {
+					untrackedTw = append(untrackedTw, d.Name)
 				}
 			}
 		}
@@ -209,7 +213,7 @@ func TestE2EOAuth(t *testing.T) {
 		res.Cleanup["devices_deleted_by_cleanup"] = crep.Deleted
 		res.Cleanup["devices_left"] = crep.Left
 		res.Cleanup["untracked_run_devices"] = crep.Untracked
-		res.Cleanup["twd_named_devices_left"] = untrackedTwd
+		res.Cleanup["tw_named_devices_left"] = untrackedTw
 		res.Cleanup["oauth_client_deleted"] = oc.ID
 		res.Cleanup["errors"] = errs
 		os.RemoveAll(state)
@@ -219,14 +223,14 @@ func TestE2EOAuth(t *testing.T) {
 		os.WriteFile(resultsTo, out, 0o644)
 		t.Logf("results: %s\n%s", resultsTo, out)
 		if len(devs) > 0 || len(keys) > 0 {
-			t.Errorf("after twd down: leftover twd devices %v, valid keys %d", devs, len(keys))
+			t.Errorf("after tw down: leftover tw devices %v, valid keys %d", devs, len(keys))
 		}
-		if crep.Left != 0 || len(crep.Untracked) > 0 || len(untrackedTwd) > 0 || len(errs) > 0 {
-			t.Errorf("cleanup: %+v twd-named left %v errors %v", crep, untrackedTwd, errs)
+		if crep.Left != 0 || len(crep.Untracked) > 0 || len(untrackedTw) > 0 || len(errs) > 0 {
+			t.Errorf("cleanup: %+v tw-named left %v errors %v", crep, untrackedTw, errs)
 		}
 	})
 
-	// 3. twd up --oauth-client-file … then (a)–(f), all from the host's CLI.
+	// 3. tw up --oauth-client-file … then (a)–(f), all from the host's CLI.
 	t0 := time.Now()
 	e.Run()
 	res.Numbers["scenario_ms"] = float64(time.Since(t0).Milliseconds())
@@ -234,11 +238,11 @@ func TestE2EOAuth(t *testing.T) {
 		Tailnet, MintMode, APIKeyFile, OAuthClientFile, OAuthClientID, IssuerURL, MgmtDNSName string
 		HTTPS                                                                                 bool
 	}
-	cb, _ := os.ReadFile(filepath.Join(state, "twd.json"))
+	cb, _ := os.ReadFile(filepath.Join(state, "tw.json"))
 	json.Unmarshal(cb, &cfg)
 	check("oauth_mode_no_api_key_no_funnel", cfg.MintMode == "oauth" && cfg.APIKeyFile == "" && cfg.OAuthClientID == oc.ID && cfg.OAuthClientFile == clientFile &&
 		cfg.IssuerURL == "" && cfg.Tailnet == tailnet && !strings.Contains(string(cb), "tskey-"),
-		fmt.Sprintf("twd.json: mode %s, apiKeyFile %q, client %s, issuer %q, tailnet %s (discovered)", cfg.MintMode, cfg.APIKeyFile, cfg.OAuthClientID, cfg.IssuerURL, cfg.Tailnet))
+		fmt.Sprintf("tw.json: mode %s, apiKeyFile %q, client %s, issuer %q, tailnet %s (discovered)", cfg.MintMode, cfg.APIKeyFile, cfg.OAuthClientID, cfg.IssuerURL, cfg.Tailnet))
 	var doc struct {
 		Checks []struct{ Name, Status, Detail string }
 	}
@@ -253,7 +257,7 @@ func TestE2EOAuth(t *testing.T) {
 	mlog, _ := os.ReadFile(filepath.Join(state, "logs", "mgmt.log"))
 	check("no_secret_in_logs", !strings.Contains(string(mlog), "tskey-client-") && !strings.Contains(string(mlog), "-funnel"), "mgmt.log has no tskey-client- and no Funnel listener")
 
-	// 4. twd link from a developer node (tag:ttest, admin cap) over https,
+	// 4. tw link from a developer node (tag:ttest, admin cap) over https,
 	// then a second developer state over plain http.
 	// mgmt fetches its node's HTTPS certificate in the background at start
 	// (a new name's first certificate takes 30–100 s; with no Funnel nothing

@@ -94,14 +94,6 @@ func TestPolicyETagTokenExchangeRetryAfter(t *testing.T) {
 			}
 			w.Header().Set("ETag", `"e1"`)
 			w.Write([]byte(`{"grants":[]}`))
-		case "/api/v2/oauth/token-exchange":
-			r.ParseForm()
-			if r.Form.Get("client_id") != "cid" || r.Form.Get("jwt") != "a.b.c" {
-				w.WriteHeader(401)
-				w.Write([]byte(`{"message":"bad jwt"}`))
-				return
-			}
-			w.Write([]byte(`{"access_token":"tok-secret","token_type":"Bearer","expires_in":3600}`))
 		case "/api/v2/tailnet/t.ts.net/keys":
 			w.Header().Set("Retry-After", "7")
 			w.WriteHeader(429)
@@ -116,13 +108,6 @@ func TestPolicyETagTokenExchangeRetryAfter(t *testing.T) {
 	}
 	if _, _, nm, err := c.GetPolicy(ctx, `"e1"`); err != nil || !nm {
 		t.Fatal("304", nm, err)
-	}
-	tr, err := ExchangeToken(ctx, nil, srv.URL, "cid", "a.b.c")
-	if err != nil || tr.AccessToken != "tok-secret" || tr.ExpiresIn != 3600 || strings.Contains(tr.String(), "tok-secret") {
-		t.Fatal(tr, err)
-	}
-	if _, err := ExchangeToken(ctx, nil, srv.URL, "cid", "bad"); err == nil || strings.Contains(err.Error(), "bad.") {
-		t.Fatal(err)
 	}
 	_, err = c.CreateKey(ctx, KeyOptions{Tags: []string{"tag:x"}})
 	var ae *APIError

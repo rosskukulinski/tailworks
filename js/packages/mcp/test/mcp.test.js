@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { withTailnet, caller, authorizeTool, budget } from "../dist/index.js";
-import { getCaller } from "@twd/tailnet";
+import { getCaller } from "@tailworks/tailnet";
 
 const CAP = "acme.com/cap/mcp";
 const mkReq = (caps) => {
@@ -38,7 +38,11 @@ test("cap_missing is a typed JSON error with what the caller has", () => {
   const none = getCaller(mkReq(undefined));
   assert.throws(() => authorizeTool(none, CAP, { tool: "x" }), (e) => parse(e).code === "cap_missing");
   const grouped = getCaller(mkReq([{ tools: ["refund"], groups: { refund: ["group:support"] } }]));
-  assert.throws(() => authorizeTool(grouped, CAP, { tool: "refund" }), (e) => /group:support/.test(parse(e).message));
+  // On-behalf-of is not built, so no caller is in a group: a groups grant
+  // denies (fail closed); another grant without groups still allows.
+  assert.throws(() => authorizeTool(grouped, CAP, { tool: "refund" }), (e) => /group:support/.test(parse(e).message) && parse(e).chain === undefined);
+  const both = getCaller(mkReq([{ tools: ["refund"], groups: { refund: ["group:support"] } }, { tools: ["refund"], limits: { refund: { maxUsd: 5 } } }]));
+  assert.equal(authorizeTool(both, CAP, { tool: "refund", usd: 5 }).limits.maxUsd, 5);
 });
 
 test("withTailnet exposes caller() per request and rejects unverified requests", async () => {
@@ -46,7 +50,7 @@ test("withTailnet exposes caller() per request and rejects unverified requests",
   assert.equal(await (await h.fetch(mkReq([]), {}, {})).text(), "nA");
   const bad = await h.fetch(new Request("http://x/mcp"), {}, {});
   assert.equal(bad.status, 401);
-  assert.equal(bad.headers.get("twd-error"), "no_identity");
+  assert.equal(bad.headers.get("tw-error"), "no_identity");
   assert.equal((await h.fetch(new Request("http://x/other"), {}, {})).status, 404);
   assert.throws(() => caller(), (e) => e.code === "no_identity");
 });
@@ -70,7 +74,7 @@ test("budget reserves against the perDay limit from authorizeTool", async () => 
 
 test("mcpFetch routes via ctx.tailnet.fetch with traceparent; typed errors pass through", async () => {
   const { mcpFetch } = await import("../dist/index.js");
-  const { TailnetError } = await import("@twd/tailnet");
+  const { TailnetError } = await import("@tailworks/tailnet");
   const seen = [];
   const ctx = { tailnet: { async fetch(url, init) { seen.push({ url, init }); if (url.includes("denied")) throw new TailnetError("peer_not_visible", "nope"); return new Response("{}"); } } };
   const f = mcpFetch(ctx, { traceId: "0123456789abcdef0123456789abcdef", headers: { "x-a": "1" } });

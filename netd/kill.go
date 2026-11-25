@@ -117,6 +117,7 @@ func (r *Registry) Kill(ctx context.Context, id string, opts KillOptions) (*Kill
 		ln.Close() // new SYNs to the port now get a RST from netstack
 	}
 	pubAborted := o.closePublic() // a public node: close the Funnel listener too
+	o.closeHTTPS()                // tailnethttps.go: its flows are aborted below
 	if opts.Tombstone > 0 && !opts.CloseFirst && o.pub == nil {
 		// (A public node has no tailnet listener to tombstone: its Funnel
 		// clients get a RST, and a killed node never answers on Funnel.)
@@ -170,13 +171,7 @@ func (r *Registry) Kill(ctx context.Context, id string, opts KillOptions) (*Kill
 	} else {
 		doDelete()
 		if opts.Tombstone > 0 {
-			keep := opts.KeepState
-			time.AfterFunc(opts.Tombstone, func() {
-				o.teardown()
-				if !keep {
-					os.RemoveAll(o.dir)
-				}
-			})
+			o.tomb.arm(o, opts.KeepState, opts.Tombstone) // tombstone_end.go
 		} else {
 			doClose()
 		}

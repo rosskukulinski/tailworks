@@ -1,4 +1,4 @@
-# oapi-codegen config: the Go client twd-hostd and the twd CLI use against /v1.
+# oapi-codegen config: the Go client tw-hostd and the tailworks CLI use against /v1.
 # Regenerate with `make api`; CI checks the output is current (`make api-check`).
 package: v1
 output: hostd/mgmtapi/v1/client.gen.go
@@ -8,4 +8,4 @@ generate:
 output-options:
   nullable-type: true
   name-normalizer: ToCamelCaseWithInitialisms
-  exclude-tags: [registry]
+  exclude-tags: [mcp, registry]

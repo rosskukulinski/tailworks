@@ -8,23 +8,29 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"time"
 
-	"github.com/rosskukulinski/twd/internal/procsb"
+	"github.com/rosskukulinski/tailworks/internal/procsb"
+	"github.com/rosskukulinski/tailworks/internal/wallclock"
 )
 
 // Process-tier sandboxes (Config.Sandbox).
 const (
 	SandboxNone = "none"
-	// SandboxSeatbelt runs each workerd under macOS Seatbelt
-	// (sandbox-exec). Every twd process runs as one uid on the process
+	// SandboxSeatbelt runs each workerd and Node app under macOS Seatbelt
+	// (sandbox-exec). Every tailworks process runs as one uid on the process
 	// tier, so 0700 dirs alone don't keep tenant A's workerd out of tenant
 	// B's state: the profile denies every hostd data and run dir (node
 	// keys, other tenants' DO storage and sockets, mgmt's admin socket,
-	// API key files) except the instance's own dir and its own DO storage.
+	// API key files) except the instance's own dir and its own DO storage,
+	// and (seatbelt_strict.go) writes, network, signals and exec outside
+	// what the workload needs.
 	SandboxSeatbelt = "seatbelt"
+	// SandboxSeatbeltLegacy is the pre-#121 Seatbelt profile: files and unix
+	// sockets only (TCP, signals and writes elsewhere allowed). Kept for one
+	// release in case the strict profile breaks a workload.
+	SandboxSeatbeltLegacy = "seatbelt-legacy"
 	// SandboxLandlock runs each workerd and Node app on Linux under the
 	// internal/procsb launcher: Landlock filesystem and TCP rules, no_new_privs
 	// and a seccomp filter, with the same allow list as the Seatbelt profile
@@ -50,11 +56,12 @@ func ResolveSandbox(s string) (string, error) {
 			return SandboxLandlock, nil
 		}
 		return SandboxNone, nil
-	case SandboxSeatbelt:
+	case SandboxSeatbelt,
+		SandboxSeatbeltLegacy:
 		if runtime.GOOS != "darwin" || !isFileExec(sandboxExec) {
 			return "", fmt.Errorf("sandbox %q needs macOS %s", s, sandboxExec)
 		}
-		return SandboxSeatbelt, nil
+		return s, nil
 	case SandboxLandlock:
 		if runtime.GOOS != "linux" || !procsb.Supported() {
 			_, err := procsb.ABI()
@@ -62,7 +69,7 @@ func ResolveSandbox(s string) (string, error) {
 		}
 		return SandboxLandlock, nil
 	}
-	return "", fmt.Errorf("unknown sandbox %q (none | seatbelt | landlock | auto)", s)
+	return "", fmt.Errorf("unknown sandbox %q (none | seatbelt | seatbelt-legacy | landlock | auto)", s)
 }
 
 func isFileExec(p string) bool {
@@ -88,65 +95,16 @@ func sbQuote(p string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(p) + `"`
 }
 
-// SeatbeltProfile returns a profile that denies reads, writes and unix
-// socket connects under each of deny, then allows them again under each of
-// own, and reads of each of readOnly (Seatbelt: the last matching rule
-// wins). The ancestors of own stay stat-able (workerd resolves its paths).
+// SeatbeltProfile returns the profile workerd runs under with no TCP (see
+// seatbeltProfile). tw doctor probes with it.
 func SeatbeltProfile(own, readOnly, deny []string) string {
-	return seatbeltProfile(own, readOnly, nil, deny)
-}
-
-// seatbeltProfile is SeatbeltProfile plus readOnlyTrees: dirs readable (not
-// writable) below, such as a node install prefix under the home dir.
-func seatbeltProfile(own, readOnly, readOnlyTrees, deny []string) string {
-	var b strings.Builder
-	b.WriteString("(version 1)\n(allow default)\n")
-	var denyR []string
-	for _, d := range deny {
-		if d == "" {
-			continue
-		}
-		r := realPath(d)
-		if !slices.Contains(denyR, r) {
-			denyR = append(denyR, r)
-		}
-	}
-	for _, r := range denyR {
-		fmt.Fprintf(&b, "(deny file-read* file-write* (subpath %s))\n", sbQuote(r))
-		fmt.Fprintf(&b, "(deny network-outbound (remote unix-socket (subpath %s)))\n", sbQuote(r))
-	}
-	var meta []string
-	for _, o := range append(append([]string{}, own...), readOnlyTrees...) {
-		r := realPath(o)
-		for d := filepath.Dir(r); d != "/" && d != "."; d = filepath.Dir(d) {
-			if !slices.Contains(meta, d) {
-				meta = append(meta, d)
-			}
-		}
-	}
-	for _, m := range meta {
-		fmt.Fprintf(&b, "(allow file-read-metadata (literal %s))\n", sbQuote(m))
-	}
-	for _, o := range readOnly {
-		for _, p := range []string{o, realPath(o)} {
-			fmt.Fprintf(&b, "(allow file-read* (literal %s))\n", sbQuote(p))
-		}
-	}
-	for _, o := range readOnlyTrees {
-		fmt.Fprintf(&b, "(allow file-read* (subpath %s))\n", sbQuote(realPath(o)))
-	}
-	for _, o := range own {
-		r := realPath(o)
-		fmt.Fprintf(&b, "(allow file-read* file-write* (subpath %s))\n", sbQuote(r))
-		fmt.Fprintf(&b, "(allow network-outbound (remote unix-socket (subpath %s)))\n", sbQuote(r))
-	}
-	return b.String()
+	return seatbeltProfile(own, readOnly, nil, deny, nil, nil)
 }
 
 // sandboxDeny is what no workerd may touch: the user's home dir (API key
 // files, including those of tenants added after this workerd started, and
 // everything else there), hostd's data and run dirs, the configured extra
-// paths (twd up: its state and run dirs), and the API key file of every
+// paths (tw up: its state and run dirs), and the API key file of every
 // tenant this host serves.
 func (h *Host) sandboxDeny() []string {
 	deny := append([]string{h.cfg.DataDir, h.cfg.RunDir}, h.cfg.SandboxDeny...)
@@ -167,7 +125,12 @@ func (h *Host) sandboxDeny() []string {
 	// yet (best effort: the local socket allows it, a remote mgmt may not).
 	ctx, cancel := context.WithTimeout(h.ctx, 3*time.Second)
 	defer cancel()
-	if ts, err := h.mgmt.Tenants(ctx); err == nil {
+	// Every tenant's credential files, including tenants with nothing on
+	// this host yet (paths only; GET /v1/tenants shows a host only its own
+	// tenants). An older mgmt without the route: the tenant list, as before.
+	if paths, err := h.mgmt.SandboxDenyPaths(ctx, h.cfg.HostID); err == nil {
+		deny = append(deny, paths...)
+	} else if ts, err := h.mgmt.Tenants(ctx); err == nil {
 		for _, t := range ts {
 			if t.APIKeyFile != "" {
 				deny = append(deny, t.APIKeyFile)
@@ -197,14 +160,22 @@ func (inst *instance) workerdCommand() (*exec.Cmd, error) {
 		}
 		args = append(args, "--socket-fd", "ingress=3")
 	}
+	args, bind := inst.inspectorArgs(args) // inspector.go: tw dev --inspector-port
+	args = append(args, inst.pyodideArgs()...)
+	var trees []string
+	if inst.pyodide != "" {
+		trees = []string{inst.pyodide} // pyodide.go: read-only
+	}
+	_, clockFiles := wallclock.Workerd() // a test build's skewed clock; nil otherwise
 	cmd, err := inst.sandboxed(inst.h.cfg.WorkerdBin, args,
-		[]string{inst.dir, inst.doStorage}, []string{inst.h.cfg.WorkerdBin}, nil, nil, inst.loopPorts)
+		[]string{inst.dir, inst.doStorage}, append([]string{inst.h.cfg.WorkerdBin}, clockFiles...), trees, bind, inst.loopPorts)
 	if err != nil {
 		if f != nil {
 			f.Close()
 		}
 		return nil, err
 	}
+	cmd.Env = WorkerdEnv() // workerdenv.go (#336): not hostd's environment, on any branch
 	if f != nil {
 		cmd.ExtraFiles = []*os.File{f}
 	}
@@ -225,6 +196,9 @@ func (inst *instance) nodeCommand(args []string) (*exec.Cmd, error) {
 	var bind, connect []uint16
 	if np.port != 0 {
 		bind, connect = []uint16{uint16(np.port)}, []uint16{uint16(np.port)}
+	}
+	if np.confined() { // nodelisten.go: hostd owns the listener
+		bind = nil
 	}
 	if a, ok := np.proxy.Addr().(*net.TCPAddr); ok {
 		connect = append(connect, uint16(a.Port))
@@ -247,7 +221,7 @@ func nodePrefix(bin string) []string {
 // sandbox-exec execs bin in place; Landlock: the procsb launcher does, so
 // the pid is bin's either way). The profile is written to the instance dir
 // and recorded as inst.profile. bindTCP and connectTCP are the only TCP
-// ports allowed (Landlock; Seatbelt leaves TCP alone).
+// ports allowed (Landlock: by port; Seatbelt: on localhost).
 func (inst *instance) sandboxed(bin string, args, own, readOnly, readOnlyTrees []string, bindTCP, connectTCP []uint16) (*exec.Cmd, error) {
 	if inst.h.sandbox == SandboxLandlock {
 		launcher, err := inst.h.sandboxLauncher()
@@ -260,6 +234,7 @@ func (inst *instance) sandboxed(bin string, args, own, readOnly, readOnlyTrees [
 		noUnix := inst.ingressLn != nil || inst.node != nil && inst.node.listen != "unix"
 		prof := &procsb.Profile{Launcher: launcher, Exec: readOnly, ReadOnly: readOnlyTrees, Own: own,
 			BindTCP: bindTCP, ConnectTCP: connectTCP, NoUnixSockets: noUnix, Deny: inst.h.sandboxDeny()}
+		prof.NoListen = inst.node != nil && inst.node.confined() // nodelisten.go
 		p := filepath.Join(inst.dir, "sandbox.json")
 		if err := prof.Write(p); err != nil {
 			return nil, err
@@ -269,11 +244,17 @@ func (inst *instance) sandboxed(bin string, args, own, readOnly, readOnlyTrees [
 		inst.mu.Unlock()
 		return procsb.Command(launcher, p, bin, args...), nil
 	}
-	if inst.h.sandbox != SandboxSeatbelt {
+	var prof, p string
+	switch inst.h.sandbox {
+	case SandboxSeatbelt:
+		prof = seatbeltProfile(own, readOnly, readOnlyTrees, inst.h.sandboxDeny(), bindTCP, connectTCP)
+		p = filepath.Join(inst.dir, "sandbox.sb")
+	case SandboxSeatbeltLegacy:
+		prof = seatbeltLegacyProfile(own, readOnly, readOnlyTrees, inst.h.sandboxDeny())
+		p = filepath.Join(inst.dir, legacyProfileName)
+	default:
 		return exec.Command(bin, args...), nil
 	}
-	prof := seatbeltProfile(own, readOnly, readOnlyTrees, inst.h.sandboxDeny())
-	p := filepath.Join(inst.dir, "sandbox.sb")
 	if err := os.WriteFile(p, []byte(prof), 0o600); err != nil {
 		return nil, err
 	}
@@ -284,7 +265,7 @@ func (inst *instance) sandboxed(bin string, args, own, readOnly, readOnlyTrees [
 }
 
 // sandboxLauncher is the binary that applies Landlock profiles: any binary
-// importing internal/procsb (twd-hostd; in tests, the test binary).
+// importing internal/procsb (tw-hostd; in tests, the test binary).
 func (h *Host) sandboxLauncher() (string, error) {
 	if h.cfg.SandboxLauncher != "" {
 		return h.cfg.SandboxLauncher, nil
@@ -301,6 +282,9 @@ func (h *Host) sandboxLauncher() (string, error) {
 func sandboxOf(profile string) string {
 	switch filepath.Ext(profile) {
 	case ".sb":
+		if filepath.Base(profile) == legacyProfileName {
+			return SandboxSeatbeltLegacy
+		}
 		return SandboxSeatbelt
 	case ".json":
 		return SandboxLandlock
@@ -314,7 +298,8 @@ func sandboxOf(profile string) string {
 // reach.
 func SandboxCommand(profile string, args ...string) (*exec.Cmd, error) {
 	switch sandboxOf(profile) {
-	case SandboxSeatbelt:
+	case SandboxSeatbelt,
+		SandboxSeatbeltLegacy:
 		return exec.Command(sandboxExec, append([]string{"-f", profile}, args...)...), nil
 	case SandboxLandlock:
 		p, err := procsb.Load(profile)
@@ -324,6 +309,29 @@ func SandboxCommand(profile string, args ...string) (*exec.Cmd, error) {
 		return procsb.Command(p.Launcher, profile, args[0], args[1:]...), nil
 	}
 	return nil, fmt.Errorf("no sandbox profile %q", profile)
+}
+
+// landlockTCPABI is the first Landlock ABI with TCP connect/bind rules.
+const landlockTCPABI = 4
+
+// landlockABI is the kernel's Landlock ABI when sandbox is Landlock, else 0.
+func landlockABI(sandbox string) int {
+	if sandbox != SandboxLandlock {
+		return 0
+	}
+	abi, _ := procsb.ABI()
+	return abi
+}
+
+// egressEnforcement is EgressEnforcement for a given Landlock ABI.
+func egressEnforcement(sandbox string, abi int) string {
+	if sandbox == SandboxLandlock && abi >= landlockTCPABI {
+		return EgressEnforced
+	}
+	if sandbox == SandboxSeatbelt { // TCP connects only to localhost:<proxy>, <own port>
+		return EgressEnforced
+	}
+	return EgressUnenforced
 }
 
 // SandboxInfo describes this host's process sandbox for logs and status:

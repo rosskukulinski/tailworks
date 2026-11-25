@@ -24,7 +24,7 @@ import (
 // kernel's, and IPv6 is disabled in it: even a frame the guest aims at the
 // kernel finds nothing. The guest's only peer is hostd's userspace stack.
 // (tailvisor-bridged uses the same TAP-on-a-bridge shape; the namespace is
-// twd's addition, so the bridge can never leak to the host network.)
+// tailworks' addition, so the bridge can never leak to the host network.)
 
 func ipCmd(args ...string) error {
 	out, err := exec.Command("ip", args...).CombinedOutput()

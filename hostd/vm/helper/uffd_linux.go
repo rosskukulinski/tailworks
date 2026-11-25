@@ -5,7 +5,6 @@ package helper
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -39,13 +38,7 @@ import (
 // tenant touched), while faults keep being served on demand; whichever
 // comes first wins (the other gets EEXIST).
 
-// GuestRegionUffdMapping (src/firecracker/examples/uffd/uffd_utils.rs).
-type uffdRegion struct {
-	Base     uint64 `json:"base_host_virt_addr"`
-	Size     uint64 `json:"size"`
-	Offset   uint64 `json:"offset"`
-	PageSize uint64 `json:"page_size"`
-}
+// The region table (uffdRegion) and its validation are in uffdregions.go.
 
 const (
 	uffdEventPagefault = 0x12
@@ -106,8 +99,18 @@ func (u *uffdServer) fail(err error) {
 	u.err.CompareAndSwap(nil, err)
 }
 
+// recoverSession turns a panic in one VM's fault loop or prefetch into
+// that VM's error, so the root helper keeps serving every other VM
+// (security/LOOP.md I8). It must be deferred directly.
+func (u *uffdServer) recoverSession() {
+	if r := recover(); r != nil {
+		u.fail(fmt.Errorf("uffd: panic: %v", r))
+	}
+}
+
 func (u *uffdServer) serve() {
 	defer close(u.done)
+	defer u.recoverSession()
 	u.ln.SetDeadline(time.Now().Add(30 * time.Second))
 	c, err := u.ln.AcceptUnix()
 	u.ln.Close()
@@ -140,16 +143,10 @@ func (u *uffdServer) serve() {
 		return
 	}
 	defer unix.Close(uffd)
-	var regions []uffdRegion
-	if err := json.Unmarshal(buf[:n], &regions); err != nil || len(regions) == 0 {
-		u.fail(fmt.Errorf("uffd handshake: bad mappings %q: %v", buf[:n], err))
+	regions, err := parseRegions(buf[:n], uint64(len(u.mem)))
+	if err != nil {
+		u.fail(err)
 		return
-	}
-	for _, r := range regions {
-		if r.PageSize == 0 || r.PageSize&(r.PageSize-1) != 0 || r.Offset+r.Size > uint64(len(u.mem)) {
-			u.fail(fmt.Errorf("uffd: bad region %+v (memory file %d bytes)", r, len(u.mem)))
-			return
-		}
 	}
 	if len(u.nonzero) > 0 {
 		go u.prefetch(uffd, regions)
@@ -196,7 +193,7 @@ func (u *uffdServer) serve() {
 					return
 				}
 			case uffdEventRemove:
-				// Only a balloon removes pages; twd configures none.
+				// Only a balloon removes pages; tailworks configures none.
 			}
 		}
 	}
@@ -205,34 +202,35 @@ func (u *uffdServer) serve() {
 func (u *uffdServer) copyPage(uffd int, regions []uffdRegion, addr uint64) error {
 	u.faults.Add(1)
 	u.firstFault.CompareAndSwap(0, time.Now().UnixNano())
-	for _, r := range regions {
-		if addr < r.Base || addr >= r.Base+r.Size {
+	page, src, size, ok := pageSource(regions, addr)
+	if !ok {
+		return fmt.Errorf("uffd: fault at %#x outside guest memory", addr)
+	}
+	if src > uint64(len(u.mem)) || size > uint64(len(u.mem))-src { // validateRegions rules this out
+		return fmt.Errorf("uffd: fault at %#x maps past the memory file", addr)
+	}
+	for {
+		arg := uffdioCopyArg{Dst: page, Src: uint64(uintptr(unsafe.Pointer(&u.mem[src]))), Len: size}
+		_, _, e := unix.Syscall(unix.SYS_IOCTL, uintptr(uffd), uffdioCopy, uintptr(unsafe.Pointer(&arg)))
+		switch {
+		case e == 0:
+			u.copied.Add(1)
+			return nil
+		case e == unix.EEXIST: // another vCPU faulted the same page first
+			u.eexist.Add(1)
+			return nil
+		case e == unix.EAGAIN:
 			continue
-		}
-		page := addr &^ (r.PageSize - 1)
-		src := r.Offset + (page - r.Base)
-		for {
-			arg := uffdioCopyArg{Dst: page, Src: uint64(uintptr(unsafe.Pointer(&u.mem[src]))), Len: r.PageSize}
-			_, _, e := unix.Syscall(unix.SYS_IOCTL, uintptr(uffd), uffdioCopy, uintptr(unsafe.Pointer(&arg)))
-			switch {
-			case e == 0:
-				u.copied.Add(1)
-				return nil
-			case e == unix.EEXIST: // another vCPU faulted the same page first
-				u.eexist.Add(1)
-				return nil
-			case e == unix.EAGAIN:
-				continue
-			default:
-				return fmt.Errorf("UFFDIO_COPY %#x: %w", page, e)
-			}
+		default:
+			return fmt.Errorf("UFFDIO_COPY %#x: %w", page, e)
 		}
 	}
-	return fmt.Errorf("uffd: fault at %#x outside guest memory", addr)
 }
 
 // prefetch copies the base's non-zero pages into the VM, in address order.
+// regions passed validateRegions, so r.Offset+page is inside the file.
 func (u *uffdServer) prefetch(uffd int, regions []uffdRegion) {
+	defer u.recoverSession()
 	st := time.Now()
 	for _, r := range regions {
 		for page := uint64(0); page < r.Size; page += r.PageSize {

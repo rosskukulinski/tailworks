@@ -1,12 +1,9 @@
 # twd STATUS (living log)
 
-> **Frozen 2026-11-14. Don't add to this file.** New status goes in
-> `status/<branch>.md`, one file per workstream (see `status/README.md`).
-> This file stays as the history and is still cited by section name.
+> The project was renamed twd → tailworks (issue #86). This file is frozen history and keeps the old names.
 
-Last update: 2026-11-14 00:30 PT. Fast identity: Ross approved the three decisions. `-warm-keys` now defaults to 5; port mapping stays off; **the pre-joined node pool (ADR-031 variant B) is built** (`twd-hostd -pool-nodes`, default 1 per hot class): create → first request on the object's own node **232 ms p50 / 297 ms p95** on production control. See "Fast identity, Phase 3".
-Last update: 2026-11-13 22:20 PT. Fast identity, Phase 2 on branch `fast-identity`: callers wait for a new peer's path (b), warm-key pool (a, `-warm-keys`, default off), no port mapping on host nodes (c, default); pre-joined node pool measured and drafted as ADR-031 (Proposed). See "Fast identity, Phase 2".
-Last update: 2026-11-13 21:10 PT. Fast identity, Phase 1 (measurement only) on branch `fast-identity`: per-stage cold-identity breakdown, hermetic and tailnet 1; the bimodal join explained. See "Fast identity: where a new object's node time goes".
+`BUILD-PLAN.md` and `MORNING.md` referenced below were removed before publication (see commit 84b4246); the safety rules for the real-tailnet suites are in docs/install-testing.md, "Safety rules for the real-tailnet suites".
+
 Last update: 2026-11-07 23:55 PT. M0 and M1 by the first run; M2 (`twd-mgmt`) on branch `m2-mgmt`.
 Last update: 2026-11-08 00:10 PT. M0, M1 (main) and M3 (branch `m3-hostd`).
 Last update: 2026-11-08 00:40 PT. M8 (microVM tier, Firecracker in Lima) on branch `m8-vm`: `make e2e-vm` PASS.
@@ -18,51 +15,7 @@ Last update: 2026-11-08 01:40 PT. M7 (E2E-MULTI: one host, tenant A on tailnet 1
 Last update: 2026-11-08 08:30 PT. L3: `make e2e-linux-reboot` PASS (clean reboot + power cut). Earlier, 08:15 PT, L3 (production-shaped microVM tier on Linux) on branch `l3-microvm`: `make e2e-vm` PASS (13 subtests), `make e2e-linux-vm` PASS from the installed release on fresh `twdl-kvm-u24`.
 Last update: 2026-11-08 10:00 PT. Integration (Linux): L3 + L1 merged onto master (L2) on `int-linux`; redeploy-after-purge and lease_lost-retry fixes; full matrix green (macOS, real tailnets, twd-dev, Debian 12 / Ubuntu 24.04 arm64 with reboot + ephemeral / Ubuntu 24.04 amd64, e2e-linux-vm, e2e-linux-reboot); re-find delay diagnosed (WireGuard stale-session timeout, not DERP/netmap).
 Last update: 2026-11-08 09:05 PT. L1: ephemeral nodes now re-mint on a rejected rejoin (netd + mgmt `/remint` + hostd); reboot survival and the ephemeral restart measured on Ubuntu 24.04 arm64; 5/5 supported distros PASS.
-Last update: 2026-11-13 PT. FV (fast microVM start) on branch `fast-vm`: Phase 1 boot breakdown; Phase 2 warm pool (on by default), `Boot()` p50 602 → 58 ms, deploy → active 746 → 193 ms; Phase 3 snapshot restore, **on by default for pool misses** after ADR-030 was decided (one shared base, no cross-tenant page sharing, hourly rotation); restore → ready p50 100 ms on demand. `make test`, `make lint`, `make e2e-vm`, `make e2e-linux-vm` PASS (see the FV section at the end).
 Last update: 2026-11-08 02:05 PT. Integration: master (M6 + M5 + M9, `57dd519`) merged into `m7-multi`; the full matrix passes on `4cce30d` (macOS, real tailnets, mbp from the release, Lima).
-Last update: 2026-11-13. Public ingress over Funnel (ADR-029) and a separate WIF issuer node, merged to master in PR #4; see "Public ingress over Funnel (ADR-029)" below.
-Last update: 2026-11-14. Containers and code sandboxes (ADR-032, Cloudflare `ctx.container` on the microVM tier) on branch `design/containers-sandboxes-microvm-tier`; see the section at the end and the open decisions below.
-Last update: 2026-11-14 PT. Master's fast-vm (#6), fast-identity (#7), smart placement (#3), Tailscale Services (#2) and cron triggers (#1) merged into `design/containers-sandboxes-microvm-tier` (PR #5); see "Merge of master: fast-vm, fast-identity, smart placement (2026-11-14)" in the containers section, and open decisions 11 and 12.
-
-## Open decisions (for Ross, from ADR-032)
-
-Each item says what was built and what the build currently does. Each recommendation is the builder's; none is decided. Details are in "Containers and code sandboxes (ADR-032)" at the end of this file.
-
-1. **`enableInternet` without a gateway.** twd has no tenant exit-node or gateway path yet (RFC §4.8). So `enableInternet: true` leaves from the host's own network (`-container-internet=direct`, the default), filtered by `tailnet.egress.internet` and the ADR-019 blocks.
-   - Options: keep it; default to `off` until a gateway exists; or require an operator opt-in per tenant.
-   - *Recommendation:* operator opt-in per tenant, `direct` only in single-tenant `twd up`.
-   - *ADR-029 (merged 2026-11-14):* public ingress is ingress only and adds no egress path, so this decision is unchanged. Its tenant gate (`publicIngress: allow|deny`, `deny` by default, `allow` set on single-tenant `twd up`) is the same shape as the recommendation and could be copied for an `enableInternet` gate.
-   - *Preview URLs (ADR-029 note):* `exposePort()` / `proxyToSandbox` stay `not_supported`. ADR-029 gives one public hostname per workload (`<workload>.<tailnet>.ts.net`, no wildcard certificates), and every public request goes to the Worker, so Sandbox SDK's per-port subdomain previews cannot map onto it. A path-based preview (a public route on the Worker forwarding to the object's container) works with today's pieces, but only for objects that already exist or a class with `public.create`. Not built.
-2. **amd64 verification.** The amd64 assets build reproducibly and `make test` passes on x86. But no amd64 microVM became ready on the only x86 test host, a nested QEMU/KVM guest on an AMD Zen 1 NAS whose L2 guests lose interrupts.
-   - Decide where amd64 gets verified: a bare-metal x86 box, a cloud VM with nested virtualization, or CI. Also decide whether to tear down the current test VM.
-   - *Recommendation:* a cloud x86 VM with nested KVM, then tear down the NAS VM.
-3. **Who may push images.** Developers are global admins (`twd.dev/cap/admin`), so any developer can push into any tenant's registry namespace.
-   - Add a per-tenant developer role (a cap scoped to a tenant), or accept this for the self-hosted, single-operator case?
-4. **The plain-DO attribution limit.** In plain-DO mode (`"egress": "workload"`), code in a workload can drive another plain object's container of the *same* workload: the same trust domain as `ctx.tailnet` today. Facet mode is platform-attested.
-   - Accept and document it (current), or require facet mode for container classes?
-5. **Mac hosts in production.** The vz backend gives macOS the full microVM tier, as ADR-032 D7 decided. It has no jailer equivalent, no host cgroup (CPU fractions are enforced in the guest only) and no RAM key scan (Virtualization.framework refuses to save state).
-   - Keep Mac hosts production-eligible, or mark them dev-only until a Seatbelt profile for `twd-vz` exists?
-6. **Rosetta.** Stock amd64 Cloudflare images run under Rosetta on Apple Silicon (verified), but Rosetta is opt-in (`-vm-rosetta`). Placement treats a Rosetta Mac as arm64 only, and the native arm64 path is much faster (Bun server first `/run` 11 s vs 41 s, exec p50 105 ms vs 2.2 s at `lite`).
-   - Turn Rosetta on by default? Let placement count a Rosetta Mac as amd64-capable?
-7. **Fencing granularity.** Containers are fenced per *workload* (any fenced class fences the workload), not per class as ADR-032 D2 says.
-   - Accept, or make it per class?
-8. **Registry operations.**
-   - There is no blob garbage collection.
-   - Upload sessions are files, so mgmt replicas serving `/v2/` must share the registry directory.
-   - Mirrors re-download blobs that are already stored.
-   - Decide the storage backend for multi-replica mgmt: a shared filesystem, S3-compatible, or Postgres large objects.
-9. **Upstream and signing.** File the workerd ask for a pluggable `containerEngine` (an external `rpc::Container` server), which retires the polyfill? Image signing (cosign) is deferred: when?
-10. **Cleanup debt.**
-    - Container instance types exist twice (`internal/container` and `sandbox`).
-    - There are two arm64 guest kernels (vz 6.1.167, Firecracker 6.1.155).
-    - `KernelHasErofs` is a byte scan.
-    - Schedule a cleanup pass?
-11. **Should container VMs use the warm pool or snapshots?** (from the fast-vm merge) Today they don't: the warm pool and the base snapshot serve Durable Object (workerd) guests only, and every container cold-boots (~250 ms to the entrypoint on Firecracker in Lima, against the Sandbox SDK's seconds-long first `/run`). A container VM's shape comes from its `start()` (instance type, CPU quota, pids, image and scratch drives, a NIC with no gateway services, the container kernel), D6 forbids a tenant image in a shared base, and container guests have no `load` op to reseed entropy, reset the clock and rekey.
-    - Options: keep cold boot; a per-(instance type, kernel) pool of tenant-free container VMs with the image and scratch hot-attached at claim (like the DO volume slot) and a container `load` (entropy, boot id, clock, control token, then the entrypoint); later, snapshots of such a VM before any image is attached.
-    - *Recommendation:* keep cold boot until a workload shows container start time matters; the boot is already a small part of a sandbox's first request. If it does, build the pool variant first (no snapshot), reusing the claim-time rekey.
-12. **Idle pool VMs and the capacity vector.** (from the fast-vm merge) hostd's usage report counts running DO VMs and containers, not idle pooled VMs (≤ 2 × 512 MiB by default, huge-page backed) or the base VM while it is built. So mgmt's placement sees that much more free `vms`/memory than there is, and hostd's container admission (`AcquireContainer`) can admit a container whose memory the pool holds; the pool, in turn, counts each container as one 512 MiB VM in its budget (its real guard is the free huge-page check).
-    - Options: report pooled VMs in usage as used; report them separately (`pooledVMs`) and count them as used for containers but free for DO placements (a DO deploy consumes one); or leave it (the pool is small).
-    - *Recommendation:* report them separately and subtract them for container admission and for placing container bundles.
 
 ## M0: repo skeleton (DONE)
 - Layout per RFC §15:
@@ -306,53 +259,7 @@ Code is in `mgmt/`, `cmd/twd-mgmt`, `internal/tsapi` (extended) and `e2e/real/mg
 - In wif mode, policy reads use the lifecycle credential, which then needs `policy_file:read`; this hasn't been tested on a real tailnet.
 - No Lima/Linux test run yet; the linux/arm64 build was only cross-compiled.
 
-## Cron triggers (DONE, branch `build-cron-triggers`)
-`wrangler.jsonc` `triggers.crons` run the default export's `scheduled()`. User docs: `docs/cron-triggers.md`.
-
-**Parser** (`internal/cron`)
-- Cloudflare syntax: five fields, UTC, `L`/`W`/`#`, names. Day of week is 1-7 with 1 = Sunday; `0` is refused.
-- Strict and bounded: ≤128 bytes, ≤10 triggers, no duplicates. A schedule that never fires is refused; the "never fires" check scans 50 years, since a date pinned to a weekday recurs within 40.
-- Fuzzed (63M execs, clean). A fuzz-found AND-semantics case with a gap over 8 years is kept as a regression seed.
-
-**Validation**
-- mgmt: `400 bad_bundle` on deploy and on dry run (`BundleCrons`).
-- hostd: `bundle.Parse` checks again. Node-runtime bundles with crons are refused.
-
-**Running them**
-- hostd `cronLoop` wakes at each UTC minute boundary. `cronDue` is the policy:
-  - active instance only;
-  - fresh heartbeat (≤ FenceAfter), stateless workloads included, so a partitioned host does not double-run;
-  - once per (workload, minute): no re-run after the clock steps back, no backfill after a jump forward;
-  - an overlapping run is skipped.
-- A run goes over the instance's private ingress as `cf.twd.kind = "scheduled"`. The platform checks the cron is declared, then calls `env.TENANT.scheduled()`. The `service_binding_extra_handlers` flag is on the platform worker only, and only when crons exist.
-- Runs are bounded by `CronTimeout` (15 min) and drained like requests. Egress leaves as the workload node.
-
-**`twd dev --test-scheduled`**: wrangler's `/__scheduled?cron=&time=` route on the 127.0.0.1 dev port.
-
-**Tests**
-- `internal/cron`: syntax, semantics and fuzzing.
-- `hostd/bundle`, `mgmt`: `TestBundleCrons`, `TestAPIDeployRejectsBadCrons`.
-- `hostd/gen` (real workerd): `TestGeneratedCron`, covering undeclared crons, a bad `scheduledTime`, and the `/__scheduled` and `/cdn-cgi` paths not triggering; `TestGeneratedCronCancelledOnDisconnect` checks that workerd cancels `scheduled()` when hostd times out.
-- `hostd` policy and real loop: `TestCronDue*`, `TestCronLoopFiresAtMinuteBoundary`.
-- `hostd` end to end (testcontrol, real workerd): `TestCronTriggers`, covering:
-  - the schedule, and egress attributed to the workload node;
-  - a forged `x-twd-cf` from a tailnet caller not triggering a run;
-  - timeouts;
-  - a redeploy that removes the crons.
-
-**Not built**
-- Cron runs are not in the audit chain; they are logged only.
-- No per-run history in `twd ls` (the hostd status has `Crons`).
-- No microVM-tier e2e run (the path is the same `inst.direct` ingress).
-- No Node-tier crons (roadmap; see Next steps).
-
 ## Next steps
-- **Roadmap: cron triggers for the Node tier (Vercel-style).** Today `"runtime": "node"` refuses `triggers.crons`, and twd ignores `vercel.json`; Workflow apps loop on `sleep()` instead. The plan is Vercel's model: `{path, schedule}` entries (from `twd.jsonc` `node.crons`, or `vercel.json` `crons`), with hostd sending a GET to that path in the Node process.
-  - **Reuse:** `internal/cron`, mgmt's `BundleCrons` validation, and the `cronDue` policy.
-  - **Security:** the Node listener also serves tailnet ingress, so a tailnet caller could GET the cron path directly. Two parts:
-    - a per-deployment `CRON_SECRET` in the app's environment, sent as `Authorization: Bearer`, for Vercel compatibility;
-    - a hostd-only marker that netd strips from every client request, as the real guarantee.
-  - **Tests:** Node-tier e2e tests, including a forged-request test from a tailnet caller.
 - M2 follow-ups: a per-root row lock for multi-replica budgets, a warm-key pool, node certificates (§4.6), `nodeAttributes` at mint, and a real setec.
 - M3 `twd-hostd`: move `netd/testdata/workerd/platform.js` into the generated wrapper, add the egress MAC, and run the workerd supervisor.
 ## M3: `twd-hostd` process tier + JS runtime packages (DONE, branch `m3-hostd`)
@@ -469,7 +376,7 @@ Code is in `mgmt/`, `cmd/twd-mgmt`, `internal/tsapi` (extended) and `e2e/real/mg
 - **Not built yet:**
   - egress MAC replay protection (no nonce cache; timestamp skew only);
   - same-host object→object calls over the tailnet (refused as siblings by netd); in-process DO RPC works and is not policy-checked;
-  - ~~cron triggers~~ (built: see "Cron triggers" below), WebSocket hibernation across deploys, internet egress (`egress.internet` is parsed but everything is denied), and `forward()` signing.
+  - cron triggers, WebSocket hibernation across deploys, internet egress (`egress.internet` is parsed but everything is denied), and `forward()` signing.
 
 ## Next steps
 - M2 `twd-mgmt`: SQLite and Postgres leases with epoch fencing, the mint broker (API-key mode first, reusing `internal/tsapi`), the registration throttle and the audit log.
@@ -645,7 +552,7 @@ Final run: `e2e/vm/results/m8-20261108T083524Z.json`.
   3. `tag:twd-wl-agent`, `tag:twd-agent-support` and `tag:twd-agent-support-sub` → `tag:ttest` (the echo);
   4. `tag:twd-agent-support` → `tag:twd-wl-mcp`, app `{tools:[lookup_order, refund]}`;
   5. `tag:twd-agent-support-sub` → `tag:twd-wl-mcp`, app `{tools:[lookup_order]}`.
-- The snippet is `cliflow.Policy()` in `e2e/cliflow`. **Ross's personal tailnet was not touched**, and the system tailscaled was never used.
+- The snippet is `cliflow.Policy()` in `e2e/cliflow`. **The maintainer's personal tailnet was not touched**, and the system tailscaled was never used.
 
 ### Known gaps (M4)
 - **Not yet run on `mbp`:** that needs M6 (release tarball, `install.sh`). twd finds `twd-mgmt`/`twd-hostd` next to itself, and workerd and create-twd via `$TWD_WORKERD`/`$TWD_CREATE_TWD`, next to the binary, or by walking up to a repo checkout. A release must ship `share/twd/create-twd` plus its `node_modules`. Deploy also needs `node` on the machine (esbuild).
@@ -705,7 +612,7 @@ Final run: `e2e/vm/results/m8-20261108T083524Z.json`.
 | `twd down` (purge + device deletes) · uninstall + cleanup | 0.5–3.1 s · 2.3 s |
 
 ### Safety
-- **Ross's personal tailnet was not touched.** mbp's Tailscale.app was never used, queried or read: the test never runs `tailscale`, and twd on mbp runs only tsnet nodes of tailnet 1 (`twd doctor`'s lsof check passed in every run).
+- **The maintainer's personal tailnet was not touched.** mbp's Tailscale.app was never used, queried or read: the test never runs `tailscale`, and twd on mbp runs only tsnet nodes of tailnet 1 (`twd doctor`'s lsof check passed in every run).
 - **No policy change in M6** (read-only check that M4's grants exist). No sudo on mbp; nothing installed outside `~/.twd` and `~/.twd-e2e`, and both are removed at the end. No Homebrew installs.
 - Keys: the key file goes over ssh stdin (never on a command line), mode 0600, deleted at the end even on failure. No `tskey-*` in logs or results (check-secrets).
 
@@ -748,7 +655,7 @@ Full matrix: `docs/COMPAT.md`.
   - `twd init` and `create-twd` now list `ai-agent`.
 
 ### Test results (measured 2026-11-08)
-- **`make test-sdk`: PASS on macOS** (this Mac, 28.7 s) **and in Lima `twd-dev`** (Ubuntu arm64, cloned from `/Users/ross/dev/twd` at `m5-sdk`; 82.7 s, because node joins are slower there).
+- **`make test-sdk`: PASS on macOS** (this Mac, 28.7 s) **and in Lima `twd-dev`** (Ubuntu arm64, cloned from the Mac's checkout at `m5-sdk`; 82.7 s, because node joins are slower there).
 
   | Check | Result |
   |---|---|
@@ -855,7 +762,7 @@ Full matrix: `docs/COMPAT.md`.
     3. the agent tags → `tag:ttest`;
     4. `tag:twd-agent-support` → `tag:twd-wl-mcp` `{tools:[lookup_order, refund]}`;
     5. `tag:twd-agent-support-sub` → `tag:twd-wl-mcp` `{tools:[lookup_order]}`.
-- **Tailnet 1:** not written (it already had all of this from M4). **Ross's personal tailnet was not touched**, and the system tailscaled was never used.
+- **Tailnet 1:** not written (it already had all of this from M4). **The maintainer's personal tailnet was not touched**, and the system tailscaled was never used.
 
 ### Findings
 1. **Two tailnets on one host are isolated by netd's netmap-only egress guard, with no extra code.** A tenant's registry has only its own tailnet's netmap, so another tenant's names don't resolve and its IPs aren't peers: the answer is a typed `peer_not_visible` in about 1 ms, never a timeout. Cross-tenant IP collisions are possible in principle (both tailnets draw from CGNAT space). On production they didn't happen; on testcontrol they always happen (sequential numbering). The scenario skips, and notes, an IP that is also a node of the source tenant.
@@ -1005,7 +912,7 @@ Result files: `e2e/node/results/m9-*.json`.
 Earlier runs, kept for the record: on merge commit `a219532`, `make e2e-mac` (`8c1592`) and `make e2e-multi` ×2 (`1dc500`, `4ba728`) passed, and `make e2e-mbp` failed in `make release` (fix 1). On a dirty tree with fix 1, e2e-mbp passed once (`acd614`).
 
 ### Safety
-- Policy: **no writes** (both tailnets already had the scenario's rules, as e2e-multi reports). Ross's personal tailnet and mbp's Tailscale.app were not touched (doctor's lsof check passed).
+- Policy: **no writes** (both tailnets already had the scenario's rules, as e2e-multi reports). The maintainer's personal tailnet and mbp's Tailscale.app were not touched (doctor's lsof check passed).
 - Every run deleted its own devices by ID and revoked its keys (0 left). No `tskey-` in results (check-secrets).
 
 ### Gaps (integration)
@@ -1364,7 +1271,7 @@ Measured on `l3-reboot-447bf5` with the new client-side sampler (the test client
 - Not twd-side and not trivial: a client can't be told to re-handshake by the server; tailscale's own disco path discovery is what eventually rescues it. Options if it matters: (a) have twd's workload nodes **re-mint on host reboot** (new node key; costs a device churn and ~5 s instead of ~15 s), (b) clients using a short WireGuard persistent keepalive would notice in ≤ 10 s, (c) leave it: a reboot already means ≥ 6 s of downtime before twd even starts, and the node is correct and reachable over DERP for any *new* client the moment it is up (first-time clients saw it at +2–3 s in L3's e2e-linux-vm). Recorded, not fixed.
 
 ### Safety
-- Only tailnet 1 and tailnet-2; **no policy written** (every run reported the rules already present, read-only). Every run deleted its own devices by ID and revoked its keys (0 left, see each row); no `tskey-` in any log or result (check-secrets in `make lint`). `sudo` only inside Lima VMs (`twd host setup --microvm`, `enable-linger`). Ross's personal tailnet untouched.
+- Only tailnet 1 and tailnet-2; **no policy written** (every run reported the rules already present, read-only). Every run deleted its own devices by ID and revoked its keys (0 left, see each row); no `tskey-` in any log or result (check-secrets in `make lint`). `sudo` only inside Lima VMs (`twd host setup --microvm`, `enable-linger`). The maintainer's personal tailnet untouched.
 - **VMs:** all matrix VMs are stopped and kept (`twdl-ubuntu24-arm64`, `twdl-debian12-arm64`, `twdl-ubuntu24-amd64`, `twdl-kvm-u24`; the others untouched and stopped); `twd-dev` is running. Each row's harness cleaned the VM (`twd down --purge --service`, uninstall, `rm -rf ~/.twd-e2e`; `setup --undo` on the kvm VM). `twd-dev` has a copy of the tree in `/tmp/twd-int` (no mounts used).
 
 ### Gaps (integration)
@@ -1410,7 +1317,7 @@ Tree: master `4a8e0d9` (Linux integration + `rt-fixes`) + master `63a4eb3` (`rt2
 - Timing context, not a failure: the rows that overlapped (mbp #3 with twd-dev `make test -race` + the Ubuntu release build; Ubuntu run 1 with e2e-linux-vm) show slower `twd up` / spawn numbers (e.g. up 2.7 s vs 0.66 s, spawn 3.8 s vs 1.8 s); every bound held.
 
 ### Safety
-- Only tailnet 1 and tailnet-2; **no policy written** in any run (each reported the grants already present, read-only). Every run deleted its own devices by ID and revoked its keys (0 left, per row); prefixes `ttest-fv-*` / `twd-fv-*` (hostnames) and the harness run IDs above; no `tskey-` in any log or result (`check-secrets` in `make lint`). `sudo` only inside Lima VMs (`twd host setup --microvm`, `enable-linger`, `e2e-vm`). On `mbp` only `~/.twd` / `~/.twd-e2e`, no sudo; `mbp_clean: true` after each run. Ross's personal tailnet untouched.
+- Only tailnet 1 and tailnet-2; **no policy written** in any run (each reported the grants already present, read-only). Every run deleted its own devices by ID and revoked its keys (0 left, per row); prefixes `ttest-fv-*` / `twd-fv-*` (hostnames) and the harness run IDs above; no `tskey-` in any log or result (`check-secrets` in `make lint`). `sudo` only inside Lima VMs (`twd host setup --microvm`, `enable-linger`, `e2e-vm`). On `mbp` only `~/.twd` / `~/.twd-e2e`, no sudo; `mbp_clean: true` after each run. The maintainer's personal tailnet untouched.
 - **VMs:** `twdl-ubuntu24-arm64` and `twdl-kvm-u24` were started (≤ 2 at a time), cleaned by their harness traps (`twd down --purge [--service]`, uninstall, `rm -rf ~/.twd-e2e`, `setup --undo` on the kvm VM) and **stopped** (kept); the other `twdl-*` VMs were not started; `twd-dev` is running with a copy of this tree in `/tmp/twd-fv` (and `/tmp/twd-vm-assets` from the release's guest build). The lead's red-team worktree/VMs (`twd-rt2*`, `twdl-rt*`) were not touched.
 
 ### Gaps (final verification)
@@ -1420,7 +1327,7 @@ Tree: master `4a8e0d9` (Linux integration + `rt-fixes`) + master `63a4eb3` (`rt2
 
 ## M10: keyless by default (branch `m10-keyless`, 2026-11-08) — ADR-026
 
-Ross: "We shouldn't have to use an API key. We've got Tailscale identity built into the connection." The M4 flow (`--api-key-file`, CLI only on the local unix socket, interactive login refused) was a test-harness shortcut. M10 makes the keyless path the product flow and keeps API-key mode as a labelled alternative.
+The maintainer: "We shouldn't have to use an API key. We've got Tailscale identity built into the connection." The M4 flow (`--api-key-file`, CLI only on the local unix socket, interactive login refused) was a test-harness shortcut. M10 makes the keyless path the product flow and keeps API-key mode as a labelled alternative.
 
 ### What's built
 - **`twd up` (no flags) is keyless.** mgmt's own tailnet node (`twd-mgmt`, `tag:twd-mgmt`) is joined **in the CLI** by tsnet interactive login (`cmd/twd/login.go`: the login URL is printed, the IPN bus is watched until Running, the netmap gives the tailnet name, DNS name, HTTPS and the funnel attribute), then the node's state dir (`<state>/mgmt/tsnet`) is handed to twd-mgmt, which re-opens it without any login (`twd-mgmt` fails fast with the login URL if a state ever needs one again, instead of hanging). Later `twd up` runs need no login. `--tailnet` is an override; the policy snippet (tagOwners `tag:twd`, `tag:twd-mgmt`, `tag:twd-host`; `nodeAttrs` funnel for `tag:twd-mgmt`; the `autogroup:admin → tag:twd-mgmt` grant with app cap `twd.dev/cap/admin`) is printed **before** the login URL. `https_required` / `funnel_required` stop with the exact console fix and keep the joined node. `--mgmt-authkey-file` is the unattended join (tests). The system tailscaled is still never used: mgmt's node is a tsnet node.
@@ -1449,14 +1356,14 @@ Ross: "We shouldn't have to use an API key. We've got Tailscale identity built i
 - **`make e2e-mac`: PASS 12/12** (`m4-53b7c4`, 50 s: up 1.22 s, deploy→ready 2.0 s, first object node 1.67 s, spawn 3.3 s, kill CLI 67 ms, 410 in 1 ms, 0 leftovers; the harness check `up_interactive_refused` became `up_apikey_needs_tailnet`: `twd up --yes --api-key-file f` without `--tailnet` → `tailnet_required`). **`make e2e-multi`: PASS 15/15** (`m7-c74ce8`, 75 s, 0 leftovers in both tailnets).
 
 ### Policy change on tailnet 1 (recorded per BUILD-PLAN safety rule 2)
-Applied once by `make e2e-keyless` run `2fd12c` (2026-11-08 13:30 PT) through `internal/policy.ApplyWith` (additions only; validated; `If-Match: "14e4bab4…"`; previous copy `~/.config/tailnet-agents-design/tailnet1_acl.pre-m10-2fd12c.hujson`). Added: tagOwners `tag:ttest-noadmin: ["autogroup:admin"]`; grants `autogroup:admin → tag:twd-mgmt` tcp:443,80 app `twd.dev/cap/admin`, `tag:ttest → tag:twd-mgmt` tcp:443,80 app `twd.dev/cap/admin`, `tag:ttest-noadmin → tag:twd-mgmt` tcp:443,80. `tag:twd-mgmt`/`tag:twd-host` tagOwners and the funnel nodeAttr were already there. Later runs found nothing missing and wrote nothing. **Ross's personal tailnet and the system tailscaled were never touched**; the API key was used only for policy, trust credentials, the test nodes' keys and cleanup by ID.
+Applied once by `make e2e-keyless` run `2fd12c` (2026-11-08 13:30 PT) through `internal/policy.ApplyWith` (additions only; validated; `If-Match: "14e4bab4…"`; previous copy `~/.config/tailnet-agents-design/tailnet1_acl.pre-m10-2fd12c.hujson`). Added: tagOwners `tag:ttest-noadmin: ["autogroup:admin"]`; grants `autogroup:admin → tag:twd-mgmt` tcp:443,80 app `twd.dev/cap/admin`, `tag:ttest → tag:twd-mgmt` tcp:443,80 app `twd.dev/cap/admin`, `tag:ttest-noadmin → tag:twd-mgmt` tcp:443,80. `tag:twd-mgmt`/`tag:twd-host` tagOwners and the funnel nodeAttr were already there. Later runs found nothing missing and wrote nothing. **The maintainer's personal tailnet and the system tailscaled were never touched**; the API key was used only for policy, trust credentials, the test nodes' keys and cleanup by ID.
 
 ### Limitation stated plainly
 An interactive browser login cannot be automated, so **the login-URL branch of `joinMgmtNode` (print the URL, wait for the browser) has not been run against a real control plane**; it follows tsnet's own `Up` logic (IPN bus, `BrowseToURL`, Running) but is untested beyond compiling. The e2e substitutes `--mgmt-authkey-file`, the flag the product also offers for unattended joins. Everything after the join (Funnel issuer, trust credential, WIF mint, WhoIs admin, remote CLI) ran for real.
 
 ## M11: REST v1 (spec-first) + tsnet-only operation (branch `m11-rest-tsnet`, 2026-11-08)
 
-Ross: "Normal operation should be tsnet only." · "Please add pagination now." · "All POST seems like an anti-pattern in sound REST design." Pre-release, so `/v1` is a **breaking** replacement and `/v0` goes away with no shim. Process change from the lead: **spec first**; Ross reviews the spec before any handler is written.
+The maintainer: "Normal operation should be tsnet only." · "Please add pagination now." · "All POST seems like an anti-pattern in sound REST design." Pre-release, so `/v1` is a **breaking** replacement and `/v0` goes away with no shim. Process change from the lead: **spec first**; the maintainer reviews the spec before any handler is written.
 
 ### Phase 1 (DONE, this commit): the spec is the source of truth
 - **`api/openapi.yaml`** (OpenAPI 3.1, ~2000 lines) specifies every `/v1` route and the public OIDC paths. Components: `Tenant`/`TenantCreate`/`TenantPatch`/`WIFInfo`/`WIFCheckResult`, `Host`/`HostRegistration`/`HostStatus`/`HostStatusResponse`/`HostPush`/`Lease`, `Deployment`/`DeploymentCreate`/`Assignment`/`ClassConfig`/`Endpoint`/`PreflightResult`, `Object`/`ObjectCreate`/`ObjectPatch`/`ObjectStatus`/`Tombstone`/`KillResult`, `Credential`, `NodeCertificate`(+`Payload`), `AuditRecord`/`AuditKind`/`AuditSource`/`AuditBatch`/`ChainStatus`/`AuditVerification`, `VolumeKeyGrant`, `Error`/`ErrorCode` (the full typed catalog, 35 codes, with examples per status)/`TombstoneError`, `Page` + typed `*Page` envelopes (`items`, `nextCursor: string|null`), `limit`/`cursor`/`If-Match`/`If-None-Match`/`epoch` parameters, `ETag`/`Location` headers, `Status`/`WhoAmI`/`Health`. Security: `tailnetWhoIs` (documented as WhoIs on the tsnet listener, not a token; `mutualTLS` is the nearest scheme type) and `localHostToken` (`--local-dev` only). Every operation carries `x-twd-role` (`admin` / `host` / `admin|host` / `any`); every mutating operation `x-twd-audit: true` (exceptions, recorded in the test: the 3 s heartbeat and the wif-check diagnostic). `operationId`s read as Go methods (`ListTenants`, `CreateObjectCredential`, `ReportHostStatus`, …).
@@ -1465,7 +1372,7 @@ Ross: "Normal operation should be tsnet only." · "Please add pagination now." �
 - **Validation in tests:** `mgmt/api/v1/validate.go` wraps kin-openapi `openapi3filter` (`Validator.Middleware` checks every request and response of a handler against the spec; hermetic suites will wrap mgmt's handler with it in Phase 2). `spec_test.go` proves it rejects `limit=0/501`, bad ID patterns, a missing `epoch`, unknown enum values, `additionalProperties`, a `/v0` path, a response missing required fields, an unknown error code and an undocumented status, and accepts the valid cases; `TestSpecConventions` enforces operationId / role / audit / paging / merge-patch / `If-Match`+`412` / `202`+`Location` / no DELETE bodies on every operation.
 - **Not done in Phase 1 (by instruction):** no handlers, no hostd/CLI/fakemgmt/e2e migration, no tsnet-only transport work, no store migrations. `/v0` still serves; the old `hostd/mgmtapi` (hand-written) is still what hostd compiles against; `hostd/mgmtapi/v1` is the generated replacement it will move to.
 
-### Phase 2 (pending Ross's spec review)
+### Phase 2 (pending the maintainer's spec review)
 Implement the strict-server interface in `mgmt` from the generated types; delete `/v0`; migrate hostd, fakemgmt, the CLI (`ls --limit/--all`, `kill` → DELETE, `tenant set` → PATCH, `tenant rm`, `undeploy`), the wrapper's spawn path and every e2e harness; `(created_at, id)` indexes for cursor pagination (SQLite + Postgres migrations); hostd's own `tag:twd-host` tsnet node, `twd host add` → WIF-minted single-use join key, `twd link --tsnet`, local socket only behind `--local-dev`, `twd doctor transport`.
 
 ### Phase 2 (this tree): implementation
@@ -1484,7 +1391,7 @@ Implement the strict-server interface in `mgmt` from the generated types; delete
   - Two product bugs found by this run and fixed: (1) `twd status` said host `""` before the join (now `pending`); (2) the mint of the host join key was refused by the control plane (`tags [tag:twd-host] … not permitted`) because tailnet 1's `tag:twd-host` owners were `[autogroup:admin, tag:twd-mgmt]` from an earlier milestone and `internal/policy.Missing` never added owners to an *existing* tag. Merges are now additive at the owner level (`Missing`/`Merge`/`VerifyAdditive`), which also matters for real deployments whose policies predate a snippet change.
 
 ### Policy changes on tailnet 1 (recorded per BUILD-PLAN safety rule 2)
-Applied by `make e2e-keyless` through `internal/policy.ApplyWith` (additions only; validated; `If-Match`; previous copies kept): run `a83272` (2026-11-08 22:05 PT) added the grant `tag:twd-mgmt → tag:twd-host tcp:7474` (kill push to the host's node; previous copy `~/.config/tailnet-agents-design/tailnet1_acl.pre-m10-a83272.hujson`); run `93bf7b` (22:06 PT, `If-Match "87d6044e…"`) added the owner `tag:twd` to `tagOwners["tag:twd-host"]` (previous copy `…/tailnet1_acl.pre-m10-93bf7b.hujson`). The grant `tag:twd-host → tag:twd-mgmt tcp:80,443` and the `tag:twd-mgmt`/`tag:twd-host` tagOwners were already present. **Ross's personal tailnet and this Mac's system tailscaled were never touched**; the API key was used only for policy, trust credentials, the test nodes' keys and cleanup by ID.
+Applied by `make e2e-keyless` through `internal/policy.ApplyWith` (additions only; validated; `If-Match`; previous copies kept): run `a83272` (2026-11-08 22:05 PT) added the grant `tag:twd-mgmt → tag:twd-host tcp:7474` (kill push to the host's node; previous copy `~/.config/tailnet-agents-design/tailnet1_acl.pre-m10-a83272.hujson`); run `93bf7b` (22:06 PT, `If-Match "87d6044e…"`) added the owner `tag:twd` to `tagOwners["tag:twd-host"]` (previous copy `…/tailnet1_acl.pre-m10-93bf7b.hujson`). The grant `tag:twd-host → tag:twd-mgmt tcp:80,443` and the `tag:twd-mgmt`/`tag:twd-host` tagOwners were already present. **The maintainer's personal tailnet and this Mac's system tailscaled were never touched**; the API key was used only for policy, trust credentials, the test nodes' keys and cleanup by ID.
 - **`make e2e-mac` (tailnet 1, apikey mode, run `8a7e51`): PASS 13/13** in 65 s, **tsnet only in apikey mode too**: the API key minted mgmt's node key in-process (no browser login), `POST /v1/hosts` minted the host join key, `transport_tsnet_only` passed (`doctor ok tsnet: … hostd on its own tag:twd-host node twd-host-twd-e2e-8a7e51`, no `mgmt.sock`), up 13.6 s (incl. both node joins), deploy→ready 4.6 s, first object node 1.9 s, kill CLI 156 ms, down 2.9 s; cleanup by ID: 9 devices deleted (5 object nodes + mgmt node + host node + 2 test nodes), **0 left, 0 untracked**.
 - **`make e2e-multi` (tailnet 1 + tailnet-2, run `02d7b2`): PASS 16/16** in 97 s (tenant A on mgmt's/the host's tailnet, tenant B added with its API key; isolation checks a–f; the sandbox check now asserts **no mgmt unix socket**, and that mgmt's loopback credential and the host node's state are unreadable from a tenant's workerd). Cleanup by ID in both tailnets: **0 devices left** (verified read-only after the run: no `twd-*`/`ttest-*` device on either test tailnet). The first run of the day found a harness gap, not a product one: the multi harness tracked mgmt's and the host's own nodes on the overall results, not on tenant A's per-tailnet cleanup list, so those two nodes outlived the run; they were deleted by ID and the harness fixed.
 
@@ -1499,7 +1406,7 @@ Applied by `make e2e-keyless` through `internal/policy.ApplyWith` (additions onl
 
 ## M12: OAuth client mint mode, the self-hosted default (branch `m12-oauth`, 2026-11-09)
 
-Ross, installing on his prod tailnet: WIF needs Funnel + HTTPS + a public OIDC issuer just to get a secretless `auth_keys` credential; move to an **OAuth client** (scope `auth_keys`, tag `tag:twd`, never expires; the mechanism of the k8s operator / GitHub Action) as the default. WIF stays (hosted / multi-tenant), API key stays as the explicit fallback.
+The maintainer, installing on a production tailnet: WIF needs Funnel + HTTPS + a public OIDC issuer just to get a secretless `auth_keys` credential; move to an **OAuth client** (scope `auth_keys`, tag `tag:twd`, never expires; the mechanism of the k8s operator / GitHub Action) as the default. WIF stays (hosted / multi-tenant), API key stays as the explicit fallback.
 
 ### What's built
 - **Mint mode `oauth` in mgmt** (`mgmt/broker.go`, `internal/tsapi/oauth.go`). Tenant fields `oauthClientID` (public) + `oauthClientFile` (absolute path; the secret is never stored or returned). The file (`TS_OAUTH_CLIENT_ID=…`, `TS_OAUTH_CLIENT_SECRET=tskey-client-…`) is **re-read at every token exchange** and refused if `mode & 0o077 != 0` (at tenant create/patch and at every exchange). Client-credentials grant at `POST /api/v2/oauth/token`; the access token is cached until ~90 % of its life; a **401 invalidates it and the request is retried once** with a fresh exchange (`tsapi.Client.Tokens`). Keys are minted exactly as in apikey mode (single use, preauthorized, ≤ 5 min, tagged). Device deletes use the same token: a **403 → `device_delete_unavailable`** in `KillResult.warnings` (code, objects, fix) and in the kill / `device_delete` audit detail; the kill itself never fails; later kills warn up front; the tombstone reports `deviceDeleted: false`. A tag refusal at the host join key mint → **`403 policy_missing_tag_owners`** with the tagOwners snippet. Secrets/tokens never logged (tests assert it; `netd.Redact` covers `tskey-client-`). hostd's sandbox denies every tenant's `oauthClientFile` (and `twd up` adds it to `-sandbox-deny`).
@@ -1512,7 +1419,7 @@ Ross, installing on his prod tailnet: WIF needs Funnel + HTTPS + a public OIDC i
 - **Docs:** `docs/INSTALL.md` "Recommended: OAuth client" first (policy, console steps, file, `twd up`), "Alternative: workload identity federation (`twd up --wif`)" second, "Last resort: API-key mode" last; troubleshooting for the new codes; `MORNING.md` command list; `install.sh` hint.
 
 ### Safety fix found on the way (product bug)
-`twd up`/`twd down` checked *any* installed LaunchAgent/systemd unit, not the one for their state dir. This Mac now runs Ross's real twd as `dev.twd.up` (`~/.twd`), so every hermetic/e2e `twd up --state-dir /tmp/…` failed `service_running`, and **a test's `twd down` would have stopped Ross's service** (`serviceStop()`). Now `serviceOf(s)` only counts a unit whose `--state-dir` is `s.Dir`, and `down --service` only removes its own. Ross's service was never stopped (checked `launchctl print`: running throughout). Also: `TestCLILink`'s "auto-discovery fails" case resolved `twd-mgmt` through this Mac's MagicDNS and **reached Ross's real mgmt on the personal tailnet** with one read-only `GET /v1/whoami` (the link was saved only in a temp dir, nothing written anywhere); the test now sets `TWD_LINK_DISCOVER_NAME` to an unresolvable name.
+`twd up`/`twd down` checked *any* installed LaunchAgent/systemd unit, not the one for their state dir. This Mac now runs the maintainer's real twd as `dev.twd.up` (`~/.twd`), so every hermetic/e2e `twd up --state-dir /tmp/…` failed `service_running`, and **a test's `twd down` would have stopped the maintainer's service** (`serviceStop()`). Now `serviceOf(s)` only counts a unit whose `--state-dir` is `s.Dir`, and `down --service` only removes its own. The maintainer's service was never stopped (checked `launchctl print`: running throughout). Also: `TestCLILink`'s "auto-discovery fails" case resolved `twd-mgmt` through this Mac's MagicDNS and **reached the maintainer's real mgmt on the personal tailnet** with one read-only `GET /v1/whoami` (the link was saved only in a temp dir, nothing written anywhere); the test now sets `TWD_LINK_DISCOVER_NAME` to an unresolvable name.
 
 ### Test results (2026-11-09, this Mac)
 - **Hermetic:** `internal/tsapi` `TestLoadOAuthFile` (0600 enforcement, ID from the secret, mismatch, no secret in errors/`%#v`, redaction), `TestOAuthSourceCacheRefreshRetry` (cache, refresh near expiry, 401 → one retry, persistent 401 → exactly one retry, wrong secret, mode loosened later), `TestIsTagsNotPermitted`; `mgmt.TestOAuthMintPath` (spec-validated: create refusals, no secret in responses, host + object keys via OAuth, 1 exchange cached, revoked token → retry, kill with devices:core deletes, without → `device_delete_unavailable` in result + audit + tombstone, deferred delete audit with code + fix, `policy_missing_tag_owners` + snippet, group-readable file refused, no secret/token in logs); `cmd/twd.TestOperatorSnippet`, `TestModeChoiceAndTypedErrors`; **`cmd/twd.TestCLIOAuth`** (real binaries on testcontrol + fake API with an OAuth token endpoint: 0644 → `credential_file_insecure`; policy without `tag:twd` owners → `policy_missing_tag_owners`, **0 keys minted, mgmt not joined**; then the whole (a)–(f) scenario in oauth mode, 3 exchanges, 0 API-key requests, doctor ok/warn, no secret in logs) 12.6 s.
@@ -1522,874 +1429,10 @@ Ross, installing on his prod tailnet: WIF needs Funnel + HTTPS + a public OIDC i
 - **`make e2e-mac`: PASS** (61 s, apikey mode, 0 left). **`make e2e-multi`: PASS 16/16** (103 s, 0 left in both tailnets).
 
 ### Policy change on tailnet 1 (BUILD-PLAN safety rule 2)
-Run `e6d03b` (2026-11-08 23:56 PT) via `policy.ApplyWith` (additions only, validated, `If-Match "07e9f510…"`, previous copy `~/.config/tailnet-agents-design/tailnet1_acl.pre-m12-e6d03b.hujson`): added owner **`tag:twd` to `tagOwners["tag:twd-mgmt"]`**. Later runs wrote nothing. No other tailnet's policy was read or written; Ross's personal tailnet was touched only by the hermetic test bug described above (one read-only whoami to his twd-mgmt, now fixed).
+Run `e6d03b` (2026-11-08 23:56 PT) via `policy.ApplyWith` (additions only, validated, `If-Match "07e9f510…"`, previous copy `~/.config/tailnet-agents-design/tailnet1_acl.pre-m12-e6d03b.hujson`): added owner **`tag:twd` to `tagOwners["tag:twd-mgmt"]`**. Later runs wrote nothing. No other tailnet's policy was read or written; the maintainer's personal tailnet was touched only by the hermetic test bug described above (one read-only whoami to his twd-mgmt, now fixed).
 
 ### Gaps (M12)
 - `twd tenant add` (a second tenant) is still apikey-only; oauth for a second tenant is a PATCH away in the API (`mintMode: oauth`, `oauthClientFile`) but has no CLI flag yet.
 - The interactive confirmation before the WIF login URL and the translation of a join-time tag refusal were exercised only by unit tests (no real browser login can be automated).
 - Not exercised for real: an OAuth client **without** `devices:core` (hermetic only), and a real `policy_missing_tag_owners` (would need breaking tailnet 1's policy); both covered hermetically.
 - `twd up` without `policy_file:read` can't check grants; it reports that and relies on the mints proving tag ownership. Without that scope `spawn()` answers `policy_unavailable` (same as WIF without a lifecycle credential).
-
-## Fast identity: where a new object's node time goes (branch `fast-identity`, 2026-11-13; Phase 1, measurement only)
-**Question.** A new object's compute is ready in 13–24 ms, but its own node is reachable only 1.5–7 s later (bimodal). Where does that time go? No optimisation in this phase.
-
-**Instrumentation (kept; diagnostics only, no behaviour change):**
-- **mgmt** logs `mint spans` after every successful mint (`queued_ms` create → attempt on the store clock, then `load`, `claim`, `throttle`, `reclaim`, `broker`, `createkey`, `custody`, `commit`, `attempt_ms`, `create_to_minted_ms`; durations on the replica's monotonic clock, never used for decisions) and `credential released` (`waited_ms`, `since_create_ms`). Both name the key by ID only.
-- **netd** records `JoinSpans` per fresh join (`ObjectInfo.spans`, and the `object ready` log line): join slot, key in hand, tsnet backend started, controlclient `doLogin` / `RegisterReq` sent / its response (matched in tsnet's own log lines), IPN `Starting`, the first `SelfChange` (the node's first netmap), `Running`, listener open. `up()` now always calls `srv.Start()` before `Up` (it only did on rejoins) so the bus is watched from the first transition.
-- **Harness** `e2e/coldid` (`make e2e-coldid`, `make e2e-coldid-real`): the real code path in one process. twd-mgmt (SQLite) is served on its v1 unix socket. Objects are created with `POST /v1/objects` and minted by the mint worker. A netd `Registry` joins each node with a KeySource that is hostd's loop (the fenced `POST …/credentials?epoch=&wait=10` long-poll). A separate **caller** node watches its IPN bus (`PeersChanged`: when the new node lands in its netmap, when it gets a home DERP and endpoints) and GETs the object's own node until a 200, recording the path. Two caller modes: dial as soon as the peer is in the netmap (a client polling MagicDNS), or only after the node is ready (a client told "ready" by twd). Objects are created one at a time (2 s apart on the real tailnet). `TWD_COLDID_AGG=<glob> … -run Aggregate` pools result files into the table below.
-- Not in the path: hostd's own `CreateObject` RPC over its tsnet loopback (the harness calls the same API on the unix socket) and workerd.
-
-**Runs.**
-- Hermetic (testcontrol + local DERP/STUN, fake key API): 94 objects (64 dial-on-netmap, 30 dial-on-ready).
-- Tailnet 1 (production control, `ttest-fi-<run>-*`, ephemeral `tag:ttest`): 59 objects in 5 runs (31 / 28).
-- Every real run deleted exactly its devices by ID and revoked its keys (`left 0`, `untracked []` each time). No policy was read or written, and no `tskey-` appeared in any captured log.
-
-### Per stage (ms; each row is the time between two marks; p50 / p95)
-| stage | hermetic p50 | p95 | tailnet 1 p50 | p95 |
-|---|---|---|---|---|
-| mgmt: `POST /v1/objects` (row + create audit in one tx, enqueue) | 1 | 3 | 2 | 4 |
-| mgmt: mint queue → `mintOne` | 2 | 3 | 2 | 4 |
-| mgmt: mint claim + throttle token + re-claim | 0 | 1 | 0 | 1 |
-| mgmt: **`CreateKey` API call** | 0 | 0 | **195** | **4562** |
-| mgmt: custody put + fenced commit (+ mint audit) → `minted` | 0 | 1 | 1 | 2 |
-| hostd: credential long-poll wakes → key in netd | 1 | 2 | 1 | 2 |
-| netd: tsnet backend start (after the key) | 10 | 14 | 12 | 21 |
-| tsnet: `doLogin` → `RegisterRequest` sent (fetch control's key over HTTPS) | 0 | 1 | 431 | 786 |
-| control: `RegisterRequest` → response (Noise dial + register) | 1 | 2 | 434 | **5422** |
-| control: registered → the node's first netmap | 14 | 21 | 186 | **5370** |
-| tsnet: first netmap → `Running` → listening (**first netcheck, port-map probe**) | **262** | 274 | **259** | 286 |
-| control: registered → in the caller's netmap | 4 | 12 | 5 | 2242 |
-| control: node `Running` → the caller's netmap has its home DERP (n=4, last 2 runs only) | – | – | 396 | 680 |
-| caller: own node ready → first HTTP 200, dial on netmap | 4922 | 5056 | 591 | 5531 |
-| caller: own node ready → first HTTP 200, dial on ready | 3 | 5220 | **5140** | 5307 |
-| **create → own node ready** | **294** | 311 | **2906** | **10420** |
-| **create → first 200 on the own node** (both modes) | 5141 | 5349 | **7082** | **15917** |
-
-Outlier counts on tailnet 1 (59 objects): `CreateKey` > 1 s in **26**; register > 2 s in **9**; registered → first netmap > 1.5 s in **10**; first 200 more than 3 s after ready in **37**. The `CreateKey` latency moved between runs minutes apart: p50 145 ms in two runs (with 1.7–4.8 s outliers), but **1.42 s p50 across a whole run** in another. Hermetically, twd's own work before the join (create row → key in netd) is **≈5 ms**.
-
-### Findings
-1. **twd's own code is not the cost.** Everything between the create call and the key reaching netd (row, audit outbox, mint queue, claim, throttle, custody, fenced commit, long-poll wake) is 4–7 ms p50 in both environments. The F16 `credentialPoll` (250 ms) never fires on one replica, because the local `notify` wakes the long-poll. The key arrives about 1 ms after `minted`.
-2. **The clean production path is ~1.45 s, and every piece of it is external:** `CreateKey` 145 ms + control key fetch 430 ms + Noise dial + register 434 ms + first map 186 ms + **a fixed 250 ms port-map probe** + 10 ms. The last one is client-side and fixed. netcheck's first report waits for the UPnP/NAT-PMP/PCP probe (`netcheck.go` `waitPortMap`; `portMapServiceTimeout` = 250 ms). Nothing answers on this network, so every fresh node waits out the timeout, hermetically too, before it picks a home DERP and goes `Running`. It is also a per-node cost: N object nodes on a host each try to map a port on the home router. The only knob is the process-wide `TS_DISABLE_PORTMAPPER` envknob.
-3. **The bimodal production join (≈1.6 s vs ≈6.8 s) is three independent tails on Tailscale's side, not one twd stage.** Each of them added +1.5–5.5 s to some objects:
-   - the key API (`CreateKey` 1.5–4.8 s; 26/59);
-   - the register request (+4.3–5.0 s; 9/59);
-   - the first map response (+2–5.4 s; 10/59).
-
-   Only 5 of the first 20 objects of the main run were clean. The register and map stalls are near-constant +5 s. The client logs show it simply waiting on an open request: no retry, no `node registration rate limited` line and no `Retry-After` in any run. So this is not ADR-017 shaping visible to the client; it is control-side latency, the same family as the 3–5 s device-delete and logout outliers in M1/M2. twd can't speed these up, only take them off the critical path.
-4. **A fourth, separate +5 s hits callers: WireGuard's first-handshake retry.** It is not part of the join. It is what turns "own node ready" into "first request on the own node". The caller's log on a dial-on-ready sample:
-   ```
-   47.738  wg: Sending handshake initiation
-   47.738  wg: Failed to send handshake initiation: no UDP or DERP addr
-   50.739  magicsock: derp route for [peer] set to derp-10        (the path exists, +3.0 s)
-   52.800  wg: Handshake did not complete after 5 seconds, retrying (try 2)
-   52.803  wg: Received handshake response                       (3 ms once retried)
-   ```
-   - A node is in its peers' netmaps about 5 ms after it registers, but its home DERP and endpoints reach them only after its first netcheck, ≈0.3–0.7 s after it is `Running` (later in slow runs).
-   - A first packet sent in that window has nowhere to go. WireGuard drops the initiation and retries only after `REKEY_TIMEOUT` (5 s).
-   - twd's "ready" (`tsnet.Up` returned) falls *inside* that window, so on production a caller that waits for ready pays the 5 s almost always (**28/28**, ready → 200 p50 5.14 s). Hermetically, propagation is instant and only 2/30 did.
-   - Dialing *earlier* on production was mostly cheaper (p50 591 ms after ready): whether the first initiation lands before or after the path arrives is a race.
-   - **This is the same mechanism family as the L3 re-find delay, with a different trigger.** Both are WireGuard timers on the *caller*, not DERP or netmap propagation. Re-find: a stale session, KEEPALIVE_TIMEOUT + REKEY_TIMEOUT ≈ 15 s. Here: a dropped first initiation, REKEY_TIMEOUT = 5 s.
-5. **What a warm-key pool would buy:** only the `CreateKey` row. That is 145 ms on a good run, but it also removes the key API's 1.5–4.8 s tail (26/59 objects) from the critical path, so it moves p95 more than p50. It does nothing for the register and map tails (finding 3), the 250 ms probe (finding 2) or the caller's 5 s (finding 4).
-
-**The numbers point partly elsewhere** than minting and joining. For *own node ready*, minting (`CreateKey` tail) and joining (control's register and map tails, the 250 ms probe) are the whole cost. For *first request on the own node*, the largest single item is finding 4, on the caller, after the join. Phase 2 is paused for a decision (see the summary on the branch). Candidates, measured cost in brackets:
-- (a) the warm-key pool [CreateKey: 145 ms p50, up to 4.8 s tail];
-- (b) report ready only once the node's home DERP has reached control, i.e. its own netmap's Self has it, and/or have twd's own dialers (netd egress, `@twd/tailnet`, CLI) wait for a peer path before the first packet [the 5 s caller retry];
-- (c) skip the port-map probe on object nodes [250 ms fixed per node; tradeoff: no UPnP-assisted direct paths];
-- (d) the pre-joined node pool (design only) [the register and map tails plus ~1.1 s fixed].
-
-## Fast identity, Phase 2: what was built and what it bought (branch `fast-identity`, 2026-11-13)
-Built in the order agreed after Phase 1: (b), (a), (c); (d) measured and drafted only.
-
-### (b) Callers wait for a new peer's path
-- **Mechanism:** `netd.HasPath` / `netd.WaitPeerPath`.
-  - A just-registered peer is in the netmap before it has a home DERP or endpoints.
-  - netd egress (`dialEgress`, which also carries hostd's raw connect) waits, bounded by `PeerPathWait` = 5 s (the WireGuard retry it replaces), until its own node has a path to the peer, then dials.
-  - Peers seen with a path are cached per object, so only the first dial to a peer costs a status read.
-  - The CLI's link-mode dial does the same.
-- **A node-side "reachable" signal was tried and dropped.**
-  - The idea: wait until control echoes the node's home DERP back to it (`SelfChange.HomeDERP`).
-  - testcontrol sends it; **production control never did** (all 8 objects of a run timed out waiting for it).
-  - That run was stopped and its 9 devices deleted by its unique run prefix (0 left).
-  - netd's `Ready` is unchanged.
-- **Test:** `netd.TestEgressWaitsForNewPeerPath`. Object a calls a node through netd egress the moment the node appears in a's netmap: **5.106 s → 286 ms**.
-
-### (a) Warm-key pool (`mgmt/warmkeys.go`, `twd-mgmt -warm-keys N`; default 5 since Phase 3, 0 = off)
-- **Storage.** A `warm_keys` table holds pre-minted, single-use, preauthorized keys per (tenant, canonical sorted tags, ephemeral), keyed `(tenant_id, key_id)` (key IDs are only unique per control plane). Secrets live in custody at `twd/<tenant>/_pool/authkey/<keyID>`.
-- **Take (in `mintOne`, after the mint claim, before any throttle token).**
-  - One conditional `UPDATE … RETURNING` marks a key taken by the object (`FOR UPDATE SKIP LOCKED` on Postgres).
-  - A taken key never returns to the pool.
-  - The secret is copied to the object's own per-key custody name, then the object commits `minted` with its `mint` audit record (`pooled: true`) in the same transaction (H22).
-  - Credential release is the unchanged lease-fenced `Credential`.
-  - Any pool trouble falls back to a fresh mint.
-- **Refill.**
-  - One replica per pool at a time (a store lease `warmpool/<tenant>/<pool>`).
-  - Only when this replica has no mint queued, and only with a free token from the shared per-tenant throttle (`Reserve`, never `Wait`), so real mints keep priority and the ADR-017 budget is shared.
-  - Each refill's `mint` record (tenant-level, `pool` in the detail) commits with its row.
-- **Sizing.** About the creates expected over 2 min (from the last 10 min), at least 1 for a pool with a create or a deploy in the last hour (a deploy seeds its classes' pools), at most `-warm-keys`.
-- **Expiry.**
-  - Keys live `-warm-key-ttl` (30 min) at the API and are handed out only with ≥ 60 s + 30 s safety left; decided on the store clock.
-  - Past that they are revoked and audited (`revoke`).
-  - Rows left `taken` by a replica that died mid-adoption are cleaned after 10 min: revoked unless an object holds the key.
-  - Failed revocations keep their row and retry every 30 s; a deleted tenant's rows are dropped (the key expires at the API within its TTL).
-  - `DrainWarmKeys` revokes all.
-- **Tests:**
-  - `TestStoreWarmKeyTakeOnce` (SQLite + Postgres): 20 concurrent takers get 3 keys exactly once, never another tenant's, pool's or an expired one.
-  - `TestWarmKeyPool`: deploy seeds pools; a create adopts a pooled key with no CreateKey of its own and exactly its tags; the credential is that key; the mint, refill and credential are audited; the pool refills; another class gets its own tags; kill revokes the adopted key; no `tskey-` in the logs.
-  - `TestWarmKeyExpiry`: store clock +60 s revokes nothing; +100 s revokes all, deletes custody, audits `revoke`, refills.
-  - `TestWarmKeyRefillRespectsThrottle`: at 10/min (burst 1) the seed takes the only token, and no refill happens until the next token (~6 s).
-  - `make test-pg` now also runs the pool's API tests on Postgres.
-- **Multi-replica** (`e2e/multimgmt`, 3 replicas, `TWD_MM_WARM_KEYS=5` turns the pool on in every replica):
-  - The fake API keeps pool keys apart from objects (I3 unchanged).
-  - New invariants: **PoolExclusive** (no key held by two objects) and **PoolTags** (an adopted pool key has exactly its object's tags and ephemeral flag).
-  - **Hypothesis suite 11/11 with the pool on, 11/11 with it off.** **Soak, 10 min, seed 211, pool on: PASS on every invariant**: I3, I5–I9, I11, Quota, AuditComplete, KillOnce, PoolExclusive, PoolTags. 245,038 ops; 35 objects adopted pooled keys, 0 with other tags, 0 keys shared; 45 refills; audit chain verified (29,786 records); outbox drained.
-  - Harness fix found on the way: the Postgres container name was fixed (`twd-mm-pg`), and each test starts with `docker rm -f` of it. Two worktrees running the harness at once removed each other's database mid-test. My first two suite runs did this to the `smart-placement` worktree's run, which had already switched to its own name and port. `TWD_MM_PG_NAME` (with the existing `TWD_MM_PG_PORT`) now isolates runs; all numbers above are from isolated runs (`twd-mm-pg-fi`, port 55481).
-
-### (c) No port mapping on host nodes (`netd.DisablePortMapping()`, called by `twd-hostd` at start; `-port-mapping` restores it)
-- A fresh node's first netcheck waits for the UPnP / NAT-PMP / PCP probe (250 ms timeout, which nothing answered on any network measured).
-- Skipping it: netmap → `Running` **259 → 99 ms** on production, **262 → 11 ms** hermetically.
-- It also stops every object node asking the router for a mapping.
-- **Process-wide** (tailscale's `TS_DISABLE_PORTMAPPER` envknob): it covers hostd's own node too; twd-mgmt runs in its own process and is unaffected.
-- **Process start only:** running nodes read the knob without synchronisation. A first version set it in `netd.New` (per tenant, while other nodes ran), and `make test`'s `-race` caught the data race in `TestHostd`. It is now a once-per-process call before any node exists.
-- **Cost:** no router-assisted direct paths through hard NATs; those fall back to DERP. All 20 objects in the production run still went direct (Mac ↔ Mac on one LAN; a hard-NAT host was not tested).
-
-### Before → after (tailnet 1, production control; ms)
-| configuration | n | create → key minted p50 / p95 | netmap → Running p50 | create → own node ready p50 / p95 | own node ready → first 200 p50 / p95 | first 200 > 3 s after ready | **create → first 200 on the own node** p50 / p95 |
-|---|---|---|---|---|---|---|---|
-| Phase 1: no pool, dial on netmap | 31 | 148 / 4776 | 252 | 4364 / 10420 | 591 / 5531 | 9/31 | **7009 / 15917** |
-| Phase 1: no pool, dial on ready | 28 | 1424 / 1987 | 254 | 2750 / 7609 | 5140 / 5307 | 28/28 | **7755 / 12917** |
-| (b) callers wait for a path | 12 | 207 / 5168 | 253 | 4989 / 6735 | 204 / 5205 | 1/12 | **5464 / 7391** |
-| (b) + (a) warm-key pool (all 20 pooled) | 20 | 3 / 6 | 253 | 1679 / 4695 | 194 / 380 | 1/20 | **1770 / 6555** |
-| (b) + (a) + (c) | 20 | 2 / 26 | **99** | **1522 / 4235** | **255 / 299** | **0/20** | **1714 / 4450** |
-
-Hermetic (testcontrol, where control and the key API cost ~nothing), create → first 200, path wait on throughout:
-- baseline, dial on netmap: 5141 / 5349 ms;
-- (b): 313 / 323 ms;
-- (b) + (c): **44 / 70 ms**, with create → own node ready **38 / 47 ms**.
-
-**Caveats.**
-- Production varies a lot between runs minutes apart: `CreateKey` was 145 ms p50 in some runs and 1.4 s p50 for a whole run in another.
-- Each row is one to three runs of 12–31 objects, created one at a time 2 s apart on one Mac.
-- Read the rows as orders of magnitude, not as precise deltas.
-
-### What is left: registration stalls on control
-- With the key in hand, the remaining tail is the register call: +2.1–5.4 s on 10/20 objects in each of the last two runs, **strictly every other object**.
-- At one create per ~4 s, a registration stalled whenever it followed the previous one by less than ~6 s. That looks like control-side pacing of registrations on this tailnet (held open, never answered 429; no `rate limited` line in any client log).
-- The tailnet had ~150 registrations from these runs in ~80 minutes, plus other worktrees' runs.
-- This is a **hypothesis**. It is far below ADR-017's planning figure (250/min) and matches M1's unverified "latency rose as registrations piled up".
-- **Next experiment:** fixed inter-registration gaps of 2, 4, 6, 8 and 10 s, fresh and after a cool-down, to find the spacing and whether it is per tailnet, per credential or per source IP.
-- Only taking registration off the critical path helps against it (d).
-
-### (d) Pre-joined node pool: measured, ADR-031 drafted (Proposed, uncommitted in the design repo)
-`e2e/coldid` `TestRenameOnAssignmentReal` on tailnet 1 (n=5 per operation, 20/20 seen by the peer, node reachable after every one; both devices deleted):
-
-| operation on an already-joined node | API call p50 | a peer's netmap shows it, p50 / max |
-|---|---|---|
-| node changes its own hostname (LocalAPI `EditPrefs`) | – | **209 / 337 ms** |
-| admin rename (`POST /device/{id}/name`) | 169 ms | 258 / **5168 ms** (one 5 s API outlier) |
-| retag, add a tag (`POST /device/{id}/tags`) | 165 ms | **188 / 190 ms** |
-| retag, remove it | 164 ms | **185 / 190 ms** |
-
-- Handing a pre-joined node to an object would therefore take ~0.2–0.35 s, with no registration on the critical path, versus 1.5 s p50 / 4.2 s p95 now.
-- ADR-031 lays out:
-  - two variants: a neutral pool per (host, tenant) with rename + retag, or a pool per (host, tenant, tag set) with rename only;
-  - how each meets the open problems: names, tags, node certificates, audit, device cost, kill;
-  - what still needs measuring: grant propagation after a retag, MagicDNS collisions, the registration pacing, Headscale.
-- Recommendation: the per-tag-set variant first.
-
-### Not done / follow-ups
-- ~~`-warm-keys` is off by default.~~ **Default 5 since Phase 3** (Ross).
-  - Cost: at most 5 live, unused, preauthorized single-use keys per active pool, held in custody for up to 30 min.
-  - Idle pools stop refilling after an hour without creates or deploys.
-  - A tenant purge (`twd down --purge`) now revokes them.
-- ~~`twd up` has no flag for `-warm-keys` or `-port-mapping` yet.~~ Added: `twd up --warm-keys N --pool-nodes N --port-mapping` (stored in the state; state from before keeps the binaries' defaults; docs/INSTALL.md "Tuning").
-- Tenant-level audit records (pool `mint`, `revoke`) have no object ID; `twd audit <object>` shows the object's own pooled `mint` record.
-- A peer can still lose the race in (b) (1/12 in the first production run): the path wait narrows the window but doesn't close it.
-- External clients (not twd's egress or CLI) still dial whenever they like; nothing on the node can tell when peers can reach it.
-
-## Fast identity, Phase 3: pre-joined node pool (ADR-031 variant B) built (branch `fast-identity`, 2026-11-14)
-Ross approved:
-1. `-warm-keys` on by default (5);
-2. port mapping off by default;
-3. building the pre-joined node pool, variant B (one pool per host, tenant, workload and class, so a pool node already has exactly the class's tags; assignment = rename only).
-
-### Design
-- **A pool node is an mgmt object in namespace `_pool`** (`objectName` `<Class>/<suffix>`, tags = the class's, never ephemeral, no TTL, never a spawn).
-  - It joins through the unchanged object machinery: create (quota; `create` audit with `pool`), mint (the warm-key pool), the lease-fenced credential, ready (node certificate).
-  - It serves nothing: hostd refuses ingress to it.
-  - Tenant code can't address it: `ensure` refuses the reserved classes `_pool` and `_workload`, so tenant code can neither create one nor act as one. Acting as one would mean holding the identity a later object is given.
-- **Assignment** (`CreateObject{poolObjectID}`). mgmt takes the node only if it is this tenant's and workload's, for this class, `ready` with a stable node ID, has exactly the class's canonical tags, and the new object is not ephemeral. Then, in **one transaction** (`TransferPool`):
-  - the object is inserted `assigned` with the node's IDs;
-  - the pool row becomes `transferred` (terminal, not live) with its node IDs, MagicDNS and certificate cleared, so only the object names the device;
-  - the object's `create` record (`fromPool`, `stableNodeID`) and the pool row's `transfer` record commit with it (H22).
-
-  Quota is unchanged: one live row in, one out. Concurrent offers of one node give it to one create; the other mints as usual.
-- **No key for an assigned object.** `Credential` answers `409 already_joined`. `ready` is fenced as before and must name the assigned stable node ID (`409 identity_conflict` otherwise); it signs the object's node certificate (ADR-025).
-  - Kill deletes the device as for any object.
-  - `remint` (a rejected rejoin) falls back to a fresh mint.
-  - `transferred` rows purge with killed and failed ones.
-- **hostd** (`hostd/poolnodes.go`):
-  - A class becomes hot on a root create; hostd keeps `-pool-nodes` (default 1) ready pool nodes per hot class, one join at a time.
-  - A create of that class reserves an idle one and offers it. If mgmt answers `assigned`, the object takes over the pool node's netd node and state dir under its own mgmt ID (hostd keeps `netdID` separate, persisted in `objects.json`, so restarts rejoin it).
-  - netd `SetHostname` renames the node from its own LocalAPI (no API call). It rewrites `object.json` and waits until the node's own netmap shows the name (control may suffix `-1`).
-  - Then `ready` goes to mgmt with the same stable node ID.
-  - Pool nodes of a class with no create here for an hour, and at least that old, are retired through mgmt's kill (audited, device deleted). The age condition means a restart, which forgets demand, doesn't drop a warm pool.
-- **API (spec first, `make api`):**
-  - statuses `assigned` and `transferred`;
-  - `ObjectCreate.poolObjectID`;
-  - the `_pool` namespace;
-  - `ReadyConflict` (409 `lease_lost | identity_conflict`) on `PATCH /v1/objects/{id}`;
-  - audit kinds `transfer` and `revoke`;
-  - `PurgeResult.warmKeysRevoked`.
-- testcontrol names a node only at registration; production renames on a hostname change. `nettest` now emulates production (it follows `Hostinfo.Hostname` after each map request), so hermetic tests exercise the rename.
-
-### Bugs found by the tests on the way
-- `make test -race`: netd's `start()` logged `o.hostname` after signalling ready, which raced with a rename. The name is now captured under the lock.
-- The spec validator rejected an undeclared 409 code and new audit kinds (fixed in the spec).
-- An e2e assertion compared mgmt's bare hostname with hostd's per-run-prefixed one (a test bug).
-
-### Tests
-- mgmt `TestPoolNodeAssignment` (spec-validated API):
-  - the pool node's join and its audit (`create,mint,credential,ready,transfer`);
-  - assignment without a mint, the object audit `create,ready`;
-  - `already_joined`, `identity_conflict` and `lease_lost` on ready;
-  - only the object names the device;
-  - a transferred node, or another class's node, falls back to a mint;
-  - two concurrent offers give the node to exactly one create;
-  - kill deletes the device; purge forgets the transferred row.
-- netd `TestSetHostname`: renamed in 32 ms with the same node ID and IP; a peer sees the new name; `object.json` updated.
-- hostd `TestEnsureRefusesReservedClasses`, `TestIngressRefusesPoolNodes`, `TestIdlePoolSelection`.
-- **`TestCLIEndToEnd`** (real twd, twd-mgmt and twd-hostd binaries, testcontrol, all new defaults on), new step **(a2)**:
-  - after agent a1, hostd brings up a SupportAgent pool node;
-  - agent a2 comes up **on that node** (same stable node ID) under its own MagicDNS name, answers the client with a verified caller, and the pool row is `transferred`;
-  - the flow's `twd down --purge` leftover check (devices and keys) still passes.
-- `make test` (14 Go packages with `-race`, plus JS), `make lint` (api-check, vet, secret scan), `make e2e-local`, `make test-pg`: PASS.
-- **Multi-replica** (3 replicas, warm keys at the new default):
-  - hypothesis suite **11/11**;
-  - **10 min soak (seed 307): PASS on every invariant**: I3, I5–I9, I11, Quota, AuditComplete, KillOnce, PoolExclusive, PoolTags. 290,420 ops; 216 objects adopted pooled keys, 0 with other tags.
-  - The harness doesn't run hostd, so pre-joined assignment isn't exercised across replicas. Its cross-replica safety rests on the single conditional transfer (`TransferPool`), which the concurrency case of `TestPoolNodeAssignment` covers on one replica and which `make test-pg` runs on both backends.
-
-### Measured (ms; create → …, p50 / p95)
-| path | where | n | own node ready | first 200 on the own node |
-|---|---|---|---|---|
-| Phase 1 baseline | tailnet 1 | 31 | 4364 / 10420 | 7009 / 15917 |
-| (b)+(a)+(c) | tailnet 1 | 20 | 1522 / 4235 | 1714 / 4450 |
-| **pre-joined (+ (a), (c))** | **tailnet 1** | **20** | **222 / 290** (max 812) | **232 / 297** (max 823) |
-| pre-joined | hermetic | 15 | 31 / 54 | 33 / 55 |
-
-Production breakdown of the pre-joined path (`e2e/coldid` `TWD_COLDID_PREJOINED=1`, which does what hostd does):
-- create with `poolObjectID` 1 ms;
-- rename until the node's own netmap shows it: **219 / 288 ms**;
-- fenced ready 1 ms;
-- the caller's netmap shows the new name 197 / 280 ms after the create;
-- 20/20 assigned, 20/20 direct.
-
-The pool node's own join (registration, including control's stalls) happens ahead of demand and is not in these numbers.
-
-### Still open
-- The registration-pacing hypothesis (Phase 2) is untested. It decides how fast pools refill after a burst.
-- A MagicDNS collision on rename is handled (the suffixed name is read back and reported) but was not provoked on production.
-- Headscale's support for node-side renames is unverified (ADR-002).
-- Ephemeral objects (spawns with a TTL) never use the pool. Ephemeral pool nodes would need their own pools.
-- `twd ls` lists idle pool nodes (namespace `_pool`); each is a device.
-- ~~`twd up` has no flags for these.~~ Added: `twd up --warm-keys N --pool-nodes N --port-mapping`, stored in the state for the service (`TestIdentityArgs`; the CLI e2e runs with them).
-
-## Tier-aware placement (2026-11-13)
-
-- **Bug:** `pickHost` ignored `Host.Tiers`, and mgmt never read twd.jsonc `"tier"`. A `"tier": "microvm"` workload (or a tenant with default tier `microvm`) could be placed on a process-only host. hostd's `tierFor` then **fell back to the process tier with only a log warning**: a silent isolation downgrade on mixed clusters.
-- **Fix (`mgmt/service.go`):** `placementTier` = twd.jsonc `"tier"`, else the tenant's `tier`. `process` and `runtime: "node"` place anywhere. Eligible hosts are live, in the tenant's pool and list the tier (a host listing no tiers is process-only). Ties on free capacity go to the lower host ID (deterministic across replicas).
-  - No eligible host → `503 no_host` naming the missing tier and the fix (`sudo twd host setup --microvm`).
-  - `--host` without the tier, or a live lease holder without the tier the workload now asks for → new `409 tier_unavailable` with the fix (`twd undeploy` then deploy, or pick another host). Stickiness never keeps a workload on the wrong tier.
-- **Tests:** `mgmt/tier_test.go` (`TestPlacementTier` 10 cases, `TestPlacementTierStickyHolder`). `make test`, `make lint`, `make test-pg`: PASS.
-- **Not changed:** hostd's fallback (`hostd/workload.go` `tierFor`) still downgrades with a warning when a microvm assignment reaches a host without a VM backend (e.g. the backend vanished after registration, or `twd dev`). Making it refuse is a follow-up.
-
-## Tailscale Services for workloads and mgmt replicas (2026-11-13)
-
-Design and behavior: [docs/services.md](docs/services.md).
-
-- **Mechanism (`internal/tssvc`):** advertise + an *empty* serve-config TCP handler + a tsnet fallback TCP handler. VIP flows are delivered in-process with the caller's real source address, so WhoIs (and so all of netd's attributed ingress) works through the VIP. tsnet's `ListenService` was not usable: it forwards to a host loopback socket (caller = `127.0.0.1`, or a forgeable PROXY header).
-- **Workloads:** twd.jsonc `tailnet.service` (`true` = `svc:<workload>`, or a name). This needs `tailnet.tags`. mgmt (`mgmt/services.go`):
-  - creates the definition (`tcp:80`, owner comment `managed by twd: tenant=… workload=…`) before the lease;
-  - refuses anyone else's Service, and a name that collides with a device's MagicDNS name (`409 service_conflict`);
-  - reports a credential without Services scope as `502 service_api_failed`;
-  - preflights `autoApprovers.services` (`serviceUnapproved`, `serviceSnippet`);
-  - carries `service` in assignments and `endpoint.service` in deployments.
-- **Workloads, host side:** hostd (`hostd/service.go`) advertises while the deployment is active, the instance passes probes (2 s; 2 failures withdraw) and the workload node is ready. It withdraws on undeploy, fencing, a move, a redeploy without a Service, and kill. netd serves Service flows on their own `http.Server`, so a withdraw stops keep-alives on Service connections only. netd egress resolves Service names from the object's netmap (MagicDNS extra records, routed by a peer's AllowedIPs) under the sibling rule.
-- **mgmt replicas (H12):** `twd-mgmt -tsnet-service svc:twd-mgmt` (`mgmt.ServiceGate`, health = store answers). A hostname equal to the Service label is refused at start.
-- **Tests:**
-  - hermetic, all passing in `make test` (Go `-race` + JS): `internal/tssvc` (routing guard), `netd` `TestService` (testcontrol emulating Service hosts: VIP ingress identity, egress by name/bare name/VIP, sibling refusal, withdraw, kill), `hostd` `TestWorkloadService` (advertise; caller via VIP, with the remote address asserted to be the VIP; SIGSTOPped workerd withdrawn in 5.4 s and re-advertised 0.5 s after SIGCONT; redeploy without a Service withdraws and closes pooled connections), `mgmt` `TestServiceDeploy` (8 cases, spec-validated) and `TestServiceGate`;
-  - real (tailnet 1, production control): `TestRealService`, E2E-SVC (`make e2e-svc`) and H12 `TestRealMgmtService` (`make e2e-mm-svc`). The numbers are in docs/services.md. All PASS, with 0 leftover devices or keys.
-- **Found while testing:** a workload node and a Service with the same name share one MagicDNS name, and MagicDNS answers the device first. The first hostd test "passed" through the node, not the VIP. Tests now assert the remote address is the VIP, and mgmt refuses such names.
-- **Not done:** one workload on several hosts at once (still one lease per workload). Also unverified: whether app caps granted to a `svc:` destination reach WhoIs, and a real hostd and `twd link` through `svc:twd-mgmt`.
-- **Test tailnet policy (tailnet 1, backed up first to `tailnet1_acl.pre-svc-*.hujson`):**
-  - `autoApprovers.services` for `svc:ttest-tssvc`, `svc:twd-mgmt`, `svc:ttest-mgmt` and `svc:ttest-svc-hello`;
-  - tagOwners `tag:twd-wl-svc`;
-  - grants `tag:ttest` → those Services, `tag:twd-host` → `svc:twd-mgmt`, and `tag:ttest` ↔ `tag:twd-wl-svc`.
-
-## Public ingress over Funnel (ADR-029) and a separate WIF issuer node (2026-11-13)
-
-Design: ADR-029 (design repo, Proposed, with implementation notes). User doc: [docs/public-ingress.md](docs/public-ingress.md).
-
-- **Opt-in:** twd.jsonc `public.routes` (path patterns, no `true` shorthand), `public.upgrade` and `public.limits`, plus per-class `public.create` + `maxObjects` (`internal/publicspec`, shared by the bundle parser, mgmt, netd and the CLI).
-  - **Tenant gate:** `publicIngress: allow|deny`. It is `allow` for single-tenant `twd up`, and deploying `public` against `deny` fails `public_ingress_not_allowed`.
-  - **Expose:** `twd expose off|on <workload>` survives redeploys and is audited on both chains.
-- **Public node:**
-  - **Identity:** one per public workload, namespace `_public`, tag `tag:twd-public`, hostname = the workload, so the URL is `https://<workload>.<tailnet>.ts.net/`.
-  - **Listener:** netd listens on `ListenFunnel :443` only. Connections that aren't Funnel are closed, and the node has no tailnet listener.
-  - **Delivery:** every request goes to the workload's Worker (`DeliverTo` = the entry node). Object nodes are never public.
-  - **Certificate:** it is prefetched.
-  - **Name clash:** a MagicDNS de-duplicated name is never served (`public_name_taken`).
-- **Requests:**
-  - **Order:** limits (per workload and per IP token buckets with `Retry-After`, body, headers, timeout, conns) → canonical path + route allowlist (`/_twd` never) → identity headers stripped → `CF-Connecting-IP` / `X-Forwarded-For` from `FunnelConn.Src` → cf blob with `requester:{kind:"public"}`, no caller.
-  - **netd's own headers:** `X-Forwarded-*` now survive the workerd reverse proxy (`netd.KeepForwarded`).
-- **JS:** `getRequester()` added. `getCaller()` throws `public_request`.
-- **Public requests can't mint nodes:** a public fetch gets a guarded `env`, and its `ctx.tailnet.spawn` / `kill` are refused.
-  - **Admission:** hostd `/v1/admit` allows existing objects, or opted-in classes up to `maxObjects` and 20/min per tenant (persisted in `public-creates.json`).
-  - **Second check:** the Host DO calls `ensure {public:true}` before a facet runs.
-- **Audit:** `public_request` per request, without the query string. Limit refusals are summarized per minute (`public_rejected`). Also `public_object_created`, `expose_on` / `expose_off`. All are new `AuditKind`s in the spec.
-- **Policy:**
-  - **Funnel targets:** `policy.FunnelTargets` = `tag:twd-public`, `tag:twd-issuer`. `Check` refuses `funnel` on `tag:twd-mgmt` (and on any other tag).
-  - **Snippet:** `PublicSnippet()`, printed by `twd deploy`.
-  - **Doctor rows:** `https_certs`, `public_ingress`, `funnel_attr:<wl>`, `public_probe:<wl>`.
-- **mgmt is never Funnel-capable (Ross).** The WIF issuer now runs on its own node, `tag:twd-issuer`: no grants, Funnel-only, discovery + JWKS only.
-  - **Joining it:** `twd up --wif` joins that node with a second login, or `--issuer-authkey-file`.
-  - **Leftover policy:** `twd up` warns when `tag:twd-mgmt` still has a `funnel` attribute.
-  - **Issuer URL changed:** stored WIF client IDs are cleared, so a new trust credential is required.
-
-### Test results
-- **Hermetic:**
-  - **Suites:** `make test-go` and `make test-js` PASS. New:
-    - `internal/publicspec` tests;
-    - `netd/public_test.go` (12 tests: headers and blob, routes, `/_twd` even with `/*`, upgrade, rate limits, body/header limits, timeout, non-Funnel conn closed, MaxConns, expose toggle < 1 s with RST, disabled at create, rejoin stays public);
-    - `hostd/gen` `TestGeneratedWrapperPublic` (real workerd);
-    - JS `public.test.js` (11 tests);
-    - mgmt `TestPublic*` on SQLite and Postgres;
-    - policy hostile cases;
-    - `cmd/twd` `public_test.go`.
-  - **`hostd TestPublicIngress`:** real hostd + workerd + testcontrol + fakemgmt, with Funnel injected as `*ipn.FunnelConn`, PASS under `-race`. Covered:
-    - spoofed identity headers and a forged cf blob never reach the app;
-    - existing object reachable, new one `public_create_denied` with no mgmt object created;
-    - opt-in class up to `maxObjects` 2;
-    - spawn refused, 413, 429 with `Retry-After`;
-    - audit with no query string;
-    - expose off cut an in-flight stream in **1.1–1.9 ms**.
-- **`make e2e-public` (tailnet 1, real Funnel, public DNS via 1.1.1.1): PASS**, run `1a66e8` (625 s, `e2e/real/results/m13-public-20261113-221221-1a66e8.json`).
-  - **Identity:** the requester was public with the client's real public IP, `getCaller` threw `public_request`, and spoofed headers were dropped.
-  - **Routes:** 404 `not_public`, 400 for `..`, `/_twd` refused.
-  - **Objects:** existing object reachable, new one `public_create_denied`, opt-in up to `maxObjects`, spawn denied, 413.
-  - **Expose:** **`twd expose off` cut a live public stream 137 ms after the CLI started** (CLI 46 ms), and the URL refused afterwards. `expose on` was back to 200 in 319 ms.
-  - **Audit and doctor:** 12+ `public_request` records with no query string; `twd doctor` `public_probe` ok.
-  - **Cleanup:** 0 devices left, OAuth client deleted.
-  - **First public fetch of a new name:** 7m57s and 9m26s (public DNS + first certificate).
-  - **Earlier runs:**
-    - `196882`: everything passed except the audit check, which was a harness bug (it read `items` instead of the CLI's `records`).
-    - `c1f781` (after the certificate-prefetch change): no certificate was issued for any new name in 10+ min, including mgmt's own tailnet name, which the change doesn't touch. Every prefetch attempt hit its 3-minute deadline.
-- **`make e2e-keyless` with the issuer node:**
-  - **Run `0582eb`:** found that the issuer's first certificate outlasted every Funnel handshake (fixed: prefetch).
-  - **Run `56c6a9`:** passed 12 checks:
-    - issuer on its own node (`twd-…-issuer`, not mgmt);
-    - issuer public via Funnel in 8m31s;
-    - **mgmt's node unreachable from the public internet**;
-    - both trust credentials' token exchanges + policy read;
-    - deploy with a WIF-minted object node;
-    - doctor labels.
-
-    It then failed at `twd link https://<mgmt>`, because mgmt's tailnet HTTPS certificate wasn't issued in the window (same certificate stall as `c1f781`). One test CLI node it never got to track was deleted by ID afterwards. Tailnet 1 now has 0 test devices.
-- **Policy writes on tailnet 1 (approved by Ross),** each validated and additions only, with If-Match and a backup:
-  - run `196882`: `tagOwners["tag:twd-public"]` + nodeAttr funnel on `tag:twd-public`;
-  - run `0582eb`: `tagOwners["tag:twd-issuer"]` + nodeAttr funnel on `tag:twd-issuer`.
-
-  The old `funnel` on `tag:twd-mgmt` is still in tailnet 1's policy; Ross chose not to remove it.
-
-### Gaps
-- **Certificate stall:** a clean real-tailnet rerun of `e2e-keyless` (from `twd link` on) and of `e2e-public` after the prefetch change waits on the certificate issuance stall clearing. Hypothesis, not verified: today's many new `*.tail7906d5.ts.net` names hit Let's Encrypt's per-domain weekly limit.
-- **Guard bypass:** the public-create guard guards the `env` a handler is given. `import { env } from "cloudflare:workers"` bypasses it. For facet classes the Host DO still refuses a `fetch`; plain-DO and `node:false` classes rely on the guard alone.
-- **Host moves:** the public node's state does not move through custody; a host move that clashes on the name is refused instead.
-- **Not supported yet:** `"runtime": "node"` + `public`; tsidp (ADR-029 D4); custom domains; GeoIP.
-- **Harness:** the e2e cliflow doesn't track a CLI tsnet node whose `twd link` fails before joining (cleaned up by hand this time).
-
-## Containers and code sandboxes (ADR-032) (branch design/containers-sandboxes-microvm-tier, 2026-11-13)
-
-Cloudflare's `ctx.container` on the microVM tier: one VM per container, attached to its Durable Object, with no tailnet reach by default. The Sandbox SDK 0.x `examples/minimal` and the 1.0 flow (raw `ctx.container` + `Files` through `sandbox-shim`) run **unmodified** on Firecracker (Lima, arm64) and on vz (this Mac, both with the stock amd64 images under Rosetta and with the arm64 rebuilds). Built in two phases: phase A = `ctr/groundwork`, `ctr/core`, `ctr/vz`, `ctr/amd64` (merges `ab3dd71` … `37fe89b`, fix `4e79f0d`); phase B = `ctr/egress`, `ctr/images`, `ctr/ports` (merges `57b95c8`, `eca14a2`, `b508c07`), plus the integration fixes below (`ef85e7d`, `d5d1d65`, `a0bab52`). User doc: [docs/containers.md](docs/containers.md); compatibility: [docs/COMPAT.md](docs/COMPAT.md).
-
-### What's built
-- **No fallback (D5, prerequisite).** hostd refuses a microVM assignment it can't run (`tier_unavailable`) instead of downgrading to the process tier; this replaces `tierFor`'s warning path for the whole microVM tier. A host lists `process|microvm|containers`; it offers `containers` only when the backend can boot container guests (helper feature + erofs in the kernel) and `mkfs.erofs` exists. `twd dev` stays process-tier, so `start()` throws `tier_unavailable` there.
-- **guestd container mode (D3, D8).** `GuestConfig.Container`: the OCI image as a read-only erofs (`/dev/vdc`), a fresh scratch disk as the overlay upper (`/dev/vdd`; made by the helper on Firecracker, formatted by the guest on vz), guestd stays PID 1 and runs `ENTRYPOINT`/`CMD` and every `exec` through `twd-guestd ctr-exec` (new mount namespace, `pivot_root`, old root detached, cgroup `ctr` with `pids.max`, and `cpu.max` where the host can't cap the VMM). Container processes hold **at most Docker's default capability set** (integration fix, below). Exec stdio is framed on its own vsock connection; exec inherits only `PATH`.
-- **hostd container manager (D2).** Keyed by (tenant, workload, class, object), survives DO eviction and parent blue/green, dies with the host; inactivity timer (default 10 min, ≤ 6 h), hard max lifetime (24 h), `destroy()` grace capped at 10 s, `twd kill`/workload stop/fence = VMM SIGKILL. A container inherits its parent class's fence bit (ADR-028). Host API `POST /v1/container{,/exec,/stdin}`, `ANY /v1/container/port/<p>/…`.
-- **Polyfill (D1).** `ctx.container` in the generated platform wrapper (`js/packages/tailnet/src/container.ts` → `hostd/gen/js/twd-rt.js`), calling hostd over the existing `hostd` outbound service; `running` kept in the object's SQLite kv and reconciled at construction. v1 methods: `start`, `running`, `inspect`, `exec` (streamed, `kill`, `pty`/`resize`), `getTcpPort().fetch`, `monitor`, `signal`, `destroy`, `setInactivityTimeout`, the three `intercept*`. `connect()`, snapshots and preview URLs throw `not_supported`.
-- **Sandbox egress proxy (D4, `netd/sbxnet`).** One per run, in hostd, no tsnet server, no keys. Deny-all; DNS answers only reachable names with synthetic `198.18.0.0/15` addresses (the proxy knows each flow's name without trusting Host/SNI); `interceptOutboundHttp(s)`/`interceptAllOutboundHttp` deliver to the **parent object's** handler (its fetches leave with the parent's identity, policy and `lim`); per-run ephemeral P-256 CA for HTTPS interception (key never in the guest); `enableInternet` reaches only `tailnet.egress.internet` hosts with the ADR-019 blocks on every resolved address, audited `egress`/`deny` as `sandbox-of <object>`. Both backends use it (integration: vz's NIC now takes `ContainerSpec.Net` too).
-- **Strict no-keys scan (D5).** `twd host vmcheck <workload> --container <Class>/<name>`: disks (rootfs, config, image, scratch), guest files and a RAM dump for `tskey-`, node/machine keys, the parent's MAC keys, the tenant's volume keys, host key/token/credential files and the run's CA key; positive controls per needle kind and a per-run canary in guestd's memory.
-- **Images (D3).** OCI → erofs, cached per tenant by digest (`public` scope for operator-marked bases), LRU (`-container-image-cache-max-mib`). mgmt serves an **OCI registry at `/v2/`** on its tsnet listeners (WhoIs: admins push/pull, hosts only pull `public/` and tenants they hold a deployment of; blobs visible only through repos they were pushed or mirrored into), **pins every image by per-arch digest at deploy** (external refs mirrored through mgmt's egress; alias map applied per arch), and limits placement to those arches. `twd deploy` builds Dockerfile classes with `docker buildx` on the developer machine and pushes over the CLI's own connection. Hosts pull only from twd's registry and never run a container engine. `twd image public add|ls|rm`, `twd image push`.
-- **Quota and capacity (D9).** Host capacity vector `{vms, memMiB, hugepages, vcpu (×overcommit), scratchDiskMiB}` shared with microVM DOs (`503 capacity_exhausted`); synchronous mgmt reservation at `start()` (`POST /v1/container-reservations`) against `maxContainers` / `maxContainerMemMiB` / `maxContainerVCPU` and the class's `max_instances` (`429 container_quota_exceeded`), **fail closed** when mgmt is unreachable (`503 quota_unavailable`) except a restart of a key the host still holds; released on every stop path, reconciled from heartbeats. Placement: a bundle with containers needs a live host offering `containers` for its arch (`503 no_host` / `409 tier_unavailable`).
-- **Platforms (D7).** Firecracker on Linux arm64 and amd64 (reproducible amd64 + arm64 guest images and kernels from pinned inputs; `DefaultBootArgs(arch)`, `CheckArch`); **vz on macOS** for DO and container guests (one `twd-vz` VMM per VM, file-handle NIC, `VZVirtioSocketDevice`), Rosetta for Linux opt-in (`-vm-rosetta`) runs the stock amd64 images.
-
-### Integration of phase B (this run)
-- **Merges:** `ctr/egress` (`fcb19a4`), `ctr/images` (`a26ccf4`), `ctr/ports` (`e0eddd6`), in that order; none missing.
-- **Conflicts:** fakemgmt (egress: the assignment's fence + `SetHeartbeatsDown`; images: registry + pinned classes) and the `twd` command table and docs: both sides kept. guest/proto `ContainerConfig` (egress: `DNS`, `CACert`, `Canary`; ports: `ScratchFormat`, `CPUQuotaUS`) and guestd (`installCA` vs `formatScratch`): both kept.
-- **Cross-agent TODO done: the macOS sandbox NIC is on the shared sandbox proxy.** `ctr/ports` had moved the container host side into `hostd/vm/container.go` with a `containerHandlers` placeholder for the egress proxy; `ctr/egress` had wired `ContainerSpec.Net` into Firecracker's vnet. The placeholder is gone: both backends give the container NIC no gateway services and the run's `ContainerNet` (`newDgramVnet` takes it; the vz guest gets the gateway DNS, the CA and the canary), and the keyscan methods on `ctrVM` are shared. The egress/limits e2e now also builds and runs on darwin.
-- **Security fix: container root could lift its own limits** (found by `ctr/ports` on vz). `ctr-exec` now drops every capability outside Docker's default set from the bounding set and sets root's to it (others: none): no `CAP_SYS_ADMIN` (no cgroup2 mount), no `CAP_SYS_PTRACE` (no `/proc/1/root` into guestd's namespace). `TestContainerSmoke` asserts it as root in the image on both backends: `CapEff 00000000a80425fb`, `mount: EPERM`, writes to `/proc/1/root/sys/fs/cgroup/ctr/{pids,cpu}.max`: `PermissionError`. All acceptance flows still pass.
-- **Bug fix: guestd's reaper stole `mke2fs`'s exit status** on vz (scratch formatted after PID 1's `Wait4(-1)` loop starts: `waitid: no child processes`; TestContainerSmoke failed on the first vz run after the merge). Commands guestd waits for run under a read lock the reaper takes for writing.
-- **vz keyscan:** Virtualization.framework refuses to save a container VM's state (DO guests too, known since `ctr/vz`), so `ContainerCheck` failed outright on macOS. It now returns the disk + file scan with the control `FAILED: guest RAM not scanned`, so the CLI still exits `keys_in_guest`; the e2e accepts that only on vz (`memoryDumpRequired`, as e2e/vm does).
-
-### Test results (final integration tree; Mac = this M5 Pro, Lima = `twd-dev` fresh clone `~/ctr-int`, amd64 = `twd-amd64`)
-
-| Suite | Where | Result |
-|---|---|---|
-| `make test` | Mac | **PASS** at the merges and again at the final code: 20 Go packages ok (-race), JS 5/9/7 pass, 0 fail (`/tmp/twd-intB-mac-test2.log`) |
-| `make lint` | Mac | **PASS** (api-check, gofmt, vet incl. GOOS=linux/darwin e2econtainer, e2eimages, check-secrets) |
-| `make test-node` / `make test-sdk` / `make test-pg PG_PORT=55511` | Mac (OrbStack postgres:17 for pg) | **PASS**: TestNodeTier, TestNodeWorkflow, TestNodeTierSharedHostRefused; TestCloudflareAgents, TestAgentTemplate, TestVercelAI (e2e/sdk 32.5 s); mgmt ok on SQLite and Postgres |
-| `make test` | Lima | at the merges (`b508c07`): **PASS on the first run**, 22 packages ok (hostd 199.9 s, cmd/twd 200.0 s, mgmt 47.6 s, netd 41.6 s), JS 21/21 (`/tmp/ctr-intB-maketest.log`). At the final code (`ba4aa25`): 21 packages ok (hostd 192.4 s, cmd/twd 186.2 s, guestd ok) and the known netd `TestRejoinRejectedRemints` 90 s timeout; rerun `go test -race ./netd/...` ok in 40.9 s, `make test-js` 21/21 (`/tmp/ctr-intB-maketest2.log` in Lima) |
-| `make test` | twd-amd64 (Ubuntu 24.04 x86-64, at `ef85e7d`) | **PASS on the first run**, 22 packages ok, JS 0 fail (`/tmp/ctr-intB-maketest.log` there) |
-| `make e2e-vm` (DO microVM regression) | Lima, Firecracker | **PASS** TestSmoke, TestVolume, TestDgramNICOnlyGatewayServices, arch tests; TestE2EVM 13/13 in 8.71 s, restart → serving 1006 ms (`~/ctr-int/e2e/vm/results/l3-20261114T093607Z.json`) |
-| `make e2e-vz` | Mac, vz | **PASS** TestVZSmoke/Volume/Rosetta/DiesWithHostd, TestDgram…; TestE2EVM 13/13 in 12.5 s, restart → serving 2699 ms, sql_put p50 7.9 ms (`e2e/vm/results/vz-20261114T093423Z.json`) |
-| `make e2e-container` (both acceptance flows + egress/security/limits) | Lima, Firecracker, arm64 images via alias | **PASS** TestContainerSmoke + TestE2EContainer 19/19 leaf subtests in 111.8 s (`/tmp/ctr-intB-e2ectr.log` in Lima) |
-| `make e2e-vz-container` (Rosetta, **stock** amd64 `cloudflare/sandbox` images) | Mac, vz | **PASS** TestContainerSmoke, TestVZContainerStartFailures, TestE2EContainer 19/19 in 156.3 s (`/tmp/twd-intB-vzctr-rosetta.log`) |
-| `make e2e-vz-container VZ_ROSETTA=0` (arm64 rebuilds via alias) | Mac, vz | **PASS** same set, 19/19 in 48.4 s (`/tmp/twd-intB-vzctr-arm64.log`) |
-| `make e2e-container-build` → `make e2e-container-registry` (examples from their own Dockerfiles, pushed, pinned, pulled, booted) | build: Mac (buildx, 2.9 s / 0.9 s); run: Lima | **PASS** 4/4 in 44.7 s: A from Dockerfile, B from Dockerfile, raw from a public base, what ran is what was pinned (`/tmp/ctr-intB-e2ereg.log` in Lima) |
-| `make e2e-vm`, `make e2e-container` (stock amd64 images) | twd-amd64 | **FAIL (environment)**: no guest ever reports an event (`microVM not ready after 30s; events []`), same as phase A/B: the nested L2 guests lose interrupts. TestDgram…/arch tests pass; image conversion of the stock amd64 set works (debian-trixie-python 155 MiB in 4.1 s) |
-
-The first vz container runs on this tree failed (TestContainerSmoke: the reaper race; then StrictKeyscan: the vz save-state refusal); the numbers above are from the runs after those fixes.
-
-**Measurements** (lite unless noted; Firecracker = Lima nested KVM, vz = this Mac):
-
-| Metric | Firecracker arm64 | vz arm64 (alias) | vz Rosetta (stock amd64) |
-|---|---|---|---|
-| hostd BootContainer → entrypoint running | 244 ms | 367 ms | 390 ms |
-| Sandbox 0.x first `/run` (boot + Bun server + exec) | 23.2 s | 10.0 s | 34.2 s |
-| Sandbox 0.x exec via the SDK p50 / p95 | 397 / 896 ms | 3 / 489 ms | 708 / 5105 ms |
-| 1.0 minimal first exec (boot + exec) | 807 ms | 517 ms | 652 ms |
-| raw `ctx.container` python + Files, first exec | 2687 ms | 1844 ms | 2145 ms |
-| `exec(["true"])` end to end (client → tailnet → DO → hostd → VM) p50 / p95 | 101 / 197 ms | 89 / 103 ms | 182 / 200 ms |
-| intercept round trip (guest → proxy → parent DO → echo node → back) | 2991 ms (first use) | 480 ms | 2391 ms |
-| kill: streaming exec caller ends / VM gone | 27 / 126 ms | 4 / 63 ms | 4 / 22 ms |
-| inactivity 1.5 s → stopped after | 1732 ms | | 1697 ms |
-| strict keyscan | 73 needles, 4 disks, 42 700 guest files, 256 MiB RAM in 1355 ms, found none, canary found | 73 needles, 4 disks, 43 674 files, found none, **RAM not scanned** (vz) | same, 43 926 files |
-| fractional vCPU (basic, 1/4) busy loop share | VMM cgroup `cpu.max` | 0.259 | 0.24 |
-| RSS per container VM | 52–85 MiB (python), 206 MiB (0.12.14 Bun) | | 463 MiB (Bun under Rosetta) |
-| registry path: first `/run` incl. pull + convert | 37.4 s | | |
-
-Security outcomes asserted on real VMs (Firecracker and vz): deny-all to 17 targets (internet, tailnet peers incl. the parent's 100.x, 100.100.100.100, gateway 3128/3130/22, metadata, private ranges; names NXDOMAIN; only gateway DNS answers); intercepted requests arrive at the echo node from the **parent object's** IP; HTTPS intercept with the container CA; allowlisted stand-in reachable, rebinding/private/literal-IP refused and audited; memory past the instance limit fails in the guest (MemoryError) with the VM up; 600 MB into a 256 MB scratch hits ENOSPC at 224 MiB; a fork bomb leaves host PIDs flat (Lima 267 → 242) and a neighbour exec at 21 ms; container root cannot lift `pids.max`/`cpu.max`; fence inheritance (hostd test: fenced container stopped 972 ms after the partition, a `fence: never` one kept serving).
-
-### Findings
-1. **Container root had every capability** and could lift its guest-side cgroup limits (vz `cpu.max`; `pids.max` on both). Fixed by dropping to Docker's default capability set in `ctr-exec`; the acceptance images (Bun server, sandbox-shim, python) need nothing more.
-2. **PID 1 reaping races `exec.Cmd.Wait`.** Anything guestd runs and waits for itself after the reaper starts must hold off the reaper; only the vz scratch format hit it so far.
-3. **vz cannot dump guest RAM** (Virtualization.framework refuses to save these VMs), so on macOS the no-keys scan covers disks and files only, for DO and container guests alike. The scan says so and fails its control rather than passing.
-4. **Rosetta is slow for the 0.x Bun server at `lite`** (first `/run` 34 s, SDK exec p95 5.1 s vs 10 s / 0.5 s native arm64); the 1.0 and raw flows are similar on both paths.
-5. **The first intercept on Firecracker is slow** (≈3 s, the parent's first egress over a cold tailnet path); later ones are fast.
-
-### Known gaps vs ADR-032 v1 scope
-- **amd64 is unverified end to end.** The amd64 guest assets, `DefaultBootArgs("amd64")`, stock-image conversion and amd64 pinning/placement exist and are unit-tested, but the only x86 test host (a nested QEMU/KVM guest on the NAS) loses L2 interrupts, so no amd64 microVM (DO or container) has become ready; the cause is outside twd (diagnosis in the `ctr/ports` notes). ADR-032's "amd64 assets are a v1 prerequisite" is met in code, not in a run.
-- **`enableInternet` uses the host's own network** (`-container-internet=direct`, default): twd has no tenant exit node or gateway path (RFC §4.8). Whether the default should be `off` is open. The allowlist is the workload-level `tailnet.egress.internet`, not per class.
-- **vz:** RAM not scanned (above); no jail, host cgroup or VMM `pids.max` (one VMM process per VM; the fractional vCPU is the guest's `cpu.max`, now protected by the capability drop). A Mac registers arch arm64, so a bundle stating `arch: amd64` is not placed on a Rosetta Mac, and registry pins for a Mac are arm64 (the Rosetta stock-image path applies to `-container-image-dir`).
-- **E2E coverage limits:** the VM e2es use fakemgmt (with the real registry, resolver and push code); the real twd-mgmt reservation rules, mirroring from Docker Hub and WhoIs host scoping are covered by mgmt unit tests, `make test-pg` and `TestCLIImages`, not by a VM e2e. No `twd deploy` → real mgmt → Linux host → container run with the real binaries. Max lifetime is covered only by a hostd timer test. The memory limit shows as a guest MemoryError (exit 1), not a kernel OOM kill. The keyscan's "registry credentials" needle has no real counterpart (hosts pull with their tailnet identity; host key/token files are scanned instead). The e2e images are ctr/core's prebuilt sets (read-only), not rebuilt here.
-- **Intercepts:** HTTP/1.1 only (no h2, no WebSocket upgrade); handlers live in the object's memory (a raw `ctx.container` handler registered before eviction answers `502 intercept_unavailable` until re-registered; `@cloudflare/containers` re-registers on wake); any object of the same workload can call another's `__twd_intercept` over RPC (same trust domain, not hardened).
-- **Smaller:** container instance types exist twice (`internal/container.InstanceTypes`, `sandbox.InstanceTypes`; same values); the vz kernel (`build-kernel-vz.sh`, 6.1.167) is separate from the Firecracker kernel (6.1.155 via `guest/inputs.sh`); `KernelHasErofs` is a byte scan; registry has no garbage collection and developers are global admins (any admin can push into any tenant's namespace); public image pushes are audited without a tenant; reconcile-time audit records are outside the reconcile transaction.
-- **Not run:** Redocly `make api-lint` (needs the network), `make release`, `make e2e-real` (needs credentials; out of scope).
-
-### Deferred (ADR-032, unchanged)
-Preview URLs (`exposePort`, `proxyToSandbox`; ADR-029), `getTcpPort().connect()` and raw TCP / WebSockets to container ports, `snapshotContainer` (v1.1), memory snapshots and fork, persistent sandbox volumes, bucket mounts and backups, the own-node opt-in (`sandbox.tailnet.tags`), standalone sandboxes, cosign, gVisor / cloud-hypervisor, GPUs, the upstream `containerEngine` (WD-n).
-
-### Security review fixes (2026-11-14)
-Three findings from a security review of this branch, fixed in `9ff4ee3`, `06d655e`, `f2eeefc` (+ the doc commit).
-- **MEDIUM: control-channel hijack (both backends).** Any guest vsock connection that wasn't an exec stream replaced the control channel (`agent.route`), so a container process running as guest root could connect to CID 2:1024 and take it over: forge `fsscan`/`stats`/`ready`/exit answers (defeating the keyscan's guest file scan), receive the host's exec ops, or grab another exec's stdio by its exec id. Now, host side: a random 256-bit **per-boot control token** on the config drive (`GuestConfig.CtlToken`) must be in guestd's `hello` (constant-time compare); any other connection is closed and never touches the channel or the event log. An authenticated reconnect still replaces the channel (guestd has always reconnected when its connection dies; a single-connection rule would break that). Each exec gets a random 256-bit **stream token** in the `exec` op; its stdio stream attaches only with that token, once, and a wrong token leaves the exec waiting for the real one. Guest side: `ctr-exec` installs a **seccomp filter** on every container process (entrypoint and exec, inherited across execve, set while still privileged, so no `no_new_privs` and setuid binaries still work): `socket`/`socketpair(AF_VSOCK)` and `io_uring_setup` (io_uring can make sockets out of seccomp's sight; the guest kernel has `CONFIG_IO_URING=y`; Docker blocks it too) fail with `EPERM`, including the i386/arm compat and x32 ABIs; nothing else is filtered.
-- **LOW: `CAP_MKNOD`.** With no device cgroup in the guest, container root could `mknod` `/dev/vd*` and read the raw disks. `CAP_MKNOD` is dropped (root's set is now `CapEff 00000000a00425fb`) **and** every container mount is `nodev` (overlay root, erofs lower, scratch upper, and `/dev`, whose six usual nodes are bind mounts of the guest's devtmpfs), so a node an image ships doesn't open either. Both, because nodev alone would leave `/dev` needing real nodes and MKNOD alone would leave image-shipped nodes usable; FIFOs need no capability (`mkfifo` works). The config drive holds only `guest.json` (network config, the tenant's own argv/env, the intercept CA *certificate*, the scan canary, now the control token): nothing host-sensitive, and the container can no longer read any of it.
-- **LOW: image-conversion resource caps.** `image.Limits` (`Store.Limits`): uncompressed layer bytes, default 40 GiB (2× Cloudflare's 20 GB disk; hostd `-container-image-max-mib`), 128 layers, 1 Mi entries, path depth 256 / length 4096; the image tarball's extraction has the same caps. Bytes are counted while reading, twice: the decompressed stream (never more than one byte past the cap) and the entries' declared sizes (a sparse or truncated entry trips on its header). Flatten's first pass checks everything before anything is written. Typed `*LimitError` (`errors.Is ErrLimit`); partial output is removed.
-
-| Test | Where | Result |
-|---|---|---|
-| unit: `TestAgentControlChannelNotHijackable`, `TestAgentExecStreamToken` | Mac, Lima | **PASS**: no/wrong/prefix token and forged `ready`/`ctr-exit`/`resp` first lines all closed, ops still answered by guestd, events `[hello]` only; guestd's authenticated reconnect takes over; streams with no/wrong/prefix token, the exec id as token, an unknown exec, or a reused token refused, the right one attached. Without the fix the hijack test hangs on the stolen channel |
-| unit: `TestCtrSeccomp`, `TestCtrCapsNoMknod` | Lima | **PASS**: after an exec under the filter `vsock=EPERM vsock-dgram=EPERM socketpair-vsock=EPERM io_uring_setup=EPERM`, `inet`/`unix`/`socketpair(unix)` ok |
-| unit: 8 `hostd/image` limit tests | Mac, Lima | **PASS**: a 65 KB gzip bomb of 64 MiB stops at a 1 MiB cap having decompressed < 2 MiB and written nothing; 8 GiB header in a truncated layer; 9 MB of PAX headers (stream count only); 129 layers; entries per/across layers; depth 301, 5000-byte name; untar bytes/entries; `Store.Get` over the cap leaves no cache entry or temp file |
-| `make test` / `make lint` | Mac | **PASS**: 20 Go packages ok (-race), JS 5/9/7, 0 fail; lint ok |
-| `make test` | Lima (`~/ctr-fix`) | **PASS on the first run**: 22 packages ok (hostd 197.6 s, cmd/twd 197.6 s, netd 41.4 s), JS 5/9/7 |
-| `make e2e-vm` | Lima, Firecracker | **PASS**: TestSmoke, TestVolume, TestDgram…, arch tests; TestE2EVM 13/13 in 8.61 s, restart → serving 949 ms |
-| `make e2e-container` | Lima, Firecracker | **PASS**: TestContainerSmoke + TestE2EContainer **20/20** leaf subtests (new: `Egress/GuestPlumbingSealed`) in 147.1 s; 0.x first `/run` subtest 55.7 s; strict keyscan 73 needles, 4 disks, 42 700 files, 256 MiB RAM (memdump 2313 ms), found none, canary found |
-| `make e2e-vz-container` (Rosetta, stock amd64 images) | Mac, vz | **PASS**: TestContainerSmoke, TestVZContainerStartFailures, TestE2EContainer 20/20 in 206.8 s (RAM not scanned on vz, as before) |
-| `make e2e-vz-container VZ_ROSETTA=0` | Mac, vz | **PASS**: same set, 20/20 in 73.2 s |
-
-`GuestPlumbingSealed` (container root in the python image, every backend): AF_VSOCK connect to 2:1024 and vsock dgram `EPERM`; `mknod` of vda–vdd (254:0…254:48) in `/tmp` and `/dev` `EPERM`, no node to read; `/` and `/dev` `nodev`; `mkfifo` and `/dev/null` work. The 0.x Bun server, `sandbox-shim` and python pass under the filter on all three runs.
-
-Leftovers: a guestd reconnect was not observed in these runs (the Firecracker keyscan's snapshot left the channel up), so the reconnect path is covered by the unit test only. Dropping `CAP_MKNOD` is a small departure from Docker (an image that `mknod`s a device at runtime gets `EPERM`; none of the acceptance images do). The registry pull (`oci.Copy`) holds each blob to its digest and declared size, but the total of a manifest's declared layer sizes is not capped before the download (the blobs land in the host's tmp); the conversion caps bound only what follows it.
-
-### Merge of master: fast-vm, fast-identity, smart placement (2026-11-14)
-Master moved by five PRs while this branch was in review: fast-vm (#6: per-stage boot timestamps, the warm pool, snapshot restore with one shared base per host, Uffd helper, guestd `load` with entropy reseed), fast-identity (#7: pre-joined node pool, warm keys, `twd up` flags), smart placement (#3: `scoreHosts`, tailnet path measurements, `--replace`; ADR-033), then Tailscale Services (#2) and cron triggers (#1). Merged in two merge commits (`d9bd82d`, then `a040141` when master moved again during testing), plus fix commits; no rebase.
-
-**Conflicts and resolutions.**
-- `api/openapi.yaml` by hand (error table: `tier_unavailable` with containers, `move_unconfirmed`, `lease_changed`, `service_conflict`, `service_api_failed`; `Deployment.containers` and `.placement`; audit kinds from both sides), then `make api` for `*.gen.go` and `docs/contracts/mgmt-api.md`.
-- `mgmt/sqlstore.go`: `deployments` reads/writes both `containers` and `placement` (18 insert placeholders); `warm_keys` and `host_paths` tables added next to ADR-032's four; all additive (`CREATE … IF NOT EXISTS`, `addColumns`), no version numbers on either side. `DeleteHost` removes the host, its container reservations and its path measurements in one transaction. `store_test`'s Postgres reset drops every table of both sides (incl. `warm_keys`).
-- Placement (`mgmt/service.go`, `placement*.go`): see (c) below.
-- Firecracker backend (`hostd/vm`): this branch had split the Firecracker code into a shared `agent` (control channel, ingress; also used by vz), `launch` (boot path shared with container guests), `vnet.go` and `configdrive.go`; fast-vm had changed the old monolithic `vm_linux.go`. fast-vm's pool, restore and claim were ported onto the split: `Boot` → pool `take`/`claim`, else restore + claim, else cold `boot`; `boot(bootOpts)` builds a `launch` (pool drive, volume slot, `Restore`); the `pooled` event, stage timestamps and the locked `Info()` live in `agent`; `vnet.serve` (listeners added at claim) in `vnet.go`; `writePoolDrive`/`bundleTar`/`tarDir` in `configdrive.go` (the exec bit kept).
-- `helperapi` (protocol 2 with `Features`; ops `attach`, `snapshot-base`, `cpu`; `StartRequest` with `Image`/`ScratchMiB`/`Pids` and `VolumeSlot`/`Restore`), helper session drives (image/scratch and the volume slot), `guest/proto` (`GuestConfig` keeps `CtlToken`/`Container`/`Rosetta` and gains `Pool`; `Msg` keeps exec fields and gains `chunk`/`load`/`ident`), guestd (`run()`: pool branch first, never for container guests; `mountVolume(dev, format)`; ops `exec`/`run` and `wbench`/`ident`/`wkill`).
-- `twd-hostd` flags and `vmOptions` (all three OS files), `twd-mgmt` (`-no-mirror` + warm keys), `twd deploy` (`--platform` + `--host`/`--replace`), Makefile targets of all sides; `e2e/vm` runs fast-vm's `TestE2EVM` (pool + snapshots) and `TestE2EVMSnapshot` on Firecracker through the per-OS `testBackend` (vz: no pool or snapshots, `TestE2EVMSnapshot` skips).
-
-**(a) Snapshot restore × the control-channel token (`9ff4ee3`).** Decision: **every claim rekeys.** A pooled VM boots with a pre-claim token on its pool config drive; copies restored from one base all hold that base's token (in guestd's memory; hostd keeps it per base, `baseTokens`, so a restore's agent accepts it). It authenticates only the pre-claim connection, while the VM has run nothing but twd's warm-up app and holds no tenant code or keys. The claim's `load` carries a fresh 256-bit `Load.CtlToken` with the entropy, boot id and clock; hostd switches to it *before* sending the load (the pre-claim/base token is refused from then on; the already authenticated channel stays), guestd adopts it before answering and uses it for every reconnect. Exec stream tokens are per exec and exist only in container guests, which are never pooled: unchanged. Tests: `TestAgentRekeyAtClaim` (unit: two copies of one base get different tokens; base token and the other copy's token refused after the claim; the new one accepted); on real VMs `TestSnapshotUniqueness` (3 restored copies: distinct tokens, a base-token hello refused after the claim, guestd reconnects with its new token and answers) and `TestPoolNoCarryOver` (the same for a boot-filled pool VM).
-
-**(b) fast-vm × container VMs.** Decision: **containers keep cold boot**; the pool and snapshots apply to workerd DO guests only (docs/containers.md "Warm pool and snapshots"; open decision 11). Shared code checked: container guests boot through the same `launch` (stage timestamps recorded, `Info().Source = "cold"`), count against the pool's huge-page budget, never use `attach`/`snapshot-base`/`Restore` or the uffd helper; guestd's pool branch is skipped for `GuestConfig.Container`; the container `ctr-ready` path sets `Ready` under the agent lock now that `Info()` is locked. `TestContainerSmoke` and `make e2e-container` now run on a backend with twd-hostd's defaults (pool auto, snapshots on) and assert the container VM cold-booted without touching the pool (`Claims 0, Misses 0`, pool idle 2 next to it).
-
-**(c) Smart placement × container placement.** `place` builds `Requirements` from ADR-032's `placementNeed` (tier, `Containers`, `Arch`, `Arches`) and `scoreHosts`' `ineligible` applies them before any path ranking (a host without `containers`, of the wrong arch, or outside the pinned arches is never chosen, whatever its path). Capacity uses the capacity vector: `Candidate.Free` carries `vms`, `vmMemMiB`, `hugeMemMiB`, `vcpus` (× overcommit) and `scratchMiB` (capacity − usage; a host that registered no vector is unbounded in them), and a microVM-tier or container deployment needs `{"nodes": 1, "vms": 1}`. The sticky holder stays exempt from capacity but not from eligibility; pinned or sticky hosts that lack `containers` give `409 tier_unavailable` (now suggesting `--replace`), and `--replace` moves the workload to an eligible host; no eligible host gives `503 no_host` naming containers and the arch. `pickHost` is gone. Tests: `TestScoreHostsContainers` (10 cases), `TestFreeUnits`, `TestDeployContainersCapacityAndReplace`, plus both sides' `containers_test.go`, `tier_test.go`, `placement*_test.go` unchanged and passing.
-
-**(d) fast-identity × container VMs.** Confirmed: containers create no object and no node; the pre-joined node pool is driven by object creates (`poolDemand`), and warm keys by mgmt's mint path for objects; neither is reachable from a container start or reservation. `TestContainerNoTailnetNode` (hostd, pool on: two containers, no objects, no pool demand).
-
-**Test fixes on the way (master tests):** `TestCronTriggers` used 2026-11-13 minutes while the host's own `cronLoop` ticks on the real clock, so it failed whenever the suite crossed a minute boundary (1 in 2 in Lima); its minutes are now a century ahead.
-`e2e/container`'s `ForkBombContained` now fails instead of hanging for 20 minutes when its exec call fails (seen once on vz while Lima ran `make test` at the same time; the rerun alone passed).
-
-| Suite | Where | Result |
-|---|---|---|
-| `make test` | Mac | **PASS**: 23 Go packages ok (-race; hostd 82.6 s, cmd/twd 79.3 s, mgmt 58.5 s, netd 46.1 s), JS 5/9/19, 0 fail |
-| `make lint` | Mac | **PASS** (api-check, vet incl. GOOS=linux/darwin e2evm/e2econtainer, e2eplacement, e2emultimgmt; check-secrets) |
-| `make test-node` / `make test-sdk` | Mac | **PASS**: TestNodeTier, TestNodeWorkflow, TestNodeTierSharedHostRefused (JS 9/9); TestCloudflareAgents, TestAgentTemplate, TestVercelAI |
-| `make test-pg PG_PORT=55519` | Mac (OrbStack postgres:17) | **PASS**: mgmt ok twice (Store tests on SQLite + Postgres, 19 postgres subtests; API tests on Postgres), 89 PASS lines |
-| `make e2e-placement` | Mac (hermetic) | **PASS**: TestSmartPlacementHermetic |
-| `make test` | Lima `~/ctr-merge` | 24 Go packages ok (-race; hostd 244.4 s, cmd/twd 181.0 s, mgmt 65.4 s, guestd), netd failed: `TestRejoinRejectedRemints` (the known `-race` timeout; passed on the rerun) and **`TestEgressWaitsForNewPeerPath` fails every run in Lima, also on master `448b17a` alone** (first request after the path wait 3.0 s, wants < 2 s; passes on the Mac): a fast-identity test/environment issue, not this merge. `make test-js` 5/9/19 |
-| `make e2e-vm` (`vmsmoke` + E2E-VM) | Lima, Firecracker | **PASS**: TestAgent* (incl. RekeyAtClaim), TestPoolClaim/NoCarryOver/Budget, TestSnapshotRestore/Pool/Uniqueness/Rotate, TestSmoke, TestVolume, TestDgram…, arch tests; **TestE2EVM 14/14** (pool + snapshots on: deploy→active p50 216 ms, kill→serving p50 542 ms) and **TestE2EVMSnapshot 14/14** (pool off, every VM restored: deploy→active p50 274 ms) |
-| `make e2e-container` | Lima, Firecracker, arm64 images via alias, pool + snapshots on | **PASS**: TestContainerSmoke (cold boot → entrypoint 207 ms next to 2 idle pool VMs, pool claims 0) + TestE2EContainer 20/20 in 225.4 s (strict keyscan 73 needles, none found) |
-| `make e2e-vz-container` (default: Rosetta, stock amd64 images) | Mac, vz | **PASS**: TestContainerSmoke, TestVZContainerStartFailures, TestE2EContainer 20/20 in 216.8 s (RAM not scanned on vz, as before) |
-
-**Gaps.** Container VMs don't use the pool or snapshots (decision 11). Idle pool VMs are not in the capacity vector's usage (decision 12). vz has neither pool nor snapshots. `TestEgressWaitsForNewPeerPath` fails in Lima on master too. No VM e2e drives `twd deploy --replace` across real hosts with containers (mgmt unit tests and the hermetic `e2e-placement` cover the parts). Not run: `e2e-real`, `e2e-public`, `e2e-keyless`, `e2e-linux-vm`, `e2e-coldid-real` (need credentials, Funnel or a real tailnet), `make api-lint` (network), the amd64 host.
-
-## FV: fast microVM start (branch `fast-vm`, 2026-11-13)
-Goal: make a microVM workload start in tens of ms (warm pool, then snapshot restore), so the VM tier is usable where isolates are, and a later step can afford one VM per object.
-
-> **Every number in this section was measured in Lima `twd-dev` on an M5 Pro, so Firecracker runs under nested virtualization** (the Lima VM is itself a vz guest). Stage-2 page faults and VM exits cost far more there than on bare-metal KVM. **No bare-metal KVM machine was available**, so there are no bare-metal numbers. Treat absolute values as upper bounds and the ratios between stages as the useful part. Huge pages (2 MiB) back guest RAM in all runs (M8 finding 1). twd-dev was shared with other sessions during these runs; one Firecracker VM left over from an earlier run (`twdp59144-0`, 5 days old, not started by this work) held 256 huge pages throughout and was left alone.
-
-### Phase 1: where the 0.6 s goes
-**Instrumentation** (kept; it is cheap):
-- `twd-guestd` stamps each stage on `CLOCK_BOOTTIME`, i.e. ms since the guest kernel started, which is InstanceStart. The stamps go out in the `boot` and `ready` messages (`proto.Msg.Stages`).
-- The helper reports each step relative to its own start (`Timings`: netns, jail, volume, jailer, every API call).
-- hostd records its own stages. All of it lands in `sandbox.Info.Stages` / `GuestStages`.
-- `vm.Breakdown()` turns these into per-stage durations and `vm.Summarize()` into p50/p95.
-- A debug-only guest op `wbench` times `workerd --version`, and debug-only `wkill` lets the supervisor restart workerd so a warm restart can be timed.
-
-**Benchmarks:**
-- `hostd/vm` `TestBootBench` (`TWD_VM_BENCH=N`; not part of `make e2e-vm`) boots the tiny smoke config 20 times, without and with a fresh encrypted volume, plus 3 boots of a worker with ~1.2 s of top-level module work.
-- e2e-vm `DeployReadyBench` (`TWD_VM_BENCH_DEPLOYS=20 make e2e-vm`; default 5) redeploys the real `hello` template (platform bundle, 48 KiB config drive, DO volume) through hostd 20 times, then kills its VM 3 times.
-
-**Stages, real `hello` platform bundle through hostd** (20 serial redeploys; e2e-vm `DeployReadyBench`):
-
-| Stage | p50 ms | p95 ms |
-|---|---|---|
-| host: config drive (tar of the instance dir) | 0.2 | 0.3 |
-| host: netns + bridge + 2 TAPs (6 `ip` execs) | 27.4 | 38.0 |
-| host: jail dir (bind mounts, config copy, vsock listener) | 0.2 | 0.3 |
-| host: volume attach (loop + LUKS2 open; existing volume) | 16.4 | 22.4 |
-| host: jailer exec → Firecracker API socket up | 15.8 | 22.5 |
-| host: VMM API calls (machine, boot source, 3 drives, net, vsock) | 1.4 | 2.4 |
-| host: InstanceStart call | 4.6 | 5.9 |
-| guest: **kernel boot** (InstanceStart → init runs) | **122.1** | 151.6 |
-| guest: init mounts | 0.4 | 0.5 |
-| guest: config drive read + extract | 2.9 | 5.7 |
-| guest: set clock / eth0 up | 0.0 / 0.7 | 0.1 / 1.1 |
-| guest: DO volume mount | 4.1 | 7.8 |
-| guest: workerd fork/exec | 3.1 | 4.0 |
-| guest: **workerd/V8 process init** (exec → ingress socket listening) | **168.1** | 229.0 |
-| guest: **isolate + bundle load + first healthy response** | **197.6** | 304.8 |
-| **whole `Boot()`** | **601.6** | 799.8 |
-| hostd: **deploy → active** (incl. drain, guest unmount, volume release, `Boot()`, health, routing) | **745.7** | 768.6 |
-| hostd: deploy → first 200 over tsnet | 772.1 | 795.0 |
-| hostd: VM SIGKILL → serving again (3 kills; includes the restart policy's 200/400/600 ms backoff) | 1305.9 | 1626.6 |
-
-**Same, tiny smoke worker** (`TestBootBench`, 20 boots each): no volume, `Boot()` p50 603 / p95 718 ms. With a *new* volume (LUKS2 format + mkfs each boot), the volume attach takes 80 / 91 ms and `Boot()` 688 / 805 ms. Kernel boot 125 ms, workerd init 188 ms, first healthy 207 ms: the smoke config costs as much as the platform bundle.
-
-**What each workerd stage really is.** A worker that spends ~1.2 s in module top-level code shifts *first healthy response* by ~1.2 s and leaves *until listening* unchanged (165 ms). So workerd binds its sockets before it evaluates modules. "Until listening" is workerd/V8 process init, and the bundle is compiled and evaluated on the first request.
-
-**Where the 0.6 s goes:**
-- **kernel 20 %**;
-- **workerd process init 28 %**;
-- **first request (isolate + bundle) 33 %**;
-- host-side setup (netns, volume, jailer, API) ~11 %;
-- the rest is init, mounts and vsock.
-
-On top of `Boot()`, hostd's redeploy spends ~145 ms: the drain, the old guest's unmount and volume release (~110 ms, L3), the health check and the routing switch.
-
-**The decisive measurement: workerd in a *warm* VM.** After a VM is up, a second workerd started in the same guest (debug `wkill`; the supervisor restarts it) goes from exec to healthy in **13–15 ms**: 8 ms to listening, 5–6 ms for the first request. A cold one takes ~395 ms. `workerd --version` alone takes 10.8–17.7 ms on its first run in a fresh guest and 1.7–2.1 ms on its third. So ~95 % of the cold workerd cost is first-touch cost, not work:
-- reading the 155 MiB workerd binary through virtio-blk into an empty guest page cache;
-- faulting in fresh guest RAM, which under nested virt means stage-2 faults per page.
-
-A VM that has run workerd once and then starts a *fresh* workerd process for the tenant skips almost all of it. That shapes both the pool (Phase 2) and the snapshot (Phase 3).
-
-### Phase 2: warm pool (built; on by default)
-**Design** (`hostd/vm/pool_linux.go`; guest side in `twd-guestd`; contract in `guest/proto`):
-- **What a pool VM is.** hostd's backend keeps N VMs booted ahead of time. A pool VM's config drive carries only the network config and twd's own **no-tenant warm-up app**: one request through a Durable Object with SQLite and KV storage, listening on loopback.
-- **Warm-up, then idle.** guestd runs that workerd once until healthy. This faults in the 155 MiB binary, V8, SQLite and guest RAM, which is the cold-start cost Phase 1 found. Then guestd SIGKILLs it, empties `/run/twd/app`, `/tmp` and `/dev/shm`, and says `pooled`.
-  - workerd can't swap configs in place, so the pool's "workerd idle" means a VM whose workerd has run and exited. The tenant always gets a **new workerd process**, sharing nothing with the warm-up but the read-only image's page cache.
-- **A deploy or restart claims one.** `Backend.Boot()` takes a pooled VM (hostd itself is unchanged: `bootVM` → `Boot`), then:
-  1. **Volume:** the helper opens the workload's LUKS2 volume and swaps it in behind the guest's `/dev/vdc`. That is the new `attach` op (helper protocol v2); the pool VM booted with a 1 MiB placeholder `volslot`, and the swap is Firecracker `PATCH /drives/do`, post-boot. The guest waits for the new capacity, flushes the placeholder's buffers and mounts.
-  2. **Handlers:** hostd adds the gateway listeners to the VM's gVisor stack. A pooled VM's stack has **none**, so every SYN from it is reset and recorded.
-  3. **Injection** over the existing vsock NDJSON channel (the config drive is read-only, so the bundle can't go there): `chunk` messages (≤ 1 MiB, base64, acknowledged), then one `load` carrying the sha256, workerd args, health blob, debug flag, volume device and size, the host's wall clock, **64 bytes of entropy** and a fresh **boot_id**. guestd verifies the hash, reseeds the kernel CRNG (`RNDADDENTROPY` + `RNDRESEEDCRNG`), bind-mounts the new boot_id, sets the clock, extracts, mounts and starts workerd.
-- **Single use, enforced on both sides.** guestd refuses a second `load` (`loading` is set before anything else). The backend never puts a claimed VM back, and a claim that fails destroys the VM. If the failure isn't a volume error (`volume_busy`, `volume_fenced`, `volume_key`), `Boot()` falls back to a cold boot.
-- **Sizing:** `-vm-pool N` (twd-hostd) / `vm.Config.Pool`: 0 = auto, which is half the huge-page reservation's VMs, at most 2 (with `twd host setup --microvm`'s default 4-VM reservation: 2). -1 = off.
-  - Refill runs in the background, one VM at a time, after each claim or exit.
-  - It happens only while **all of this backend's live VMs (pooled + claimed + cold) plus the next one fit `PoolBudgetMiB`** (default: `vm.nr_hugepages` × 2 MiB, i.e. the reservation), and only if that many 2 MiB pages are available (free − reserved).
-  - Pool VMs run with `huge_pages` **on**, never falling back to 4 KiB pages.
-  - A cold boot on a pool miss is not limited by the pool budget (same as before).
-- **Unchanged, and re-verified on pool VMs:** e2e-vm now waits for the pool before deploying, so `hello` and `probe` run in *claimed* pool VMs and every check covers that path; `TestSmoke` pins the cold path (`Pool: -1`).
-  - per-object egress attribution (MAC'd `x-twd-*`; forged headers still leave as the sender);
-  - the encrypted volume: key to the helper only; `volume_busy` for a second VM, through a claim too;
-  - serial blue/green (drain → guest unmount → release → *claim* → attach);
-  - the bounded restart policy (VM SIGKILL → 503 `upstream_unavailable` → the restart claims a pooled VM).
-- **Also changed:**
-  - The helper now sends the `exit` event right after the VMM is dead and the **volume is released**, then tears down the netns, jail and cgroup. A serial redeploy's next VM was waiting on all of it.
-  - guestd polls workerd's exit on `shutdown` every 1 ms (was 10).
-  - `FreeHugePages2M` and the helper's `auto` check now subtract `resv_hugepages`.
-  - `sandbox.Info.Source` is `cold` / `pool` (later `restore`), and `PoolIdle` is how long the VM waited.
-
-**Tests (in `make e2e-vm`, `hostd/vm`):**
-- **`TestPoolClaim`**:
-  - `Boot()` returns a pooled VM on huge pages;
-  - it serves the workload, its egress reaches *its* gateway handler, and its DO storage is the attached `/dev/vdc` ext4;
-  - a second `load` is refused (`not a pooled VM waiting for its load`);
-  - the claimed VM is never back in the pool, and the pool refills.
-- **`TestPoolNoCarryOver`** (fsscan before injection):
-  - workload A runs; its code, its responses and a volume write carry a random marker. A is stopped.
-  - The pool's refilled VM is taken *before* any injection. It is not A's VMM, and its state dirs (`/run`, `/tmp`, `/dev/shm`) hold **0 files**: the warm-up app and its marker file are gone too.
-  - Its **full 512 MiB RAM dump** does not contain A's marker.
-  - Then it is loaded with workload B and serves B, with none of A's files.
-- **`TestPoolBudget`** (budget 3 VMs, target 2):
-  - 2 claims → exactly 1 idle, 3 live, `MaxLive` 3, and refills skipped at quota;
-  - a 3rd claim → 0 idle, no refill past 3;
-  - after the claimed VMs stop → refilled to 2, `MaxLive` still 3;
-  - all VMs on huge pages.
-- **`make e2e-vm`: PASS** (TestPoolClaim, TestPoolNoCarryOver, TestPoolBudget, TestSmoke, TestVolume, TestE2EVM 14/14 incl. `DeployReadyBench` ×20; `e2e/vm/results/l3-20261114T050849Z.json`).
-
-**Before → after** (real `hello` platform bundle through hostd; 20 serial redeploys each; nested virt):
-
-| | before (cold boot) p50 / p95 ms | after (pool claim) p50 / p95 ms |
-|---|---|---|
-| **`Boot()`** (deploy/restart → workerd healthy in the guest) | 601.6 / 799.8 | **58.2 / 64.4** |
-| **deploy → active** (hostd: drain, release old VM, new VM, health, routing) | 745.7 / 768.6 | **193.0 / 213.0** |
-| deploy → first 200 over tsnet | 772.1 / 795.0 | 215.2 / 237.8 |
-| VM SIGKILL → serving (3 kills; includes the policy's 200/400/600 ms backoff) | 1305.9 / 1626.6 | 529.5 / 734.1 (343.6 min) |
-
-**Claim stages** (same 20 redeploys):
-
-| Stage | p50 ms | p95 ms |
-|---|---|---|
-| host: take a pooled VM | 0.0 | 0.0 |
-| host: volume attach (helper: loop + LUKS2 open + `PATCH /drives`) | 17.0 | 18.7 |
-| host: inject (chunks + `load`; includes the guest's extract, reseed and mount) | 9.1 | 12.3 |
-| guest: bundle extract + reseed + clock | 2.0 | 3.4 |
-| guest: DO volume mount | 4.8 | 7.7 |
-| guest: workerd fork/exec | 0.7 | 1.0 |
-| guest: workerd/V8 init (until listening) | 10.1 | 12.5 |
-| guest: **isolate + bundle load + first healthy response** | **21.9** | 23.7 |
-| **total `Boot()`** | **58.2** | 64.4 |
-
-**Against the target** ("deploy/restart → ready ≈ bundle load"):
-- **What's left of `Boot()`:** of 58 ms, 32 ms is workerd (10 ms process init, 22 ms bundle load + first request), 17 ms is the volume and 9 ms is the injection. **Without a volume** (`TestPoolClaim`'s smoke worker, no volume) the claim's guest side is ~20 ms.
-- **What's left of a redeploy (hostd log, `drain_ms` / `stop_old_ms` / `start_ms`):** deploy → active is 151–193 ms. **85–100 ms of it is releasing the old VM** (the guest stops workerd, syncs and unmounts: 33–44 ms; then VMM exit + the host's LUKS close). The single-attach volume fence makes that serial; making it overlap needs a hot volume handover (an L3 gap, not built).
-- **Restarts:** a crash restart is dominated by hostd's restart backoff (200 ms on the first crash), not the VM.
-- **A fresh volume** (first deploy) adds LUKS2 format + mkfs: the attach is ~90 ms then.
-- **Memory:** each idle pool VM has touched ~110 MiB of guest RAM (hugetlb) after its warm-up.
-
-**Findings (Phase 2):**
-1. **`resv_hugepages` stays 0 with running VMs.** Firecracker maps guest RAM without a hugetlb reservation, so a VM takes its 2 MiB pages only as the guest touches them. `free_hugepages` therefore overstates what's available, and an over-committed host would SIGBUS a VMM whose guest touches new memory.
-   - This was true before this branch; the helper's `auto` check has always only looked at free pages at boot.
-   - The pool counts every live VM at its **full** size against the reservation instead of trusting free pages. The cold path and the helper still don't; that's a follow-up: a per-backend or per-helper accounting of all VMs.
-2. **The workerd clock is frozen during execution**, so a `Date.now()` busy loop never ends. The heavy-top-level benchmark uses an iteration count.
-3. A pool VM's console log holds only the warm-up's output until the claim; after the claim, the workload's output follows in the same file.
-
-### Phase 3: snapshot restore (built; `-vm-snapshot` **on by default** since ADR-030 was decided, used for pool misses)
-**Design** (`hostd/vm/snapshot_linux.go`, `helper/uffd_linux.go`; helper ops `snapshot-base` and `start` with `Restore`):
-- **Base snapshot.** With `Snapshot` on, hostd boots one pool VM at startup: kernel, guestd, the no-tenant warm-up run and exited, app dir empty, waiting for its load. hostd checks that `fsscan` shows no state files and nothing that looks like tailscale state.
-  - Then the helper, on a separate *holder* connection, pauses that VM, takes a Full snapshot, and moves the state (11 KB) and memory (512 MiB) files plus the config drive (8 KB) into `StateDir/snapshots/<id>/` (root, 0600).
-  - It then **kills the VM**, so the base's original never resumes.
-  - The base lives as long as the holder connection: hostd exit or `Close` removes it, and the helper's startup cleanup removes stale ones.
-  - Building it took 0.9–1.0 s (boot 0.56 s, snapshot 0.32 s, non-zero page map 0.1 s).
-- **Restore** is a fresh jail, netns and VMM with the same relative paths (`/rootfs.ext4`, `/config.tar`, `/volslot`, `fc0`, `/v.sock`), so the v1.17 `network_overrides` / `vsock_override` aren't needed. Then `PUT /snapshot/load` with `mem_backend: Uffd`.
-  - v1.17's `huge_pages: 2M` *requires* Uffd (`snapshot-support.md`).
-  - **The helper serves the guest memory**: it receives the userfaultfd and region map (`base_host_virt_addr`, `size`, `offset`, `page_size`, as in v1.17's `examples/uffd/uffd_utils.rs`), maps the base memory file read-only, and answers each fault with `UFFDIO_COPY` of the whole 2 MiB page.
-  - **Firecracker never maps the memory file**, and every restored VM gets private copies of the pages it touches, so no guest physical page is shared between VMs.
-- **Prefetch.** On the uffd handshake, a second goroutine copies every page that is non-zero *in the base*. The page map is computed once per base and never depends on what a tenant touched. Faults still win races (EEXIST).
-  - Effect: on-demand faults per restore fell from ~58 (no prefetch) to 4–9; the prefetch takes ~13 ms in the background, and the restore itself dropped from 39.8 to 27.8 ms p50.
-- **After the restore**, guestd's vsock connection was reset by the snapshot; it reconnects (1 ms backoff), says `pooled`, and is **claimed exactly like a pool VM**. Its `load` brings the entropy, boot_id and wall clock, and is stamped right before it is sent (it used to be stamped at claim start: 86 ms stale, found by the test, fixed).
-- **Where restores are used:**
-  - with the pool on, **refills restore and then re-warm** the copy (`rewarm` re-runs the warm-up from the still-attached config drive), in the background;
-  - with the pool empty or off, `Boot()` restores on demand.
-  - Restore failure → cold boot.
-
-**Uniqueness, tested (`TestSnapshotUniqueness`, 3 copies restored concurrently from one base):**
-
-| Property | Before `load` (recorded) | After `load` (asserted) |
-|---|---|---|
-| **Entropy.** No VMGenID: Firecracker always offers it, but this aarch64 6.1 guest kernel has no DeviceTree driver (needs ≥ 6.10, `random-for-clones.md`), so twd reseeds itself: 64 host bytes → `RNDADDENTROPY` + `RNDRESEEDCRNG` before workerd starts | first `getrandom` differed between copies in this run (early-boot reseeding plus interrupt entropy). That is luck, not a guarantee | kernel `getrandom` and `/proc/sys/kernel/random/uuid` differ between all copies |
-| workerd's randomness (`crypto.getRandomValues`, `randomUUID`, `Math.random`) | (no workerd in the base: the tenant's is a new process started after the reseed) | all differ between copies |
-| **boot_id** (identical in every copy otherwise) | differed (generated lazily on first read) | the injected one, bind-mounted, different per copy |
-| **Clocks** | wall clock lags the host by the base's age (0.70 s here); **monotonic doesn't jump** (resumes from snapshot time: 534 ms) | guest wall clock within **2–4 ms** of the host (incl. the ident round trip); workerd `Date.now()` within 1 s (asserted); TLS and egress MACs see real time |
-| **Network / vsock identity** | every copy has the same guest IP, MAC and vsock CID 3 by design, each in its own netns, TAP and jail; Firecracker's vsock is a per-VMM unix socket, not a host-global CID | each copy's egress reaches only *its own* gateway handler; each Machine's control channel answers with that copy's injected boot_id |
-| What guest init caches | guestd's start time (uptime accounting only); the Go runtime's seeds (map order; guestd uses no math/rand); the kernel's early-boot secrets (KASLR slide, `net_secret`, siphash keys) | the kernel secrets **stay identical across copies**: listed in the ADR as residual risk (d) |
-
-**Key safety, tested:**
-- `TestE2EVMSnapshot` is the whole e2e-vm suite with snapshots on and the pool off, so **every** workload VM (first deploys, redeploys, crash restarts) is an on-demand restore.
-- Its `NoKeysInGuest` scans the **restored** probe VM: 30 needles (tskey-, the test auth key, all node and machine private keys, the volume key as raw, hex and base64). None in its 3 disks, its guest files (fsscan) or a **full 512 MiB RAM dump**; the MAC-key positive control is present.
-- It also scans **the base snapshot's three files** (state 11 KB, memory 512 MiB, config drive 8 KB) for the same needles **plus the probe instance's MAC key**: none present.
-- The rest of the suite passes on restored VMs too: egress attribution 3/3, forged headers, ADR-019 refusals, volume double-mount refused, storage across a VMM SIGKILL and a redeploy, the jail checks.
-
-**Tests:** `TestSnapshotRestore` (restore → claim → serve, egress, volume, second load refused), `TestSnapshotPool`, `TestSnapshotUniqueness`, `TestE2EVMSnapshot`, all in `make e2e-vm`.
-
-**Numbers** (nested virt; smoke worker, no volume unless noted; `TWD_VM_BENCH=20`):
-
-| | p50 ms | p95 ms |
-|---|---|---|
-| **On-demand restore → workerd ready** (`Boot()`; 19 restores) | **100.5** | **125.3** |
-| of which: the restore (netns 6.1, jailer 10.4, `/snapshot/load` 3.5, guest resume + vsock reconnect 9.9, …) | 37.5 | 61.2 |
-| of which: inject + workerd (the restored guest's *first* workerd: listen 27.9, first response 29.3) | ~63 | — |
-| **Pool refilled by restore + re-warm: claim → ready** (`Boot()`; 20 claims) | **28.1** | **33.8** |
-| refill cost per VM (restore + rewarm, background) | 105.4 | 125.4 |
-| Real `hello` bundle through hostd, on-demand restore, existing volume (20 redeploys): `Boot()` | 125.2 | 146.4 |
-| same: deploy → active | 272.7 | 293.3 |
-| for comparison: cold boot `Boot()` / boot-filled pool claim (`hello`, volume) | 601.6 / 58.2 | 799.8 / 64.4 |
-
-- **The restored VM's first workerd is slower than a pool VM's** (listen 28 vs 10 ms; first response 29 vs 22 ms), even though uffd faults are prefetched.
-  - A **second** workerd in the same restored VM takes 7.8 + 4.8 ms, i.e. pool speed. So it's first-touch inside the restored VM, most likely KVM's stage-2 tables, which start empty after a restore. Each first guest access to a 2 MiB region exits to the host, and that is costly under nested virt.
-  - That's why refills re-warm, and why the on-demand number is ~3.5× the pool's.
-  - **On bare-metal KVM this cost should be far smaller, but it's not measured (no bare-metal machine was available).**
-- **Memory:** a restored VM holds the ~53 × 2 MiB pages (≈106 MiB) the base had touched, as **private** copies. Guest RAM is still reserved per VM at its full size (huge pages).
-
-**Decided (Ross, 2026-11-13; ADR-030, design repo, uncommitted):**
-1. one base shared by all tenants on a host (the cloned-kernel-state risk (d) is accepted);
-2. no guest pages shared across tenants, ever;
-3. the base is rebuilt at start and hourly.
-
-**Then built:**
-- **Rotation** (`-vm-snapshot-rotate`, default 1 h). A new base is built in the background; if the huge-page budget has no room for the base VM, it retries in a minute. Restores switch to the new base, idle pool VMs restored from the old one are discarded (`PoolStats.Rotated`), and the old base's files are removed after a 30 s grace (`BaseGrace`). `TestSnapshotRotate` checks all of it with a 4 s rotation.
-- **`-vm-snapshot` defaults to on.**
-
-**Which path restores serve, measured.** An A/B over 4 alternating `make e2e-vm` runs (`TWD_VM_E2E_SNAPSHOT`, 20 `hello` redeploys each, same host and hour):
-
-| pool refilled by | claim `Boot()` p50 / p95 ms | deploy → active p50 ms |
-|---|---|---|
-| boot | 62.2–74.0 / 65.9–85.1 | 193–234 |
-| restore + rewarm | 82.5–115.3 / 92.4–147.5 | 237–305 |
-
-- The extra time in restored VMs is guest-kernel first-touch: tar extract 2.3 → 3.9 ms, ext4 mount 5.7 → 9.3 ms, volume attach +3.5 ms, workerd init +2 ms. workerd's bundle load is identical (26.4 ms).
-- Pre-touching guest RAM during rewarm (all free RAM, then 128 MiB) **did not close it reliably**, and copying that much through userfaultfd per refill disturbed concurrent claims (p95 185 ms in one run). It was reverted.
-- **So the default is a boot-filled pool, and the snapshot serves misses.** An empty pool (deploy bursts, crash loops) restores in ~130 ms instead of cold-booting in ~600 ms. `-vm-snapshot-refill` opts into restore-filled refills (6× faster refills, slower claims).
-
-**Final default** (`make e2e-vm` `TestE2EVM`, 20 `hello` redeploys):
-- claim `Boot()` p50 62.0 / p95 69.8 ms;
-- deploy → active 196.2 / 216.8 ms;
-- miss path (`TestE2EVMSnapshot`, pool off) `Boot()` 130.7 / 140.6 ms. Draft **ADR-030** (number provisional) is in the design repo's `DECISIONS.md`, **uncommitted**. It recommends one shared base per host with private pages only, **never** sharing guest pages across tenants (no File backend, no KSM), and base rotation. Ross decides; the flag stays off until then.
-
-### FV: Definition-of-done runs (2026-11-13, on `fast-vm`)
-| Run | Result |
-|---|---|
-| `make test` (macOS) | **PASS** |
-| `make test` (Lima twd-dev, Linux arm64) | **PASS** |
-| `make lint` (macOS; incl. `GOOS=linux` vet of `hostd/vm`, `guest`, `e2e/vm`; check-secrets) | **PASS** |
-| `make e2e-vm` (twd-dev): TestPoolClaim, TestPoolNoCarryOver, TestPoolBudget, TestSnapshotRestore, TestSnapshotPool, TestSnapshotUniqueness, TestSmoke, TestVolume, TestE2EVM 14/14, TestE2EVMSnapshot 14/14 | **PASS** (several runs; results `e2e/vm/results/l3-*.json`, `fv-snapshot-*.json`) |
-| `make e2e-linux-vm` (fresh `twdl-kvm-u24`, installed release, systemd `twd-vmhelper` with protocol v2, tailnet 1, `ttest-l3-<run>`) | run `28c309`: **FAIL**, cleanup only (below; every functional check passed). Run `97a876` after the harness fix: **PASS**. Run `dbc527` with snapshots on by default: **PASS** (9 devices tracked and deleted, 0 left, 0 untracked; independently verified). That run doesn't record whether hostd's base snapshot was built through the systemd helper; it is exercised only in-process (`make e2e-vm`) |
-| **After merging master** (tier-aware placement, public ingress; merge `cb30fb1`, conflict in STATUS only) | `make lint`, `make test` (macOS and Lima), `make e2e-vm` (12 tests incl. TestE2EVM and TestE2EVMSnapshot), `make e2e-linux-vm` run `a622df` (9 devices tracked and deleted, 0 left, independently verified): **all PASS** |
-| `make test-pg` | **skipped**: mgmt not touched |
-| `make e2e-linux-reboot` | **not run** (not in this task's done list). Its cleanup got the same infra-node fix, untested |
-
-- **e2e-linux-vm through the real pool.** In both runs the agent and MCP VMs were **claimed pool VMs** through the installed systemd helper (`Info.Ready == Info.Total`, the claim signature).
-  - First-deploy `Boot()` was 412–540 ms: new volumes (LUKS format: 106–134 ms), two concurrent claims while the pool refilled, on a fresh 6-CPU nested VM.
-  - No keys in either guest: 30 and 32 needles; none in the rootfs, config drive, 76 / 51 guest files or 512 MiB of RAM.
-  - Storage survived the VMM SIGKILL (849 ms to serving) and the redeploy.
-- **Found on the way: a pre-existing harness gap** (since M11's tsnet-only transport). `twd down` keeps mgmt's node and the host's `tag:twd-host` node by design; e2e-mac deletes them by ID (`InfraNodeIDs`), but `e2e/linuxvm` did not.
-  - Run `28c309` therefore left `twd-l3-28c309-mgmt` (reported as untracked) and `twd-host-twd-l3-28c309` (not even reported: its name has a different prefix) on tailnet 1.
-  - **Both were deleted by ID by hand and verified gone** (0 devices with the run's prefixes); the run's keys had been revoked by the harness.
-  - Fixed in `e2e/linuxvm` (both tests) like e2e-mac, which also reports untracked `twd-host-<prefix>` devices. Run `97a876`: 9 devices tracked and deleted, 0 left, 0 untracked, 0 valid keys; verified independently afterwards: 0 devices with its prefixes.
-- **Also fixed:** the in-process helper (root tests, `make e2e-vm`) never removed its parent cgroup `twd-vmp<pid>`; `Server.Close` now removes it if empty.
-
-**Safety:**
-- **Tailnets:** no personal tailnet touched. Tailnet 1 only via `make e2e-linux-vm` (`ttest-l3-*` / `twd-l3-*` / `twd-host-twd-l3-*`), cleaned as above. No policy read or written. No `tskey-` logged or committed (pre-commit hook + check-secrets passed).
-- **Lima VMs:** `twdl-kvm-u24` was started by the harness and stopped by it (not deleted). `twd-dev` was already running and was left running. The base images in `~/fc` are untouched; work happened in a copy of the repo at `twd-dev:~/twd-fastvm`.
-- **sudo, inside Lima only:**
-  - via `make e2e-vm`'s own `sudo env …` and `twd host setup --microvm` inside `twdl-kvm-u24`;
-  - **deviation:** bench and test binaries were also run with the same `sudo env … bin/vmsmoke.test` invocation as the Makefile recipe, but directly rather than through `make`;
-  - **deviation:** once, `sudo rmdir` on 30 empty cgroup dirs `twd-vmp<pid>` left by this work's own test processes (pids ≥ 282431). That is outside "only via host setup or the documented helper"; it removed nothing that wasn't empty and this work's own.
-- **Left alone:** the 5-day-old Firecracker VM `twdp59144-0` (not mine; holds 256 huge pages in twd-dev), and 16 empty `twd-vmp<pid>` cgroups from earlier sessions.
-
-### Known gaps (FV)
-- **No bare-metal numbers**: every number is nested virt.
-- **Serial redeploys** still release the old VM's volume before the new VM attaches it: 85–100 ms of deploy → active. That needs a hot volume handover (L3 gap).
-- **Huge-page accounting outside the pool.** The cold path and the helper's `auto` mode still decide on available pages at boot time only, while Firecracker reserves nothing (Phase 2 finding 1). Per-helper accounting of all VMs is a follow-up.
-- **Base under the systemd helper** is not asserted by any test (e2e-linux-vm passes with it on but doesn't check that the base was built). If it fails, misses fall back to cold boots.
-- **Restore-filled pool claims** are 20–50 ms slower than boot-filled ones (nested virt). That is why refills boot by default.
-- **One base per hostd and VM shape.** A different `-vm-mem-mib` / `-vm-vcpus` needs its own base (not built: one shape per backend today).
-- **VMGenID:** not used, since the guest kernel would need ≥ 6.10 (or a backport). The explicit reseed covers it; a newer guest kernel would close the race window *before* the load too.
-- **Cloned guest-kernel secrets** across restored copies (KASLR slide, `net_secret`, early siphash keys) are by design of snapshots; risk accepted in ADR-030 (d), bounded in time by the hourly rotation.
-- **One VM per object** (RFC §4.8 `isolation: "object"`) is not built (out of scope). The pool and restore make it affordable: a claim is 28–58 ms.
-
-## Smart placement (branch `smart-placement`, 2026-11-13) — ADR-033 draft (Proposed, number provisional)
-
-**What decides placement now** (`mgmt/placement.go` `scoreHosts`, pure; `mgmt/placement_service.go` `place`):
-1. **Eligibility.** A host must be:
-   - live, not draining (there is no draining state yet), in the tenant's pool;
-   - offering the tier (master's `9f03c48` `placementTier`/`offersTier`, kept as is);
-   - with enough free capacity units (`nodes` today; the requirement set also takes `vms`/`hugepageMiB` for the sandbox design).
-2. **Pinned.** `--host` (or, later, "next to the parent DO"). It must still be eligible: a pinned host without the tier is `409 tier_unavailable`.
-3. **Sticky.** A live lease holder keeps the workload. A holder without the tier is `409 tier_unavailable` (or it moves with `--replace`).
-4. **Smart.** The workload's `tailnet.connects` (or `placement.targets`) are scored:
-   - path class: direct > peer-relay > DERP > unmeasured; then RTT;
-   - `worst` (default) or `sum` over several targets;
-   - then free capacity, then host ID.
-   - Without targets: capacity.
-5. **`twd deploy --replace`** re-places a running workload, with hysteresis: a better class, or ≥ 2 ms and ≥ 20 % lower RTT.
-   - `MoveLease` CAS `(holder, epoch) → (new, epoch+1)`.
-   - A stateful workload also needs `--force-takeover` (`409 move_unconfirmed`); a lost race is `409 lease_changed`.
-
-**Measurements** (`hostd/paths.go`):
-- hostd probes each tenant's targets from that tenant's own nodes on the host, up to 4 vantage nodes:
-  - netmap resolution (tags → peers; names → host/MagicDNS/IP; else `unresolved`);
-  - 4 disco pings each.
-- No mints, no keys, no devices.
-- Reported every 60 s (`-path-every`) to `PUT /v1/hosts/{id}/paths` (not the heartbeat); on demand via `POST /v1/push/probe` at deploy (≤ 2 s).
-- Stored in `host_paths` (SQLite + Postgres):
-  - `measured_at = store now − ageMs`;
-  - 5 min TTL, 1 h retention;
-  - bounded to 64 tenants × 32 targets per report and 16 targets per workload.
-
-**Explainability:**
-- `twd deploy` prints `✓ placed     placed on h2: tag:db direct 0.3 ms (h1: relayed via DERP twd-local 0.5 ms)`.
-- The decision is stored with the deployment (`GET /v1/deployments/{id}` `placement`, `twd ls`).
-- The deploy audit detail has `placement.{reason,summary,targets}` and `movedFrom`/`replace`.
-
-**Fixed along the way:**
-- **Cross-host moves couldn't rejoin nodes.** hostd asked for a credential, and mgmt answered `already_joined` forever, because the node's saved state is on the old host's disk. This affected any move or confirmed takeover of a workload whose nodes had joined: S11 never hit it because it used fake hosts, and it is found only by the new e2e. hostd now re-mints such a node, fenced by its own lease epoch, and mgmt deletes the old device: one ADR-017 registration per moved node.
-- The tier bug the task flagged was real. It was fixed on master in the meantime (`9f03c48`), so this branch was rebased onto it and dropped its own copy. Master's `TestPlacementTier`/`TestPlacementTierStickyHolder` pass unchanged on the new placement.
-
-**Test results (this Mac, M-series, macOS; go1.27.3):**
-- **Unit:**
-  - `TestScoreHosts`: 31 cases (direct > relayed > unmeasured, peer relay, RTT order, capacity tie, host-ID tie, mode off, stale ignored, unresolved/unreachable, dead/draining/pool/tier/full excluded, capacity units, pinned, sticky, replace hysteresis, worst/sum).
-  - `TestScoreHostsDeterministic` (200 shuffles), `TestResolvePlacement` (connects, off, targets, CF host/hostname, region warning), `TestMatchPeers`: PASS.
-- **Store:** `TestLeaseMove` (8 concurrent moves → exactly 1 winner at epoch+1; the old holder can't renew) and `TestStoreHostPaths` (replace, tenant isolation, retention, host delete, decision round trip): PASS on SQLite and Postgres 17.
-- **API:** `TestAPIPlacement` (spec-validated). It covers:
-  - capacity at first deploy;
-  - 403 for a report from a host without the tenant;
-  - smart placement next to `tag:db`;
-  - sticky;
-  - `--replace` moving at epoch+1 with an audited `movedFrom`;
-  - no churn on a second re-place;
-  - the stateful guard (`lease_held` → `move_unconfirmed` → moves with `forceTakeover`);
-  - tier (pinned `tier_unavailable`, holder `tier_unavailable` → `--replace` moves, node runtime, tenant tier).
-  - Result: PASS on SQLite and Postgres.
-- **Hermetic multi-host (`make e2e-placement`, new):** real `twd-mgmt` and two real `twd-hostd` processes on testcontrol + a local DERP, plus a `pg-1` node tagged `tag:db`. h1 was forced onto DERP (`TS_DEBUG_ALWAYS_USE_DERP=1` in its environment). **3/3 PASS**, about 14 s each.
-
-  | run | phase 1 h1 → tag:db | phase 1 h2 → tag:db | first deploy | phase 2 (knob swapped) | plain redeploy | `--replace` | new active / old stopped |
-  |---|---|---|---|---|---|---|---|
-  | 1 | derp 0.299 ms | direct 0.247 ms | **h2** (smart) | h1 direct 0.160, h2 derp 0.221 | **stays h2** (sticky) | **→ h1**, epoch+1 | 0.40 s / 0.41 s |
-  | 2 | derp 0.461 ms | direct 0.277 ms | **h2** | h1 direct 0.245, h2 derp 0.287 | stays h2 | → h1 | 0.41 s / 0.41 s |
-  | 3 | derp 0.327 ms | direct 0.283 ms | **h2** | h1 direct 0.279, h2 derp 0.445 | stays h2 | → h1 | 0.61 s / 0.62 s |
-
-  - The app answered over the tailnet from the db node on both hosts.
-  - After the move: the lease holder is h1 at the new epoch, the old deployment is `superseded`, and a `deploy` audit record has `movedFrom: h2`.
-  - On loopback DERP adds only ~0.05–0.2 ms, so the **class** decided, as designed.
-- **Multi-replica (`e2e/multimgmt` S12, new):** 3 replicas on Postgres, 3 fake hosts reporting through different replicas. **3/3 PASS** (about 6 s):
-  - 12 concurrent first deploys through all replicas gave the identical host and explanation (`placed on h2: tag:db direct 3.0 ms (h3: direct 3.0 ms, h1: relayed 20 ms)`; the h2/h3 tie went to the host ID).
-  - 6 concurrent `replace` of a workload held by live h1: 1 succeeded and 5 got `409 lease_changed`. One `movedFrom` audit record, lease h2 at epoch 2; h1 was revoked through every replica and h2 renewed (I1/I2).
-- `make test` (-race, Go + JS), `make lint` (incl. `api-check`, the new vet tags, check-secrets), `make test-pg`: **PASS**.
-- `go test -tags e2emultimgmt -run 'TestMM_(S|H)' ./e2e/multimgmt/`: **PASS, 24/24 in one run** (S1–S12, the 60 s soak, H01–H16; 1287 s) on the final code.
-  - **Two earlier runs failed from interference, not from this change.** Another session ran the same harness concurrently, and the fixed container name `twd-mm-pg` let each run `docker rm -f` the other's database mid-scenario. S3's Postgres restarted 10 s in and came back empty (`relation "replicas" does not exist`; then 152k `unknown_tenant`). Later tests failed at `docker run` with "name already in use" by three different container IDs.
-  - S5 then panicked in a harness diagnostic: `db.Query` failed and the code used the nil rows. Not fixed here.
-  - Fix: the harness takes `TWD_MM_PG_NAME` (default unchanged). The green run used `TWD_MM_PG_NAME=twd-mm-pg-sp TWD_MM_PG_PORT=55491`.
-
-**Not done / not verified:**
-- **Real tailnet check: skipped.** It was optional and not run. Real RTTs and real NAT, where direct is not guaranteed, are unmeasured. Hermetic DERP is forced by an env knob, not by NAT.
-- **Cross-host moves are not make-before-break by protocol.** The new host starts on the assignment push; the old one stops at its next heartbeat (500 ms here, 3 s by default), or at once for stateful moves. The hermetic runs measured new-ready before old-stop by ≤ 10 ms; on a slow start the old copy can stop first.
-- **A new tenant's first workload is placed by capacity.** No host has a vantage node yet. Pin it once; an opt-in probe node (a mint through ADR-017) is the follow-up.
-- **Still ignore placement:**
-  - per-object placement: every DO instance follows its workload's host;
-  - automatic rebalancing (none is built);
-  - draining: there is no draining host state; `host rm --drain` deletes the host.
-- hostd's microvm → process fallback (`tierFor`) is unchanged (master noted it as a follow-up).

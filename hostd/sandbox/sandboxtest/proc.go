@@ -18,7 +18,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
 )
 
 // Procs is the fake backend.

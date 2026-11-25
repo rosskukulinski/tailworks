@@ -53,8 +53,8 @@ conflict. Two branches that each add their own line usually don't.
 
 The hotspots that conflicted most were `hostd/host.go`, `hostd/http.go`,
 `hostd/workload.go`, `hostd/objects.go`, `netd/registry.go`,
-`mgmt/service.go`, `mgmt/sqlstore.go`, `cmd/twd/main.go` and
-`cmd/twd-hostd/main.go`. Put the feature's logic in its own file
+`mgmt/service.go`, `mgmt/sqlstore.go`, `cmd/tw/main.go` and
+`cmd/tw-hostd/main.go`. Put the feature's logic in its own file
 (`hostd/public.go`, `mgmt/placement.go` and `mgmt/warmkeys.go` are good
 examples). Keep the edit to the shared file small: one field, one route
 registration, one call. Don't reformat or reorder code you aren't changing.
@@ -70,7 +70,8 @@ master, and replace the slug everywhere in that same change
 (`git grep ADR-<slug>`). ADRs are one file each in `docs/design/adr/`:
 draft as `docs/design/adr/<slug>.md`, rename to `NNN-<slug>.md` when the
 number is assigned, and add the row to `docs/design/adr/README.md` in sorted
-position.
+position. `TestADRIndex` accepts a draft whose first line starts
+`# ADR-<slug>`, so a design PR passes CI before it has a number.
 
 ### 6. Stay close to master
 
@@ -84,3 +85,92 @@ position.
   public-ingress merge was one.
 - Never use bare `git stash` / `git stash pop`. The stash stack is shared with
   every other worktree. Use a WIP commit instead.
+
+## Issue labels: who acts next
+
+Two labels say whether an issue is waiting on the maintainer or ready for an
+agent. An open issue has at most one of them.
+
+- **`needs-decision`**: blocked on the maintainer, for a design choice, a
+  product call, or an answer to a question. Agents don't start work on these
+  issues.
+  - Add it when you file an issue that you can't resolve without such a
+    choice, for example "fix it or document it" or "which of these
+    behaviours do we want". Say so in the issue body: list the options with
+    their trade-offs, give your recommendation, and say what happens
+    meanwhile (for example "the checker records it as a note").
+  - Also add it to an existing issue when your work stops on such a
+    question. Put the question in a comment.
+- **`agent-ready`**: scoped and decided, so any agent can pick it up without
+  asking anything. The body says what to change and how to know it's done.
+  - The maintainer adds it, usually when replacing `needs-decision` with the
+    answer.
+  - An agent may file an issue with it directly when nothing is left to
+    decide: a confirmed bug with a clear fix, or a flaky test.
+  - When you start on one, comment with your branch name, so two agents
+    don't take the same issue.
+
+When you pick up an `agent-ready` issue and find a decision that isn't in it,
+stop. Swap the label for `needs-decision` and comment with the question.
+
+## Definition of done (before you open or merge a PR)
+
+CI (`.github/workflows/ci.yml`) runs `make lint test` on every PR, and
+master accepts a PR once its `ci-ok` check passes. The branch doesn't have
+to be up to date with master, so when another PR lands first you don't need
+to merge `origin/master` again and rerun CI, unless the two PRs touch the
+same code. The CI run on each push to master is what catches two PRs that
+pass alone and break master together (as #54, #55 and #57 did). If master
+goes red, fixing it comes before landing anything else.
+
+1. **Merge `origin/master`, then `make lint test`** locally (rule 6). Don't
+   push to find out whether CI passes.
+   **Docs-only branches** (`sh scripts/docs-only.sh` exits 0: every changed
+   file is `.md`, none under `testdata/` or `e2e/`) run `make lint-docs
+   test-docs` instead. CI does the same for them, so they don't need the full
+   run.
+2. **Run the extra suites for what you touched.** CI doesn't run these:
+
+   | You changed | Also run |
+   | --- | --- |
+   | `mgmt` store or `mgmt/migrations/` | `make test-pg` |
+   | anything in `mgmt` every replica runs (leases, mints, reaper, throttles, kills, audit) | `make e2e-multimgmt` (needs Docker) |
+   | placement, leases, D1 across moves | `make e2e-placement` |
+   | locks / leader election | `make e2e-locks` |
+   | Queues | `make e2e-queues` |
+   | logs, metrics, traces | `make e2e-observability` |
+   | templates, `js/packages`, SDK compat | `make templates-typecheck test-sdk` |
+   | wrangler config or bundling | `make e2e-wrangler` |
+   | how a Cloudflare project runs unmodified: wrangler config or bundling, assets, bindings (D1, KV, R2, Queues, Workflows, Durable Objects), `nodejs_compat`, the runtime wrapper (`hostd/gen`) | `make e2e-compat` |
+   | anything `make changes-check` calls upgrade-relevant | `make e2e-upgrade` |
+   | `tw upgrade` on a `tw up` machine, or how `tw up` restarts | `make e2e-tw-upgrade` |
+   | the launch demo: `scripts/demo*.sh`, `internal/demogrant`, the `mcp` or `agent` template's routes, `tw ls --json` or `tw status --json` fields | `make demo-test` |
+   | `install.sh` / `get.sh` | `make install-test` |
+   | the npm CLI packages (`js/cli/tailworks`, `scripts/npm-cli-packages.sh`, `internal/npminstall`) | `make npm-cli-test` |
+
+   The suites that need credentials, a real tailnet, Docker, KVM or a Mac's
+   virtualization (`e2e-real`, `e2e-public`, `e2e-compat`, `e2e-vm`,
+   `e2e-vz`, `e2e-headscale`, …) are fine to skip if you can't run them.
+   Say so in the PR.
+
+   `.github/workflows/nightly.yml` runs the credential-free suites
+   (including `e2e-headscale`) every night, and `test-pg` against a
+   Postgres service container on PRs that touch `mgmt/`. That is a
+   backstop, not a reason to skip the table above.
+3. **Generated and registered things:**
+   - API: edit `api/openapi.yaml`, run `make api`, commit the output (rule 2).
+   - Release notes: when `make changes-check` asks for one, add a
+     `changes/<branch>.md` fragment.
+   - New CLI command: one entry in `commands` (`cmd/tw/main.go`) with its
+     `group:` and `short:` (≤ 60 characters). There is nothing else to
+     register.
+   - Command, flag or help text change: run `make cli-docs` and commit
+     `docs/cli.md` (`TestCLIReferenceUpToDate` fails when it is stale).
+   - New error code: add it to `docs/errors.md` with "When" and "Fix".
+   - Template or binding change: run `tw types` and commit the template's
+     `worker-configuration.d.ts`.
+4. **Status:** update `status/<branch>.md` (rule 1) with the commands you
+   ran and their results.
+5. **PR body:** what changed and why, and a **Tests** section listing the
+   commands you actually ran and their results. List anything you skipped,
+   and why.

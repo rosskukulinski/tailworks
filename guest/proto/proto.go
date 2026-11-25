@@ -1,4 +1,4 @@
-// Package proto is the twd-guestd ⇄ twd-hostd contract for the microVM
+// Package proto is the tw-guestd ⇄ tw-hostd contract for the microVM
 // tier: the guest config delivered on the config drive, and the
 // newline-delimited JSON control channel over vsock.
 //
@@ -27,10 +27,10 @@ const (
 	// GuestConfigFile is the JSON GuestConfig inside the config tar.
 	GuestConfigFile = "guest.json"
 	// AppDir is where the generated workerd instance dir is extracted.
-	AppDir = "/run/twd/app"
+	AppDir = "/run/tailworks/app"
 	// DODir is the guest's DO storage directory: the persistent volume
 	// (GuestConfig.Volume) mounted there, else guest tmpfs.
-	DODir = "/run/twd/do"
+	DODir = "/run/tailworks/do"
 	// VolumeDev is the persistent volume's device (the third drive).
 	VolumeDev = "/dev/vdc"
 
@@ -47,7 +47,7 @@ const (
 	GatewayIP   = "192.168.72.1"
 	GuestIP     = "192.168.72.2"
 	PrefixLen   = 24
-	IngressPort = 8080 // workerd ingress (cfBlobHeader x-twd-cf); only host netd dials it
+	IngressPort = 8080 // workerd ingress (cfBlobHeader x-tw-cf); only host netd dials it
 	EgressObj   = 3128 // facet egress (platform Egress, MAC'd object attribution)
 	EgressWL    = 3129 // tenant service egress (workload identity)
 	HostAPI     = 3130 // local host API (ensure/spawn/ready/kill/audit)
@@ -69,7 +69,7 @@ type GuestConfig struct {
 	// Workerd is the argv after the binary (config path relative to AppDir).
 	WorkerdArgs []string `json:"workerdArgs"`
 	// HealthPath is requested on 127.0.0.1:IngressPort with HealthCF as
-	// the x-twd-cf header; 200 means ready.
+	// the x-tw-cf header; 200 means ready.
 	HealthCF string `json:"healthCF"`
 	// Debug enables the probe op (connectivity tests).
 	Debug bool `json:"debug,omitempty"`
@@ -111,7 +111,7 @@ type GuestConfig struct {
 // WarmupMarker is a file in the warm-up app (pool config drive): fsscan
 // reports AppDir's contents, and a pooled VM must show none of it (nor
 // anything else) before its load.
-const WarmupMarker = "twd-warmup.txt"
+const WarmupMarker = "tw-warmup.txt"
 
 // Load is the host's one-time injection into a pooled (or restored) VM:
 // the tenant bundle (sent before it in "chunk" messages: Data at Offset,
@@ -287,7 +287,7 @@ type Msg struct {
 	Argv []string `json:"argv,omitempty"`
 
 	// fsscan: files whose name looks like tailscale state; and every file
-	// under the guest's state dirs (AppDir, DODir, /tmp, /run/twd) with
+	// under the guest's state dirs (AppDir, DODir, /tmp, /run/tailworks) with
 	// its size, so a test can check a pooled VM holds no workload's state.
 	Found   []string         `json:"found,omitempty"`
 	Scanned int              `json:"scanned,omitempty"`
@@ -307,6 +307,14 @@ type Msg struct {
 	// loaded); exec / ExecStreamHello: the exec's
 	// stream token (random per exec, issued by the host)
 	Token string `json:"token,omitempty"`
+	// hello: the guest's protocol (internal/version.GuestProtocol; 0 = a
+	// guest from before protocol reporting, which speaks 1) and its tailworks
+	// release version (ADR-041 §2). hostd and its guest
+	// image ship in one tarball, so a mismatch means a mixed install:
+	// hostd logs it, and treats an "unknown op" reply to an op newer than
+	// the guest's protocol as "feature absent" (UnknownOp), not a failure.
+	Proto        int    `json:"proto,omitempty"`
+	GuestVersion string `json:"guestVersion,omitempty"`
 
 	// container guests
 	Exec     string    `json:"exec,omitempty"`
@@ -387,3 +395,20 @@ type Stats struct {
 	DOFS     string `json:"doFS,omitempty"`
 	DOUsedKB int64  `json:"doUsedKB,omitempty"`
 }
+
+// HelloProto is the protocol a hello speaks (0, from older guests, is 1).
+func (m Msg) HelloProto() int {
+	if m.Proto <= 0 {
+		return 1
+	}
+	return m.Proto
+}
+
+// UnknownOp reports whether a guest reply refused its op as unknown (an
+// older guest). A caller of an op newer than GuestProtocol 1 treats that
+// as the feature being absent; every op hostd sends today is protocol 1.
+func UnknownOp(m Msg) bool {
+	return len(m.Error) > len(unknownOpPrefix) && m.Error[:len(unknownOpPrefix)] == unknownOpPrefix
+}
+
+const unknownOpPrefix = "unknown op "

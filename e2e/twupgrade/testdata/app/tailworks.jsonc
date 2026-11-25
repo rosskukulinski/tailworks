@@ -1,0 +1,4 @@
+{
+  "name": "upgapp",
+  "tailnet": { "tags": ["tag:tw-wl-upg"] },
+}

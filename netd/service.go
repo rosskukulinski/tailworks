@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/rosskukulinski/twd/internal/tssvc"
+	"github.com/rosskukulinski/tailworks/internal/tssvc"
 )
 
 // AdvertiseService makes object id's node a host for the Tailscale Service

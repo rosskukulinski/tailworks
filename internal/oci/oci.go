@@ -1,5 +1,5 @@
 // Package oci is the small slice of the OCI image and distribution specs
-// twd needs for ADR-032 D3: manifests and indexes, digests, image
+// tailworks needs for ADR-032 D3: manifests and indexes, digests, image
 // references, a distribution client (push, pull, Docker Hub's anonymous
 // bearer tokens) and copying an image between registries for the
 // architectures a deployment needs.
@@ -20,7 +20,7 @@ import (
 	"strings"
 )
 
-// Media types twd reads and writes.
+// Media types tailworks reads and writes.
 const (
 	MediaTypeManifest       = "application/vnd.oci.image.manifest.v1+json"
 	MediaTypeIndex          = "application/vnd.oci.image.index.v1+json"
@@ -156,7 +156,7 @@ func (m *Manifest) ForPlatform(arch string) *Descriptor {
 
 var digestRE = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 
-// ValidDigest reports whether d is a sha256 digest (the only algorithm twd
+// ValidDigest reports whether d is a sha256 digest (the only algorithm tailworks
 // accepts).
 func ValidDigest(d string) bool { return digestRE.MatchString(d) }
 
@@ -228,7 +228,7 @@ var (
 // grammar, at most 255 characters).
 func ValidName(s string) bool { return len(s) <= 255 && nameRE.MatchString(s) }
 
-// ValidComponent reports whether s is one path component of a name (twd
+// ValidComponent reports whether s is one path component of a name (tailworks
 // tenant IDs must be, to own a namespace).
 func ValidComponent(s string) bool { return componentOK.MatchString(s) }
 
@@ -238,7 +238,7 @@ func ValidTag(s string) bool { return tagRE.MatchString(s) }
 // Ref is a parsed image reference: registry host, repository, and a tag
 // and/or digest.
 type Ref struct {
-	Registry   string // "docker.io", "ghcr.io", "localhost:5000", "twd.local"
+	Registry   string // "docker.io", "ghcr.io", "localhost:5000", "tw.local"
 	Repository string // "library/debian", "cloudflare/sandbox"
 	Tag        string
 	Digest     string

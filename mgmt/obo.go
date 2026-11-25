@@ -9,15 +9,15 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rosskukulinski/twd/internal/nodecert"
+	"github.com/rosskukulinski/tailworks/internal/nodecert"
 )
 
 // Per-tenant OBO root key (ADR-010, RFC §4.6): an Ed25519 key kept in
-// custody under "twd/<tenant>/obo-root" (the 32-byte seed), separate from
+// custody under "tw/<tenant>/obo-root" (the 32-byte seed), separate from
 // the WIF issuer key. It signs node certificates at `ready`. Its public key
 // is published on GET /v0/tenants/{id} (oboPublicKey) so hosts can pin it.
 
-func oboCustodyName(tenantID string) string { return "twd/" + tenantID + "/obo-root" }
+func oboCustodyName(tenantID string) string { return "tw/" + tenantID + "/obo-root" }
 
 // oboKey loads (creating on first use) the tenant's OBO root key.
 // oboChoiceName is the secret_choice row that names a tenant's OBO root key.

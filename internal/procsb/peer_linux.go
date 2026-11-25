@@ -129,7 +129,7 @@ func PeerPID(c net.Conn) (int, error) {
 // sandboxed peer). Unsandboxed peers pass (the uid check, if any, is the
 // wrapped listener's).
 //
-// This is what keeps a sandboxed workload away from twd's sockets on
+// This is what keeps a sandboxed workload away from tailworks' sockets on
 // kernels whose Landlock can't restrict unix-socket connects (ABI < 9).
 func Guard(ln net.Listener, allow func(pid int) bool) net.Listener {
 	return &guard{Listener: ln, allow: allow}

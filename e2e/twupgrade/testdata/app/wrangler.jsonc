@@ -1,0 +1,16 @@
+{
+  // tw upgrade fixture (e2e/twupgrade): data in Workers KV (mgmt's store)
+  // and D1 (the workload's storage, journaled to mgmt) that must survive an
+  // upgrade and a rollback.
+  "name": "upgapp",
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-01",
+  "kv_namespaces": [{ "binding": "CACHE", "id": "cache" }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "upg-db",
+      "database_id": "00000000-0000-4000-8000-0000000000a1",
+    },
+  ],
+}

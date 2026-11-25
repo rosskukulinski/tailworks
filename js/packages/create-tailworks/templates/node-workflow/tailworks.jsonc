@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/rosskukulinski/tailworks/master/schema/tailworks.schema.json",
+  // node-workflow: a durable Vercel Workflow ("use workflow") on tailworks' opt-in
+  // Node process tier. One supervised node process, one tailnet node.
+  "name": "node-workflow",
+  "runtime": "node",
+  "main": "src/server.ts",
+  "tailnet": {
+    "tags": ["tag:tw-wl-node-workflow"],
+    // the tailworks MCP server this workflow's agent calls (deploy the mcp template)
+    "connects": ["tag:tw-wl-mcp"]
+  }
+  // policy: grant this workload the MCP app cap, e.g.
+  //   { "src": ["tag:tw-wl-node-workflow"], "dst": ["tag:tw-wl-mcp"], "ip": ["tcp:80"],
+  //     "app": { "example.com/cap/mcp": [{ "tools": ["lookup_order"] }] } }
+}

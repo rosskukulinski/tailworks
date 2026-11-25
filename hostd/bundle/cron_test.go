@@ -7,9 +7,9 @@ import (
 
 func cronFiles(wrangler string) map[string][]byte {
 	return map[string][]byte{
-		"wrangler.jsonc": []byte(wrangler),
-		"twd.jsonc":      []byte(`{"tailnet":{"tags":["tag:x"]}}`),
-		"src/index.js":   []byte(`export default { scheduled() {} }`),
+		"wrangler.jsonc":  []byte(wrangler),
+		"tailworks.jsonc": []byte(`{"tailnet":{"tags":["tag:x"]}}`),
+		"src/index.js":    []byte(`export default { scheduled() {} }`),
 	}
 }
 
@@ -55,7 +55,7 @@ func TestParseCronsInvalid(t *testing.T) {
 
 func TestParseCronsNodeRuntime(t *testing.T) {
 	files := map[string][]byte{
-		"twd.jsonc":       []byte(`{"runtime":"node","main":"dist/server.mjs","tailnet":{"tags":["tag:x"]}}`),
+		"tailworks.jsonc": []byte(`{"runtime":"node","main":"dist/server.mjs","tailnet":{"tags":["tag:x"]}}`),
 		"wrangler.jsonc":  []byte(`{"triggers":{"crons":["* * * * *"]}}`),
 		"dist/server.mjs": []byte(`1`),
 	}

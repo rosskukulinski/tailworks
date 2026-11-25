@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/rosskukulinski/twd/hostd/mgmtapi"
-	"github.com/rosskukulinski/twd/internal/container"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/internal/container"
 )
 
 // TestV1ContainerHostClient: hostd's own client (hostd/mgmtapi) against the
@@ -14,10 +14,11 @@ import (
 // reservation is not an error), a quota refusal arrives as a typed 429, and
 // the heartbeat carries usage and the running containers.
 func TestV1ContainerHostClient(t *testing.T) {
-	e := newTestEnv(t, nil)
+	t.Parallel()
+	e := newTestEnv(t)
 	ctx := context.Background()
 	var tn struct{ TenantID string }
-	e.c.ok("POST", "/v1/tenants", map[string]any{"tailnet": "t.ts.net", "mintMode": "apikey", "apiKeyFile": e.keyFile, "maxContainers": 1}, &tn)
+	e.c.ok("POST", "/v1/tenants", map[string]any{"tailnet": "t.ts.net", "mintMode": "oauth", "oauthClientFile": e.keyFile, "maxContainers": 1}, &tn)
 	hc, err := mgmtapi.NewClient("unix://" + e.sock)
 	if err != nil {
 		t.Fatal(err)
@@ -34,7 +35,7 @@ func TestV1ContainerHostClient(t *testing.T) {
 	}
 	var dep DeployResponse
 	e.c.ok("POST", "/v1/deployments", map[string]any{"tenantID": tn.TenantID, "workload": "sb", "host": "h1",
-		"bundle": makeBundle(t, map[string]string{"twd.jsonc": `{ "tailnet": { "tags": ["tag:twd-web"] } }`, "index.js": ""})}, &dep)
+		"bundle": makeBundle(t, map[string]string{"tailworks.jsonc": `{ "tailnet": { "tags": ["tag:tw-web"] } }`, "index.js": ""})}, &dep)
 	req := mgmtapi.ContainerReservationRequest{TenantID: tn.TenantID, Workload: "sb", Class: "Sandbox", Object: "a", Epoch: dep.Epoch,
 		Resources: container.InstanceTypes["lite"]}
 	r, err := hc.ReserveContainer(ctx, req)

@@ -16,15 +16,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/guest/proto"
-	"github.com/rosskukulinski/twd/hostd/sandbox"
-	"github.com/rosskukulinski/twd/hostd/vm/helperapi"
+	"github.com/rosskukulinski/tailworks/guest/proto"
+	"github.com/rosskukulinski/tailworks/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/hostd/vm/helperapi"
 )
 
 const vzSmokeJS = `export default {
   async fetch(req, env) {
     const u = new URL(req.url);
-    if (u.pathname === "/_twd/admin") return new Response("ok");
+    if (u.pathname === "/_tw/admin") return new Response("ok");
     if (u.pathname === "/egress") { const r = await env.GW.fetch("http://anything/x"); return new Response("via host: " + await r.text()); }
     return new Response("hello from the guest " + (req.cf ? JSON.stringify(req.cf) : "nocf"));
   }
@@ -33,11 +33,11 @@ const vzSmokeJS = `export default {
 
 func vzBackend(t *testing.T, rosetta bool) *Backend {
 	t.Helper()
-	kernel, rootfs := os.Getenv("TWD_VM_KERNEL"), os.Getenv("TWD_VM_ROOTFS")
+	kernel, rootfs := os.Getenv("TW_VM_KERNEL"), os.Getenv("TW_VM_ROOTFS")
 	if kernel == "" || rootfs == "" {
-		t.Skip("TWD_VM_KERNEL / TWD_VM_ROOTFS not set (make e2e-vz)")
+		t.Skip("TW_VM_KERNEL / TW_VM_ROOTFS not set (make e2e-vz)")
 	}
-	b, err := New(Config{VMM: os.Getenv("TWD_VZ_VMM"), Kernel: kernel, Rootfs: rootfs, VCPUs: envInt("TWD_VM_VCPUS"), Rosetta: rosetta})
+	b, err := New(Config{VMM: os.Getenv("TW_VZ_VMM"), Kernel: kernel, Rootfs: rootfs, VCPUs: envInt("TW_VM_VCPUS"), Rosetta: rosetta})
 	if err != nil {
 		t.Fatalf("vz backend: %v", err)
 	}
@@ -229,8 +229,8 @@ func TestVZVolume(t *testing.T) {
 // TestVZRosetta: with Rosetta shared in, a static linux/amd64 binary runs
 // inside the arm64 guest (ADR-032 D7 "to verify").
 func TestVZRosetta(t *testing.T) {
-	if os.Getenv("TWD_VM_ROSETTA") == "" {
-		t.Skip("TWD_VM_ROSETTA not set (needs Rosetta for Linux and a virtiofs kernel)")
+	if os.Getenv("TW_VM_ROSETTA") == "" {
+		t.Skip("TW_VM_ROSETTA not set (needs Rosetta for Linux and a virtiofs kernel)")
 	}
 	b := vzBackend(t, true)
 	app := vzApp(t)

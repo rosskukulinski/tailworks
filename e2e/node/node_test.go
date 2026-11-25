@@ -2,7 +2,7 @@
 
 // make test-node: the opt-in Node process tier (runtime "node") and Vercel
 // Workflow on it, hermetic (testcontrol + local DERP, fakemgmt, real hostd,
-// real node). Two hosts: A runs the Node apps, B runs the twd MCP server the
+// real node). Two hosts: A runs the Node apps, B runs the tailworks MCP server the
 // workflow's agent calls over the tailnet.
 package node_test
 
@@ -28,11 +28,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosskukulinski/twd/hostd"
-	"github.com/rosskukulinski/twd/hostd/hostdtest"
-	"github.com/rosskukulinski/twd/hostd/mgmtapi"
-	"github.com/rosskukulinski/twd/internal/procsb"
-	"github.com/rosskukulinski/twd/netd/nettest"
+	"github.com/rosskukulinski/tailworks/hostd"
+	"github.com/rosskukulinski/tailworks/hostd/hostdtest"
+	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
+	"github.com/rosskukulinski/tailworks/internal/procsb"
+	"github.com/rosskukulinski/tailworks/netd/nettest"
 	"tailscale.com/tailcfg"
 )
 
@@ -62,7 +62,7 @@ func start(t *testing.T) *env {
 		t.Skip("node tier deps not installed (make test-node runs npm ci in e2e/node)")
 	}
 	// A canary in hostd's environment must never reach a Node app.
-	t.Setenv("TWD_TEST_CANARY_SECRET", "canary")
+	t.Setenv("TW_TEST_CANARY_SECRET", "canary")
 	ctl, err := nettest.StartControl()
 	if err != nil {
 		t.Fatal(err)
@@ -73,7 +73,7 @@ func start(t *testing.T) *env {
 		mcpCap:          []tailcfg.RawMessage{`{"tools":["lookup_order"]}`},
 	})
 	opts := func(prefix string) hostdtest.Options {
-		// Sandbox "auto" is what twd-hostd runs by default (Seatbelt on macOS).
+		// Sandbox "auto" is what tw-hostd runs by default (Seatbelt on macOS).
 		return hostdtest.Options{ControlURL: ctl.URL, Ephemeral: true, HostnamePrefix: prefix, Sandbox: hostd.SandboxAuto,
 			Tenant: mgmtapi.Tenant{Tailnet: "ttest.ts.net", ControlURL: ctl.URL, MintMode: "static"}}
 	}
@@ -230,7 +230,7 @@ func TestNodeTier(t *testing.T) {
 		// A forged header from a tailnet client is stripped by netd: the app
 		// still sees the real caller.
 		forged := "v1." + base64.RawURLEncoding.EncodeToString([]byte(`{"v":1,"caller":{"nodeId":"nEVIL"},"iat":`+strconv.FormatInt(time.Now().UnixMilli(), 10)+`}`)) + ".AAAA"
-		code, _, b = do(e.hc, "GET", base+"/whoami", nil, "x-twd-caller", forged, "x-twd-cf", `{"tailscale":{"caller":{"nodeId":"nEVIL"}}}`)
+		code, _, b = do(e.hc, "GET", base+"/whoami", nil, "x-tw-caller", forged, "x-tw-cf", `{"tailscale":{"caller":{"nodeId":"nEVIL"}}}`)
 		if code != 200 || get(obj(b), "claims", "caller", "nodeId") != e.clientID {
 			t.Fatalf("forged via tailnet: %d %s", code, b)
 		}
@@ -248,7 +248,7 @@ func TestNodeTier(t *testing.T) {
 		for name, h := range map[string]string{"none": "", "forged": "v1.eyJ2IjoxfQ.AAAA", "wrong-key": wrong} {
 			var hdr []string
 			if h != "" {
-				hdr = []string{"x-twd-caller", h}
+				hdr = []string{"x-tw-caller", h}
 			}
 			code, _, b := do(direct, "GET", "http://"+ws.Node.Addr+"/whoami", nil, hdr...)
 			if code != 401 || get(obj(b), "code") != "no_identity" {
@@ -256,7 +256,7 @@ func TestNodeTier(t *testing.T) {
 			}
 		}
 		// The optional-caller endpoint sees null.
-		code, _, b := do(direct, "GET", "http://"+ws.Node.Addr+"/maybe", nil, "x-twd-caller", wrong)
+		code, _, b := do(direct, "GET", "http://"+ws.Node.Addr+"/maybe", nil, "x-tw-caller", wrong)
 		if code != 200 || get(obj(b), "caller") != nil {
 			t.Fatalf("maybe: %d %s", code, b)
 		}
@@ -265,7 +265,7 @@ func TestNodeTier(t *testing.T) {
 	t.Run("EnvHygiene", func(t *testing.T) {
 		_, _, b := do(e.hc, "GET", base+"/proc", nil)
 		keys := fmt.Sprint(get(obj(b), "env"))
-		for _, want := range []string{"TWD_CALLER_KEY", "TWD_EGRESS_PROXY", "HTTP_PROXY", "HTTPS_PROXY", "TWD_DATA_DIR"} {
+		for _, want := range []string{"TW_CALLER_KEY", "TW_EGRESS_PROXY", "HTTP_PROXY", "HTTPS_PROXY", "TW_DATA_DIR"} {
 			if !strings.Contains(keys, want) {
 				t.Fatalf("env %s missing: %s", want, keys)
 			}
@@ -329,6 +329,9 @@ func TestNodeTier(t *testing.T) {
 		if sb == hostd.SandboxLandlock {
 			rec["landlock"] = e.landlockNodeChecks(t, ws, base)
 		}
+		if sb == hostd.SandboxSeatbelt {
+			rec["seatbelt"] = e.seatbeltNodeChecks(t, ws, base)
+		}
 		e.record("nodeprobe.sandbox", rec)
 	})
 
@@ -368,7 +371,7 @@ func TestNodeTier(t *testing.T) {
 			for _, mode := range []string{"sdk", "connect", "global"} {
 				code, _, b := do(e.hc, "GET", base+"/egress?mode="+mode+"&url="+url.QueryEscape(u), nil)
 				m := obj(b)
-				te, _ := get(m, "twdError").(string)
+				te, _ := get(m, "twError").(string)
 				typed := code == 200 && get(m, "status") == float64(403) && (te == "forbidden_destination" || te == "peer_not_visible")
 				if !typed && !(mode == "global" && code == 500) { // a refused CONNECT makes fetch() throw
 					t.Fatalf("%s/%s: want a typed 403 forbidden_destination|peer_not_visible, got %d %s", name, mode, code, b)
@@ -382,7 +385,7 @@ func TestNodeTier(t *testing.T) {
 		if code != http.StatusProxyAuthRequired {
 			t.Fatalf("proxy without credentials: want 407, got %d", code)
 		}
-		bad, _ := url.Parse("http://twd:wrong@" + ws.Node.ProxyAddr)
+		bad, _ := url.Parse("http://tw:wrong@" + ws.Node.ProxyAddr)
 		badc := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{Proxy: http.ProxyURL(bad)}}
 		if code, _, _ := do(badc, "GET", "http://"+e.echoIP()+"/", nil); code != http.StatusProxyAuthRequired {
 			t.Fatalf("proxy with a wrong token: want 407, got %d", code)
@@ -577,7 +580,7 @@ func TestNodeWorkflow(t *testing.T) {
 }
 
 // RT-08: the Node tier's egress proxy is an enforcement boundary only under
-// a sandbox that confines the process's TCP (Landlock); elsewhere status says
+// a sandbox that confines the process's TCP (Landlock ABI ≥ 4, Seatbelt); elsewhere status says
 // `Egress: "unenforced"`. On a host with NO process sandbox at all, a
 // Node-tier deployment for a second tenant is refused (egress_unenforced)
 // unless the operator passes -insecure-shared-host.
@@ -586,7 +589,7 @@ func TestNodeTierSharedHostRefused(t *testing.T) {
 	dep := e.a.DeployNode(hostdtest.Fixture("nodeprobe"), "nodeprobe", nil)
 	e.a.WaitActive("nodeprobe", dep, 60*time.Second)
 	ws := e.nodeStatus(e.a, "nodeprobe")
-	if ws.Egress != hostd.EgressEnforcement(ws.Sandbox) || (ws.Sandbox == hostd.SandboxLandlock) != (ws.Egress == hostd.EgressEnforced) {
+	if ws.Egress != hostd.EgressEnforcement(ws.Sandbox) || ws.Sandbox != hostd.SandboxLandlock && ws.Sandbox != hostd.SandboxSeatbelt && ws.Egress == hostd.EgressEnforced {
 		t.Fatalf("status Egress=%q Sandbox=%q", ws.Egress, ws.Sandbox)
 	}
 	// A host without any process sandbox, serving a second tenant.

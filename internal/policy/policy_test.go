@@ -20,10 +20,10 @@ const base = `// my tailnet
 
 func snip() Snippet {
 	return Snippet{
-		TagOwners: map[string][]string{"tag:ttest": {"tag:twd-marker"}, "tag:twd-agent": {"autogroup:admin", "tag:twd"}},
+		TagOwners: map[string][]string{"tag:ttest": {"tag:tw-marker"}, "tag:tw-agent": {"autogroup:admin", "tag:tw"}},
 		Grants: []map[string]any{
 			{"src": []string{"tag:ttest"}, "dst": []string{"tag:ttest"}, "ip": []string{"*"}}, // already there
-			{"src": []string{"tag:ttest"}, "dst": []string{"tag:twd-agent"}, "ip": []string{"tcp:80"},
+			{"src": []string{"tag:ttest"}, "dst": []string{"tag:tw-agent"}, "ip": []string{"tcp:80"},
 				"app": map[string]any{"example.com/cap/mcp": []any{map[string]any{"tools": []string{"lookup_order"}}}}},
 		},
 	}
@@ -37,7 +37,7 @@ func TestMergeKeepsExisting(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(out)
-	for _, want := range []string{"// my tailnet", "// keep me", `"tag:twd-agent"`, `"example.com/cap/mcp"`} {
+	for _, want := range []string{"// my tailnet", "// keep me", `"tag:tw-agent"`, `"example.com/cap/mcp"`} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("merged policy lacks %q:\n%s", want, s)
 		}
@@ -51,7 +51,7 @@ func TestMergeKeepsExisting(t *testing.T) {
 		t.Fatalf("second merge still missing %+v (%v)", miss, err)
 	}
 	// An existing tag gains the snippet's missing owner; its own stay.
-	if !strings.Contains(s, `"tag:twd-marker"`) {
+	if !strings.Contains(s, `"tag:tw-marker"`) {
 		t.Fatalf("missing owner not appended to the existing tagOwners entry:\n%s", s)
 	}
 	if !strings.Contains(s, `"autogroup:admin"`) {
@@ -105,15 +105,15 @@ func TestApply(t *testing.T) {
 	}
 }
 
-// keyless (M10): nodeAttrs entries and the autogroup:admin → tag:twd-mgmt
+// nodeAttrs entries and the autogroup:admin → tag:tw-mgmt
 // admin grant merge additively; without AllowSrcs the autogroup source is
-// refused (RT-06), and nodeAttrs may only set funnel on twd tags.
-func keylessSnip() Snippet {
+// refused (RT-06), and nodeAttrs may only set funnel on tailworks tags.
+func adminSnip() Snippet {
 	return Snippet{
-		TagOwners: map[string][]string{"tag:twd-mgmt": {"autogroup:admin"}, "tag:twd-issuer": {"autogroup:admin"}},
-		Grants: []map[string]any{{"src": []string{"autogroup:admin"}, "dst": []string{"tag:twd-mgmt"}, "ip": []string{"tcp:443", "tcp:80"},
-			"app": map[string]any{"twd.dev/cap/admin": []any{map[string]any{}}}}},
-		NodeAttrs: []map[string]any{{"target": []string{"tag:twd-issuer"}, "attr": []string{"funnel"}}},
+		TagOwners: map[string][]string{"tag:tw-mgmt": {"autogroup:admin"}, "tag:tw-public": {"autogroup:admin"}},
+		Grants: []map[string]any{{"src": []string{"autogroup:admin"}, "dst": []string{"tag:tw-mgmt"}, "ip": []string{"tcp:443", "tcp:80"},
+			"app": map[string]any{"github.com/rosskukulinski/tailworks/cap/admin": []any{map[string]any{}}}}},
+		NodeAttrs: []map[string]any{{"target": []string{"tag:tw-public"}, "attr": []string{"funnel"}}},
 	}
 }
 
@@ -123,17 +123,17 @@ func TestMergeNodeAttrsAndAdminGrant(t *testing.T) {
 	],
 }
 `
-	if _, err := MergeWith([]byte(withAttrs), keylessSnip(), Options{}); err == nil || !strings.Contains(err.Error(), "autogroup:admin") {
+	if _, err := MergeWith([]byte(withAttrs), adminSnip(), Options{}); err == nil || !strings.Contains(err.Error(), "autogroup:admin") {
 		t.Fatalf("autogroup:admin source must need AllowSrcs: %v", err)
 	}
 	opts := Options{AllowSrcs: []string{"autogroup:admin"}}
 	for _, in := range []string{base, withAttrs, `{}`} {
-		out, err := MergeWith([]byte(in), keylessSnip(), opts)
+		out, err := MergeWith([]byte(in), adminSnip(), opts)
 		if err != nil {
 			t.Fatalf("merge into %q: %v", in[:min(len(in), 20)], err)
 		}
 		s := string(out)
-		for _, want := range []string{`"attr": ["funnel"]`, `"twd.dev/cap/admin"`, `"tag:twd-mgmt"`, `"tag:twd-issuer"`} {
+		for _, want := range []string{`"attr": ["funnel"]`, `"github.com/rosskukulinski/tailworks/cap/admin"`, `"tag:tw-mgmt"`, `"tag:tw-public"`} {
 			if !strings.Contains(s, want) && !strings.Contains(s, strings.ReplaceAll(want, " ", "")) {
 				t.Fatalf("merged policy lacks %q:\n%s", want, s)
 			}
@@ -141,22 +141,22 @@ func TestMergeNodeAttrsAndAdminGrant(t *testing.T) {
 		if in == withAttrs && (!strings.Contains(s, "// keep me too") || !strings.Contains(s, `"tag:other"`)) {
 			t.Fatalf("existing nodeAttrs entry lost:\n%s", s)
 		}
-		if miss, err := Missing(out, keylessSnip()); err != nil || !miss.Empty() {
+		if miss, err := Missing(out, adminSnip()); err != nil || !miss.Empty() {
 			t.Fatalf("not idempotent: %+v (%v)", miss, err)
 		}
-		if err := VerifyAdditive([]byte(in), out, must(Missing([]byte(in), keylessSnip()))); err != nil {
+		if err := VerifyAdditive([]byte(in), out, must(Missing([]byte(in), adminSnip()))); err != nil {
 			t.Fatalf("not additive: %v", err)
 		}
 	}
 	// A modified existing nodeAttrs entry is refused.
-	tampered := strings.Replace(withAttrs, `"tag:other"`, `"tag:twd-mgmt"`, 1)
+	tampered := strings.Replace(withAttrs, `"tag:other"`, `"tag:tw-mgmt"`, 1)
 	if err := VerifyAdditive([]byte(withAttrs), []byte(tampered), Snippet{}); err == nil || !strings.Contains(err.Error(), "nodeAttrs[0] modified") {
 		t.Fatalf("modified nodeAttrs not caught: %v", err)
 	}
 	for _, bad := range []Snippet{
 		{NodeAttrs: []map[string]any{{"target": []string{"tag:other"}, "attr": []string{"funnel"}}}},
-		{NodeAttrs: []map[string]any{{"target": []string{"tag:twd-mgmt"}, "attr": []string{"mullvad"}}}},
-		{NodeAttrs: []map[string]any{{"target": []string{"tag:twd-issuer"}, "attr": []string{"funnel"}, "app": 1}}},
+		{NodeAttrs: []map[string]any{{"target": []string{"tag:tw-mgmt"}, "attr": []string{"mullvad"}}}},
+		{NodeAttrs: []map[string]any{{"target": []string{"tag:tw-public"}, "attr": []string{"funnel"}, "app": 1}}},
 		{NodeAttrs: []map[string]any{{"target": []string{"*"}, "attr": []string{"funnel"}}}},
 	} {
 		if err := Check(bad, opts); err == nil {

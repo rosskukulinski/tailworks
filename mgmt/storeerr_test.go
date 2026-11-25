@@ -10,6 +10,7 @@ import (
 )
 
 func TestStoreUnavailableMapping(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		err  error
 		want bool
@@ -33,6 +34,7 @@ func TestStoreUnavailableMapping(t *testing.T) {
 }
 
 func TestWithSessionLimits(t *testing.T) {
+	t.Parallel()
 	d := withSessionLimits("postgres://u:p@h:5432/db?sslmode=disable")
 	if !strings.Contains(d, "&lock_timeout=3000") || !strings.Contains(d, "idle_in_transaction_session_timeout=3000") {
 		t.Fatalf("limits not added: %s", d)
@@ -43,8 +45,9 @@ func TestWithSessionLimits(t *testing.T) {
 }
 
 func TestTakeMaxConns(t *testing.T) {
-	d, n := takeMaxConns("postgres://u:p@h:5432/db?sslmode=disable&twd_max_conns=3")
-	if n != 3 || strings.Contains(d, "twd_max_conns") || !strings.Contains(d, "sslmode=disable") {
+	t.Parallel()
+	d, n := takeMaxConns("postgres://u:p@h:5432/db?sslmode=disable&tw_max_conns=3")
+	if n != 3 || strings.Contains(d, "tw_max_conns") || !strings.Contains(d, "sslmode=disable") {
 		t.Fatalf("got %q %d", d, n)
 	}
 	if _, n := takeMaxConns("postgres://h/db"); n != DefaultMaxConns {

@@ -1,11 +1,11 @@
 // Package procsb is the Linux process-tier sandbox (the counterpart of
 // the macOS Seatbelt profile in hostd/seatbelt.go).
 //
-// twd-hostd runs every tenant's workerd and Node app as the same uid, so
+// tw-hostd runs every tenant's workerd and Node app as the same uid, so
 // file modes alone don't keep tenant A's code out of tenant B's state.
 // procsb is a re-exec launcher: hostd starts
 //
-//	<hostd binary> __twd-sandbox-exec -f <profile.json> -- <bin> <args…>
+//	<hostd binary> __tw-sandbox-exec -f <profile.json> -- <bin> <args…>
 //
 // and the launcher, before execve(bin) in place (same pid), applies to
 // itself:
@@ -13,7 +13,7 @@
 //   - Landlock filesystem rules (unprivileged; no user namespaces): read
 //     and execute only the system dirs, the runtime binary and its install
 //     prefix; read-write only the instance's own dirs. Everything else
-//     (the home dir with ~/.twd and API key files, hostd's and mgmt's
+//     (the home dir with ~/.tailworks and API key files, hostd's and mgmt's
 //     state, other tenants' dirs, node keys) is denied.
 //   - Landlock TCP rules (ABI ≥ 4): bind and connect only the TCP ports in
 //     the profile (the Node tier's own app port and egress proxy). Egress
@@ -27,7 +27,7 @@
 //     NETLINK_ROUTE (no UDP, ICMP, raw, packet, vsock or sock_diag).
 //
 // The seccomp filter is also the sandbox's marker: filters are inherited
-// and can't be removed, so twd's unix-socket servers (mgmt's admin socket,
+// and can't be removed, so tailworks' unix-socket servers (mgmt's admin socket,
 // hostd's push socket, an instance's egress sockets) refuse a peer that
 // carries more filters than the server (see peer_linux.go). That covers
 // kernels whose Landlock can't restrict unix-socket connects (ABI < 9).
@@ -41,7 +41,7 @@ import (
 )
 
 // ExecArg is the launcher's argv[1].
-const ExecArg = "__twd-sandbox-exec"
+const ExecArg = "__tw-sandbox-exec"
 
 // Name is the sandbox's name in hostd status and doctor.
 const Name = "landlock"
@@ -50,7 +50,7 @@ const Name = "landlock"
 // the instance dir (sandbox.json): it holds paths and ports only, never
 // secrets.
 type Profile struct {
-	// Launcher is the binary that applies the profile (twd-hostd, or a
+	// Launcher is the binary that applies the profile (tw-hostd, or a
 	// test binary that imports hostd).
 	Launcher string `json:"launcher"`
 	// Exec are binaries the process may read and execute (workerd, node).
@@ -71,6 +71,14 @@ type Profile struct {
 	// allowed for STREAM/SEQPACKET (internal IPC; such sockets are
 	// connected and can't be re-pointed).
 	NoUnixSockets bool `json:"noUnixSockets,omitempty"`
+
+	// NoListen makes every listen() a no-op that reports success (seccomp):
+	// the process can't turn a socket of its own into a listener, on any
+	// address or port (an unbound socket's listen() would pick
+	// *:<ephemeral>, which Landlock doesn't see). It serves only listeners
+	// it inherits, already listening (hostd's 127.0.0.1 socket for a Node
+	// app: ledger H-lan-bind).
+	NoListen bool `json:"noListen,omitempty"`
 	// Deny documents what hostd denies explicitly (the home dir, state
 	// and run dirs, key files). Landlock is deny-by-default, so these are
 	// denied because they are not allowed; tests and doctor check them.
@@ -103,8 +111,16 @@ func Load(path string) (*Profile, error) {
 }
 
 // Command runs bin args under the profile at path (launched by launcher).
+//
+// The child's environment is exactly what the caller puts in Env: the
+// launcher forwards the environment it is started with and adds nothing.
+// It starts empty, not nil (nil would hand the launcher, and so the child,
+// the caller's whole environment, #336); hostd adds what the workload needs
+// (hostd.WorkerdEnv, the Node tier's list).
 func Command(launcher, profile, bin string, args ...string) *exec.Cmd {
-	return exec.Command(launcher, append([]string{ExecArg, "-f", profile, "--", bin}, args...)...)
+	cmd := exec.Command(launcher, append([]string{ExecArg, "-f", profile, "--", bin}, args...)...)
+	cmd.Env = []string{}
+	return cmd
 }
 
 // Probe ops (ProbeCommand): each exits 0 if the operation succeeded and 3
@@ -117,6 +133,8 @@ const (
 	ProbeConnectUnix = "connect-unix"
 	ProbeConnectTCP  = "connect-tcp" // host:port
 	ProbeBindTCP     = "bind-tcp"    // host:port
+	ProbeListenTCP   = "listen-tcp"  // listen on IPv4 host:port ("": unbound); ok only if it really listens
+	ProbeAcceptFD    = "accept-fd"   // listen() again on inherited fd 3 and accept one connection
 	ProbeUDP         = "udp"         // send a datagram to host:port
 	ProbePtrace      = "ptrace"      // PTRACE_ATTACH pid
 	ProbeVMRead      = "vmread"      // process_vm_readv pid
@@ -128,7 +146,7 @@ const (
 // ProbeCommand applies the profile at path in a fresh launcher process,
 // then (instead of exec'ing a workload) performs op on args and reports.
 // The probe runs under exactly the rules, seccomp filter and no_new_privs
-// a workload with that profile gets: it is how tests and twd doctor check
+// a workload with that profile gets: it is how tests and tw doctor check
 // what a sandboxed workerd or Node app can reach.
 func ProbeCommand(profile, op string, args ...string) (*exec.Cmd, error) {
 	p, err := Load(profile)

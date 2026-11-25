@@ -13,7 +13,7 @@ type Advertiser interface {
 	Withdraw(ctx context.Context, name string) error
 }
 
-// ServiceGate advertises a Tailscale Service (e.g. svc:twd-mgmt, the VIP
+// ServiceGate advertises a Tailscale Service (e.g. svc:tw-mgmt, the VIP
 // hosts use to reach any healthy mgmt replica) only while Check passes.
 // Tailscale doesn't health-check Service hosts, so each replica gates its
 // own advertisement: FailAfter consecutive failures withdraw it, one

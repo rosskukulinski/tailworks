@@ -10,6 +10,21 @@ labelled `dataplane-chaos`.
 - Routing (#422, `TestRouting`): [ledger/routing.md](ledger/routing.md)
 - Workflows and approvals (#418, scenarios `workflows`, `workflows-move`): [ledger/workflows.md](ledger/workflows.md)
 
+## 10-minute soaks of the follow-up loops
+
+2026-11-25, macOS, seed 2001, `TW_DP_DURATION=10m` (`TW_DPK_DURATION` for
+containers). Each loop's widest scenario; every invariant passed.
+
+| Loop | Scenario | Faults | Result |
+|---|---|---|---|
+| Workflows (#418) | `workflows-move` | 28 | pass. W4 notes resumptions after a move back (#565) |
+| Cron (#419) | `cron` | 19 | pass. C1 notes 3 reruns across a move (#600) |
+| Alarms (#419) | `alarms` | 25 | pass. A1: 633 fires, 0 stale, 0 on two hosts |
+| R2 (#420) | `r2-s3` | 28 | pass. R5: 1258 blobs in the backend, 10 referenced at quiescence (orphans; compare #580 for `fs`) |
+| Deploys (#421) | `deploys-mixed`, 3 mgmt replicas on Postgres | 27 | pass. V1: 184 epochs, 0 stale answers |
+| Routing (#422) | `routing` | 23 | pass. N1/N2 clean; bindings took 55–65 s to reach the new copy after two of the moves (N6 reports, doesn't gate) |
+| Containers (#423) | `mixed`, vz | 32 | pass. K4: 0 VMMs outlived a hostd crash, 0 leaked pool nodes |
+
 ## Status
 
 | Scenario | Clean seeds (consecutive) | Notes |

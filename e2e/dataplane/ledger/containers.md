@@ -29,7 +29,7 @@ merged) and K-F2 (#590) applied. The microVM-tier copies (K3) come from
 the warm pool and snapshot restore on Firecracker only; vz cold-boots
 them, so `restore` runs there. `mixed` and `containers` (3 hosts, takeovers
 of stopped and cut-off hosts) ran on vz because the KVM guest has 2 vCPUs.
-Not yet: a 10-minute soak of each backend.
+10-minute soak: vz `mixed` seed 2001 passed (2026-11-25, 32 faults; see LEDGER.md). Not yet: a 10-minute soak on Firecracker.
 
 ## Findings
 

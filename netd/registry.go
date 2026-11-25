@@ -722,7 +722,7 @@ func (o *Object) up(ctx context.Context, key string, rejoin bool) (*local.Client
 		return nil, nil, fmt.Errorf("up %s: %w", o.hostname, err)
 	}
 	o.spans.at(func(s *JoinSpans) *float64 { return &s.Running })
-	sst, err := lc.StatusWithoutPeers(ctx)
+	sst, err := statusWithName(ctx, lc.StatusWithoutPeers) // dnsname.go (#599)
 	if err != nil {
 		return nil, nil, err
 	}

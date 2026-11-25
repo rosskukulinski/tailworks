@@ -1,6 +1,6 @@
 # ancient-wolf: interface simplification audit (2026-11-24)
 
-Branch `ancient-wolf` (worktree; no code changed). Independent finders audited each interface lens; every finding was then attacked by three adversarial verifiers (functionality, security-perf, simpler). The main body keeps the 77 findings from the first verification pass that survived with at most one refutation and adopts the verifiers' amendments; the Addendum adds the 21 further findings a second pass confirmed, and lists the 6 refuted findings, the 53 that no verifier reached, and the 238 knobs the finders deliberately kept. Five high-impact items were spot-checked against the code at HEAD `ed4d2831`; corrections are marked "(spot-check)".
+Branch `ancient-wolf` (worktree; no code changed). Independent finders audited each interface lens; every finding was then attacked by three adversarial verifiers (functionality, security-perf, simpler). The main body keeps the 77 findings from the first verification pass that survived with at most one refutation and adopts the verifiers' amendments; the Addendum adds the 21 further findings a second pass confirmed and the 46 a third pass confirmed, and lists the 14 refuted findings and the 238 knobs the finders deliberately kept. Every finding has now had three verifiers. Five high-impact items were spot-checked against the code at HEAD `ed4d2831`; corrections are marked "(spot-check)".
 
 ## Summary
 
@@ -518,9 +518,18 @@ Small effort, high impact, in a sensible PR order (each independent unless noted
 - **Let `tw upgrade` drive `npm install -g`**: refuted 2/3; it bypasses the pinned-key signature path the threat model names for `tw upgrade` (security/THREAT-MODEL.md:128-135) and the staged plan/version gate. Accepted half: one `installChannel()` classifier (tarball prefix | npm | npx | checkout | other) shared by `tw doctor`, `tw version --check` and `tw upgrade --plan`, so all three print the same one command.
 - **Split docs/containers.md into a 180-line guide and a design appendix**: refuted 2/3; the "internals" half holds the only prose on `tw host vmcheck --container`, the isolation guarantees security-model.md points at, and the per-tenant image cache, and `tw docs` must keep them offline. Accepted: fix the "ADR-032 (design repo)" link at docs/containers.md:6 and fold the duplicate Lifecycle table (:435-451) into the Lifetime bullets (:138-148).
 
+- **Fold the three deployment list routes and schemas into ListDeployments filters**: refuted in the third pass; folding the three deployment list routes is breaking under ADR-041's additive-only `/v1`, and `tw deployments` / `tw previews --json` are stable cli-json contracts.
+- **Move a stateless workload off an ineligible host without demanding --replace**: refuted in the third pass; "nothing left behind" is false for a stateless workload (fs-backend R2 bytes, the address changes), so the `--replace` consent stays.
+- **tw-mgmt's four -local-dev knobs always travel together; rotate the host token by default and derive the paths**: refuted in the third pass; rotate-by-default breaks replicas that share one token file (e2e/multimgmt), and the typical user never sees these flags.
+- **Move release, test-evidence and demo-recording docs out of docs/ so they stop shipping in `tw docs`**: refuted in the third pass; RELEASING.md and install-testing.md are load-bearing for operator and security readers inside the embedded set (SECURITY.md, INSTALL.md link them), and #479 already decided to keep every docs/*.md.
+- **--allow-missing-grants skips the whole preflight, not just grants: missing tagOwners, funnel nodeAttrs, Service auto-approval and tag_not_owned all pass, to fail later with worse errors**: refuted in the third pass; the flag has meant "skip the preflight" since its first commit, the system tolerates missing grants and nodeAttrs after deploy, and narrowing it adds hard failures.
+- **create-tailworks: fall back to `npx tailworks init` instead of a raw template copy**: refuted in the third pass; a 120 MB `npx` download behind `-y` and a second code path.
+- **`tw host vmcheck` is a verification/benchmark tool: keep it, but take it off the `host` usage line and `tw help`**: refuted in the third pass; the usage line is the single source for completion, docs/cli.md and TestDocsNameRealCommands, so hiding it there breaks them.
+- **Document tw.json as the config file for rare settings instead of adding more tw up flags**: refuted in the third pass; documenting hand-edits to tw.json adds a second, longer path next to `tw up --<flag>`.
+
 ## Addendum: remaining verified findings
 
-The first pass's verification cap left 78 findings unreviewed. A second pass ran the same three adversarial verifiers over them: 21 survived all three, 1 received a single non-refuting vote before the run hit a usage limit, 3 were refuted (added to "Considered and rejected"), and 53 received no verifier at all (listed under "Unverified backlog" so they are not lost). Items that only reinforce a main-report recommendation are folded in as "Also" bullets.
+The first pass's verification cap left 78 findings unreviewed. A second pass ran the same three adversarial verifiers over them: 21 survived all three, 1 received a single non-refuting vote before the run hit a usage limit, 3 were refuted (added to "Considered and rejected"), and 53 received no verifier at all because the run hit a usage limit; a third pass later verified those 53 (see "Verified later" below). Items that only reinforce a main-report recommendation are folded in as "Also" bullets.
 
 ### A/B. First run, help text and usage lines (additions)
 
@@ -568,30 +577,76 @@ The first pass's verification cap left 78 findings unreviewed. A second pass ran
 - **One vocabulary across UI and CLI** [medium, 3/3]. **Current.** "Auth" / "Auth mode" / "Waiting to join" for mint mode and mint queue (mgmt/ui/templates/overview.html:110, :162; tenant.html:12, :17), "Kind / name" for CLASS/NAME (layout.html:57, objects.html:37, deployment.html:36), and the objects page filter is `caller` where the API and audit page say `human` (mgmt/ui/search.go:40, :57, :137). **Proposed.** "Class / name" everywhere (frees "Kind" for audit kinds); for the mint cells either adopt "Mint mode"/"Mint queue" or keep plain words with the CLI term in a `title` attribute (verifiers split; either is fine, but "Auth" must go: mint mode is mgmt's credential to the control plane, not caller authentication); rename the query key `caller` → `human` (search.go:57, :102; search_test.go). **Effort.** small. **Breaking.** no.
 - **Print the console URL from `tw link` and `tw whoami`** [medium, partially verified: one of three verifiers ran before the limit]. **Current.** Only `tw up` (cmd/tw/up.go:713) and `tw status` (up.go:1470) print `/ui/`; cmd/tw/link.go:373-385 and whoami.go:143-160 do not, although the linked developer is the UI's audience. **Proposed.** One `console <endpoint>/ui/` line in `tw link` (omit under `--tsnet`) and in `tw whoami` (only when the caller is admitted by `mountUI`: admin, tenant admin or approver), `console` in both `--json` results (omitempty); a README note that the bare mgmt URL redirects to `/ui/` (mgmt/v1.go:1641-1642). No `tw ui` command. **Effort.** small. **Breaking.** no.
 
-### Unverified backlog
+### Verified later: the 53 findings the second pass could not reach
 
-The second verification run hit a usage limit before these 53 findings received a verifier. They are finder output only (file:line evidence exists in the run journal but no adversarial check ran), so treat each as a lead to confirm, not a recommendation. All are low user impact except the first.
+A third pass (2026-11-24, evening) ran the same three adversarial verifiers over the 53 findings the usage limit had left unverified, plus the two missing votes on the console-URL item. 46 survived with at most one refutation, 8 were refuted. Every surviving item is either a new GitHub issue (label `simplify`, tracking #434) or folded into an existing one; the verifiers' amendments are in the issue bodies.
 
-- **Admin UI:** `admin-ui-filters-in-api-once` (medium) Tag, acting-for and app filters are done in the UI with caps because the API can't; add them to the API once; `admin-ui-docs-split` (low) docs/ADMIN-UI.md is 43% architecture and test internals; keep the operator half, move the rest to a design note; `admin-ui-enum-copies` (low) Hand-copied AuditKind and ObjectStatus lists in the UI have already drifted from the spec; `admin-ui-local-kind-branch` (low) The 'mgmt's own node' admission row and the UI's Kind=="local" branches are redundant with `admin`
-- **tw up:** `up-headscale-flag-bundle` (low) Infer --control=headscale from --api-key-file and default the key file path, so Headscale needs two flags instead of five; `up-tw-json-is-the-config` (low) Document tw.json as the config file for rare settings instead of adding more tw up flags
-- **Deploy family:** `deploy-preview-alias-merge` (low) Fold --preview-alias into --preview[=<alias>]; `deploy-replace-stateless-ineligible` (low) Move a stateless workload off an ineligible host without demanding --replace; `deploy-shared-placement-flags` (low) One placement-flag helper and one wait loop for deploy, promote and rollback
-- **tenant / host:** `tenant-host-tenant-add-defaults` (low) `tw tenant add` should default its control profile from tw.json and prompt for the OAuth client like `tw up` does; `tenant-host-drop-add-rpm` (low) Drop `--registrations-per-minute` from `tw tenant add`; `tenant set` already covers it; `tenant-host-hide-vmcheck` (low) `tw host vmcheck` is a verification/benchmark tool: keep it, but take it off the `host` usage line and `tw help`; `tenant-host-hide-setup-binary-flags` (low) Hide `tw host setup --firecracker/--jailer`; the release always ships both binaries; `tenant-host-install-microvm-hint` (low) On Linux with KVM, have install.sh print the one `sudo tw host setup --microvm` next step instead of "see tw doctor"
-- **Data commands:** `data-d1-execute-stdin` (low) `tw d1 execute` is the only data write that refuses stdin; default to it when --command/--file are absent; `data-workload-name-via-loadapp` (low) Inferring the workload name runs the full deploy-time app validation; `data-queues-info` (low) `tw queues info <q>` duplicates `tw queues ls` with two extra fields
-- **Develop group:** `develop-types-remote` (low) tw types: drop --remote (and with it --tenant); secrets.required and .dev.vars.example already cover declared secrets; `develop-init-template-list` (low) tw init: derive the template list from the templates directory instead of five hand-maintained copies; `develop-dev-workerd-flag` (low) tw dev: drop --workerd; $TW_WORKERD and the install layout already locate workerd; `develop-init-keep-tags` (low) tw init: remove --keep-tags; it is used only by tests, and --tags/--object-tags express the same intent
-- **Observe:** `observe-telemetry-subcommand-flags` (low) tw telemetry's set-only flags are documented under show and rm
-- **Operate:** `operate-approve-lists` (low) tw approvals + tw approve: one command (`tw approve` with no instance lists); `operate-notify-events-flag` (low) tw notify set --events: remove until a second event exists; `operate-clidoc-duplicate-subcommand-flags` (low) docs/cli.md: stop repeating a parent's flag list under subcommands that share its flag set
-- **Install / upgrade lifecycle:** `lifecycle-install-env-docs` (low) Separate the user-facing install knobs from the test/CI ones, and document the user-facing ones once; `lifecycle-prefix-in-twjson` (low) Record the install prefix in tw.json at `tw up` so `tw upgrade` stops guessing it from unit files and /proc
-- **Policy snippets:** `policy-allow-missing-grants-scope` (low) --allow-missing-grants skips the whole preflight, not just grants: missing tagOwners, funnel nodeAttrs, Service auto-approval and tag_not_owned all pass, to fail later with worse errors; `policy-one-snippet-renderer` (low) Five hand-built HuJSON snippet strings (mgmt and CLI) are built, printed, and re-parsed; only tw up's carries the merge-into-existing-section comment
-- **tailworks.jsonc:** `jsonc-name-key-templates` (low) Stop writing name into workerd templates' tailworks.jsonc; it duplicates wrangler name and --name; `jsonc-spawn-template-noop` (low) Drop the agent template's spawn block (it equals the defaults, which a deploy can only lower) and document that
-- **SDK and templates:** `sdk-drop-spawn-defaults-from-template` (low) Remove the spawn block from the agent template: it restates the ceiling; `sdk-merge-mcp-into-tailnet` (low) Fold @tailworks/mcp into @tailworks/tailnet as a subpath and drop the ./runtime export; `sdk-create-fallback-npx` (low) create-tailworks: fall back to `npx tailworks init` instead of a raw template copy
-- **Coding agents:** `agents-setup-project-positional` (low) Replace `--scope project --dir X` with an optional directory argument; `agents-bare-subcommand-defaults` (low) Bare `tw agent` and `tw docs` should list instead of erroring; `--limit` belongs to search only
-- **Daemon flags:** `daemons-local-dev-trio` (low) Collapse the -local-dev companion flags: -socket/-host-token-file/-rotate-host-token (mgmt) and -local-dev/-mgmt-token-file (hostd); `daemons-mgmt-headscale-tags-flag` (low) Replace tw-mgmt -tsnet-tags with the same -tsnet-key-tags-only switch tw-hostd uses
-- **Guardrails:** `guardrails-merge-kill-timing` (low) Collapse --device-delete-delay into --kill-tombstone in tw up, and give tw-mgmt a non-zero delete delay so the tombstone works out of the box; `guardrails-local-dev-token-knobs` (low) tw-mgmt's four -local-dev knobs always travel together; rotate the host token by default and derive the paths; `guardrails-revoke-warm-keys-derived` (low) Default -revoke-warm-keys-on-exit from the store kind instead of relying on tw up to pass it; `guardrails-default-tier-undocumented` (low) tw-hostd -default-tier is undocumented and is not an isolation floor; remove it or redefine it as one
-- **CLI ergonomics:** `ergonomics-env-vars-doc` (low) User-facing TW_* environment variables have no single list; three are undocumented and test-only ones are not marked; `ergonomics-help-advanced-commands` (low) tw help is 64 lines for 42 commands; scale-out and HA-only commands could fold into tw help --all; `ergonomics-errors-doc-drift` (low) Three error codes tw emits have no entry in docs/errors.md, so their printed doc_url anchors dangle
-- **REST API:** `api-deployment-lists` (low) Fold the three deployment list routes and schemas into ListDeployments filters; `api-public-names-no-client` (low) public-names list/release have no CLI, UI or MCP caller; docs send operators to raw REST; `api-object-certificate-dup` (low) Remove GET /v1/objects/{id}/certificate; it duplicates GET /v1/certificates/{stableNodeID}; `api-generated-client-scope` (low) Generate the Go client only for what hostd uses; the CLI does not use it; `api-hostd-offspec-routes` (low) hostd's own /v1 routes are undocumented and share the prefix with the spec'd API
-- **Containers:** `containers-deploy-say-swapped` (low) `tw deploy` does not say when mgmt swapped a registry-ref image for the arm64 rebuild or mirrored it; the pin is only in the audit log; `containers-platform-flag-hide` (low) `tw deploy --platform` is already inferred from the fleet; drop it from the synopsis and show ARCH in `tw host ls` instead
-- **Docs:** `onboarding-contributor-docs-out-of-docs` (low) Move release, test-evidence and demo-recording docs out of docs/ so they stop shipping in `tw docs`
+**New issues (29).** Two pairs of duplicate findings became one issue each.
 
+- #512 `admin-ui-filters-in-api-once`: API / admin UI: add `tag` and `human` filters to ListObjects and `workload` to ListAudit; the UI stops filtering client-side
+- #513 `admin-ui-docs-split`: docs/ADMIN-UI.md: make the operator read contiguous (reorder internals below the mutations; optionally move them to an ADR)
+- #514 `admin-ui-enum-copies`: admin UI: derive the AuditKind and ObjectStatus lists from the spec (lazily) instead of hand-copied slices that have drifted
+- #515 `admin-ui-local-kind-branch`: admin UI: drop the `Kind == "local"` branches; `Who.Admin` already covers mgmt's own node
+- #516 `agents-bare-subcommand-defaults`: tw docs: register `--limit` only on `search` (today ls/show list it too)
+- #517 `agents-setup-project-positional`: tw agent setup [dir]: an optional directory argument means project scope (or, at minimum, `--dir` implies `--scope project`)
+- #518 `api-generated-client-scope`: api: generate the Go client only for the 32 operations hostd/mgmtapi and hostd/upgrade.go call
+- #519 `api-hostd-offspec-routes`: docs/contracts: rewrite hostd-additions.md as hostd-api.md with a current route table (surface, caller, purpose) for hostd's 13 /v1 routes
+- #520 `api-object-certificate-dup`: API: deprecate then remove GET /v1/objects/{id}/certificate (duplicate of GET /v1/certificates/{stableNodeID})
+- #521 `api-public-names-no-client`: tw expose names | tw expose release <name>: CLI callers for the public-names routes (docs currently send operators to raw REST)
+- #522 `containers-deploy-say-swapped`: tw deploy: print one `✓ image` line per container pin (alias, public mirror or digest) after the first status poll
+- #523 `data-d1-execute-stdin`: tw d1 execute <db>: read SQL from stdin when neither --command nor --file is given and stdin is not a terminal
+- #524 `data-workload-name-via-loadapp`: data commands: one `appWorkload()` helper that surfaces loadApp's error instead of swallowing it; factor name resolution out of loadWrangler
+- #525 `deploy-shared-placement-flags`: deploy / promote / rollback: one `addPlacementFlags()` helper and one `waitReady()` loop (they have already drifted: only deploy reports `crashloop`)
+- #526 `develop-init-keep-tags`: tw init: remove `--keep-tags` (test-only); migrate its 19 call sites to explicit `--tags`/`--object-tags` or drop it where the fixture overwrites tailworks.jsonc
+- #527 `develop-types-remote`: tw types: remove `--remote` and `--tenant`; declared secrets come from .dev.vars, .dev.vars.example and wrangler `secrets.required`
+- #528 `ergonomics-env-vars-doc` (with `lifecycle-install-env-docs`): docs: one Environment table for the TW_* variables the `tw` binary and install scripts read; mark the test-only ones; make `tw upgrade` honour TW_RELEASE_API (or remove it)
+- #529 `ergonomics-errors-doc-drift`: docs/errors.md: add the codes tw emits but never documents (`network`, `no_cgroup2`, `prefix_mismatch`, `upgrade_failed`, the dynamic upgrade states); test every literal code has an entry
+- #530 `guardrails-default-tier-undocumented`: tw-hostd: remove `-default-tier` (hidden deprecated no-op for one release); it is not an isolation floor and nothing sets it
+- #531 `jsonc-spawn-template-noop` (with `sdk-drop-spawn-defaults-from-template`): agent template: drop the `spawn` block that restates the defaults; document `maxLive`/`maxDepth` defaults and ceiling in the schema and docs
+- #532 `lifecycle-prefix-in-twjson`: tw upgrade: document `prefix_mismatch` and collapse the 0.1→0.2 prefix prose; optionally record `installPrefix` in tw.json at `tw up`
+- #533 `operate-approve-lists`: tw approve: fold `tw approvals` in as the no-instance form (hidden alias), or at least point the one-positional error at `tw approvals` (decision needed)
+- #534 `operate-notify-events-flag`: tw notify set: remove `--events` until a second event exists (it only accepts its own default)
+- #535 `policy-one-snippet-renderer`: policy snippets: one typed renderer (key order and comments preserved) instead of five hand-built HuJSON strings; the merge-into-existing-section comment printed before every pasted block
+- #536 `sdk-merge-mcp-into-tailnet`: SDK: drop the `./runtime` export from @tailworks/tailnet now; later fold @tailworks/mcp in as `@tailworks/tailnet/mcp` (two steps, second one breaking)
+- #537 `tenant-host-drop-add-rpm`: tw tenant add: drop `--registrations-per-minute` (the only quota it takes); `tenant set` owns every limit
+- #538 `tenant-host-tenant-add-defaults`: tw tenant add: prompt for the OAuth client secret on a terminal (like `tw up`) and save it per tenant; keep `tailscale` as the default profile
+- #539 `up-headscale-flag-bundle`: tw up: infer the Headscale profile from `--api-key-file` only with a non-default `--control-url`; default the key file to ~/.config/tailworks/headscale.env
+- #540 `sdk-create-fallback-npx`: create-tailworks: when `tw` is not on PATH, rename the scaffold like `tw init` does instead of copying the template verbatim
+
+**Folded into existing issues (12).** Each is a comment on the issue it belongs to.
+
+- `containers-platform-flag-hide` → #463 (and the ARCH column in #477)
+- `deploy-preview-alias-merge` → #463
+- `develop-dev-workerd-flag` → #463
+- `tenant-host-hide-setup-binary-flags` → #463
+- `daemons-local-dev-trio` → #489
+- `daemons-mgmt-headscale-tags-flag` → #489
+- `guardrails-merge-kill-timing` → #489 and #457
+- `guardrails-revoke-warm-keys-derived` → #489
+- `data-queues-info` → #462
+- `observe-telemetry-subcommand-flags` → #468
+- `operate-clidoc-duplicate-subcommand-flags` → #437
+- `tenant-host-install-microvm-hint` → #483
+
+**Already done, merged or superseded (6).**
+
+- `develop-init-template-list`: done: `cmd/tw/templates.go` landed with PR #504 (#439)
+- `jsonc-name-key-templates`: done: PR #510 (#447) dropped the duplicate `name`
+- `ergonomics-help-advanced-commands`: superseded by PR #502 (#435, #436): the regrouping already puts the homelab path first with nothing hidden
+- `admin-ui-discoverability`: #478, now fully verified (3/3)
+- `lifecycle-install-env-docs`: merged into #528
+- `sdk-drop-spawn-defaults-from-template`: merged into #531
+
+**Refuted (8).** Added to "Considered and rejected" below in short form; the residues the verifiers did accept are noted on the named issues.
+
+- `api-deployment-lists` (Fold the three deployment list routes and schemas into ListDeployments filters): folding the three deployment list routes is breaking under ADR-041's additive-only `/v1`, and `tw deployments` / `tw previews --json` are stable cli-json contracts; residue (a `preview` filter on ListDeployments) noted on #459
+- `deploy-replace-stateless-ineligible` (Move a stateless workload off an ineligible host without demanding --replace): "nothing left behind" is false for a stateless workload (fs-backend R2 bytes, the address changes), so the `--replace` consent stays; residue (better retry hints) noted on #464
+- `guardrails-local-dev-token-knobs` (tw-mgmt's four -local-dev knobs always travel together; rotate the host token by default and derive the paths): rotate-by-default breaks replicas that share one token file (e2e/multimgmt), and the typical user never sees these flags; residue (help text) noted on #489
+- `onboarding-contributor-docs-out-of-docs` (Move release, test-evidence and demo-recording docs out of docs/ so they stop shipping in `tw docs`): RELEASING.md and install-testing.md are load-bearing for operator and security readers inside the embedded set (SECURITY.md, INSTALL.md link them), and #479 already decided to keep every docs/*.md; residue: move the RELEASING.md entry in docs/README.md to the contributor bullet
+- `policy-allow-missing-grants-scope` (--allow-missing-grants skips the whole preflight, not just grants: missing tagOwners, funnel nodeAttrs, Service auto-approval and tag_not_owned all pass, to fail later with worse errors): the flag has meant "skip the preflight" since its first commit, the system tolerates missing grants and nodeAttrs after deploy, and narrowing it adds hard failures; residue (help text) noted on #463
+- `sdk-create-fallback-npx` (create-tailworks: fall back to `npx tailworks init` instead of a raw template copy): a 120 MB `npx` download behind `-y` and a second code path; the accepted residue (rename the scaffold locally like `tw init`) is #540
+- `tenant-host-hide-vmcheck` (`tw host vmcheck` is a verification/benchmark tool: keep it, but take it off the `host` usage line and `tw help`): the usage line is the single source for completion, docs/cli.md and TestDocsNameRealCommands, so hiding it there breaks them; residue noted on #438
+- `up-tw-json-is-the-config` (Document tw.json as the config file for rare settings instead of adding more tw up flags): documenting hand-edits to tw.json adds a second, longer path next to `tw up --<flag>`; keep tw.json as read-only state, described in the ~/.tailworks table that PR #508 landed
 
 ## Suggested sequence
 
@@ -606,6 +661,6 @@ Commands run for this report: `go build`-free greps and `sed` over cmd/tw (casca
 ## Coverage
 
 - 19 lenses (15 planned plus admin UI, containers, policy snippets and install/upgrade lifecycle named by a completeness critic) produced 158 raw findings and 238 "kept" knobs. The automated dedup step failed (output too large), so overlapping findings were merged by hand in synthesis; where two lenses found the same thing both ids are named.
-- Verification pass 1: 80 findings (all 31 high-impact, 49 medium) × 3 adversarial verifiers (functionality, security-perf, actually-simpler); 77 survived with ≤ 1 refutation, 3 refuted. Pass 2: the remaining 78; 21 confirmed 3/3, 1 partially verified (1 vote), 3 refuted, 53 unverified because the run hit a usage limit (listed above).
-- Every recommendation in the main body and the Addendum (except the one marked partially verified) survived three independent verifiers with at most one refutation, and adopts their amendments. Eight headline factual claims (cascade default, `tw ls` cap, bare `tw logs`, `--push-port`, hardcoded warm-keys/pool-nodes, sticky unsafe flags, `tw-netd` never exec'd, the `agent` key) were re-checked by hand against HEAD `ed4d2831`.
-- No code was changed on this branch; this file is the only change.
+- Verification pass 1: 80 findings (all 31 high-impact, 49 medium) × 3 adversarial verifiers (functionality, security-perf, actually-simpler); 77 survived with ≤ 1 refutation, 3 refuted. Pass 2: the remaining 78; 21 confirmed 3/3, 1 partially verified (1 vote), 3 refuted, 53 unverified because the run hit a usage limit. Pass 3 (after the limit cleared): those 53 plus the 2 missing votes; 46 confirmed, 8 refuted. No finding remains unverified.
+- Every recommendation in the main body and the Addendum survived three independent verifiers with at most one refutation, and adopts their amendments. Eight headline factual claims (cascade default, `tw ls` cap, bare `tw logs`, `--push-port`, hardcoded warm-keys/pool-nodes, sticky unsafe flags, `tw-netd` never exec'd, the `agent` key) were re-checked by hand against HEAD `ed4d2831`.
+- No code was changed on this branch; this file is the only change. Every recommendation is filed as a GitHub issue under the `simplify` label (tracking issue #434: 66 issues on 2026-11-24, 29 more after the third pass).

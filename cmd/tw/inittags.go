@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -52,11 +51,21 @@ func appTags(raw []byte, wl string) ([]byte, map[string]string, error) {
 			}
 		}
 	}
-	for old, nu := range rename {
-		raw = bytes.ReplaceAll(raw, []byte(`"`+old+`"`), []byte(`"`+nu+`"`))
-	}
-	return raw, rename, nil
+	// One pass over the quoted template tags, each looked up in rename. A
+	// pass per renamed tag (in map order) could rename a tag twice when one
+	// rename's result is another's input: with a workload named "a" and a
+	// class B, tag:tw-wl-b becomes tag:tw-wl-a, which must not then become
+	// class B's tag:tw-a-b.
+	out := quotedTwTagRE.ReplaceAllFunc(raw, func(q []byte) []byte {
+		if nu, ok := rename[string(q[1:len(q)-1])]; ok {
+			return []byte(`"` + nu + `"`)
+		}
+		return q
+	})
+	return out, rename, nil
 }
+
+var quotedTwTagRE = regexp.MustCompile(`"tag:tw-[^"]*"`)
 
 // initTags lists the tags of the app in dir, for tw init's summary.
 func initTags(dir string) []string {

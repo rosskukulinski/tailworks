@@ -37,24 +37,27 @@ func TestCreateTailworksRenamesLikeInit(t *testing.T) {
 			continue
 		}
 		tmpl := e.Name()
-		t.Run(tmpl, func(t *testing.T) {
-			// Upper case and an underscore exercise workloadLabel.
-			want := filepath.Join(t.TempDir(), "My_App-2")
-			if _, err := captureStdout(t, func() error { return cmdInit([]string{want, "--template", tmpl}) }); err != nil {
-				t.Fatal(err)
-			}
-			got := filepath.Join(t.TempDir(), "My_App-2")
-			cmd := exec.Command(node, filepath.Join(ct, "bin", "create-tailworks.js"), got, "--template", tmpl)
-			cmd.Env = append(os.Environ(), "PATH="+bin)
-			out, err := cmd.CombinedOutput()
-			if err != nil {
-				t.Fatalf("create-tailworks: %v\n%s", err, out)
-			}
-			if !strings.Contains(string(out), `(workload "my-app-2")`) {
-				t.Errorf("create-tailworks output lacks the workload name:\n%s", out)
-			}
-			createTwCompareTrees(t, want, got)
-		})
+		// Upper case and an underscore exercise workloadLabel; İ (U+0130)
+		// is the one letter Go and JavaScript lowercase differently.
+		for dir, label := range map[string]string{"My_App-2": "my-app-2", "İstanbul_App": "istanbul-app"} {
+			t.Run(tmpl+"/"+label, func(t *testing.T) {
+				want := filepath.Join(t.TempDir(), dir)
+				if _, err := captureStdout(t, func() error { return cmdInit([]string{want, "--template", tmpl}) }); err != nil {
+					t.Fatal(err)
+				}
+				got := filepath.Join(t.TempDir(), dir)
+				cmd := exec.Command(node, filepath.Join(ct, "bin", "create-tailworks.js"), got, "--template", tmpl)
+				cmd.Env = append(os.Environ(), "PATH="+bin)
+				out, err := cmd.CombinedOutput()
+				if err != nil {
+					t.Fatalf("create-tailworks: %v\n%s", err, out)
+				}
+				if !strings.Contains(string(out), `(workload "`+label+`")`) {
+					t.Errorf("create-tailworks output lacks the workload name %q:\n%s", label, out)
+				}
+				createTwCompareTrees(t, want, got)
+			})
+		}
 	}
 }
 

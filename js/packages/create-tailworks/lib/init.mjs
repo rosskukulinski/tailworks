@@ -11,7 +11,10 @@ import { stripJSONC } from "./build.mjs";
 // workloadLabel is cmd/tw/app.go's: lowercase, runs of anything but
 // [a-z0-9-] to "-", trimmed, at most 40 characters.
 export function workloadLabel(s) {
-  s = s.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "");
+  // Go's strings.ToLower maps İ (U+0130) to a plain "i". JavaScript's
+  // toLowerCase gives "i" plus a combining dot (U+0307), which the next
+  // replace would turn into a stray "-" (İstanbul -> i-stanbul). Match Go.
+  s = s.replace(/İ/g, "i").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "");
   if (s.length > 40) s = s.slice(0, 40).replace(/-+$/, "");
   return s;
 }

@@ -65,6 +65,11 @@ type fakeTS struct {
 	// keyDeleteDelay (ns) is each key DELETE's latency, outside mu
 	// (warmrevoke_test.go).
 	keyDeleteDelay atomic.Int64
+
+	// keyDeletesInFlight and keyDeletesPeak count concurrent key DELETEs
+	// (warmrevoke_test.go).
+	keyDeletesInFlight atomic.Int64
+	keyDeletesPeak     atomic.Int64
 }
 
 type fakeOAuthClient struct {
@@ -93,7 +98,11 @@ func newFakeTS(t *testing.T) *fakeTS {
 
 func (f *fakeTS) serve(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "DELETE" && strings.Contains(r.URL.Path, "/keys/") {
+		n := f.keyDeletesInFlight.Add(1)
+		for p := f.keyDeletesPeak.Load(); n > p && !f.keyDeletesPeak.CompareAndSwap(p, n); p = f.keyDeletesPeak.Load() {
+		}
 		time.Sleep(time.Duration(f.keyDeleteDelay.Load()))
+		f.keyDeletesInFlight.Add(-1)
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -537,6 +546,7 @@ func (e *testEnv) asHost(id string) *apiClient {
 // object goes back to pending, a new key is minted under the SAME hostname,
 // the credential is released again, and /ready records the new node ID.
 func TestRemintAfterRejectedRejoin(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	c, h1 := e.c, e.asHost("h1")
 	var tn struct{ TenantID string }
@@ -593,6 +603,7 @@ func TestRemintAfterRejectedRejoin(t *testing.T) {
 }
 
 func TestAPIEndToEnd(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	c, h1 := e.c, e.asHost("h1")
 
@@ -813,6 +824,7 @@ func TestAPIEndToEnd(t *testing.T) {
 }
 
 func TestAPIThrottleBackoffAndTTLReaper(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	c, h1 := e.c, e.asHost("h1")
 	var tn struct{ TenantID string }
@@ -857,6 +869,7 @@ func TestAPIThrottleBackoffAndTTLReaper(t *testing.T) {
 }
 
 func TestAPIHostAuditChain(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	h1 := e.asHost("h1")
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
@@ -908,6 +921,7 @@ func TestAPIHostAuditChain(t *testing.T) {
 }
 
 func TestTailnetAuth(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	srv := &Server{M: e.m, Admins: []string{"ross@example.com"}, Self: SelfInfo{DNSName: "tw-mgmt.t.ts.net", Tailnet: "t.ts.net"}}
 	whois := func(ctx context.Context, addr string) (WhoIsInfo, error) {
@@ -949,6 +963,11 @@ func TestTailnetAuth(t *testing.T) {
 	e.c.ok("POST", "/v1/hosts", map[string]any{"hostID": "h2", "tenantID": tn.TenantID}, &hj2)
 	if len(hj1.RegistrationSecret) < 40 || hj1.RegistrationSecret == hj2.RegistrationSecret {
 		t.Fatalf("registration secrets: %q %q", hj1.RegistrationSecret, hj2.RegistrationSecret)
+	}
+	// #488: over the tailnet the answer names mgmt's URL for the join file
+	// (keyTagsOnly only on Headscale).
+	if c, b := call("100.64.0.3:1", "POST", "/v1/hosts", `{"hostID":"h-joinurl","tenantID":"`+tn.TenantID+`"}`); c != 201 || b["mgmtURL"] != "http://tw-mgmt.t.ts.net" || b["keyTagsOnly"] != nil {
+		t.Fatalf("host join over the tailnet: %d %v", c, b)
 	}
 	reg := func(secret string) string {
 		b := map[string]any{"capacityNodes": 1, "tiers": []string{"process"}}
@@ -1054,6 +1073,7 @@ func TestTailnetAuth(t *testing.T) {
 }
 
 func TestKillWhileJoining(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	c, h1 := e.c, e.asHost("h1")
 	var tn struct{ TenantID string }
@@ -1088,6 +1108,7 @@ func TestKillWhileJoining(t *testing.T) {
 // them; a create of the same name is then a new pending object, and the
 // deployment's endpoint no longer reads "killed". Live objects stay.
 func TestPurgeAfterKill(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	c, h1 := e.c, e.asHost("h1")
 	var tn struct{ TenantID string }
@@ -1159,6 +1180,7 @@ func TestPurgeAfterKill(t *testing.T) {
 // TestAPIVolumeKey: the DO volume data key (L3) is created in custody once,
 // returned stably, and only to the lease holder at the lease's epoch.
 func TestAPIVolumeKey(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	c, h1, h2 := e.c, e.asHost("h1"), e.asHost("h2")
 	var tn struct{ TenantID string }

@@ -7,9 +7,10 @@ import (
 )
 
 func TestDoctorSummary(t *testing.T) {
+	t.Parallel()
 	checks := []check{
 		{Name: "binaries", Status: "info", Detail: "not found next to tailworks (/x) or on PATH: tw-mgmt, tw-hostd; not needed in single-process mode (the daemons run inside tailworks), only for tw up --separate-host"},
-		{Name: "workerd", Status: "warn", Detail: "/home/u/.tailworks/bin/workerd: workerd 2026-11-14 (tailworks is tested with 1.20261118.1)"},
+		{Name: "workerd", Status: "warn", Detail: "/home/u/.tailworks/bin/workerd: workerd 2026-11-14 (tailworks is tested with 1.20261121.1)"},
 		{Name: "bundler", Status: "fail", Detail: "bundling template agent failed", Fix: "cd /home/u/src && make deps"},
 		{Name: "mint_mode", Status: "ok", Detail: "oauth: OAuth client abc from /home/u/oauth.env mints every node key"},
 		{Name: "transport", Status: "ok", Detail: "tsnet: mgmt API on its own node m.example.ts.net (WhoIs); host embedded"},
@@ -51,12 +52,18 @@ func TestDoctorSummary(t *testing.T) {
 }
 
 func TestDoctorChecksHaveGroups(t *testing.T) {
+	t.Parallel()
 	// Every check doctor runs on some platform has a group and label, so
 	// none falls into "Other" with its raw name.
-	for _, n := range []string{"api_key", "binaries", "bundler", "cgroups_v2", "data_disk", "firecracker", "glibc", "host_sockets",
+	for _, n := range []string{"api_key", "binaries", "bundler", "cgroups_v2",
+		"containers",
+		"data_disk", "firecracker", "glibc", "host_sockets",
 		"https_certs", "kernel", "kvm", "landlock", "microvm_tier", "mint_mode", "node_egress", "public_ingress", "sandbox",
+		"side_channels",
 		"state_dir_writable", "store_sizes", "system_tailscaled_not_used", "systemd", "transport", "tw_home_writable",
-		"user_namespaces", "workerd", "funnel_attr:x", "public_probe:x"} {
+		"user_namespaces", "worker_internet", "workerd",
+		"workerd_age",
+		"funnel_attr:x", "public_probe:x"} {
 		if g := metaOf(n).group; g == "Other" {
 			t.Errorf("check %s has no group", n)
 		}
@@ -64,6 +71,7 @@ func TestDoctorChecksHaveGroups(t *testing.T) {
 }
 
 func TestWrapText(t *testing.T) {
+	t.Parallel()
 	got := wrapText("aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk", 20)
 	if len(got) != 3 || got[0] != "aaa bbb ccc ddd eee" {
 		t.Fatalf("wrapText: %q", got)

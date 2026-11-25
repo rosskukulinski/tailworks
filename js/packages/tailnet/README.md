@@ -23,7 +23,9 @@ export default {
   and their catalog.
 - `@tailworks/tailnet/testing`: `withCaller` and a fake `ctx.tailnet` for
   unit tests; `@tailworks/tailnet/testing/dev`: black-box tests against
-  `tw dev`.
+  `tw dev`. `testing/dev` only drives the `tw dev` process, so it works for
+  any runtime: that is why the Node-tier templates list `@tailworks/tailnet`
+  as a devDependency.
 
 Add `"@tailworks/tailnet"` to `compilerOptions.types` in `tsconfig.json`
 (next to `@cloudflare/workers-types`) to type `ctx.tailnet`. Every `tw init`

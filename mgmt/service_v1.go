@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rosskukulinski/tailworks/internal/policy"
 	"github.com/rosskukulinski/tailworks/internal/tsapi"
 )
 
@@ -274,6 +275,9 @@ type HostJoin struct {
 	Hostname           string   `json:"hostname"`
 	ControlURL         string   `json:"controlURL,omitempty"`
 	Tailnet            string   `json:"tailnet,omitempty"`
+
+	// KeyTagsOnly: the host's node advertises no tags (Headscale).
+	KeyTagsOnly bool `json:"keyTagsOnly,omitempty"`
 }
 
 // String never prints the key.
@@ -359,7 +363,7 @@ func (m *Mgmt) CreateHost(ctx context.Context, r HostCreate) (HostJoin, bool, er
 	if err != nil {
 		if tsapi.IsTagsNotPermitted(err) {
 			e := errf(403, "policy_missing_tag_owners", "the control plane refused to mint a %s key with tenant %s's %s credential: %v", HostTag, t.ID, t.MintMode, err)
-			e.Snippet = TagOwnersSnippet()
+			e.Snippet = HostTagOwnersSnippet(t)
 			return HostJoin{}, false, e
 		}
 		return HostJoin{}, false, errf(502, "bootstrap_failed", "mint host join key: %v", err)
@@ -383,7 +387,8 @@ func (m *Mgmt) CreateHost(ctx context.Context, r HostCreate) (HostJoin, bool, er
 	m.audit(ctx, AuditRecord{TenantID: t.ID, Kind: "host_add", ActingFor: r.By}, map[string]any{"host": r.HostID, "keyID": k.ID,
 		"tags": tags, "mode": t.MintMode, "by": r.By, "new": created})
 	return HostJoin{Host: h, AuthKey: k.Secret, RegistrationSecret: secret, ExpiresAt: m.now().Add(HostJoinKeyExpiry).UnixMilli(), Tags: tags,
-		Hostname: HostNodeName(r.HostID), ControlURL: m.cfg.OperatorControlURL, Tailnet: t.Tailnet}, created, nil
+		Hostname: HostNodeName(r.HostID), ControlURL: m.cfg.OperatorControlURL, Tailnet: t.Tailnet,
+		KeyTagsOnly: t.MintMode == MintHeadscale}, created, nil
 }
 
 func validHostID(s string) bool {
@@ -742,9 +747,13 @@ func (m *Mgmt) deploymentStatus(ctx context.Context, d Deployment) (string, stri
 
 var _ = fmt.Sprintf
 
-// TagOwnersSnippet is the tagOwners tailworks' own nodes need: tag:tw (the
-// mint credential's tag) must own the mgmt and host tags so an OAuth
-// client or trust credential tagged tag:tw can mint their keys.
-func TagOwnersSnippet() string {
-	return `"tagOwners": { "tag:tw": ["autogroup:admin"], "` + MgmtTag + `": ["autogroup:admin", "tag:tw"], "` + HostTag + `": ["autogroup:admin", "tag:tw"] }`
+// HostTagOwnersSnippet is the one tagOwners entry a refused host join key
+// lacks (issue #443). mgmt is running, so tag:tw and tag:tw-mgmt are
+// already in the policy: only tag:tw-host needs tag:tw among its owners.
+// It is one line to paste inside the existing "tagOwners" section; a whole
+// second "tagOwners" block would not parse (issue #389).
+// On Headscale it is owned by tag:tw alone (tagOwnersFor).
+func HostTagOwnersSnippet(t Tenant) string {
+	return fmt.Sprintf(`%q: %s, // inside the existing "tagOwners" section (replace any line for %s; don't add a second section)`,
+		HostTag, policy.ListHuJSON(tagOwnersFor(t)), HostTag)
 }

@@ -87,46 +87,90 @@ func SpecialName(name string) bool {
 }
 
 // Allowlist is a parsed tailnet.egress.internet list: host names,
-// "*.suffix" wildcards, "*" (any name), IPs and CIDRs.
+// "*.suffix" wildcards, "*" (any name), IPs and CIDRs, each with an
+// optional ":port" (ports.go): "smtp.example.com:25", "[2001:db8::1]:25",
+// "203.0.113.0/24:25", "*:25". An entry without a port allows every port
+// the default port policy allows (RefusedPort); an entry with a port
+// allows that port only, and is the only way to allow a refused port.
 type Allowlist struct {
-	hosts []string
-	nets  []netip.Prefix
+	hosts []hostEntry
+	nets  []netEntry
+}
+
+type hostEntry struct {
+	pattern string
+	port    uint16 // 0: any port
+}
+
+type netEntry struct {
+	net  netip.Prefix
+	port uint16 // 0: any port
 }
 
 // ParseAllowlist parses entries (case and a trailing dot are ignored;
-// blanks are skipped).
+// blanks are skipped). An entry whose ":port" isn't 1..65535 is kept
+// whole as a name, which matches nothing: the list form has always been
+// lenient, and a bad entry allows nothing rather than failing the deploy.
 func ParseAllowlist(entries []string) Allowlist {
 	var l Allowlist
 	for _, a := range entries {
-		a = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(a)), ".")
+		a = strings.ToLower(strings.TrimSpace(a))
 		if a == "" {
 			continue
 		}
+		a, port := SplitEntryPort(a)
+		a = strings.TrimSuffix(a, ".")
 		if pf, err := netip.ParsePrefix(a); err == nil {
-			l.nets = append(l.nets, pf.Masked())
+			l.nets = append(l.nets, netEntry{net: pf.Masked(), port: port})
 		} else if ip, err := netip.ParseAddr(a); err == nil {
-			l.nets = append(l.nets, netip.PrefixFrom(ip.Unmap(), ip.Unmap().BitLen()))
+			l.nets = append(l.nets, netEntry{net: netip.PrefixFrom(ip.Unmap(), ip.Unmap().BitLen()), port: port})
 		} else {
-			l.hosts = append(l.hosts, a)
+			l.hosts = append(l.hosts, hostEntry{pattern: a, port: port})
 		}
 	}
 	return l
 }
 
 // Allows reports whether name (lowercase, no trailing dot; a host name or
-// an IP literal) is on the list. An IP literal matches only IP and CIDR
-// entries; a name matches only host entries.
+// an IP literal) is on the list for some port. An IP literal matches only
+// IP and CIDR entries; a name matches only host entries. It answers for a
+// name alone (a DNS lookup); a flow asks AllowsPort.
 func (l Allowlist) Allows(name string) bool {
+	return l.match(name, 0, false)
+}
+
+// AllowsPort reports whether a flow to name:port is on the list: an entry
+// with no port allows every port, an entry with a port allows that port
+// only.
+func (l Allowlist) AllowsPort(name string, port uint16) bool {
+	return l.match(name, port, false)
+}
+
+// NamesPort reports whether an entry matching name names port explicitly
+// ("smtp.example.com:25", "*:25", "203.0.113.0/24:25"). That is what
+// lifts the default port policy (RefusedPort) for a destination.
+func (l Allowlist) NamesPort(name string, port uint16) bool {
+	return l.match(name, port, true)
+}
+
+// match: port 0 is any port; explicit needs an entry that names port.
+func (l Allowlist) match(name string, port uint16, explicit bool) bool {
+	portOK := func(ep uint16) bool {
+		if explicit {
+			return ep == port
+		}
+		return port == 0 || ep == 0 || ep == port
+	}
 	if ip, err := netip.ParseAddr(name); err == nil {
 		for _, n := range l.nets {
-			if n.Contains(ip.Unmap()) {
+			if n.net.Contains(ip.Unmap()) && portOK(n.port) {
 				return true
 			}
 		}
 		return false
 	}
 	for _, h := range l.hosts {
-		if HostMatch(h, name) {
+		if HostMatch(h.pattern, name) && portOK(h.port) {
 			return true
 		}
 	}

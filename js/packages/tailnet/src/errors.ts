@@ -8,6 +8,7 @@ export type TailnetErrorCode =
   | "peer_not_visible"
   | "forbidden_destination"
   | "internet_egress_unavailable"
+  | "internet_port_refused"
   | "acl_denied"
   | "cap_missing"
   | "cap_limit_exceeded"
@@ -18,6 +19,8 @@ export type TailnetErrorCode =
   | "identity_pending"
   | "derp_unreachable"
   | "plan_feature_missing"
+  | "not_supported"
+  | "socket_limit"
   | "killed"
   | "object_killed"
   | "no_identity"
@@ -25,6 +28,9 @@ export type TailnetErrorCode =
   | "namespace_conflict"
   | "bad_request"
   | "unknown_object"
+  | "service_not_found"
+  | "binding_forbidden"
+  | "rpc_not_forwardable"
   | "dial_failed"
   | "upstream_unavailable"
   | "hostd_unavailable"
@@ -52,6 +58,7 @@ export const CATALOG: Readonly<Record<TailnetErrorCode, CatalogEntry>> = Object.
   peer_not_visible: { status: 403, title: "the destination is not in this node's netmap (a grant is missing, or the name does not exist)" },
   forbidden_destination: { status: 403, title: "the destination class is refused by netd (loopback, self, sibling, host, non-tailnet)" },
   internet_egress_unavailable: { status: 403, title: "internet egress is turned off for this workload or host (tailnet.egress.internet), or the host is not on its allowlist" },
+  internet_port_refused: { status: 403, title: "internet egress to TCP port 25 is refused unless tailnet.egress.internet names the destination with that port" },
   acl_denied: { status: 403, title: "the peer is visible but the port or service is not granted" },
   cap_missing: { status: 403, title: "the caller lacks the app capability (or the tool) required" },
   cap_limit_exceeded: { status: 403, title: "within the granted tool, but above a numeric limit or budget" },
@@ -62,6 +69,8 @@ export const CATALOG: Readonly<Record<TailnetErrorCode, CatalogEntry>> = Object.
   identity_pending: { status: 503, title: "the object's node is not ready yet" },
   derp_unreachable: { status: 502, title: "no direct path and no reachable DERP relay" },
   plan_feature_missing: { status: 501, title: "the tailnet's plan or control server lacks a feature tailworks can use" },
+  not_supported: { status: 501, title: "tailworks doesn't support this call here (yet)" },
+  socket_limit: { status: 429, title: "too many open sockets for this object" },
   killed: { status: 410, title: "the object was killed" },
   object_killed: { status: 410, title: "a new request reached a killed object (its node's tombstone answered)" },
   no_identity: { status: 401, title: "the request carries no verified tailnet caller" },
@@ -69,6 +78,9 @@ export const CATALOG: Readonly<Record<TailnetErrorCode, CatalogEntry>> = Object.
   namespace_conflict: { status: 409, title: "mgmt returned another identity's object for this workload's class + object name (an invariant violation; tailworks fails closed rather than share a node)" },
   bad_request: { status: 400, title: "the request is malformed" },
   unknown_object: { status: 404, title: "no such object" },
+  service_not_found: { status: 404, title: "a service binding's target workload (or its entrypoint) does not exist in this tenant" },
+  binding_forbidden: { status: 403, title: "a named entrypoint or RPC method was called by something that is not a tailworks node of the same tenant" },
+  rpc_not_forwardable: { status: 400, title: "an RPC argument or result is passed by reference on Cloudflare (a function, RpcTarget, stream, Request or Response) and cannot cross a service binding" },
   dial_failed: { status: 502, title: "the tailnet dial failed" },
   upstream_unavailable: { status: 503, title: "the platform upstream is unavailable" },
   hostd_unavailable: { status: 503, title: "the host agent is unavailable" },

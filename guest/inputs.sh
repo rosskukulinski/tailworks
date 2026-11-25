@@ -43,6 +43,13 @@ FIRECRACKER_SHA256_arm64=fe726e0b43c04363ac07e358be4dee982c3947c65ed3ae10c770fef
 JAILER_SHA256_amd64=65ef226e96f0ceda55ba643f445801ef2cc0ea667ef67cad8ac4f406c9c8434f
 JAILER_SHA256_arm64=4d8d2dd4dfc1d47932b2bd261479181dd0c54f0a2f32714421a7e7f9f07ddec8
 
+# Pyodide bundles for Python Workers (ADR-055): the files, digests and sizes
+# are internal/pyodide/bundles.txt (shared with hostd's process tier); they
+# come from where workerd itself downloads them.
+PYODIDE_URL=https://pyodide-capnp-bin.edgeworker.net
+PYODIDE_LIST=${ROOT:?}/internal/pyodide/bundles.txt
+PYODIDE_GUEST_DIR=usr/share/tailworks/pyodide # internal/pyodide.GuestDir
+
 # GUEST_CACHE: downloads (content-checked, so safe to share between builds).
 GUEST_CACHE=${GUEST_CACHE:-${ROOT:?}/dist/cache/guest}
 

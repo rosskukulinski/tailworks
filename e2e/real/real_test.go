@@ -342,9 +342,9 @@ func TestRealTailnet(t *testing.T) {
 	t.Run("SelfSSRF", func(t *testing.T) {
 		cases := map[string][2]string{
 			"own_ip":        {"http://" + ips["a"] + "/", netd.CodeForbiddenDestination},
-			"sibling_ip":    {"http://" + ips["b"] + "/", netd.CodeForbiddenDestination},
-			"sibling_name":  {"http://" + prefix + "-obj-b/", netd.CodeForbiddenDestination},
-			"sibling_fqdn":  {"http://" + prefix + "-obj-c." + tailnet + "/", netd.CodeForbiddenDestination},
+			"sibling_ip":    {"http://" + ips["b"] + "/", "hop"},
+			"sibling_name":  {"http://" + prefix + "-obj-b/", "hop"},
+			"sibling_fqdn":  {"http://" + prefix + "-obj-c." + tailnet + "/", "hop"},
 			"loopback":      {"http://127.0.0.1/", netd.CodeForbiddenDestination},
 			"loopback_v6":   {"http://[::1]/", netd.CodeForbiddenDestination},
 			"link_local":    {"http://169.254.169.254/", netd.CodeForbiddenDestination},
@@ -361,9 +361,15 @@ func TestRealTailnet(t *testing.T) {
 		for name, c := range cases {
 			code, h, b, _ := get("http://"+ips["a"]+"/egress?url="+c[0], nil)
 			var ok bool
-			if c[1] == "" {
+			switch c[1] {
+			case "":
 				ok = code == 200
-			} else {
+			case "hop":
+				// A same-host object (netd/samehost.go): delivered in process
+				// when the policy grants it, else not in the netmap; never
+				// refused as a sibling.
+				ok = code == 200 || (code == 403 && h.Get(netd.HeaderError) == netd.CodePeerNotVisible)
+			default:
 				ok = code == 403 && h.Get(netd.HeaderError) == c[1]
 			}
 			res.check("ssrf_"+name, ok, fmt.Sprintf("%d %s", code, b))

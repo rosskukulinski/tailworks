@@ -87,7 +87,7 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == "POST" && strings.HasSuffix(p, "/acl/validate"):
 		w.Write([]byte(`{}`))
 	case r.Method == "POST" && strings.HasSuffix(p, "/acl"):
-		w.WriteHeader(500) // tw never writes the policy without --policy-apply
+		w.WriteHeader(500) // tw never writes the policy without --apply-policy
 	case r.Method == "POST" && strings.HasSuffix(p, "/keys"):
 		f.n++
 		id := fmt.Sprintf("k%d", f.n)

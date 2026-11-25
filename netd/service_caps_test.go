@@ -27,11 +27,12 @@ func TestServiceCapsScopedToVIP(t *testing.T) {
 	const capSvc, capNode = "example.com/cap/h22-svc", "example.com/cap/h22-node"
 
 	o := e.reg.Get("a")
+	// netd already set OmitAuth on this client (writing it here again
+	// races with its rejected-node watcher, #271).
 	alc, err := o.Server().LocalClient()
 	if err != nil {
 		t.Fatal(err)
 	}
-	alc.OmitAuth = true
 	if err := nettest.AcceptRoutes(ctx, e.client.LC); err != nil {
 		t.Fatal(err)
 	}

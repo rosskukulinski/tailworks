@@ -1,7 +1,8 @@
 package main
 
-// Public ingress (ADR-029), CLI side: `tw expose on|off`, the deploy's
-// public URL and --wait-public, and the doctor's public probe.
+// Public ingress (ADR-029), CLI side: `tw expose on|off` (names and release:
+// exposenames.go), the deploy's public URL and --wait-public, and the
+// doctor's public probe.
 
 import (
 	"context"
@@ -40,6 +41,9 @@ func cmdExpose(args []string) error {
 	pos, err := f.parse(args)
 	if err != nil {
 		return err
+	}
+	if len(pos) > 0 && (pos[0] == "names" || pos[0] == "release") {
+		return cmdExposeNames(f, *tenantF, pos) // exposenames.go
 	}
 	if len(pos) != 2 || (pos[0] != "on" && pos[0] != "off") {
 		return fail("bad_request", "tw expose needs on|off and a workload", "usage: tw "+usageOf("expose"))
@@ -90,9 +94,7 @@ func printPublicPreflight(pf mgmt.PreflightResult) {
 		fmt.Printf("› preflight: nodeAttrs %s … ✗ missing (the public node could not serve Funnel)\n", m)
 	}
 	fmt.Printf("  add to your tailnet policy:\n")
-	for _, l := range strings.Split(pf.NodeAttrsSnippet, "\n") {
-		fmt.Printf("    %s\n", l)
-	}
+	printPaste(snippetPublic(preflightPolicy(pf)), "    ") // policysnippet.go
 }
 
 // preflightFailure is the typed error for a failed deploy preflight.
@@ -102,26 +104,14 @@ func preflightFailure(pf mgmt.PreflightResult) *cliErr {
 		code, msg = "funnel_required", "preflight failed: this app declares public routes, but the tenant policy does not let "+policy.PublicTag+" use Funnel"
 	}
 	e := fail(code, msg)
-	// The public snippet already owns tag:tw-public; don't print it twice.
-	if len(pf.MissingTagOwners) > 0 && !(len(pf.MissingNodeAttrs) > 0 && onlyPublicTagOwner(pf.MissingTagOwners)) {
-		e.Fix = append(e.Fix, "add to your tailnet policy:", "  "+pf.TagOwnersSnippet)
-	}
-	if len(pf.Missing) > 0 {
-		e.Fix = append(e.Fix, `add to "grants" in your tailnet policy:`)
-		for _, m := range pf.Missing {
-			e.Fix = append(e.Fix, "  "+m.Snippet)
-		}
-	}
-	if len(pf.MissingNodeAttrs) > 0 {
-		e.Fix = append(e.Fix, "add to your tailnet policy (public ingress, ADR-029):")
-		for _, l := range strings.Split(pf.NodeAttrsSnippet, "\n") {
-			e.Fix = append(e.Fix, "  "+l)
-		}
+	if lines := pasteLines(preflightPolicy(pf), nil, "  "); lines != nil { // policysnippet.go
+		e.Fix = append(append(e.Fix, "add to your tailnet policy (admin console › Access controls):"), lines...)
 	}
 	if pf.ServiceUnapproved {
-		e.Fix = append(e.Fix, "let the workload node host "+pf.Service+" (control won't route it otherwise):", "  "+pf.ServiceSnippet)
+		e.Fix = append(e.Fix, "(the autoApprovers entry lets the workload node host "+pf.Service+"; control won't route it otherwise)")
 	}
-	e.Fix = append(e.Fix, "then re-run, or deploy anyway with --allow-missing-grants")
+	e.Fix = append(e.Fix, "then re-run, or deploy anyway with --allow-missing-grants",
+		"or let tw add them (shows the lines and asks first): tw deploy --apply-policy")
 	return e
 }
 
@@ -288,7 +278,7 @@ func doctorPublic(run func(string, func() (string, string, string)), s *state) {
 			}
 			if !pol.HasNodeAttr(policy.PublicTag, "funnel") {
 				return "fail", policy.PublicTag + " has no funnel nodeAttr: " + d.Workload + "'s public node cannot serve Funnel",
-					"add to your tailnet policy: " + strings.ReplaceAll(policy.PublicSnippet().HuJSON(), "\n", " ")
+					"add to your tailnet policy: " + strings.ReplaceAll(policy.PublicSnippet().Inline(), "\n", " ")
 			}
 			return "ok", "funnel allowed on " + policy.PublicTag, ""
 		})

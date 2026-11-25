@@ -9,7 +9,7 @@ import (
 	"github.com/rosskukulinski/tailworks/e2e/cliflow"
 )
 
-// backupRestoreRunning is tw backup on a running install (issue #120):
+// backupRestoreRunning is tw backup on a running install (issues #120, #295):
 // the backup is taken while tailworks serves, tw restore is refused while it
 // runs, and after tw down the restore puts it back and tw up serves the
 // same tenant and deployments again.
@@ -24,10 +24,13 @@ func backupRestoreRunning(t *testing.T, e *cliflow.Env, work string) {
 	bk := filepath.Join(work, "backup")
 	var br struct {
 		Backup   string
-		Manifest struct{ Store, Custody string }
+		Manifest struct {
+			Store, Custody string
+			Hostd          *struct{ Workloads []string } // issue #295
+		}
 	}
 	e.MustJSON(&br, "backup", "--out", bk)
-	if br.Backup != bk || br.Manifest.Store != "sqlite" || br.Manifest.Custody != "file" {
+	if br.Backup != bk || br.Manifest.Store != "sqlite" || br.Manifest.Custody != "file" || br.Manifest.Hostd == nil || len(br.Manifest.Hostd.Workloads) == 0 {
 		t.Fatalf("tw backup: %+v", br)
 	}
 	if _, se, _, err := e.Tw("restore", bk, "--yes"); err == nil || !strings.Contains(se, "already_running") {

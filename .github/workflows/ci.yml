@@ -8,6 +8,11 @@
 #   suite  the fast, deterministic suites, one matrix job each so they run
 #          in parallel with test (issue #163): test-vitest, e2e-local and
 #          templates-typecheck (which uses the npm registry).
+#   changes  decides whether the PR is docs-only (scripts/docs-only.sh:
+#          every changed file is Markdown prose). A docs-only pull_request
+#          runs `make lint-docs` and `make test-docs` instead of lint and
+#          test, and skips the suites: about 2 minutes instead of 14. Pushes
+#          to master, merge_group and workflow_dispatch always run everything.
 #   ci-ok  needs all of them. Branch protection requires this one check,
 #          so adding or renaming a job here never needs a settings change
 #          (add it to ci-ok's needs, though).
@@ -16,11 +21,18 @@
 # by every job, saved once by whichever job finished first, and then never
 # updated, so lint (vet per build tag, staticcheck) and test (-race) rebuilt
 # nearly everything on every run. Instead each job restores its own cache
-# (module cache, build cache and, for lint, staticcheck's) from the newest
-# master run. Only master pushes (and workflow_dispatch) save. PR and queue
-# runs restore only, because a PR-scoped cache is invisible to every other
-# ref. go-cache-prune then deletes the older entries, so each job keeps one
+# (build cache and, for lint, staticcheck's) from the newest master run.
+# Only master pushes (and workflow_dispatch) save. PR and queue runs restore
+# only, because a PR-scoped cache is invisible to every other ref.
+# go-cache-prune then deletes the older entries, so each job keeps one
 # rolling cache within the repo's 10 GB Actions cache budget.
+#
+# A saving job keeps only the cache entries it used (scripts/ci-go-cache.sh
+# mark, then prune before the save). Without that the rolling cache carried
+# five days of master builds: 29 GB on disk for lint, of which a run used
+# 4.9 GB, and a restore spent 2-3 minutes unpacking it. The module cache
+# isn't cached at all: `go mod download` takes about 5 s on a runner, less
+# than unpacking it does.
 #
 # merge_group runs the same gates on master + the queued PRs combined, which
 # is what catches two PRs that pass alone and break master together. The
@@ -41,7 +53,6 @@ permissions:
 
 env:
   GO_CACHE_PATHS: |
-    ~/go/pkg/mod
     ~/.cache/go-build
     ~/.cache/staticcheck
   # Saved by master pushes and workflow_dispatch only (see the header).
@@ -52,7 +63,28 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2 # the PR merge commit and its first parent (master)
+      - name: classify
+        id: classify
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          docs_only=false
+          # HEAD is the PR's merge commit; HEAD^1 is master, so the diff is
+          # exactly what the PR changes.
+          if [ "$EVENT" = pull_request ] && sh scripts/docs-only.sh HEAD^1; then docs_only=true; fi
+          echo "docs_only=$docs_only" | tee -a "$GITHUB_OUTPUT"
+
   lint:
+    needs: changes
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -72,12 +104,23 @@ jobs:
           restore-keys: |
             go-ci-lint-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum', 'tools/go.mod', 'tools/go.sum') }}-
             go-ci-lint-${{ runner.os }}-
+      - name: mark restored Go cache entries
+        if: ${{ steps.go-cache.outcome == 'success' && env.GO_CACHE_SAVE == 'true' && steps.go-cache.outputs.cache-hit != 'true' }}
+        run: sh scripts/ci-go-cache.sh mark
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
           cache: npm
       - name: make lint
+        if: ${{ needs.changes.outputs.docs_only != 'true' }}
         run: make lint
+      - name: make lint-docs (docs-only PR)
+        if: ${{ needs.changes.outputs.docs_only == 'true' }}
+        run: make lint-docs
+      - name: prune unused Go cache entries
+        # Only after a green run: a failed one would keep just what it got to.
+        if: ${{ success() && steps.go-cache.outcome == 'success' && env.GO_CACHE_SAVE == 'true' && steps.go-cache.outputs.cache-hit != 'true' }}
+        run: sh scripts/ci-go-cache.sh prune
       - name: save Go caches
         if: ${{ !cancelled() && steps.go-cache.outcome == 'success' && env.GO_CACHE_SAVE == 'true' && steps.go-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -86,6 +129,7 @@ jobs:
           key: ${{ steps.go-cache.outputs.cache-primary-key }}
 
   test:
+    needs: changes
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -103,6 +147,9 @@ jobs:
           restore-keys: |
             go-ci-test-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum', 'tools/go.mod', 'tools/go.sum') }}-
             go-ci-test-${{ runner.os }}-
+      - name: mark restored Go cache entries
+        if: ${{ steps.go-cache.outcome == 'success' && env.GO_CACHE_SAVE == 'true' && steps.go-cache.outputs.cache-hit != 'true' }}
+        run: sh scripts/ci-go-cache.sh mark
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
@@ -112,7 +159,15 @@ jobs:
       #   env: { GO_TEST_SKIP: "^(TestA|TestB)$" }
       # on this step. It still runs in a local `make test` and in release.yml.
       - name: make test
+        if: ${{ needs.changes.outputs.docs_only != 'true' }}
         run: make test
+      - name: make test-docs (docs-only PR)
+        if: ${{ needs.changes.outputs.docs_only == 'true' }}
+        run: make test-docs
+      - name: prune unused Go cache entries
+        # Only after a green run: a failed one would keep just what it got to.
+        if: ${{ success() && steps.go-cache.outcome == 'success' && env.GO_CACHE_SAVE == 'true' && steps.go-cache.outputs.cache-hit != 'true' }}
+        run: sh scripts/ci-go-cache.sh prune
       - name: save Go caches
         if: ${{ !cancelled() && steps.go-cache.outcome == 'success' && env.GO_CACHE_SAVE == 'true' && steps.go-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -122,6 +177,8 @@ jobs:
 
   suite:
     name: ${{ matrix.target }}
+    needs: changes
+    if: ${{ needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
@@ -146,6 +203,9 @@ jobs:
           restore-keys: |
             go-ci-suite-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum', 'tools/go.mod', 'tools/go.sum') }}-
             go-ci-suite-${{ runner.os }}-
+      - name: mark restored Go cache entries
+        if: ${{ steps.go-cache.outcome == 'success' && env.GO_CACHE_SAVE == 'true' && steps.go-cache.outputs.cache-hit != 'true' && matrix.target == 'e2e-local' }}
+        run: sh scripts/ci-go-cache.sh mark
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
@@ -154,6 +214,10 @@ jobs:
         run: make deps
       - name: make ${{ matrix.target }}
         run: make ${{ matrix.target }}
+      - name: prune unused Go cache entries
+        # Only after a green run: a failed one would keep just what it got to.
+        if: ${{ success() && steps.go-cache.outcome == 'success' && env.GO_CACHE_SAVE == 'true' && steps.go-cache.outputs.cache-hit != 'true' && matrix.target == 'e2e-local' }}
+        run: sh scripts/ci-go-cache.sh prune
       - name: save Go caches
         # The three suites share one cache; e2e-local builds the most Go, so it saves.
         if: ${{ !cancelled() && steps.go-cache.outcome == 'success' && env.GO_CACHE_SAVE == 'true' && steps.go-cache.outputs.cache-hit != 'true' && matrix.target == 'e2e-local' }}
@@ -165,6 +229,7 @@ jobs:
   ci-ok:
     if: always()
     needs:
+      - changes
       - lint
       - suite
       - test
@@ -174,9 +239,15 @@ jobs:
       - name: every gate passed
         env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
         run: |
-          echo "results: $RESULTS"
-          for r in $RESULTS; do [ "$r" = success ] || exit 1; done
+          echo "results: $RESULTS (docs-only: $DOCS_ONLY)"
+          # A docs-only PR skips the suites on purpose; nothing else may skip.
+          for r in $RESULTS; do
+            [ "$r" = success ] && continue
+            [ "$r" = skipped ] && [ "$DOCS_ONLY" = true ] && continue
+            exit 1
+          done
 
   # Keep one go-ci-<job> cache per job on this ref: the newest. Its own job
   # so that the actions: write token never reaches the jobs that run the

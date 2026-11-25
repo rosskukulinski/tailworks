@@ -19,6 +19,7 @@ import (
 // Node-tier app with --max-old-space-size=hostd.DefaultNodeHeapMiB. What
 // the cap does to a Worker that passes it is TestGeneratedHeapCap.
 func TestProcessTierHeapCaps(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("short")
 	}

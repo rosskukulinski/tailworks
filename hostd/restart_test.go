@@ -40,6 +40,7 @@ func groupGone(pgid int) bool { return errors.Is(syscall.Kill(-pgid, 0), syscall
 // comes back by itself and serves; its old process group is gone. The
 // crash loop itself is TestWorkerdStuckSocketCrashLoop.
 func TestWorkerdCrashRecovery(t *testing.T) {
+	t.Parallel()
 	s := startSuiteCapsOpts(t, fakemgmt.Config{}, nil, func(o *hostdtest.Options) { o.Sandbox = "auto" })
 	e := s.e
 	dep := e.Deploy(hostdtest.Fixture("probe"), "probe", nil)
@@ -100,11 +101,12 @@ func TestWorkerdWrapperKilled(t *testing.T) {
 	}
 	dir := t.TempDir()
 	wrapper := filepath.Join(dir, "workerd-wrapper")
-	if err := os.WriteFile(wrapper, []byte("#!/bin/sh\n\"$TW_TEST_REAL_WORKERD\" \"$@\" &\nwait\n"), 0o755); err != nil {
+	// The real path is baked in: workerd gets hostd's minimal environment,
+	// not hostd's own (#336), so the wrapper can't read it from a variable.
+	if err := os.WriteFile(wrapper, []byte("#!/bin/sh\n'"+real+"' \"$@\" &\nwait\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("TW_WORKERD", wrapper)
-	t.Setenv("TW_TEST_REAL_WORKERD", real)
 	s := startSuiteCapsOpts(t, fakemgmt.Config{}, nil, func(o *hostdtest.Options) { o.Sandbox = "none" })
 	e := s.e
 	dep := e.Deploy(hostdtest.Fixture("probe"), "probe", nil)

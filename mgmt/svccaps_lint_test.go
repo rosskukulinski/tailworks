@@ -6,6 +6,7 @@ import (
 )
 
 func TestServiceCapWarnings(t *testing.T) {
+	t.Parallel()
 	pol, err := ParsePolicy([]byte(`{"grants": [
 		// caps on the tag only: calls through svc:web lose them
 		{"src": ["tag:agent"], "dst": ["tag:tw-wl-web"], "ip": ["tcp:80"], "app": {"example.com/cap/mcp": [{"tools": ["a"]}]}},

@@ -84,12 +84,18 @@ func (m *Mgmt) purgeTenant(ctx context.Context, id string) (map[string]int64, er
 // tenantCustodyNames lists every custody name the tenant can have an
 // entry under (absent names are fine: Delete ignores them).
 func (m *Mgmt) tenantCustodyNames(ctx context.Context, id string, refs tenantCustodyRefs) []string {
+	return tenantCustodyCandidates(ctx, m.store, id, refs)
+}
+
+// tenantCustodyCandidates is tenantCustodyNames without a Mgmt (the custody
+// migration, custodymigrate.go, derives names from the store alone).
+func tenantCustodyCandidates(ctx context.Context, sc secretChooser, id string, refs tenantCustodyRefs) []string {
 	set := map[string]bool{
 		notifyCustodyName(id):    true,
 		oboCustodyName(id):       true,
 		telemetryCustodyName(id): true,
 	}
-	if kid, err := m.store.SecretChoice(ctx, oboChoiceName(id)); err == nil {
+	if kid, err := sc.SecretChoice(ctx, oboChoiceName(id)); err == nil {
 		set[oboKeyName(id, kid)] = true
 	}
 	for _, inc := range refs.StoreIncarnations {

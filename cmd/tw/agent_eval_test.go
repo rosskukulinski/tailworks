@@ -33,14 +33,14 @@ import (
 //
 // TW_EVAL_DUMP=<dir> writes every run (args, stdout, stderr) there.
 func TestAgentEval(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("short")
 	}
-	wd, err := nettest.WorkerdBinary()
+	_, err := nettest.WorkerdBinary()
 	if err != nil || !hostdtest.HasNode() {
 		t.Skip("needs workerd and node (make deps)")
 	}
-	t.Setenv("TW_WORKERD", wd)
 	ctl, err := nettest.StartControl()
 	if err != nil {
 		t.Fatal(err)

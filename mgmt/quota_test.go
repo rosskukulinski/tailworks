@@ -11,6 +11,7 @@ import (
 // (an overwrite) passes, so a full tenant can free space; the usage
 // endpoint reports it; 0 or null is unlimited again.
 func TestTenantStoreQuota(t *testing.T) {
+	t.Parallel()
 	s := newStoreEnv(t)
 	c, h1 := s.e.c, s.e.asHost("h1")
 	tp := "/v1/tenants/" + s.tenant
@@ -69,6 +70,7 @@ func TestTenantStoreQuota(t *testing.T) {
 // TestTenantMaxStores (#120): maxStores refuses a new store, not writes
 // to existing ones.
 func TestTenantMaxStores(t *testing.T) {
+	t.Parallel()
 	s := newStoreEnv(t)
 	c := s.e.c
 	tp := "/v1/tenants/" + s.tenant
@@ -89,6 +91,7 @@ func TestTenantMaxStores(t *testing.T) {
 // TestTenantQueueQuota (#120): maxQueueBytes bounds all the tenant's
 // queued messages; consuming them frees the space.
 func TestTenantQueueQuota(t *testing.T) {
+	t.Parallel()
 	q := newQueueEnv(t)
 	c, h1 := q.e.c, q.e.asHost("h1")
 	tp := "/v1/tenants/" + q.tenant

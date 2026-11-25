@@ -86,6 +86,7 @@ func wantRefused(t *testing.T, resp *http.Response) {
 // pushes to mgmt's node only (tag:tw-mgmt and the pinned stable node ID),
 // and nothing else.
 func TestPushAuthTsnet(t *testing.T) {
+	t.Parallel()
 	mgmt := node("nMGMT", MgmtTag)
 	f := &fakeWhoIs{mgmt: mgmt}
 	h := newPushTestHost(t, "http://"+mgmtIP, f.whois, nil)
@@ -154,6 +155,7 @@ func TestPushAuthTsnet(t *testing.T) {
 // -mgmt address) is accepted once the address resolves to it; an unrelated
 // tag:tw-mgmt node is still refused.
 func TestPushAuthRepin(t *testing.T) {
+	t.Parallel()
 	old, renewed := node("nMGMT1", MgmtTag), node("nMGMT2", MgmtTag)
 	f := &fakeWhoIs{mgmt: old}
 	h := newPushTestHost(t, "http://"+mgmtIP+":80", f.whois, nil)
@@ -188,6 +190,7 @@ func TestPushAuthRepin(t *testing.T) {
 // and a mgmt node that is not in the netmap yet is pinned by the first
 // tagged pusher.
 func TestPushAuthPinByDNSName(t *testing.T) {
+	t.Parallel()
 	tags := views.SliceOf([]string{MgmtTag})
 	st := func(ps ...*ipnstate.PeerStatus) StatusFunc {
 		peers := map[key.NodePublic]*ipnstate.PeerStatus{}
@@ -242,6 +245,7 @@ func TestPushAuthPinByDNSName(t *testing.T) {
 // TestPushListenerRequiresWhoIs: New refuses a tailnet push listener
 // without an authenticator.
 func TestPushListenerRequiresWhoIs(t *testing.T) {
+	t.Parallel()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -257,6 +261,7 @@ func TestPushListenerRequiresWhoIs(t *testing.T) {
 // TestLocalPushAPIKeepsOperatorRoutes: the unix-socket surface still
 // serves status, purge and the pushes without WhoIs.
 func TestLocalPushAPIKeepsOperatorRoutes(t *testing.T) {
+	t.Parallel()
 	h := newPushTestHost(t, "", nil, nil)
 	srv := httptest.NewServer(h.pushAPI())
 	defer srv.Close()

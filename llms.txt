@@ -2,7 +2,7 @@
 
 > tailworks is a self-hosted, tailnet-native runtime for Cloudflare-style Workers and Durable Objects on stock workerd. Every workload and every Durable Object instance is its own Tailscale tailnet node; callers are identified by WireGuard identity (`getCaller`), not tokens. You drive it with the `tw` CLI; every command takes `--json`.
 
-Coding agents: start with the skills. `tw agent setup` installs them for Claude Code, Codex, Cursor, Gemini CLI and OpenCode; `tw agent show <skill>` prints one; `tw docs search <words>` and `tw docs show <doc>[#<anchor>]` read these docs offline, at the version of the installed CLI.
+Coding agents: start with the skills. `tw agent setup` installs them for Claude Code, Codex, Cursor, Gemini CLI and OpenCode; `tw agent show <skill>` prints one; `tw docs search <words>` and `tw docs show <doc>[#<anchor>]` read these docs offline, at the version of the installed CLI (all but the API and design section below).
 
 ## Start here
 
@@ -12,12 +12,16 @@ Coding agents: start with the skills. `tw agent setup` installs them for Claude 
 - [Using tailworks with a coding agent](https://github.com/rosskukulinski/tailworks/blob/master/docs/agents.md): skills, `tw agent setup`, safety rules
 - [Agent skills](https://github.com/rosskukulinski/tailworks/blob/master/agent/skills/tw/SKILL.md): the core skill; the others are next to it in agent/skills/
 - [Concepts](https://github.com/rosskukulinski/tailworks/blob/master/docs/concepts.md): the words tailworks uses (tenant, workload, object, tiers, facet mode, pool nodes, warm keys)
-- [Installing tailworks](https://github.com/rosskukulinski/tailworks/blob/master/docs/INSTALL.md): macOS and Linux, OAuth client, `tw link`, hosts, troubleshooting
-- [My first deploy doesn't answer](https://github.com/rosskukulinski/tailworks/blob/master/docs/troubleshooting.md): the caller grant, `identity_pending`, tagOwners after a rename, `peer_not_visible`, a `failed` deployment
+- [Alternatives to tailworks](https://github.com/rosskukulinski/tailworks/blob/master/docs/alternatives.md): what tailworks adds to stock workerd, a dated comparison with celld, workerd on its own, OpenOrange, Rivet, Cloudflare Mesh and tsnet, and when not to use it
+- [Installing tailworks](https://github.com/rosskukulinski/tailworks/blob/master/docs/INSTALL.md): macOS and Linux, npm or the tarball, the OAuth client, `tw link`, the service, the microVM tier, backup, restore and uninstall
+- [More than one machine](https://github.com/rosskukulinski/tailworks/blob/master/docs/hosts.md): `tw host add`, where a workload runs (placement), how many objects a host holds
+- [Troubleshooting](https://github.com/rosskukulinski/tailworks/blob/master/docs/troubleshooting.md): `tw up` fails; a first deploy doesn't answer (the caller grant, `identity_pending`, tagOwners after a rename, `peer_not_visible`, a `failed` deployment); `tw link` and linked machines; `tw doctor` warnings
+- [What tailworks runs on a host](https://github.com/rosskukulinski/tailworks/blob/master/docs/footprint.md): processes, ports, tailnet devices, state files and the microVM tier's root-owned helper
 - [Where the install is tested](https://github.com/rosskukulinski/tailworks/blob/master/docs/install-testing.md): the Linux support matrix and measured timings
 - [Postgres and mgmt replicas](https://github.com/rosskukulinski/tailworks/blob/master/docs/postgres.md): when to switch, `tw-mgmt migrate --from sqlite`, `tw up --db-file`, backups with Postgres, HA replicas
 - [Upgrading tailworks](https://github.com/rosskukulinski/tailworks/blob/master/docs/upgrading.md): what may run together, `tw upgrade`, fleet upgrade runs, cordon and drain
 - [Changelog](https://github.com/rosskukulinski/tailworks/blob/master/CHANGELOG.md): what changed in each release, breaking changes and upgrade actions first
+- [The launch demo](https://github.com/rosskukulinski/tailworks/blob/master/docs/demo.md): `scripts/demo.sh` (an MCP server and an agent deployed, a tool call allowed then denied by one grant, `tw kill`), the throwaway Headscale tailnet, how to record it
 - [Releasing tailworks](https://github.com/rosskukulinski/tailworks/blob/master/docs/RELEASING.md): versions, release-note fragments, the release gates
 - [Running tailworks on Headscale](https://github.com/rosskukulinski/tailworks/blob/master/docs/headscale.md): the Headscale profile, `tw up --control=headscale`, what's different from Tailscale
 
@@ -36,19 +40,21 @@ Coding agents: start with the skills. `tw agent setup` installs them for Claude 
 - [Cron triggers](https://github.com/rosskukulinski/tailworks/blob/master/docs/cron-triggers.md): `triggers.crons`, `scheduled()`
 - [Workflows and approvals](https://github.com/rosskukulinski/tailworks/blob/master/docs/approvals.md): Cloudflare Workflows, `AgentWorkflow`, `waitForApproval`; approvals decided by tailnet identities under `github.com/rosskukulinski/tailworks/cap/approve`, `tw approve`
 - [Public ingress (Funnel)](https://github.com/rosskukulinski/tailworks/blob/master/docs/public-ingress.md): public routes, `tw expose`
+- [MCP for hosted assistants](https://github.com/rosskukulinski/tailworks/blob/master/docs/mcp-public.md): one MCP endpoint for claude.ai / ChatGPT connectors over public ingress, OAuth tokens from tsidp, `withTailnet` `publicOAuth`, `requester()`
 - [Tailscale Services](https://github.com/rosskukulinski/tailworks/blob/master/docs/services.md): stable names and replicas
 - [Locks and leader election](https://github.com/rosskukulinski/tailworks/blob/master/docs/locks.md): Durable Objects as locks, leases, fencing tokens, the `lock` template, failure guarantees
 - [Per-object egress](https://github.com/rosskukulinski/tailworks/blob/master/docs/egress-modes.md): facet mode vs plain-DO mode
 - [Create admission](https://github.com/rosskukulinski/tailworks/blob/master/docs/create-admission.md): how a new Durable Object gets made
 - [Containers and code sandboxes](https://github.com/rosskukulinski/tailworks/blob/master/docs/containers.md): `ctx.container` on the microVM tier
 - [The Node process tier](https://github.com/rosskukulinski/tailworks/blob/master/docs/node-tier.md): `"runtime": "node"`
+- [Python Workers](https://github.com/rosskukulinski/tailworks/blob/master/docs/python.md): Pyodide, `main = "src/entry.py"`, Python Durable Objects, vendored packages, the `python` template
 
 ## Operating and debugging
 
 - [CLI reference](https://github.com/rosskukulinski/tailworks/blob/master/docs/cli.md): every command and subcommand with its flags and defaults (generated from --help)
 - [CLI --json output](https://github.com/rosskukulinski/tailworks/blob/master/docs/cli-json.md): result documents, NDJSON events, the error shape
 - [CLI --json schema](https://github.com/rosskukulinski/tailworks/blob/master/schema/cli.schema.json): JSON Schema of every command's output
-- [Debugging in tw dev](https://github.com/rosskukulinski/tailworks/blob/master/docs/dev-debugging.md): source-mapped stacks, `req.url`, `--inspector-port` (Chrome DevTools, VS Code), hotkeys
+- [Debugging in tw dev](https://github.com/rosskukulinski/tailworks/blob/master/docs/dev-debugging.md): running an app with no tailnet, source-mapped stacks, `req.url`, `--inspector-port` (Chrome DevTools, VS Code), hotkeys
 - [Observability](https://github.com/rosskukulinski/tailworks/blob/master/docs/observability.md): request records (`tw logs`), Prometheus `/metrics`, OTLP export (`tw telemetry`), traces
 - [Error catalog](https://github.com/rosskukulinski/tailworks/blob/master/docs/errors.md): every error code and its fix
 - [Limits](https://github.com/rosskukulinski/tailworks/blob/master/docs/limits.md): every size, count, rate and timeout, with the flag or constant it comes from, and the limits that don't exist
@@ -60,7 +66,7 @@ Coding agents: start with the skills. `tw agent setup` installs them for Claude 
 
 - [Management API](https://github.com/rosskukulinski/tailworks/blob/master/docs/contracts/mgmt-api.md): the REST v1 contract, rendered from api/openapi.yaml
 - [OpenAPI spec](https://github.com/rosskukulinski/tailworks/blob/master/api/openapi.yaml): the source of truth for /v1
-- [tw-hostd additions](https://github.com/rosskukulinski/tailworks/blob/master/docs/contracts/hostd-additions.md): the host agent's contract
+- [tw-hostd API](https://github.com/rosskukulinski/tailworks/blob/master/docs/contracts/hostd-api.md): the host agent's routes, mgmt → hostd and the operator's local socket
 - [RFC](https://github.com/rosskukulinski/tailworks/blob/master/docs/design/RFC.md): the design
 - [Architecture decision records](https://github.com/rosskukulinski/tailworks/blob/master/docs/design/adr/README.md): one file per decision
 

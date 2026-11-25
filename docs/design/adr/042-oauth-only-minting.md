@@ -47,7 +47,9 @@ tailworks connection, WhoIs auth, `tw link`, the LaunchAgent) stand.
 2. **Removed:**
    - mint modes `apikey` and `wif`;
    - `tw up --api-key-file` on Tailscale (the flag remains for
-     `--control=headscale`), `--wif`, `--wif-client-id`,
+     `--control=headscale`; since 2026-11, `--api-key-file` also implies
+     the Headscale profile when `--control-url` names a Headscale server,
+     #539), `--wif`, `--wif-client-id`,
      `--wif-lifecycle-client-id`, `--issuer-authkey-file` and
      `--login-timeout`, and the browser-login branch of `tw up`;
    - `tw tenant add --api-key-file` on Tailscale (it takes

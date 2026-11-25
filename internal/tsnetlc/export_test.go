@@ -1,13 +1,20 @@
 package tsnetlc
 
 import (
-	"time"
+	"net"
 
 	"tailscale.com/tsnet"
 )
 
-// SetDialDelay slows every LocalAPI dial (set it before the nodes start).
-func SetDialDelay(d time.Duration) { dialDelay = d }
+// SetDialHook makes every LocalAPI dial call h with the real dial (nil:
+// dial directly).
+func SetDialHook(h func(dial func() (net.Conn, error)) (net.Conn, error)) {
+	if h == nil {
+		dialHook.Store(nil)
+		return
+	}
+	dialHook.Store(&h)
+}
 
 // CloseIdle closes ts's pooled LocalAPI connections, as Close does first.
 func CloseIdle(ts *tsnet.Server) {

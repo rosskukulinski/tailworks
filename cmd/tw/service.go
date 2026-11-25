@@ -99,6 +99,9 @@ func serviceUnitPath() string {
 // installService writes and starts the service (restarting it if its
 // definition changed); it returns once the supervisor has written its pid.
 func installService(s *state) (changed bool, err error) {
+	if err := npmServiceErr(); err != nil { // npm_install.go: not from npx's cache
+		return false, err
+	}
 	if runtime.GOOS == "darwin" {
 		return launchdInstall(s)
 	}

@@ -15,14 +15,14 @@ import (
 // database's migrations (wrangler's migrations_dir layout) before the
 // first request, like `wrangler d1 migrations apply --local`.
 func TestDevD1(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("short")
 	}
-	wd, err := nettest.WorkerdBinary()
+	_, err := nettest.WorkerdBinary()
 	if err != nil || !hostdtest.HasNode() {
 		t.Skip("needs workerd and node (make deps)")
 	}
-	t.Setenv("TW_WORKERD", wd)
 	bin := cliflow.BuildBinaries(t)
 	work := t.TempDir()
 	app := filepath.Join(work, "dd")

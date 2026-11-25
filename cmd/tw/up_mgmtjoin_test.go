@@ -12,6 +12,7 @@ import (
 // TestUpMgmtJoinKeyRemoved; that mgmt deletes it is internal/mgmtd
 // TestJoinKeyOnce.
 func TestMgmtJoinKeyFileMode(t *testing.T) {
+	t.Parallel()
 	s := &state{Dir: t.TempDir()}
 	for range 2 { // the second write replaces the first
 		if err := s.writeMgmtJoinKey("tskey-auth-test"); err != nil {

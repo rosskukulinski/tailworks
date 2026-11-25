@@ -467,6 +467,7 @@ const (
 	ErrorCodeDelegationExceedsParent ErrorCode = "delegation_exceeds_parent"
 	ErrorCodeDelegationInvalid       ErrorCode = "delegation_invalid"
 	ErrorCodeExists                  ErrorCode = "exists"
+	ErrorCodeExperimentalFlag        ErrorCode = "experimental_flag"
 	ErrorCodeFeatureUnavailable      ErrorCode = "feature_unavailable"
 	ErrorCodeForbidden               ErrorCode = "forbidden"
 	ErrorCodeHostHoldsLeases         ErrorCode = "host_holds_leases"
@@ -518,6 +519,7 @@ const (
 	ErrorCodeReservedTag             ErrorCode = "reserved_tag"
 	ErrorCodeServiceAPIFailed        ErrorCode = "service_api_failed"
 	ErrorCodeServiceConflict         ErrorCode = "service_conflict"
+	ErrorCodeServiceNotFound         ErrorCode = "service_not_found"
 	ErrorCodeSharedOwnerTag          ErrorCode = "shared_owner_tag"
 	ErrorCodeSpawnBudgetExceeded     ErrorCode = "spawn_budget_exceeded"
 	ErrorCodeStorageQuotaExceeded    ErrorCode = "storage_quota_exceeded"
@@ -579,6 +581,8 @@ func (e ErrorCode) Valid() bool {
 	case ErrorCodeDelegationInvalid:
 		return true
 	case ErrorCodeExists:
+		return true
+	case ErrorCodeExperimentalFlag:
 		return true
 	case ErrorCodeFeatureUnavailable:
 		return true
@@ -681,6 +685,8 @@ func (e ErrorCode) Valid() bool {
 	case ErrorCodeServiceAPIFailed:
 		return true
 	case ErrorCodeServiceConflict:
+		return true
+	case ErrorCodeServiceNotFound:
 		return true
 	case ErrorCodeSharedOwnerTag:
 		return true
@@ -1900,7 +1906,6 @@ type ChainStatus struct {
 
 // ClassConfig One DO namespace from `tailworks.jsonc` `tailnet.objects`.
 type ClassConfig struct {
-	Agent *bool  `json:"agent,omitempty"`
 	Class string `json:"class"`
 
 	// PreviewOf `_workload` only, previews: the workload this deployment is a preview of (ADR-048), deployed as the workload `<workload>--preview-<alias>`.
@@ -2328,6 +2333,7 @@ type Error struct {
 	// | `tenant_forbidden` | 403 | a tenant admin's `github.com/rosskukulinski/tailworks/cap/tenant-admin` grants don't name the tenant with the action, or the route is admin-only (`snippet` given) |
 	// | `cap_missing` | 403 | an approval the caller's `github.com/rosskukulinski/tailworks/cap/approve` grants do not cover (`snippet` given) |
 	// | `forbidden` | 403 | role ok, but outside the caller's records / namespaces |
+	// | `experimental_flag` | 403 | the bundle's `compatibility_flags` list flags workerd marks experimental (`unsafe_module`, `rtti_api`, `precise_timers`, …) and no host allows them (`tw-hostd -allow-experimental-flags`); the deploy and its dry run |
 	// | `host_not_registered` | 403 | `tag:tw-host` node that never did `PUT /v1/hosts/{id}`, or a `PUT` for a host ID the admin never created |
 	// | `host_identity_mismatch` | 403 | host ID bound to another node; `registrationSecret` missing or wrong; `auditPubKey` differs from the pinned one |
 	// | `delegation_invalid` | 403 | child tag not owned by the parent's, parent unknown (404) or dead (410) |
@@ -2340,6 +2346,7 @@ type Error struct {
 	// | `unknown_secret` | 404 | the workload has no secret of that name |
 	// | `unknown_store` | 404 | the workload has no store of that kind and name |
 	// | `unknown_queue` | 404 | the tenant has no queue of that name |
+	// | `service_not_found` | 404 | a workload's service binding is not declared, or its target workload was never deployed in the tenant |
 	// | `exists` | 409 | create of an existing ID |
 	// | `lease_lost` | 409 | epoch/holder fence failed |
 	// | `lease_held` | 409 | another host holds the lease |
@@ -2350,7 +2357,7 @@ type Error struct {
 	// | `queue_limit` | 400 | a send exceeds a message, batch, delay or queue size limit |
 	// | `store_unavailable` | 503 | the store is unreachable, restarting or contended (a row-lock or idle-transaction timeout); retry after `Retry-After` |
 	// | `tier_unavailable` | 409 | the chosen host (`--host`, or the workload's current host) does not offer the deployment's tier, or `containers` (for the image's `arch`) when the bundle declares containers |
-	// | `replica_conflict` | 409 | a deploy names a replica (`<workload>--r<n>`) instead of its workload, or a replica name is taken by a separate workload |
+	// | `replica_conflict` | 409 | a deploy names a replica (`<workload>--r<n>`) instead of its workload, a replica name is taken by a separate workload, or a workload that is not a replica is given a name of that shape (n ≥ 2), which belongs to replicas |
 	// | `preview_conflict` | 409 | a preview's name (`<workload>--preview-<alias>`) is taken by a workload that is not a preview of this one |
 	// | `preview_failed` | 409 | promote of a preview its host reported `failed` |
 	// | `preview_unsupported` | 400 | `preview` for a bundle with queue bindings (queues are tenant-wide), or of a workload that is itself a preview or replica |
@@ -2362,7 +2369,7 @@ type Error struct {
 	// | `public_name_in_use` | 409 | release of a public name the workload still serves: its latest deployment declares public routes, or its public node is live |
 	// | `move_unconfirmed` | 409 | `replace` would move a stateful workload off its live host, leaving its DO storage behind; confirm with `forceTakeover` |
 	// | `lease_changed` | 409 | the workload's lease changed while `replace` was moving it (a concurrent deploy); retry |
-	// | `takeover_unconfirmed` | 409 | the workload has Durable Objects and its host stopped heartbeating but is still registered: it may still be serving them. `tw host rm <host> --drain`, or redeploy with `--force-takeover` |
+	// | `takeover_unconfirmed` | 409 | the workload has Durable Objects and its host stopped heartbeating but is still registered: it may still be serving them. `tw host rm <host> --force`, or redeploy with `--force-takeover` |
 	// | `already_joined` | 409 | credential for an object that has a node |
 	// | `identity_conflict` | 409 | object ID collision across identities |
 	// | `namespace_ambiguous` | 409 | class declared by several workloads, `workload` missing |
@@ -2431,6 +2438,7 @@ type Error struct {
 // | `tenant_forbidden` | 403 | a tenant admin's `github.com/rosskukulinski/tailworks/cap/tenant-admin` grants don't name the tenant with the action, or the route is admin-only (`snippet` given) |
 // | `cap_missing` | 403 | an approval the caller's `github.com/rosskukulinski/tailworks/cap/approve` grants do not cover (`snippet` given) |
 // | `forbidden` | 403 | role ok, but outside the caller's records / namespaces |
+// | `experimental_flag` | 403 | the bundle's `compatibility_flags` list flags workerd marks experimental (`unsafe_module`, `rtti_api`, `precise_timers`, …) and no host allows them (`tw-hostd -allow-experimental-flags`); the deploy and its dry run |
 // | `host_not_registered` | 403 | `tag:tw-host` node that never did `PUT /v1/hosts/{id}`, or a `PUT` for a host ID the admin never created |
 // | `host_identity_mismatch` | 403 | host ID bound to another node; `registrationSecret` missing or wrong; `auditPubKey` differs from the pinned one |
 // | `delegation_invalid` | 403 | child tag not owned by the parent's, parent unknown (404) or dead (410) |
@@ -2443,6 +2451,7 @@ type Error struct {
 // | `unknown_secret` | 404 | the workload has no secret of that name |
 // | `unknown_store` | 404 | the workload has no store of that kind and name |
 // | `unknown_queue` | 404 | the tenant has no queue of that name |
+// | `service_not_found` | 404 | a workload's service binding is not declared, or its target workload was never deployed in the tenant |
 // | `exists` | 409 | create of an existing ID |
 // | `lease_lost` | 409 | epoch/holder fence failed |
 // | `lease_held` | 409 | another host holds the lease |
@@ -2453,7 +2462,7 @@ type Error struct {
 // | `queue_limit` | 400 | a send exceeds a message, batch, delay or queue size limit |
 // | `store_unavailable` | 503 | the store is unreachable, restarting or contended (a row-lock or idle-transaction timeout); retry after `Retry-After` |
 // | `tier_unavailable` | 409 | the chosen host (`--host`, or the workload's current host) does not offer the deployment's tier, or `containers` (for the image's `arch`) when the bundle declares containers |
-// | `replica_conflict` | 409 | a deploy names a replica (`<workload>--r<n>`) instead of its workload, or a replica name is taken by a separate workload |
+// | `replica_conflict` | 409 | a deploy names a replica (`<workload>--r<n>`) instead of its workload, a replica name is taken by a separate workload, or a workload that is not a replica is given a name of that shape (n ≥ 2), which belongs to replicas |
 // | `preview_conflict` | 409 | a preview's name (`<workload>--preview-<alias>`) is taken by a workload that is not a preview of this one |
 // | `preview_failed` | 409 | promote of a preview its host reported `failed` |
 // | `preview_unsupported` | 400 | `preview` for a bundle with queue bindings (queues are tenant-wide), or of a workload that is itself a preview or replica |
@@ -2465,7 +2474,7 @@ type Error struct {
 // | `public_name_in_use` | 409 | release of a public name the workload still serves: its latest deployment declares public routes, or its public node is live |
 // | `move_unconfirmed` | 409 | `replace` would move a stateful workload off its live host, leaving its DO storage behind; confirm with `forceTakeover` |
 // | `lease_changed` | 409 | the workload's lease changed while `replace` was moving it (a concurrent deploy); retry |
-// | `takeover_unconfirmed` | 409 | the workload has Durable Objects and its host stopped heartbeating but is still registered: it may still be serving them. `tw host rm <host> --drain`, or redeploy with `--force-takeover` |
+// | `takeover_unconfirmed` | 409 | the workload has Durable Objects and its host stopped heartbeating but is still registered: it may still be serving them. `tw host rm <host> --force`, or redeploy with `--force-takeover` |
 // | `already_joined` | 409 | credential for an object that has a node |
 // | `identity_conflict` | 409 | object ID collision across identities |
 // | `namespace_ambiguous` | 409 | class declared by several workloads, `workload` missing |
@@ -2513,6 +2522,15 @@ type HealthOk bool
 type Host struct {
 	// Arch A Go GOARCH. Container images must match their host's.
 	Arch *Arch `json:"arch,omitempty"`
+
+	// AuditHead Only in the answer to `PUT /v1/hosts/{id}`: the hash of the last
+	// record mgmt stores on the host's audit chain (`host:<hostID>`);
+	// absent when the chain is empty. A restarted host continues its
+	// chain from this head only when it matches the last record the
+	// host itself chained and flushed before a clean shutdown;
+	// otherwise it starts a new segment (`prevHash: ""`), which
+	// verification reports as a break.
+	AuditHead *string `json:"auditHead,omitempty"`
 
 	// AuditPubKey base64 ed25519; verifies `hostSig`.
 	AuditPubKey *string `json:"auditPubKey,omitempty"`
@@ -2653,6 +2671,7 @@ type HostDrainResult struct {
 		// | `tenant_forbidden` | 403 | a tenant admin's `github.com/rosskukulinski/tailworks/cap/tenant-admin` grants don't name the tenant with the action, or the route is admin-only (`snippet` given) |
 		// | `cap_missing` | 403 | an approval the caller's `github.com/rosskukulinski/tailworks/cap/approve` grants do not cover (`snippet` given) |
 		// | `forbidden` | 403 | role ok, but outside the caller's records / namespaces |
+		// | `experimental_flag` | 403 | the bundle's `compatibility_flags` list flags workerd marks experimental (`unsafe_module`, `rtti_api`, `precise_timers`, …) and no host allows them (`tw-hostd -allow-experimental-flags`); the deploy and its dry run |
 		// | `host_not_registered` | 403 | `tag:tw-host` node that never did `PUT /v1/hosts/{id}`, or a `PUT` for a host ID the admin never created |
 		// | `host_identity_mismatch` | 403 | host ID bound to another node; `registrationSecret` missing or wrong; `auditPubKey` differs from the pinned one |
 		// | `delegation_invalid` | 403 | child tag not owned by the parent's, parent unknown (404) or dead (410) |
@@ -2665,6 +2684,7 @@ type HostDrainResult struct {
 		// | `unknown_secret` | 404 | the workload has no secret of that name |
 		// | `unknown_store` | 404 | the workload has no store of that kind and name |
 		// | `unknown_queue` | 404 | the tenant has no queue of that name |
+		// | `service_not_found` | 404 | a workload's service binding is not declared, or its target workload was never deployed in the tenant |
 		// | `exists` | 409 | create of an existing ID |
 		// | `lease_lost` | 409 | epoch/holder fence failed |
 		// | `lease_held` | 409 | another host holds the lease |
@@ -2675,7 +2695,7 @@ type HostDrainResult struct {
 		// | `queue_limit` | 400 | a send exceeds a message, batch, delay or queue size limit |
 		// | `store_unavailable` | 503 | the store is unreachable, restarting or contended (a row-lock or idle-transaction timeout); retry after `Retry-After` |
 		// | `tier_unavailable` | 409 | the chosen host (`--host`, or the workload's current host) does not offer the deployment's tier, or `containers` (for the image's `arch`) when the bundle declares containers |
-		// | `replica_conflict` | 409 | a deploy names a replica (`<workload>--r<n>`) instead of its workload, or a replica name is taken by a separate workload |
+		// | `replica_conflict` | 409 | a deploy names a replica (`<workload>--r<n>`) instead of its workload, a replica name is taken by a separate workload, or a workload that is not a replica is given a name of that shape (n ≥ 2), which belongs to replicas |
 		// | `preview_conflict` | 409 | a preview's name (`<workload>--preview-<alias>`) is taken by a workload that is not a preview of this one |
 		// | `preview_failed` | 409 | promote of a preview its host reported `failed` |
 		// | `preview_unsupported` | 400 | `preview` for a bundle with queue bindings (queues are tenant-wide), or of a workload that is itself a preview or replica |
@@ -2687,7 +2707,7 @@ type HostDrainResult struct {
 		// | `public_name_in_use` | 409 | release of a public name the workload still serves: its latest deployment declares public routes, or its public node is live |
 		// | `move_unconfirmed` | 409 | `replace` would move a stateful workload off its live host, leaving its DO storage behind; confirm with `forceTakeover` |
 		// | `lease_changed` | 409 | the workload's lease changed while `replace` was moving it (a concurrent deploy); retry |
-		// | `takeover_unconfirmed` | 409 | the workload has Durable Objects and its host stopped heartbeating but is still registered: it may still be serving them. `tw host rm <host> --drain`, or redeploy with `--force-takeover` |
+		// | `takeover_unconfirmed` | 409 | the workload has Durable Objects and its host stopped heartbeating but is still registered: it may still be serving them. `tw host rm <host> --force`, or redeploy with `--force-takeover` |
 		// | `already_joined` | 409 | credential for an object that has a node |
 		// | `identity_conflict` | 409 | object ID collision across identities |
 		// | `namespace_ambiguous` | 409 | class declared by several workloads, `workload` missing |
@@ -2739,6 +2759,12 @@ type HostJoin struct {
 
 	// Hostname `tw-host-<hostID>`
 	Hostname string `json:"hostname"`
+
+	// KeyTagsOnly The host's node must advertise no tags; its join key carries `tag:tw-host` (Headscale, ADR-015). `tw-hostd -tsnet-key-tags-only`.
+	KeyTagsOnly *bool `json:"keyTagsOnly,omitempty"`
+
+	// MgmtURL Where the host reaches mgmt over the tailnet (`tw-hostd -mgmt`): `http://tw-mgmt.<tailnet>`. Absent when mgmt doesn't know its own node name (local-dev).
+	MgmtURL *string `json:"mgmtURL,omitempty"`
 
 	// RegistrationSecret One-time secret (32 random bytes, base64url) the host presents in its first `PUT /v1/hosts/{id}`; mgmt stores only its SHA-256 and clears it once the node is bound.
 	RegistrationSecret string   `json:"registrationSecret"`
@@ -2871,7 +2897,10 @@ type ImageAlias struct {
 	// Arch "" = every arch.
 	Arch *string `json:"arch,omitempty"`
 	From string  `json:"from"`
-	To   string  `json:"to"`
+
+	// Source A digest-pinned external image (`ghcr.io/…:<tag>@sha256:…`) that fills `to` when it is not in tailworks' registry yet: mgmt copies it into `public/` at deploy (unless `-no-mirror`), and `tw deploy` builds from it. Absent: `to` must be pushed (`tw image push`).
+	Source *string `json:"source,omitempty"`
+	To     string  `json:"to"`
 }
 
 // ImageAliasList defines model for ImageAliasList.
@@ -3299,6 +3328,12 @@ type PolicyApply struct {
 	// Added The additions as a HuJSON snippet (with `dryRun`, what would be added). Empty when nothing is missing that tailworks writes.
 	Added *string `json:"added,omitempty"`
 
+	// CallerGrant The grant in `added` that lets every user of the tailnet call the app (`autogroup:member` to the workload's own tags, `tcp:80`), as JSON. Absent when `added` has none.
+	CallerGrant *string `json:"callerGrant,omitempty"`
+
+	// CanWrite With `dryRun`, when `added` is not empty — the control plane accepted the policy with `added` merged in, so the write would go through (Tailscale refuses a client without Policy File write). `tw deploy` on a terminal offers to write the lines only when it is true. Absent otherwise.
+	CanWrite *bool `json:"canWrite,omitempty"`
+
 	// Changed The policy was written.
 	Changed bool `json:"changed"`
 	DryRun  bool `json:"dryRun"`
@@ -3325,9 +3360,22 @@ type PolicyApplyCreate struct {
 	Namespaces *[]ClassConfig `json:"namespaces,omitempty"`
 }
 
+// PolicySnippet Additions to a tailnet policy, in the policy file's own shape.
+type PolicySnippet struct {
+	AutoApprovers *struct {
+		Services *map[string][]string `json:"services,omitempty"`
+	} `json:"autoApprovers,omitempty"`
+	Grants    *[]map[string]interface{} `json:"grants,omitempty"`
+	NodeAttrs *[]map[string]interface{} `json:"nodeAttrs,omitempty"`
+	TagOwners *map[string][]string      `json:"tagOwners,omitempty"`
+}
+
 // PreflightMissing defines model for PreflightMissing.
 type PreflightMissing struct {
 	Dst string `json:"dst"`
+
+	// IP The grant's port (`tcp:5432`).
+	IP *string `json:"ip,omitempty"`
 
 	// Snippet The grant to add (HuJSON).
 	Snippet string `json:"snippet"`
@@ -3360,6 +3408,9 @@ type PreflightResult struct {
 	// ServiceUnapproved The policy's `autoApprovers.services` doesn't let the workload tags host `service`: the node would advertise it but control would never route it. `ok` is false.
 	ServiceUnapproved *bool `json:"serviceUnapproved,omitempty"`
 
+	// Snippet Everything above that is missing, as one typed policy snippet: the string fields (`tagOwnersSnippet`, `nodeAttrsSnippet`, `serviceSnippet`, each `missing[].snippet`) are renderings of its parts. Absent when nothing is missing. Never holds the caller grant (`PolicyApply.callerGrant`).
+	Snippet *PolicySnippet `json:"snippet,omitempty"`
+
 	// SrcTags The tags checked (workload + object tags from the bundle).
 	SrcTags *[]string `json:"srcTags,omitempty"`
 
@@ -3369,6 +3420,9 @@ type PreflightResult struct {
 
 	// Unchecked `tailnet.connects` entries that are names, not tags.
 	Unchecked *[]string `json:"unchecked,omitempty"`
+
+	// UndefinedConnects `tailnet.connects` tags in `tag:tw*` (another tailworks app's, not deployed yet) that have no `tagOwners` entry; the control plane rejects a grant to them. `tagOwnersSnippet` defines them too, so `tw policy --apply` writes them with the grants. Never set for a tenant with its own `ownerTag`. Makes `ok` false.
+	UndefinedConnects *[]string `json:"undefinedConnects,omitempty"`
 }
 
 // Preview One running preview of a workload (ADR-048).
@@ -3725,6 +3779,31 @@ type QueueSendResult struct {
 	OldestAt *int64   `json:"oldestAt,omitempty"`
 }
 
+// R2Object One live object of an R2 bucket, as its index describes it.
+type R2Object struct {
+	// ContentType The object's `httpMetadata.contentType`, if set.
+	ContentType *string `json:"contentType,omitempty"`
+	Etag        string  `json:"etag"`
+	Key         string  `json:"key"`
+
+	// Size Bytes.
+	Size int64 `json:"size"`
+
+	// Uploaded Upload time (unix ms).
+	Uploaded int64 `json:"uploaded"`
+
+	// Version The object's version (R2's `R2Object.version`): new on every put.
+	Version string `json:"version"`
+}
+
+// R2ObjectPage defines model for R2ObjectPage.
+type R2ObjectPage struct {
+	Items []R2Object `json:"items"`
+
+	// NextCursor Pass as `?cursor=` for the next page; `null` when there is none.
+	NextCursor nullable.Nullable[string] `json:"nextCursor"`
+}
+
 // ReleaseArtifact defines model for ReleaseArtifact.
 type ReleaseArtifact struct {
 	Name    string `json:"name"`
@@ -3970,6 +4049,30 @@ type SelfInfo struct {
 
 	// Transport `tsnet` in normal operation; `local-dev` when the unix socket is serving.
 	Transport *Transport `json:"transport,omitempty"`
+}
+
+// ServiceBindingTarget Where a service binding's calls go (ADR-053).
+type ServiceBindingTarget struct {
+	Binding string `json:"binding"`
+
+	// Entrypoint The named export the binding calls; absent for the default export.
+	Entrypoint *string `json:"entrypoint,omitempty"`
+	Hostname   string  `json:"hostname"`
+
+	// MagicDNS The entry node's MagicDNS name (no trailing dot).
+	MagicDNS string `json:"magicDNS"`
+
+	// ObjectID The target's entry node object.
+	ObjectID string `json:"objectID"`
+
+	// Service The target workload.
+	Service string `json:"service"`
+
+	// Status `pending` → `minted` → `ready`; or, for an object given a pre-joined
+	// pool node (`ObjectCreate.poolObjectID`, ADR-031), `assigned` → `ready`
+	// (never minted). Terminal: `killed` (tombstone, `410`), `failed`, and
+	// `transferred` (a `_pool` node whose node went to an object).
+	Status ObjectStatus `json:"status"`
 }
 
 // ServiceEndpoint A workload's Tailscale Service: a stable name and VIPs that survive the workload node being re-minted or moving host. Callers need a grant to the `svc:` name; control routes it to the workload node only when policy `autoApprovers.services` lets the workload tags host it.
@@ -4489,6 +4592,7 @@ type TombstoneError struct {
 	// | `tenant_forbidden` | 403 | a tenant admin's `github.com/rosskukulinski/tailworks/cap/tenant-admin` grants don't name the tenant with the action, or the route is admin-only (`snippet` given) |
 	// | `cap_missing` | 403 | an approval the caller's `github.com/rosskukulinski/tailworks/cap/approve` grants do not cover (`snippet` given) |
 	// | `forbidden` | 403 | role ok, but outside the caller's records / namespaces |
+	// | `experimental_flag` | 403 | the bundle's `compatibility_flags` list flags workerd marks experimental (`unsafe_module`, `rtti_api`, `precise_timers`, …) and no host allows them (`tw-hostd -allow-experimental-flags`); the deploy and its dry run |
 	// | `host_not_registered` | 403 | `tag:tw-host` node that never did `PUT /v1/hosts/{id}`, or a `PUT` for a host ID the admin never created |
 	// | `host_identity_mismatch` | 403 | host ID bound to another node; `registrationSecret` missing or wrong; `auditPubKey` differs from the pinned one |
 	// | `delegation_invalid` | 403 | child tag not owned by the parent's, parent unknown (404) or dead (410) |
@@ -4501,6 +4605,7 @@ type TombstoneError struct {
 	// | `unknown_secret` | 404 | the workload has no secret of that name |
 	// | `unknown_store` | 404 | the workload has no store of that kind and name |
 	// | `unknown_queue` | 404 | the tenant has no queue of that name |
+	// | `service_not_found` | 404 | a workload's service binding is not declared, or its target workload was never deployed in the tenant |
 	// | `exists` | 409 | create of an existing ID |
 	// | `lease_lost` | 409 | epoch/holder fence failed |
 	// | `lease_held` | 409 | another host holds the lease |
@@ -4511,7 +4616,7 @@ type TombstoneError struct {
 	// | `queue_limit` | 400 | a send exceeds a message, batch, delay or queue size limit |
 	// | `store_unavailable` | 503 | the store is unreachable, restarting or contended (a row-lock or idle-transaction timeout); retry after `Retry-After` |
 	// | `tier_unavailable` | 409 | the chosen host (`--host`, or the workload's current host) does not offer the deployment's tier, or `containers` (for the image's `arch`) when the bundle declares containers |
-	// | `replica_conflict` | 409 | a deploy names a replica (`<workload>--r<n>`) instead of its workload, or a replica name is taken by a separate workload |
+	// | `replica_conflict` | 409 | a deploy names a replica (`<workload>--r<n>`) instead of its workload, a replica name is taken by a separate workload, or a workload that is not a replica is given a name of that shape (n ≥ 2), which belongs to replicas |
 	// | `preview_conflict` | 409 | a preview's name (`<workload>--preview-<alias>`) is taken by a workload that is not a preview of this one |
 	// | `preview_failed` | 409 | promote of a preview its host reported `failed` |
 	// | `preview_unsupported` | 400 | `preview` for a bundle with queue bindings (queues are tenant-wide), or of a workload that is itself a preview or replica |
@@ -4523,7 +4628,7 @@ type TombstoneError struct {
 	// | `public_name_in_use` | 409 | release of a public name the workload still serves: its latest deployment declares public routes, or its public node is live |
 	// | `move_unconfirmed` | 409 | `replace` would move a stateful workload off its live host, leaving its DO storage behind; confirm with `forceTakeover` |
 	// | `lease_changed` | 409 | the workload's lease changed while `replace` was moving it (a concurrent deploy); retry |
-	// | `takeover_unconfirmed` | 409 | the workload has Durable Objects and its host stopped heartbeating but is still registered: it may still be serving them. `tw host rm <host> --drain`, or redeploy with `--force-takeover` |
+	// | `takeover_unconfirmed` | 409 | the workload has Durable Objects and its host stopped heartbeating but is still registered: it may still be serving them. `tw host rm <host> --force`, or redeploy with `--force-takeover` |
 	// | `already_joined` | 409 | credential for an object that has a node |
 	// | `identity_conflict` | 409 | object ID collision across identities |
 	// | `namespace_ambiguous` | 409 | class declared by several workloads, `workload` missing |
@@ -4909,8 +5014,13 @@ type ListAuditParams struct {
 	Tenant *string `form:"tenant,omitempty" json:"tenant,omitempty"`
 
 	// Chain `mgmt` or `host:<hostID>`.
-	Chain *string      `form:"chain,omitempty" json:"chain,omitempty"`
-	Kind  *[]AuditKind `form:"kind,omitempty" json:"kind,omitempty"`
+	Chain *string `form:"chain,omitempty" json:"chain,omitempty"`
+
+	// Workload Records about this workload: records whose object belongs to it,
+	// and mgmt records that name it in their detail (deploy, undeploy,
+	// secrets). Combine with `tenant` when several tenants use the name.
+	Workload *string      `form:"workload,omitempty" json:"workload,omitempty"`
+	Kind     *[]AuditKind `form:"kind,omitempty" json:"kind,omitempty"`
 
 	// Since Records at or after this time (RFC 3339 or unix ms).
 	Since *string `form:"since,omitempty" json:"since,omitempty"`
@@ -5034,6 +5144,12 @@ type ListObjectsParams struct {
 
 	// Namespace DO class name, or `_workload`.
 	Namespace *string `form:"namespace,omitempty" json:"namespace,omitempty"`
+
+	// Tag Objects carrying this tag (the full `tag:<name>`, matched exactly).
+	Tag *string `form:"tag,omitempty" json:"tag,omitempty"`
+
+	// Human Objects whose `actingFor` is this principal (exact match, as on `GET /v1/audit`).
+	Human *string `form:"human,omitempty" json:"human,omitempty"`
 
 	// State Repeatable. Default is every state, tombstones included.
 	State *[]ObjectStatus `form:"state,omitempty" json:"state,omitempty"`
@@ -5216,8 +5332,8 @@ type GetWorkloadLogsParams struct {
 	// Host Only the replica on this host (a host ID).
 	Host *string `form:"host,omitempty" json:"host,omitempty"`
 
-	// Source `console`: the app's raw output (workerd's stdout, the node
-	// tier's `app.log`, the microVM console). `requests`: the
+	// Source `console`: the app's raw output (workerd's stdout, the Node
+	// runtime's `app.log`, the microVM console). `requests`: the
 	// workload's structured request records (ADR-045), as
 	// JSON Lines (`application/x-ndjson`), one `RequestRecord` per
 	// line; `n` and the filters below then count records, not lines.
@@ -5284,6 +5400,12 @@ type ListWorkloadSecretsParams struct {
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 }
 
+// GetServiceBindingTargetParams defines parameters for GetServiceBindingTarget.
+type GetServiceBindingTargetParams struct {
+	// Epoch The namespace lease epoch the caller believes it holds. Fenced in the store (`409 lease_lost`).
+	Epoch Epoch `form:"epoch" json:"epoch"`
+}
+
 // ListWorkloadStoresParams defines parameters for ListWorkloadStores.
 type ListWorkloadStoresParams struct {
 	// Limit Page size, 1–500 (default 50). Out-of-range values are `400 bad_request`.
@@ -5322,6 +5444,18 @@ type GetKVValueParams struct {
 type PutKVValueParams struct {
 	// Key The KV key (any UTF-8, 1 to 512 bytes; not `.` or `..`).
 	Key string `form:"key" json:"key"`
+}
+
+// ListR2ObjectsParams defines parameters for ListR2Objects.
+type ListR2ObjectsParams struct {
+	// Limit Page size, 1–500 (default 50). Out-of-range values are `400 bad_request`.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque page cursor from the previous page's `nextCursor`. Filters must be repeated unchanged.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Prefix Only objects whose keys start with this.
+	Prefix *string `form:"prefix,omitempty" json:"prefix,omitempty"`
 }
 
 // ReadStoreJournalParams defines parameters for ReadStoreJournal.
@@ -5706,6 +5840,8 @@ type ServerInterface interface {
 	UpdateObject(w http.ResponseWriter, r *http.Request, id ObjectID, params UpdateObjectParams)
 	// GetObjectCertificate Read the object's node certificate
 	// (GET /v1/objects/{id}/certificate)
+	//
+	// Deprecated: this operation has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	GetObjectCertificate(w http.ResponseWriter, r *http.Request, id ObjectID)
 	// CreateObjectCredential Mint a single-use auth key for the object's node
 	// (POST /v1/objects/{id}/credentials)
@@ -5851,6 +5987,9 @@ type ServerInterface interface {
 	// PutWorkloadSecret Create or replace a workload secret (`tw secret put`)
 	// (PUT /v1/tenants/{id}/workloads/{workload}/secrets/{name})
 	PutWorkloadSecret(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, name SecretName)
+	// GetServiceBindingTarget Resolve a workload's service binding to its target's entry node
+	// (GET /v1/tenants/{id}/workloads/{workload}/service-bindings/{binding})
+	GetServiceBindingTarget(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, binding string, params GetServiceBindingTargetParams)
 	// ListWorkloadStores List a workload's stores
 	// (GET /v1/tenants/{id}/workloads/{workload}/stores)
 	ListWorkloadStores(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, params ListWorkloadStoresParams)
@@ -5866,6 +6005,9 @@ type ServerInterface interface {
 	// PutKVValue Write one KV value
 	// (PUT /v1/tenants/{id}/workloads/{workload}/stores/kv/{name}/value)
 	PutKVValue(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, name StoreName, params PutKVValueParams)
+	// ListR2Objects List an R2 bucket's objects
+	// (GET /v1/tenants/{id}/workloads/{workload}/stores/r2/{name}/objects)
+	ListR2Objects(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, name StoreName, params ListR2ObjectsParams)
 	// DeleteWorkloadStore Delete a store and its data
 	// (DELETE /v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name})
 	DeleteWorkloadStore(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, kind StoreKind, name StoreName)
@@ -6015,6 +6157,19 @@ func (siw *ServerInterfaceWrapper) ListAudit(w http.ResponseWriter, r *http.Requ
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "chain"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "chain", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "workload" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workload", r.URL.Query(), &params.Workload, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "workload"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
 		}
 		return
 	}
@@ -7155,6 +7310,32 @@ func (siw *ServerInterfaceWrapper) ListObjects(w http.ResponseWriter, r *http.Re
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "namespace"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "namespace", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "tag" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "tag", r.URL.Query(), &params.Tag, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "tag"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tag", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "human" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "human", r.URL.Query(), &params.Human, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "human"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "human", Err: err})
 		}
 		return
 	}
@@ -9581,6 +9762,66 @@ func (siw *ServerInterfaceWrapper) PutWorkloadSecret(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// GetServiceBindingTarget operation middleware
+func (siw *ServerInterfaceWrapper) GetServiceBindingTarget(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", r.PathValue("binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetServiceBindingTargetParams
+
+	// ------------- Required query parameter "epoch" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "epoch", r.URL.Query(), &params.Epoch, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "epoch"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "epoch", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetServiceBindingTarget(w, r, id, workload, binding, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListWorkloadStores operation middleware
 func (siw *ServerInterfaceWrapper) ListWorkloadStores(w http.ResponseWriter, r *http.Request) {
 
@@ -9915,6 +10156,92 @@ func (siw *ServerInterfaceWrapper) PutKVValue(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PutKVValue(w, r, id, workload, name, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListR2Objects operation middleware
+func (siw *ServerInterfaceWrapper) ListR2Objects(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TenantID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workload" -------------
+	var workload WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workload", r.PathValue("workload"), &workload, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workload", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name StoreName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListR2ObjectsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "prefix" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "prefix", r.URL.Query(), &params.Prefix, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "prefix"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "prefix", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListR2Objects(w, r, id, workload, name, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -10716,6 +11043,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/stores/kv/{name}/value", wrapper.DeleteKVValue)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/stores/kv/{name}/value", wrapper.GetKVValue)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/stores/kv/{name}/value", wrapper.PutKVValue)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/stores/r2/{name}/objects", wrapper.ListR2Objects)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/d1/{name}/query", wrapper.QueryD1)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/d1/{name}/export", wrapper.ExportD1)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/queues", wrapper.ListQueues)
@@ -10728,6 +11056,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/tenants/{id}/queues/{queue}/messages/pull", wrapper.PullQueueMessages)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/tenants/{id}/queues/{queue}/messages/ack", wrapper.AckQueueMessages)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/telemetry-grants", wrapper.CreateTelemetryGrant)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/workloads/{workload}/service-bindings/{binding}", wrapper.GetServiceBindingTarget)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/tenants/{id}/telemetry", wrapper.DeleteTenantTelemetry)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/tenants/{id}/telemetry", wrapper.GetTenantTelemetry)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/tenants/{id}/telemetry", wrapper.PutTenantTelemetry)
@@ -19097,6 +19426,148 @@ func (response PutWorkloadSecretdefaultJSONResponse) VisitPutWorkloadSecretRespo
 	return err
 }
 
+type GetServiceBindingTargetRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Binding  string       `json:"binding"`
+	Params   GetServiceBindingTargetParams
+}
+
+type GetServiceBindingTargetResponseObject interface {
+	VisitGetServiceBindingTargetResponse(w http.ResponseWriter) error
+}
+
+type GetServiceBindingTarget200JSONResponse ServiceBindingTarget
+
+func (response GetServiceBindingTarget200JSONResponse) VisitGetServiceBindingTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServiceBindingTarget400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response GetServiceBindingTarget400JSONResponse) VisitGetServiceBindingTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServiceBindingTarget403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetServiceBindingTarget403JSONResponse) VisitGetServiceBindingTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServiceBindingTarget404JSONResponse Error
+
+func (response GetServiceBindingTarget404JSONResponse) VisitGetServiceBindingTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServiceBindingTarget409JSONResponse struct{ LeaseLostJSONResponse }
+
+func (response GetServiceBindingTarget409JSONResponse) VisitGetServiceBindingTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServiceBindingTarget410JSONResponse struct{ GoneJSONResponse }
+
+func (response GetServiceBindingTarget410JSONResponse) VisitGetServiceBindingTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(410)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServiceBindingTarget503JSONResponse Error
+
+func (response GetServiceBindingTarget503JSONResponse) VisitGetServiceBindingTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServiceBindingTargetdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response GetServiceBindingTargetdefaultJSONResponse) VisitGetServiceBindingTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListWorkloadStoresRequestObject struct {
 	ID       TenantID     `json:"id"`
 	Workload WorkloadName `json:"workload"`
@@ -19616,6 +20087,130 @@ type PutKVValuedefaultJSONResponse struct {
 }
 
 func (response PutKVValuedefaultJSONResponse) VisitPutKVValueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListR2ObjectsRequestObject struct {
+	ID       TenantID     `json:"id"`
+	Workload WorkloadName `json:"workload"`
+	Name     StoreName    `json:"name"`
+	Params   ListR2ObjectsParams
+}
+
+type ListR2ObjectsResponseObject interface {
+	VisitListR2ObjectsResponse(w http.ResponseWriter) error
+}
+
+type ListR2Objects200ResponseHeaders struct {
+	CacheControl *string
+}
+
+type ListR2Objects200JSONResponse struct {
+	Body    R2ObjectPage
+	Headers ListR2Objects200ResponseHeaders
+}
+
+func (response ListR2Objects200JSONResponse) VisitListR2ObjectsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListR2Objects400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ListR2Objects400JSONResponse) VisitListR2ObjectsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListR2Objects403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListR2Objects403JSONResponse) VisitListR2ObjectsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListR2Objects404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListR2Objects404JSONResponse) VisitListR2ObjectsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListR2Objects409JSONResponse struct{ ConflictJSONResponse }
+
+func (response ListR2Objects409JSONResponse) VisitListR2ObjectsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.TwError != nil {
+		w.Header().Set("Tw-Error", fmt.Sprint(*response.Headers.TwError))
+	}
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListR2ObjectsdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ListR2ObjectsdefaultJSONResponse) VisitListR2ObjectsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -21115,6 +21710,8 @@ type StrictServerInterface interface {
 	UpdateObject(ctx context.Context, request UpdateObjectRequestObject) (UpdateObjectResponseObject, error)
 	// GetObjectCertificate Read the object's node certificate
 	// (GET /v1/objects/{id}/certificate)
+	//
+	// Deprecated: this operation has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	GetObjectCertificate(ctx context.Context, request GetObjectCertificateRequestObject) (GetObjectCertificateResponseObject, error)
 	// CreateObjectCredential Mint a single-use auth key for the object's node
 	// (POST /v1/objects/{id}/credentials)
@@ -21260,6 +21857,9 @@ type StrictServerInterface interface {
 	// PutWorkloadSecret Create or replace a workload secret (`tw secret put`)
 	// (PUT /v1/tenants/{id}/workloads/{workload}/secrets/{name})
 	PutWorkloadSecret(ctx context.Context, request PutWorkloadSecretRequestObject) (PutWorkloadSecretResponseObject, error)
+	// GetServiceBindingTarget Resolve a workload's service binding to its target's entry node
+	// (GET /v1/tenants/{id}/workloads/{workload}/service-bindings/{binding})
+	GetServiceBindingTarget(ctx context.Context, request GetServiceBindingTargetRequestObject) (GetServiceBindingTargetResponseObject, error)
 	// ListWorkloadStores List a workload's stores
 	// (GET /v1/tenants/{id}/workloads/{workload}/stores)
 	ListWorkloadStores(ctx context.Context, request ListWorkloadStoresRequestObject) (ListWorkloadStoresResponseObject, error)
@@ -21275,6 +21875,9 @@ type StrictServerInterface interface {
 	// PutKVValue Write one KV value
 	// (PUT /v1/tenants/{id}/workloads/{workload}/stores/kv/{name}/value)
 	PutKVValue(ctx context.Context, request PutKVValueRequestObject) (PutKVValueResponseObject, error)
+	// ListR2Objects List an R2 bucket's objects
+	// (GET /v1/tenants/{id}/workloads/{workload}/stores/r2/{name}/objects)
+	ListR2Objects(ctx context.Context, request ListR2ObjectsRequestObject) (ListR2ObjectsResponseObject, error)
 	// DeleteWorkloadStore Delete a store and its data
 	// (DELETE /v1/tenants/{id}/workloads/{workload}/stores/{kind}/{name})
 	DeleteWorkloadStore(ctx context.Context, request DeleteWorkloadStoreRequestObject) (DeleteWorkloadStoreResponseObject, error)
@@ -23807,6 +24410,35 @@ func (sh *strictHandler) PutWorkloadSecret(w http.ResponseWriter, r *http.Reques
 	}
 }
 
+// GetServiceBindingTarget operation middleware
+func (sh *strictHandler) GetServiceBindingTarget(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, binding string, params GetServiceBindingTargetParams) {
+	var request GetServiceBindingTargetRequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Binding = binding
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetServiceBindingTarget(ctx, request.(GetServiceBindingTargetRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetServiceBindingTarget")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetServiceBindingTargetResponseObject); ok {
+		if err := validResponse.VisitGetServiceBindingTargetResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListWorkloadStores operation middleware
 func (sh *strictHandler) ListWorkloadStores(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, params ListWorkloadStoresParams) {
 	var request ListWorkloadStoresRequestObject
@@ -23951,6 +24583,35 @@ func (sh *strictHandler) PutKVValue(w http.ResponseWriter, r *http.Request, id T
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(PutKVValueResponseObject); ok {
 		if err := validResponse.VisitPutKVValueResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListR2Objects operation middleware
+func (sh *strictHandler) ListR2Objects(w http.ResponseWriter, r *http.Request, id TenantID, workload WorkloadName, name StoreName, params ListR2ObjectsParams) {
+	var request ListR2ObjectsRequestObject
+
+	request.ID = id
+	request.Workload = workload
+	request.Name = name
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListR2Objects(ctx, request.(ListR2ObjectsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListR2Objects")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListR2ObjectsResponseObject); ok {
+		if err := validResponse.VisitListR2ObjectsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

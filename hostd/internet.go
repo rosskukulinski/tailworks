@@ -13,6 +13,35 @@ import (
 // off or limit it to an allowlist; Config.WorkerInternet nil turns it off
 // for the whole host.
 
+// workerInternetMode names Config.WorkerInternet for StatusView: "direct"
+// (set) or "off" (nil).
+func workerInternetMode(wi *ContainerInternet) string {
+	if wi == nil {
+		return "off"
+	}
+	if wi.Mode != "" {
+		return wi.Mode
+	}
+	return "direct"
+}
+
+// workerInternetProblem is why the path is unusable right now ("" when it
+// is, or when there is no path).
+func workerInternetProblem(wi *ContainerInternet) string {
+	if wi == nil || wi.Problem == nil {
+		return ""
+	}
+	return wi.Problem()
+}
+
+// internetVia names the path in audit notes.
+func (h *Host) internetVia() string {
+	if wi := h.cfg.WorkerInternet; wi != nil && wi.Via != "" {
+		return wi.Via
+	}
+	return "this host's network"
+}
+
 // internetConfig is the tenant registry's internet path, or nil when this
 // host has none.
 func (h *Host) internetConfig() *netd.InternetConfig {
@@ -62,6 +91,6 @@ func (h *Host) auditInternetFlow(f netd.InternetFlow) {
 	if o != nil {
 		id = o.ID
 	}
-	h.log.Info("internet egress", "object", id, "dst", f.Host, "addr", f.Addr.String())
-	h.audit.add(mgmtapi.AuditRecord{ObjectID: id, Kind: "egress", Dst: f.Host, Detail: mgmtapi.Note("internet via this host's network (" + f.Addr.String() + ")"), TraceID: newTraceID()})
+	h.log.Info("internet egress", "object", id, "dst", f.Host, "addr", f.Addr.String(), "via", h.internetVia())
+	h.audit.add(mgmtapi.AuditRecord{ObjectID: id, Kind: "egress", Dst: f.Host, Detail: mgmtapi.Note("internet via " + h.internetVia() + " (" + f.Addr.String() + ")"), TraceID: newTraceID()})
 }

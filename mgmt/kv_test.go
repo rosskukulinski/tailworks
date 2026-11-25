@@ -16,6 +16,7 @@ import (
 // it (TestV1RoleMatrix); a namespace must exist; entries written by a binding (kv.js) are
 // read back, and admin writes are entries a binding can apply.
 func TestKVAdmin(t *testing.T) {
+	t.Parallel()
 	s := newStoreEnv(t)
 	c, h1 := s.e.c, s.e.asHost("h1")
 	base := "/v1/tenants/" + s.tenant + "/workloads/support/stores/kv/sessions"

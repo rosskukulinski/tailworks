@@ -18,6 +18,7 @@ import (
 // names the forged principal. Forwarding the original request still
 // carries the real caller.
 func TestRT3_H08_ForgedPrincipal(t *testing.T) {
+	t.Parallel()
 	s := startSuite(t, fakemgmt.Config{})
 	e := s.e
 	d := e.Deploy(hostdtest.Fixture("sealprobe"), "sealprobe", nil)

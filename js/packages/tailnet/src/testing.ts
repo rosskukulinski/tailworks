@@ -15,7 +15,7 @@
 // import in app code throws instead of quietly minting callers.
 
 import { TailnetError, fromResponse } from "./errors.js";
-import type { SpawnOptions, Spawned, TailnetContext } from "./runtime.js";
+import type { SocketAddress, SpawnOptions, Spawned, TailnetContext, TailnetSelf, TailnetSocket, TailnetSocketOptions } from "./runtime.js";
 
 /** The MagicDNS suffix fake callers and fake objects get. */
 export const TEST_DOMAIN = "test.ts.net";
@@ -189,16 +189,21 @@ export interface TestTailnetOptions {
   env?: Record<string, any>;
   /** env binding name → Durable Object class (wrangler durable_objects.bindings), for class names in spawned. */
   bindings?: Record<string, string>;
-  /** What ctx.tailnet.self() answers (defaults: a ready workload, epoch 1). */
-  self?: Partial<{ objectId: string; hostname: string; magicDNS: string; status: string; kind: string; epoch: number }>;
+  /** What ctx.tailnet.self() answers (defaults: a ready workload "test-workload", epoch 1). */
+  self?: Partial<TailnetSelf>;
   /**
-   * The egress of ctx.tailnet.fetch()/forward(). Default: every destination
+   * The egress of ctx.tailnet.fetch(). Default: every destination
    * is refused (forbidden_destination), as on tailworks with no grant. A response
    * with a tw-error header is thrown as a TailnetError, as on tailworks.
    */
   fetch?: (req: Request) => Response | Promise<Response>;
   /** Called on each spawn before it is recorded; throw (e.g. a TailnetError) to make it fail. */
   onSpawn?: (rec: SpawnRecord) => void | Promise<void>;
+  /**
+   * ctx.tailnet.connect(): return a socket (e.g. cloudflare:sockets
+   * connect() to a test server). Default: refused with not_supported.
+   */
+  connect?: (address: SocketAddress, options: TailnetSocketOptions) => TailnetSocket;
 }
 
 /** A fake tw runtime: a ctx.tailnet that records what the app asked of it. */
@@ -208,7 +213,7 @@ export interface TestTailnet {
   readonly spawned: SpawnRecord[];
   readonly killed: KillRecord[];
   readonly audits: Array<Record<string, unknown>>;
-  /** Requests the app sent through ctx.tailnet.fetch()/forward(). */
+  /** Requests the app sent through ctx.tailnet.fetch(). */
   readonly fetches: Request[];
   /** withCaller, bound to this fake runtime (no enableTestCallers() needed). */
   withCaller(req: Request | string | URL, who: TestCaller): Request;
@@ -238,12 +243,14 @@ export function createTestTailnet(opts: TestTailnetOptions = {}): TestTailnet {
   const audits: Array<Record<string, unknown>> = [];
   const fetches: Request[] = [];
   const pending: Promise<unknown>[] = [];
-  const self = {
+  const self: TailnetSelf = {
     objectId: "test-workload",
     hostname: "test-workload",
     magicDNS: `test-workload.${TEST_DOMAIN}`,
     status: "ready",
     kind: "workload",
+    workload: "test-workload",
+    deploymentId: "test-deployment",
     epoch: 1,
     ...opts.self,
   };
@@ -273,10 +280,6 @@ export function createTestTailnet(opts: TestTailnetOptions = {}): TestTailnet {
 
   const tailnet: TailnetContext = Object.freeze({
     fetch: tfetch,
-    forward(request: Request, to: string | URL, init?: RequestInit) {
-      const hasBody = request.method !== "GET" && request.method !== "HEAD";
-      return tfetch(new Request(String(to), { method: request.method, headers: request.headers, body: hasBody ? request.body : undefined, ...init }));
-    },
     async spawn<T = any>(ns: any, o: SpawnOptions): Promise<Spawned<T>> {
       if (!o || typeof o.name !== "string" || !o.name) throw new TailnetError("bad_request", "spawn: opts.name is required");
       const cls = classOf(ns);
@@ -309,8 +312,9 @@ export function createTestTailnet(opts: TestTailnetOptions = {}): TestTailnet {
     async self() {
       return { ...self };
     },
-    connect(): never {
-      throw new TailnetError("plan_feature_missing", "ctx.tailnet.connect() is not implemented yet (raw TCP egress)");
+    connect(address: SocketAddress, options: TailnetSocketOptions = {}): TailnetSocket {
+      if (opts.connect) return opts.connect(address, options);
+      throw new TailnetError("not_supported", "ctx.tailnet.connect() has no test socket: pass createTestTailnet({ connect })");
     },
   });
 

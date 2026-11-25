@@ -1,5 +1,10 @@
 import { TailnetError } from "./errors.js";
 
+/**
+ * Caller is the tailnet node that connected, verified over WireGuard.
+ * On-behalf-of assertions (which human an agent acts for, RFC §4.6) are not
+ * built: a caller is always the node itself, never a human behind it.
+ */
 export interface Caller {
   /** Stable node ID; the primary key to authorize on. */
   nodeId: string;
@@ -11,9 +16,6 @@ export interface Caller {
   addrs: readonly string[];
   /** Untagged (human) callers only. */
   user?: { login: string };
-  actingFor?: { sub: string; login?: string; groups: string[]; verified: "tw-assertion" | "control" };
-  /** Nearest hop first. */
-  chain: ReadonlyArray<{ nodeId: string; tags: readonly string[] }>;
   /** The object (node) the request was delivered to. */
   objectId: string;
   traceId: string;
@@ -73,9 +75,7 @@ export function getCaller(req: Request | { cf?: any } | null | undefined): Calle
     node: c.node ?? "",
     addrs: Object.freeze([...(c.addrs ?? [])]),
     user: c.user ? Object.freeze({ login: c.user }) : undefined,
-    actingFor: undefined,
     objectId: cf.objectId ?? "",
-    chain: Object.freeze([Object.freeze({ nodeId: c.nodeId, tags })]),
     traceId: cf.traceId ?? "",
     tw: c.tw ? Object.freeze({ objectId: c.tw.objectId, lim: c.tw.lim ? structuredClone(c.tw.lim) : undefined, parent: c.tw.parent, root: c.tw.root }) : undefined,
     capsWithheld: !!c.capsWithheld,
@@ -92,7 +92,7 @@ export function principalKey(who: Caller): string {
   if ((who as any)?.kind === "public" || !who?.nodeId) {
     throw new TailnetError("public_request", "principalKey needs a tailnet caller; a public requester has no identity");
   }
-  return who.actingFor?.login ?? who.user?.login ?? who.nodeId;
+  return who.user?.login ?? who.nodeId;
 }
 
 /**

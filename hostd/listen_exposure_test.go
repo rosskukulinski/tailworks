@@ -27,6 +27,7 @@ import (
 // Landlock bind rules matched the port only, so listen(PORT) and a raw
 // 0.0.0.0:<PORT> listener were reachable on the LAN address.
 func TestRT_HLanBind_NodeListenOnlyViaIngress(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("short")
 	}

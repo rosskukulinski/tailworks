@@ -1,0 +1,8 @@
+{
+  "name": "pgprobe",
+  "tailnet": {
+    "tags": ["tag:ttest"],
+    "connects": ["tag:ttest:5432"],
+    "objects": { "Counter": { "tags": ["tag:ttest"] } },
+  },
+}

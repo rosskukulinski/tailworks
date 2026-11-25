@@ -12,6 +12,7 @@ import (
 // and one rate; a backoff seen by one pauses the other. On SQLite and (with
 // TW_TEST_POSTGRES_DSN, via make test-pg) Postgres.
 func TestStoreSharedThrottle(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		clk := newFakeClock()
 		backend := func(ctx context.Context, fn func(*ThrottleState)) error {

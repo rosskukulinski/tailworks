@@ -10,6 +10,7 @@ import (
 // A linked machine's replica lines arrive as "[<host>] …": with --json
 // the prefix becomes "host"; anything else stays in "line".
 func TestLogLinesSplitHost(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	lw := &lineWriter{ev: newEvents(true, &buf), fields: map[string]any{"workload": "web"}, splitHost: true}
 	lw.Write([]byte("[h1] hello\n[not a host] x\nplain"))
@@ -34,6 +35,7 @@ func TestLogLinesSplitHost(t *testing.T) {
 
 // Every --json error has code, message, hint and doc_url.
 func TestJSONErrorHint(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		e    *cliErr
 		hint string

@@ -18,6 +18,7 @@ import (
 // The strict profile's shape (issue #121): global denies first, each
 // allow after the deny it narrows (Seatbelt: the last match wins).
 func TestSeatbeltStrictProfileShape(t *testing.T) {
+	t.Parallel()
 	dir := realPath(t.TempDir())
 	p := seatbeltProfile([]string{dir + "/run/i1"}, []string{"/opt/workerd"}, nil, []string{dir + "/data"},
 		[]uint16{4001}, []uint16{4001, 4002})
@@ -64,6 +65,7 @@ func TestSeatbeltStrictProfileShape(t *testing.T) {
 // still works: its own dir, its own unix sockets, its TCP ports, signalling
 // itself and its children, /etc, /bin/sh, workerd and node.
 func TestSeatbeltStrictProbes(t *testing.T) {
+	t.Parallel()
 	if _, err := ResolveSandbox(SandboxSeatbelt); err != nil {
 		t.Skip(err)
 	}

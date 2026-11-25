@@ -14,6 +14,7 @@ import (
 // same hostname, mgmt gets a ready report with the new node ID, and the
 // workload answers on the new node.
 func TestReadyNodeRejectedRemints(t *testing.T) {
+	t.Parallel()
 	s := startSuite(t, fakemgmt.Config{NoPush: true})
 	e := s.e
 	d := e.Deploy(hostdtest.Fixture("probe"), "probe", nil)

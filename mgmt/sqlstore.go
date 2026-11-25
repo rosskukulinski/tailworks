@@ -1525,6 +1525,12 @@ func (s *SQLStore) ListObjects(ctx context.Context, f ObjectFilter) ([]Object, e
 	if f.HasParent {
 		where = append(where, "parent_id<>''")
 	}
+	if f.Tag != "" {
+		add(s.objectTagCond(f.Tag)) // sqlstore_auditworkload.go
+	}
+	if f.ActingFor != "" {
+		add("acting_for=?", f.ActingFor)
+	}
 	if len(f.Status) > 0 {
 		ph := strings.TrimSuffix(strings.Repeat("?,", len(f.Status)), ",")
 		where = append(where, "status IN ("+ph+")")
@@ -1750,12 +1756,19 @@ func (s *SQLStore) appendAuditTx(ctx context.Context, tx *sql.Tx, rec AuditRecor
 				return err
 			}
 		}
+		workload, err := s.auditWorkloadTx(ctx, tx, rec) // sqlstore_auditworkload.go
+		if err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, s.q(`INSERT INTO audit (chain, seq, ts, tenant_id, object_id, kind, trace_id, acting_for, prev_hash, hash, host_sig, raw)
 			VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`), rec.Chain, rec.Seq, rec.TS, rec.TenantID, rec.ObjectID, rec.Kind, rec.TraceID,
 			rec.ActingFor, rec.PrevHash, rec.Hash, rec.HostSig, string(rec.Raw)); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, s.q("UPDATE audit_heads SET seq=?, hash=? WHERE chain=? AND seq=?"), rec.Seq, rec.Hash, rec.Chain, seq)
+		if err := s.putAuditWorkloadTx(ctx, tx, rec, workload); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, s.q("UPDATE audit_heads SET seq=?, hash=? WHERE chain=? AND seq=?"), rec.Seq, rec.Hash, rec.Chain, seq)
 		return err
 	}()
 	return rec, err
@@ -1785,6 +1798,9 @@ func (s *SQLStore) listAudit(ctx context.Context, qr queryer, f AuditFilter) ([]
 	}
 	if f.TenantID != "" {
 		add("tenant_id=?", f.TenantID)
+	}
+	if f.Workload != "" {
+		add("(chain, seq) IN (SELECT chain, seq FROM audit_workloads WHERE workload=?)", f.Workload) // sqlstore_auditworkload.go
 	}
 	if len(f.Kinds) > 0 {
 		ph := strings.TrimSuffix(strings.Repeat("?,", len(f.Kinds)), ",")

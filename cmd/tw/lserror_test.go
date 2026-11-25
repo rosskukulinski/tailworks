@@ -3,6 +3,7 @@ package main
 import "testing"
 
 func TestDeployErrorLine(t *testing.T) {
+	t.Parallel()
 	bind := "Socket \"ingress\": bind(): Address already in use (os error 48)"
 	for in, want := range map[string]string{
 		"workerd exited 6 times: " + bind + "\n" + bind + "\n" + bind: "workerd exited 6 times: " + bind + " · tw logs app --console",

@@ -651,7 +651,7 @@ func resolvePlacement(cfg *TwConfig) PlacementConfig {
 		}
 		ts = []string{h}
 	default:
-		ts = cfg.Tailnet.Connects
+		ts = ConnectTargets(cfg.Tailnet.Connects) // connects.go: ports dropped
 	}
 	seen := map[string]bool{}
 	for _, t := range ts {

@@ -19,6 +19,7 @@ import (
 // and serves it by stable node ID for receivers; the tenant's OBO public
 // key verifies it.
 func TestNodeCertificates(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	c, h1 := e.c, e.asHost("h1")
 	var tn struct{ TenantID string }
@@ -90,6 +91,7 @@ func TestNodeCertificates(t *testing.T) {
 // RT-03: the unix socket admits nobody without the per-host token, not even
 // for /v1/healthz, and the token file is minted 0600 and rotatable.
 func TestHostTokenOnUnixSocket(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	hc := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", e.sock)
@@ -141,6 +143,7 @@ func TestHostTokenOnUnixSocket(t *testing.T) {
 // RT-02: host-submitted records carry their provenance; a tenant source
 // may only be a tenant_note and is reported as such.
 func TestAuditIngestProvenance(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	h1 := e.asHost("h1")
 	e.c.ok("POST", "/v1/tenants", map[string]any{"tailnet": "t.ts.net", "mintMode": "oauth", "oauthClientFile": e.keyFile}, nil) // a mgmt-chain record

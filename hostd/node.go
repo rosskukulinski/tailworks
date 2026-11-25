@@ -165,7 +165,7 @@ func (h *Host) startNodeInstance(w *workload, depID string, app *bundle.App, n i
 		return nil, err
 	}
 	dial := func(ctx context.Context, _, _ string) (net.Conn, error) { return np.dial(ctx) }
-	tr := &http.Transport{DialContext: dial, MaxIdleConnsPerHost: 64, IdleConnTimeout: 60 * time.Second}
+	tr := &http.Transport{DialContext: dial, MaxIdleConnsPerHost: 64, IdleConnTimeout: nodeUpstreamIdleTimeout}
 	inst.direct = &http.Client{Timeout: 10 * time.Second, Transport: tr}
 	inst.ingress = h.nodeIngress(inst, tr)
 	if np.proxy, err = net.Listen("tcp", "127.0.0.1:0"); err != nil {
@@ -277,6 +277,7 @@ func (inst *instance) spawnNode() error {
 	inst.cmd, inst.exited, inst.started = cmd, ex, time.Now()
 	inst.mu.Unlock()
 	inst.h.log.Info("node process started", "workload", inst.w.name, "pid", cmd.Process.Pid)
+	inst.h.children.add(cmd.Process.Pid, "node "+inst.w.name) // childreap.go
 	go func() {
 		err := cmd.Wait()
 		logf.Close()
@@ -290,6 +291,7 @@ func (inst *instance) spawnNode() error {
 		np.mu.Unlock()
 		// Reap anything the app left in its process group.
 		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		inst.h.children.remove(cmd.Process.Pid)
 		close(ex)
 		inst.onNodeExit()
 	}()
@@ -377,7 +379,9 @@ func (h *Host) nodeIngress(inst *instance, tr http.RoundTripper) http.Handler {
 		ErrorLog:      log.New(io.Discard, "", 0),
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(&url.URL{Scheme: "http", Host: "app"})
+			netd.KeepBodyEOF(pr) // #138
 			pr.Out.Host = pr.In.Host
+			keepForwardedProto(pr) // tailnethttps.go
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			if r.Context().Err() != nil {
@@ -456,6 +460,7 @@ func (h *Host) nodeEgress(inst *instance) http.Handler {
 			return
 		}
 		r.Header.Del("Proxy-Authorization")
+		r.Header.Del(HeaderBindingWire) // a Node app makes no binding calls; the header is hostd's (servicebind.go, #347)
 		wl := inst.w.currentWL()
 		if wl == nil {
 			writeAPIError(w, &apiError{Code: "identity_pending", Detail: "workload node not created yet"})

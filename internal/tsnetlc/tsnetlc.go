@@ -19,7 +19,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
-	"time"
+	"sync/atomic"
 
 	"tailscale.com/client/local"
 	"tailscale.com/tsnet"
@@ -27,9 +27,10 @@ import (
 
 var transports sync.Map // *tsnet.Server → *http.Transport
 
-// dialDelay slows LocalAPI dials (tests: a request given up on during the
-// dial leaves the stray connection behind).
-var dialDelay time.Duration
+// dialHook, if set, runs each LocalAPI dial in place of calling dial
+// directly (tests: holding a dial until its request has given up leaves the
+// stray connection behind).
+var dialHook atomic.Pointer[func(dial func() (net.Conn, error)) (net.Conn, error)]
 
 // Client starts ts and returns its LocalAPI client, with a transport Close
 // drains. Call it before anything uses ts.LocalClient (tsnet hands out one
@@ -43,10 +44,11 @@ func Client(ts *tsnet.Server) (*local.Client, error) {
 	if _, ok := transports.Load(ts); !ok {
 		dial := lc.Dial
 		tr := &http.Transport{DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			if dialDelay > 0 {
-				time.Sleep(dialDelay)
+			d := func() (net.Conn, error) { return dial(ctx, network, addr) }
+			if h := dialHook.Load(); h != nil {
+				return (*h)(d)
 			}
-			return dial(ctx, network, addr)
+			return d()
 		}}
 		if _, loaded := transports.LoadOrStore(ts, tr); !loaded {
 			lc.Transport = tr

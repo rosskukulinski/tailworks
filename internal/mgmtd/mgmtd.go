@@ -28,6 +28,7 @@ import (
 
 	"github.com/rosskukulinski/tailworks/internal/approvecap"
 	"github.com/rosskukulinski/tailworks/internal/obs"
+	"github.com/rosskukulinski/tailworks/internal/registry"
 	"github.com/rosskukulinski/tailworks/internal/tsapi"
 	"github.com/rosskukulinski/tailworks/internal/tsnetlc"
 	"github.com/rosskukulinski/tailworks/internal/tssvc"
@@ -113,7 +114,7 @@ type Options struct {
 	// RegistryDir is the OCI registry blob store ("" = <StateDir>/registry,
 	// "off" = no registry); RegistryInsecure lists upstream registry hosts
 	// mirrored over plain HTTP; NoMirror refuses external image refs at
-	// deploy; ImageAliasesFile is a JSON file [{from, to, arch}] replacing
+	// deploy; ImageAliasesFile is a JSON file [{from, to, arch, source}] replacing
 	// the default image alias map.
 	RegistryDir      string
 	RegistryInsecure []string
@@ -348,6 +349,9 @@ func Start(ctx context.Context, o Options) (rt *Runtime, err error) {
 			return nil, err
 		}
 		if err := json.Unmarshal(b, &mcfg.ImageAliases); err != nil {
+			return nil, fmt.Errorf("-image-aliases %s: %w", o.ImageAliasesFile, err)
+		}
+		if err := registry.ValidateAliases(mcfg.ImageAliases); err != nil {
 			return nil, fmt.Errorf("-image-aliases %s: %w", o.ImageAliasesFile, err)
 		}
 	}

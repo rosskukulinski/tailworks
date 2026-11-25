@@ -16,6 +16,7 @@ import (
 // TestRestartBackoff: 200 ms doubling to a 5 min cap, and it stays there
 // (a long-running deployment is never given up on).
 func TestRestartBackoff(t *testing.T) {
+	t.Parallel()
 	ms := time.Millisecond
 	want := []time.Duration{200 * ms, 400 * ms, 800 * ms, 1600 * ms, 3200 * ms, 6400 * ms, 12800 * ms, 25600 * ms, 51200 * ms, 102400 * ms, 204800 * ms, 5 * time.Minute, 5 * time.Minute}
 	for i, w := range want {
@@ -45,6 +46,7 @@ func TestRestartBackoff(t *testing.T) {
 // TestLiveStatus: a crash-looping deployment is still this host's (lease,
 // nodes, unassignment); failed and stopped ones are not.
 func TestLiveStatus(t *testing.T) {
+	t.Parallel()
 	for st, want := range map[string]bool{"active": true, "starting": true, statusCrashloop: true, "failed": false, "stopped": false, "": false} {
 		if liveStatus(st) != want {
 			t.Errorf("liveStatus(%q) = %v", st, !want)
@@ -56,6 +58,7 @@ func TestLiveStatus(t *testing.T) {
 // sleep standing in for a workerd child, or a workerd under a wrapper) is
 // killed and waited for before reapGroup returns.
 func TestReapGroup(t *testing.T) {
+	t.Parallel()
 	cmd := exec.Command("/bin/sh", "-c", "sleep 300 & wait")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
@@ -97,6 +100,7 @@ func TestReapGroup(t *testing.T) {
 // the restarts of a workerd that keeps exiting. It must read the count under
 // inst.mu, as onExit writes it; under -race the old unlocked read failed.
 func TestWaitHealthyDuringRestart(t *testing.T) {
+	t.Parallel()
 	ex := make(chan struct{})
 	close(ex) // the first workerd already exited
 	inst := &instance{w: &workload{name: "probe"}, dir: t.TempDir(), exited: ex,

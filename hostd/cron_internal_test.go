@@ -50,6 +50,7 @@ func finishCronRuns(rs []cronRun) {
 }
 
 func TestCronDueMatchesSchedule(t *testing.T) {
+	t.Parallel()
 	h, _ := cronHost("*/5 * * * *", "0 * * * *")
 	rs := h.cronDue(at("2026-11-13 10:05:00"))
 	if got := names(rs); got != "w:*/5 * * * *@10:05" {
@@ -70,6 +71,7 @@ func TestCronDueMatchesSchedule(t *testing.T) {
 }
 
 func TestCronDueOncePerMinute(t *testing.T) {
+	t.Parallel()
 	h, _ := cronHost("* * * * *")
 	finishCronRuns(h.cronDue(at("2026-11-13 10:05:00")))
 	if rs := h.cronDue(at("2026-11-13 10:05:59")); len(rs) != 0 {
@@ -85,6 +87,7 @@ func TestCronDueOncePerMinute(t *testing.T) {
 }
 
 func TestCronDueNoBackfill(t *testing.T) {
+	t.Parallel()
 	h, _ := cronHost("* * * * *")
 	finishCronRuns(h.cronDue(at("2026-11-13 10:00:00")))
 	// The host slept (or the clock jumped) for 3 hours: one run, for now.
@@ -95,6 +98,7 @@ func TestCronDueNoBackfill(t *testing.T) {
 }
 
 func TestCronDueSkipsOverlap(t *testing.T) {
+	t.Parallel()
 	h, _ := cronHost("* * * * *", "*/2 * * * *")
 	first := h.cronDue(at("2026-11-13 10:00:00"))
 	if len(first) != 2 {
@@ -111,6 +115,7 @@ func TestCronDueSkipsOverlap(t *testing.T) {
 }
 
 func TestCronDueNeedsFreshHeartbeat(t *testing.T) {
+	t.Parallel()
 	h, w := cronHost("* * * * *")
 	w.noFence = true // stateless: keeps serving through a partition, but no crons
 	h.lastHB = time.Now().Add(-DefaultFenceAfter - time.Second)
@@ -140,6 +145,7 @@ func TestCronDueNeedsFreshHeartbeat(t *testing.T) {
 }
 
 func TestCronDueOnlyActiveInstances(t *testing.T) {
+	t.Parallel()
 	for name, mod := range map[string]func(w *workload){
 		"stopped":  func(w *workload) { w.status = "stopped" },
 		"starting": func(w *workload) { w.status = "starting" },
@@ -162,6 +168,7 @@ func TestCronDueOnlyActiveInstances(t *testing.T) {
 // changes the crons takes effect at the next minute, and a minute that ran
 // under the old deployment does not run again under the new one.
 func TestCronDueFollowsDeployment(t *testing.T) {
+	t.Parallel()
 	h, w := cronHost("* * * * *")
 	finishCronRuns(h.cronDue(at("2026-11-13 10:00:00")))
 	w.mu.Lock()
@@ -179,6 +186,7 @@ func TestCronDueFollowsDeployment(t *testing.T) {
 }
 
 func TestCronDueIsolatesWorkloads(t *testing.T) {
+	t.Parallel()
 	h, _ := cronHost("* * * * *")
 	o := &workload{h: h, tenantID: "tn2", name: "other", status: "active"}
 	o.active = &instance{h: h, w: o, app: &bundle.App{Crons: []string{"*/2 * * * *"}}}
@@ -198,6 +206,7 @@ func TestCronDueIsolatesWorkloads(t *testing.T) {
 // shifted to just before a minute boundary, against a fake workerd ingress,
 // and checks the invocation hostd sends.
 func TestCronLoopFiresAtMinuteBoundary(t *testing.T) {
+	t.Parallel()
 	got := make(chan map[string]any, 4)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var blob map[string]any

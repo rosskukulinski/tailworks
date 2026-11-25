@@ -16,7 +16,8 @@ import "strings"
 //     so the object's ActingFor is no guide);
 //   - admit refuses a name that is killed on this host ("killed") until
 //     it is purged, so nothing is admitted between the kill and the purge
-//     for ensure to take afterwards;
+//     for ensure to take afterwards (an undeployed workload's tombstones
+//     go once it is no longer assigned here: unassignedtombstones.go);
 //   - a tenant purge drops all of the tenant's admissions and records.
 
 // dropAdmissionLocked forgets the pending create admission for o's name (h.mu held).
@@ -39,7 +40,7 @@ func (h *Host) killedLocked(key string) bool {
 
 // killedName is the admit answer for a name that is killed on this host.
 func killedName(class, name string) *apiError {
-	return &apiError{Code: "killed", Detail: "object " + class + "/" + name + " was killed: it cannot be created again until it is purged (tw down --purge)"}
+	return &apiError{Code: "killed", Detail: "object " + class + "/" + name + " was killed: it cannot be created again while its workload stays deployed (undeploy the workload and deploy it again, or tw down --purge)"}
 }
 
 // dropTenantAdmissions forgets every pending admission and public.create

@@ -53,6 +53,7 @@ func forEachStore(t *testing.T, fn func(t *testing.T, s *SQLStore)) {
 }
 
 func TestLeaseFencing(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		now := time.UnixMilli(1_000_000)
@@ -120,6 +121,7 @@ func TestLeaseFencing(t *testing.T) {
 }
 
 func TestLeaseAcquireRace(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		now := time.Now()
@@ -147,6 +149,7 @@ func TestLeaseAcquireRace(t *testing.T) {
 }
 
 func TestAuditChainTamper(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		for i := range 5 {
@@ -178,6 +181,7 @@ func TestAuditChainTamper(t *testing.T) {
 }
 
 func TestAuditChainTruncateAndRelink(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		for i := range 4 {
@@ -211,6 +215,7 @@ func dropGuards(t *testing.T, s *SQLStore) {
 }
 
 func TestStoreObjectsAndDeployments(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		if err := s.CreateTenant(ctx, Tenant{ID: "tn", Tailnet: "t.ts.net", MintMode: MintOAuth, RegistrationsPerMinute: 200, MaxObjects: 10}); err != nil {

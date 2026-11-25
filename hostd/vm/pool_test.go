@@ -213,7 +213,7 @@ func TestPoolNoCarryOver(t *testing.T) {
 	dir := t.TempDir()
 	mem, err := m.MemoryDump(ctx, dir)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("memory dump: %v (VM exit: %v)", err, m.Err())
 	}
 	if hit := scanBytes(t, mem, map[string][]byte{"workload A's marker": []byte(a.marker)}); hit != "" {
 		t.Fatalf("%s in the pooled VM's RAM", hit)

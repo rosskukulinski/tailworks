@@ -121,6 +121,10 @@ type approvalStore struct {
 	mu   sync.Mutex
 	path string
 	m    map[string]*Approval
+
+	// deciding holds the keys of approvals whose decision is being
+	// delivered (#561): one decision per approval.
+	deciding map[string]bool
 }
 
 func (h *Host) approvals() *approvalStore {
@@ -313,6 +317,33 @@ type approvalDecision struct {
 
 const maxApprovalComment = 1024
 
+// claim marks a as being decided, so a concurrent decision (another
+// approver, or the same one retrying a request that is still being
+// delivered) is refused instead of delivered too (#561). unclaim drops the
+// mark: after a's status is set, or after a failed delivery so that a retry
+// can decide it.
+func (s *approvalStore) claim(a *Approval) *apiError {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch {
+	case s.deciding[a.key()]:
+		return &apiError{Code: "approval_not_pending", Detail: fmt.Sprintf("%s/%s step %q is being decided", a.Workflow, a.Instance, a.Step)}
+	case a.Status != ApprovalPending:
+		return &apiError{Code: "approval_not_pending", Detail: fmt.Sprintf("%s/%s step %q is %s", a.Workflow, a.Instance, a.Step, a.Status)}
+	}
+	if s.deciding == nil {
+		s.deciding = map[string]bool{}
+	}
+	s.deciding[a.key()] = true
+	return nil
+}
+
+func (s *approvalStore) unclaim(a *Approval) {
+	s.mu.Lock()
+	delete(s.deciding, a.key())
+	s.mu.Unlock()
+}
+
 // decideApproval authorises, delivers and audits one decision.
 func (h *Host) decideApproval(d approvalDecision) (*Approval, *apiError) {
 	if d.Approver.NodeID == "" {
@@ -380,6 +411,10 @@ func (h *Host) decideApproval(d approvalDecision) (*Approval, *apiError) {
 		audit(kindApprovalDenied, map[string]any{"decision": decision, "code": e.Code})
 		return nil, e
 	}
+	if e := s.claim(a); e != nil {
+		return nil, e
+	}
+	defer s.unclaim(a) // after the status is set (success) or to let a retry decide (failure)
 
 	// The payload the Workflow sees. "approver" and metadata.approver are
 	// tailworks' (the identity above), whatever the request carried.

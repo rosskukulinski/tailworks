@@ -1,10 +1,8 @@
 package ui
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/url"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,12 +11,12 @@ import (
 // Search, filters and paging (issue #50): /ui/objects lists objects with
 // filters, and /ui/audit combines the /v1/audit filters, newest first.
 //
-// What /v1 filters is filtered there: objects by tenant, workload and
-// status (state); audit records by object, caller (human), trace, tenant
-// and event kind, newest first (order=desc) with nextCursor paging. What
-// it does not is filtered here, in the UI, and the page says so: objects
-// by tag and by caller (actingFor), over the first objectsScanMax matches;
-// audit records by workload, within each page.
+// Every filter is applied by /v1 (issue #512): objects by tenant, workload,
+// status (state), tag and human (actingFor); audit records by object,
+// human, trace, tenant, workload and event kind, newest first (order=desc)
+// with nextCursor paging. /v1/objects has no newest-first order, so the
+// objects page reads up to objectsScanMax matches, sorts and pages them
+// here, and says when it hit the cap.
 
 // objectsScanMax bounds the objects the UI reads for one listing.
 const objectsScanMax = 5000
@@ -26,35 +24,27 @@ const objectsScanMax = 5000
 // objectsPerPage is the UI's page of objects.
 const objectsPerPage = 50
 
-// objectStates are /v1's object states, for the status filter.
-var objectStates = []string{
-	"pending",
-	"minted",
-	"ready",
-	"failed",
-	"killed",
-}
-
 type objectsData struct {
 	base
-	Tenant, Workload, State, Tag, Caller string
-	Tenants                              []tenant
-	States                               []string
-	Objects                              []object
-	Total                                int  // matches before paging
-	Truncated                            bool // objectsScanMax reached
-	Page                                 int  // 1-based
-	PrevURL, NextURL                     string
-	Errors                               []string
+	Tenant, Workload, State, Tag, Human string
+	Tenants                             []tenant
+	States                              []string
+	Objects                             []object
+	Total                               int  // matches before paging
+	Truncated                           bool // objectsScanMax reached
+	Page                                int  // 1-based
+	PrevURL, NextURL                    string
+	Errors                              []string
 }
-
-// ClientFiltered: a tag or caller filter applied by the UI.
-func (d objectsData) ClientFiltered() bool { return d.Tag != "" || d.Caller != "" }
 
 func (u *ui) objects(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	d := objectsData{base: u.base(r, "objects"), Tenant: q.Get("tenant"), Workload: q.Get("workload"), State: q.Get("status"),
-		Tag: strings.TrimSpace(q.Get("tag")), Caller: strings.TrimSpace(q.Get("caller")), States: objectStates, Page: 1}
+		Tag: strings.TrimSpace(q.Get("tag")), Human: strings.TrimSpace(q.Get("human")), Page: 1}
+	d.States, _ = uiSpecEnums() // enums.go
+	if d.Human == "" {          // the key's name before issue #449, so old links still filter
+		d.Human = strings.TrimSpace(q.Get("caller"))
+	}
 	if n, err := strconv.Atoi(q.Get("page")); err == nil && n > 1 {
 		d.Page = n
 	}
@@ -69,25 +59,20 @@ func (u *ui) objects(w http.ResponseWriter, r *http.Request) {
 	if d.State != "" {
 		api.Set("state", d.State)
 	}
-	objs, err := listAll[object](u, r, "/v1/objects?"+api.Encode(), objectsScanMax)
+	if tag := d.Tag; tag != "" {
+		if !strings.HasPrefix(tag, "tag:") {
+			tag = "tag:" + tag
+		}
+		api.Set("tag", tag)
+	}
+	if d.Human != "" {
+		api.Set("human", d.Human)
+	}
+	match, err := listAll[object](u, r, "/v1/objects?"+api.Encode(), objectsScanMax)
 	if err != nil {
 		d.Errors = append(d.Errors, "objects: "+err.Error())
 	}
-	d.Truncated = len(objs) >= objectsScanMax
-	tag := d.Tag
-	if tag != "" && !strings.HasPrefix(tag, "tag:") {
-		tag = "tag:" + tag
-	}
-	var match []object
-	for _, o := range objs {
-		if tag != "" && !slices.Contains(o.Tags, tag) {
-			continue
-		}
-		if d.Caller != "" && !strings.Contains(strings.ToLower(o.ActingFor), strings.ToLower(d.Caller)) {
-			continue
-		}
-		match = append(match, o)
-	}
+	d.Truncated = len(match) >= objectsScanMax
 	// Newest first, like every activity list in the UI.
 	sort.SliceStable(match, func(i, j int) bool { return match[i].CreatedAt > match[j].CreatedAt })
 	d.Total = len(match)
@@ -99,10 +84,13 @@ func (u *ui) objects(w http.ResponseWriter, r *http.Request) {
 	d.Objects = match[start:end]
 	link := func(p int) string {
 		v := url.Values{}
-		for _, k := range []string{"tenant", "workload", "status", "tag", "caller"} {
+		for _, k := range []string{"tenant", "workload", "status", "tag"} {
 			if s := q.Get(k); s != "" {
 				v.Set(k, s)
 			}
+		}
+		if d.Human != "" {
+			v.Set("human", d.Human)
 		}
 		if p > 1 {
 			v.Set("page", strconv.Itoa(p))
@@ -137,7 +125,6 @@ type auditData struct {
 	Object, Human, Trace, Tenant, Kind, Workload string
 	Limit                                        int
 	Records                                      []auditRecord
-	Hidden                                       int // records on this page the workload filter hid
 	Names                                        map[string]string
 	NextCursor                                   string
 	NextURL, FirstURL                            string
@@ -162,7 +149,7 @@ func (u *ui) audit(w http.ResponseWriter, r *http.Request) {
 		d.Limit = n
 	}
 	filters := url.Values{}
-	for k, v := range map[string]string{"object": d.Object, "human": d.Human, "trace": d.Trace, "tenant": d.Tenant, "kind": d.Kind} {
+	for k, v := range map[string]string{"object": d.Object, "human": d.Human, "trace": d.Trace, "tenant": d.Tenant, "kind": d.Kind, "workload": d.Workload} {
 		if v != "" {
 			filters.Set(k, v)
 		}
@@ -185,9 +172,6 @@ func (u *ui) audit(w http.ResponseWriter, r *http.Request) {
 	for k, v := range filters {
 		ui[k] = v
 	}
-	if d.Workload != "" {
-		ui.Set("workload", d.Workload)
-	}
 	d.FirstURL = "/ui/audit?" + ui.Encode()
 	if ap.NextCursor != nil && *ap.NextCursor != "" {
 		d.NextCursor = *ap.NextCursor
@@ -196,65 +180,18 @@ func (u *ui) audit(w http.ResponseWriter, r *http.Request) {
 	}
 	u.call(r, "GET", "/v1/audit/verification", &d.Verification)
 	d.Tenants, _ = listAll[tenant](u, r, "/v1/tenants?limit=500", 2000)
-	// Node names (and workloads) for the records' objects (best effort).
-	workloadOf := map[string]string{}
+	// Node names for the records' objects (best effort).
 	if objs, err := listAll[object](u, r, "/v1/objects?limit=500", 2000); err == nil {
 		for _, o := range objs {
 			d.Names[o.ObjectID] = o.NodeName()
-			workloadOf[o.ObjectID] = o.Workload
 		}
 	}
-	for _, rec := range ap.Items {
-		if d.Workload != "" && workloadOf[rec.ObjectID] != d.Workload && detailWorkload(rec) != d.Workload {
-			d.Hidden++
-			continue
-		}
-		d.Records = append(d.Records, rec)
-	}
+	d.Records = ap.Items
 	u.render(w, 200, "audit", d)
 }
 
-// detailWorkload is the "workload" field of a record's detail, if any.
-func detailWorkload(r auditRecord) string {
-	var v struct {
-		Workload string `json:"workload"`
-	}
-	if len(r.Detail) > 0 && r.Detail[0] == '{' {
-		json.Unmarshal(r.Detail, &v)
-	}
-	return v.Workload
-}
-
-// AuditKinds are the /v1 audit kinds, for the kind filter's suggestions.
-func (d auditData) AuditKinds() []string { return auditKinds }
-
-var auditKinds = []string{
-	"allow",
-	"approval_decision",
-	"approval_denied",
-	"approval_requested",
-	"approval_timeout",
-	"create",
-	"credential",
-	"deny",
-	"deploy",
-	"device_delete",
-	"egress",
-	"expose_off",
-	"expose_on",
-	"kill",
-	"mint",
-	"notification_delete",
-	"notification_failed",
-	"notification_put",
-	"notification_test",
-	"principal",
-	"public_request",
-	"ready",
-	"secret_put",
-	"spawn",
-	"telemetry_put",
-	"tenant_create",
-	"tenant_note",
-	"undeploy",
+// AuditKinds are the /v1 audit kinds, for the event filter's suggestions.
+func (d auditData) AuditKinds() []string {
+	_, kinds := uiSpecEnums() // enums.go
+	return kinds
 }

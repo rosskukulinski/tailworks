@@ -37,6 +37,7 @@ func (f *fakeAdv) Withdraw(_ context.Context, name string) error {
 // answers; FailAfter consecutive failures withdraw it, one success restores
 // it, a failing first check never advertises, Close withdraws.
 func TestServiceGate(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	adv := &fakeAdv{}
 	var healthy = true
@@ -93,6 +94,7 @@ func TestServiceGate(t *testing.T) {
 }
 
 func TestServiceGateClosedStaysWithdrawn(t *testing.T) {
+	t.Parallel()
 	adv := &fakeAdv{}
 	g := &ServiceGate{Adv: adv, Name: "svc:tw-mgmt", Ports: []uint16{80}, Check: func(context.Context) error { return nil }}
 	g.Step(context.Background())

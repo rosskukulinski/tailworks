@@ -38,6 +38,7 @@ func testCustody(t *testing.T, c Custody) {
 }
 
 func TestFileCustody(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "custody")
 	c, err := OpenFileCustody(dir)
 	if err != nil {
@@ -122,6 +123,7 @@ func fakeSetec(t *testing.T) *httptest.Server {
 }
 
 func TestSetecCustody(t *testing.T) {
+	t.Parallel()
 	srv := fakeSetec(t)
 	defer srv.Close()
 	testCustody(t, &SetecCustody{BaseURL: srv.URL})

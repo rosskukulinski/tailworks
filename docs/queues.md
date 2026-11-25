@@ -78,8 +78,8 @@ Delivery is at least once.
   `tw-hostd -queue-visibility`). hostd extends it while `queue()` runs. If
   workerd dies mid-batch, the batch is retried. If hostd or its host dies,
   the timeout expires and the batch is delivered again. A batch that never
-  reached `queue()` (workerd restarting) is handed back without counting
-  an attempt.
+  reached `queue()` (workerd restarting, or the workload moved away first)
+  is handed back without counting an attempt.
 - **Who consumes.** The host holding the consumer workload's lease runs
   the consumer, and only while its heartbeat to mgmt is fresh (the same
   rule as cron triggers). When the workload moves (`tw deploy --replace`,
@@ -88,6 +88,14 @@ Delivery is at least once.
 - **Order** is best effort: oldest first, but retries, delays and
   concurrency reorder messages, as on Cloudflare.
 - **Time limit:** one `queue()` run gets 15 minutes of wall time.
+
+Measured by `e2e/queues` and the data-plane chaos loop
+(`e2e/dataplane:TestDataplane`, invariant D3), which kills hosts, hostd and
+workerd, stalls and cuts off the consumer's host, moves the workload, takes
+it over and restarts mgmt under a steady producer: every acknowledged send
+was delivered, no two deliveries of a message had the same `attempts`,
+retried messages came back, and poison stopped at `max_retries + 1` and
+reached the dead-letter queue.
 
 ## Identity and security
 

@@ -15,7 +15,7 @@ the template's dependencies, so this one can't be built offline.
 ```sh
 npm install
 tw dev
-curl -X POST -d '{"order":"o1","usd":5,"mcp":"http://mcp/mcp"}' http://127.0.0.1:8787/refunds
+curl -X POST -d '{"order":"o1","usd":5,"mcp":"http://tw-mcp/mcp"}' http://127.0.0.1:8787/refunds
 #   {"runId":"…","approveToken":"approve:o1"}
 curl http://127.0.0.1:8787/runs/<runId>
 curl -X POST http://127.0.0.1:8787/hooks/approve:o1   # resume the waiting run

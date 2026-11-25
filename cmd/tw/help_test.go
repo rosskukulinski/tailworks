@@ -26,7 +26,7 @@ func TestHelp(t *testing.T) {
 	}
 	for _, args := range [][]string{{}, {"--help"}, {"-h"}, {"help"}} {
 		out := runOK(args...)
-		for _, want := range []string{"usage: tw <command>", "node-workflow", "needs Node.js", "  init ", "  doctor ", "tw <command> --help"} {
+		for _, want := range []string{"usage: tw <command>", "hello (default) | agent | mcp | static-site", "tw init --list", "  init ", "  doctor ", "tw <command> --help"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("tw %s: global help lacks %q:\n%s", strings.Join(args, " "), want, out)
 			}
@@ -41,7 +41,7 @@ func TestHelp(t *testing.T) {
 		}
 		for _, args := range [][]string{{c.name, "--help"}, {c.name, "-h"}, {c.name, "-help"}, {"help", c.name}, {"--state-dir", "/nonexistent", c.name, "--help"}, {c.name, "--help", "extra", "--flags"}} {
 			out := runOK(args...)
-			if !strings.Contains(out, "usage: tw "+c.usage) || !strings.Contains(out, c.help) {
+			if !hasUsage(out, c) || !strings.Contains(out, c.help) {
 				t.Errorf("tw %s: want the %s usage line, got:\n%s", strings.Join(args, " "), c.name, out)
 			}
 		}
@@ -51,8 +51,8 @@ func TestHelp(t *testing.T) {
 		runOK(args...)
 	}
 	init := runOK("init", "--help")
-	if !strings.Contains(init, "hello|agent|mcp|ai-agent|chat-agent|pi-agent|lock|refund-approval|node-workflow") || !strings.Contains(init, "Node.js") {
-		t.Errorf("init help lacks the seven templates / the Node.js note:\n%s", init)
+	if !strings.Contains(init, "hello|agent|mcp|static-site]") || !strings.Contains(init, "init --list") || strings.Contains(init, "refund-approval") {
+		t.Errorf("init help lacks the four starting points / --list, or lists the demos:\n%s", init)
 	}
 	// After `--` nothing is a help flag; a bare `tw` with only flags is a usage error.
 	var so, se bytes.Buffer

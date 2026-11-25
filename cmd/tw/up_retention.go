@@ -20,6 +20,11 @@ type retentionFlags struct {
 }
 
 func addRetentionFlags(f *flags) retentionFlags {
+	f.group(upGroupRetention,
+		"audit-max-age",
+		"audit-max-records",
+		"request-log-max-age",
+	)
 	return retentionFlags{
 		auditAge:   f.Duration("audit-max-age", 0, "audit retention: delete audit records older than this (e.g. 2160h), keeping a checkpoint so the rest still verify (0 = keep every record, the default)"),
 		auditRecs:  f.Int64("audit-max-records", 0, "audit retention: keep only the newest N records of each audit chain (0 = keep every record, the default)"),

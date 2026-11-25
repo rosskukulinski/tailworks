@@ -190,8 +190,13 @@ func TestNetdBinary(t *testing.T) {
 			t.Fatalf("egress %s: %d %s", id, code, b)
 		}
 	}
+	// A same-host sibling is delivered in process (netd/samehost.go): b
+	// answers, and sees a as its caller.
+	if code, b := get("http://" + ips["a"] + "/egress?url=http://" + ips["b"] + "/"); code != 200 || !strings.Contains(string(b), `"hostname":"tw-a"`) {
+		t.Errorf("same-host hop a -> b: %d %s", code, b)
+	}
 	// SSRF + peer_not_visible through the binary
-	for u, want := range map[string]string{"http://" + ips["b"] + "/": netd.CodeForbiddenDestination,
+	for u, want := range map[string]string{
 		"http://127.0.0.1/": netd.CodeForbiddenDestination, "http://example.com/": netd.CodeInternetEgressUnavailable} {
 		_, b := get("http://" + ips["a"] + "/egress?url=" + u)
 		var e netd.Error

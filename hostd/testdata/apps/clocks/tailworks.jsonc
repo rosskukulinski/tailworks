@@ -1,0 +1,10 @@
+{
+  "name": "clocks",
+  "tailnet": {
+    "tags": ["tag:ttest"],
+    "objects": {
+      // facet mode: the object is its own isolate, loaded by the platform
+      "Clock": { "tags": ["tag:ttest"] },
+    },
+  },
+}

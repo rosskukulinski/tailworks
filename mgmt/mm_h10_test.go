@@ -100,6 +100,7 @@ func (w *h10World) deploy(t *testing.T, m *Mgmt, host string) (DeployResponse, e
 // by skew (so it writes early lease expiries and old last_seen values).
 // A redeploy is served by A. Expected: the workload stays on h1.
 func TestMM_H10_LeaseClockSkew(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	skews := []time.Duration{0, 1 * time.Second, 2 * time.Second, 5 * time.Second, 7 * time.Second, 8 * time.Second,
 		9 * time.Second, 10 * time.Second, 12 * time.Second, 15 * time.Second, 20 * time.Second}

@@ -354,6 +354,12 @@ func (p *Proxy) Accept(dst netip.AddrPort) bool {
 		}
 		p.deny(net.JoinHostPort(name, strconv.Itoa(port)), code, "")
 		return false
+	case !p.allow.AllowsPort(name, dst.Port()):
+		p.deny(net.JoinHostPort(name, strconv.Itoa(port)), "not_allowlisted", "the allowlist entry names another port")
+		return false
+	case publicip.RefusedPort(dst.Port()) != "" && !p.allow.NamesPort(name, dst.Port()):
+		p.deny(net.JoinHostPort(name, strconv.Itoa(port)), "internet_port_refused", publicip.RefusedPort(dst.Port()))
+		return false
 	case !synthetic:
 		if why := p.blocked(dst.Addr()); why != "" {
 			p.deny(dst.String(), "forbidden_destination", why)

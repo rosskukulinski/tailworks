@@ -23,6 +23,7 @@ import (
 // stops at "no facet class" before it could create anything: the two
 // refusals are told apart by their detail.
 func TestEgressMACReplayRefusedByHandler(t *testing.T) {
+	t.Parallel()
 	const root = "deadbeefdeadbeefdeadbeefdeadbeef"
 	inst := &instance{
 		res: &gen.Result{MACKey: root},

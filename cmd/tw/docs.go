@@ -17,10 +17,14 @@ import (
 func cmdDocs(args []string) error {
 	sub, args, ok := splitSubcommand(args) // agent.go
 	if !ok {
-		return fail("bad_request", "tw docs needs a subcommand: search, show or ls", "usage: tw "+usageOf("docs"))
+		return needsSubcommand("docs")
 	}
+	sub = normalizeVerb(sub)
 	f := newFlags("docs")
-	limit := f.Int("limit", 10, "search: at most this many sections")
+	limit := new(int)
+	if sub == "search" {
+		limit = f.Int("limit", 10, "at most this many sections")
+	}
 	pos, err := f.parse(args)
 	if err != nil {
 		return err
@@ -40,6 +44,9 @@ func cmdDocs(args []string) error {
 		}
 		md, ok := repodocs.Show(pos[0])
 		if !ok {
+			if u := repodocs.OnGitHubOnly(pos[0]); u != "" {
+				return fail("not_found", pos[0]+" isn't built into the CLI: the API contract and the design records are on GitHub").withFix(u)
+			}
 			return fail("not_found", "no doc or section "+pos[0]).withFix("tw docs ls", "tw docs search <words>")
 		}
 		emit(f, map[string]any{"ref": pos[0], "markdown": md}, func() { fmt.Print(md) })
@@ -64,7 +71,7 @@ func cmdDocs(args []string) error {
 		out := make([]hit, 0, len(hits))
 		for _, h := range hits {
 			out = append(out, hit{Ref: h.Ref(), Doc: h.Doc, Heading: h.Heading, Excerpt: h.Excerpt, Score: h.Score,
-				URL: "https://github.com/rosskukulinski/tailworks/blob/master/" + repodocs.RepoPath(h.Ref())})
+				URL: repodocs.GitHubBlob + repodocs.RepoPath(h.Ref())})
 		}
 		emit(f, map[string]any{"query": q, "results": out}, func() {
 			if len(out) == 0 {

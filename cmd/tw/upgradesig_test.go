@@ -211,6 +211,7 @@ func TestUpgradeUsesPinnedKeys(t *testing.T) {
 
 // tw upgrade extracts with the hardened extractor tw-hostd uses.
 func TestExtractReleaseRefusesEscapes(t *testing.T) {
+	t.Parallel()
 	for name, entry := range map[string]*tar.Header{
 		"dotdot":   {Name: "../evil", Typeflag: tar.TypeReg},
 		"absolute": {Name: "/tmp/evil", Typeflag: tar.TypeReg},

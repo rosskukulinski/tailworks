@@ -2,8 +2,9 @@ package main
 
 // D1 (ADR-038), CLI side: `tw d1 …`, like `wrangler d1 …`. A database
 // is the platform store (kind "d1") of a workload, named by the binding's
-// database_name. create, list and delete use mgmt's store routes; execute,
-// export and migrations go through mgmt to the host running the workload
+// database_name. create, ls and rm (or wrangler's list and delete) use
+// mgmt's store routes; execute, export and migrations go through mgmt to
+// the host running the workload
 // (POST …/d1/{name}/query, GET …/d1/{name}/export), so the workload must
 // be deployed. Migrations are wrangler's: numbered .sql files in the
 // binding's migrations_dir, recorded in migrations_table (internal/d1mig).
@@ -24,7 +25,7 @@ import (
 	"github.com/rosskukulinski/tailworks/mgmt"
 )
 
-const d1Usage = "d1 create <db> | d1 list | d1 delete <db> [--yes] | d1 execute <db> --command <sql> | --file <file> | d1 export <db> [--output <file>] | d1 repair <db> --skip <seq> [--yes] | d1 migrations create <db> <message> | d1 migrations list <db> | d1 migrations apply <db>   [--workload <workload>] [--tenant <tailnet>]"
+const d1Usage = "d1 create <db> | d1 ls | d1 rm <db> [--yes] | d1 execute <db> [--command <sql> | --file <file>] | d1 export <db> [--output <file>] | d1 repair <db> --skip <seq> [--yes] | d1 migrations create <db> <message> | d1 migrations ls <db> | d1 migrations apply <db>   [--workload <workload>] [--tenant <tailnet>]"
 
 type d1Result struct {
 	Workload  string           `json:"workload"`
@@ -43,54 +44,82 @@ type d1Result struct {
 	Skipped  int64           `json:"skipped,omitempty"`
 }
 
-func cmdD1(args []string) error {
-	// Global flags (--state-dir X, --json) may precede the subcommand,
-	// which is one word, or two after "migrations".
-	var subs, rest []string
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		switch {
-		case a == "--state-dir" || a == "-state-dir":
-			rest = append(rest, args[i:min(i+2, len(args))]...)
-			i++
-		case strings.HasPrefix(a, "-"):
-			rest = append(rest, a)
-		case len(subs) == 0 || len(subs) == 1 && subs[0] == "migrations":
-			subs = append(subs, a)
-		default:
-			rest = append(rest, args[i:]...)
-			i = len(args)
-		}
-	}
-	if len(subs) == 0 || subs[0] == "migrations" && len(subs) < 2 {
-		return fail("bad_request", "tw d1 needs a subcommand: create | list | delete | execute | export | repair | migrations create|list|apply", "usage: tw "+usageOf("d1"))
-	}
-	return cmdD1Sub(strings.Join(subs, " "), rest)
+// d1Verbs are tw d1's commands and how many arguments each takes.
+var d1Verbs = map[string]int{
+	"create":            1,
+	"execute":           1,
+	"export":            1,
+	"ls":                0,
+	"migrations apply":  1,
+	"migrations create": 2,
+	"migrations ls":     1,
+	"repair":            1,
+	"rm":                1,
 }
 
-func cmdD1Sub(sub string, args []string) error {
+// d1Opts are tw d1's flags. A verb registers only its own (d1Flags); the
+// others keep their zero value.
+type d1Opts struct {
+	tenant, workload *string
+
+	// execute
+	command, file *string
+
+	// export
+	output *string
+
+	// repair
+	skip *int64
+
+	// rm, repair
+	yes *bool
+}
+
+// d1Flags registers verb's flags ("execute"; anyVerb: every verb's) on f.
+func d1Flags(f *flags, verb string) *d1Opts {
+	o := &d1Opts{command: new(string), file: new(string), output: new(string), skip: new(int64), yes: new(bool)}
+	o.tenant = tenantFlag(f)
+	o.workload = f.String("workload", "", "workload whose database it is (default: the app in the current directory, as tw deploy names it)")
+	if onVerb(verb, "execute") {
+		o.command = f.String("command", "", "SQL to run (one or more statements, run as one batch)")
+		o.file = f.String("file", "", "a file of SQL to run as one batch (with neither flag, the SQL is read from stdin: tw d1 execute <db> < file.sql)")
+	}
+	if onVerb(verb, "export") {
+		o.output = f.String("output", "", "write the SQL to this file (default: stdout)")
+	}
+	if onVerb(verb, "repair") {
+		o.skip = f.Int64("skip", 0, "the journal entry to skip (the entry tw d1 ls shows the database degraded at)")
+	}
+	if onVerb(verb, "rm", "repair") {
+		o.yes = yesFlag(f)
+	}
+	return o
+}
+
+func cmdD1(args []string) error {
+	// The verb is one word, or two after "migrations"; flags may come
+	// before it.
+	sub, args, complete := scanVerb(args, func(f *flags) { d1Flags(f, anyVerb) }, func(first string) int {
+		if first == "migrations" {
+			return 2
+		}
+		return 1
+	})
+	n, ok := d1Verbs[sub]
+	if complete && !ok {
+		return fail("bad_request", fmt.Sprintf("unknown subcommand %q", sub), "usage: tw "+usageOf("d1"))
+	}
+	if !complete && sub != "" {
+		return needsSubcommand("d1")
+	}
 	f := newFlags("d1")
-	tenantF := tenantFlag(f)
-	workloadF := f.String("workload", "", "workload whose database it is (default: the app in the current directory, as tw deploy names it)")
-	command := f.String("command", "", "execute: SQL to run (one or more statements, run as one batch)")
-	file := f.String("file", "", "execute: a file of SQL to run as one batch")
-	output := f.String("output", "", "export: write the SQL to this file (default: stdout)")
-	skip := f.Int64("skip", 0, "repair: the journal entry to skip (the entry tw d1 list shows the database degraded at)")
-	yes := yesFlag(f)
+	o := d1Flags(f, sub)
 	pos, err := f.parse(args)
 	if err != nil {
 		return err
 	}
-	switch sub {
-	case "ls":
-		sub = "list"
-	case "rm":
-		sub = "delete"
-	}
-	want := map[string]int{"create": 1, "list": 0, "delete": 1, "execute": 1, "export": 1, "repair": 1, "migrations create": 2, "migrations list": 1, "migrations apply": 1}
-	n, ok := want[sub]
-	if !ok {
-		return fail("bad_request", fmt.Sprintf("unknown subcommand %q", sub), "usage: tw "+usageOf("d1"))
+	if !complete {
+		return needsSubcommand("d1")
 	}
 	if len(pos) != n {
 		return fail("bad_request", fmt.Sprintf("tw d1 %s takes %d argument(s)", sub, n), "usage: tw "+usageOf("d1"))
@@ -109,10 +138,14 @@ func cmdD1Sub(sub string, args []string) error {
 	var db *bundle.D1Database
 	name := ""
 	if len(pos) > 0 {
-		name = pos[0]
+		bs := make([]bundle.StoreBinding, len(dbs))
+		for i, d := range dbs {
+			bs[i] = bundle.StoreBinding{Kind: "d1", Binding: d.Binding, Name: d.DatabaseName}
+		}
+		name = storeName(bs, pos[0])
 		for i := range dbs {
-			if dbs[i].DatabaseName == name || dbs[i].Binding == name {
-				db, name = &dbs[i], dbs[i].DatabaseName
+			if dbs[i].DatabaseName == name {
+				db = &dbs[i]
 				break
 			}
 		}
@@ -135,28 +168,30 @@ func cmdD1Sub(sub string, args []string) error {
 		return nil
 	}
 
-	workload := *workloadF
+	workload := *o.workload
 	if workload == "" {
 		if appErr != nil {
-			return fail("bad_request", "no app in the current directory to take the workload from").
-				withFix("cd <app dir> && tw d1 "+sub+" …", "tw d1 "+sub+" … --workload <workload>")
+			return appWorkloadErr(appDir, "d1 "+sub, appErr, "") // appworkload.go
 		}
 		workload = a.Name
 	}
 	if workloadLabel(workload) != workload {
 		return fail("bad_request", fmt.Sprintf("workload %q is not a DNS label", workload))
 	}
-	if sub == "execute" && (*command == "") == (*file == "") {
-		return fail("bad_request", "tw d1 execute needs --command <sql> or --file <file>")
+	execSQL := ""
+	if sub == "execute" {
+		if execSQL, err = d1ExecuteSQL(*o.command, *o.file); err != nil { // d1stdin.go
+			return err
+		}
 	}
-	if sub == "delete" {
-		if err := confirmDestroy(f, *yes, "deleting database "+name+" deletes its data (its journal and key in mgmt)", name, "tw d1 delete "+name,
+	if sub == "rm" {
+		if err := confirmDestroy(f, *o.yes, "deleting database "+name+" deletes its data (its journal and key in mgmt)", name, "tw d1 rm "+name,
 			"tw d1 export "+name+" --output backup.sql   (first, to keep a copy)"); err != nil {
 			return err
 		}
 	}
 	if sub == "repair" {
-		if err := confirmD1Repair(f, *yes, name, *skip); err != nil {
+		if err := confirmD1Repair(f, *o.yes, name, *o.skip); err != nil {
 			return err
 		}
 	}
@@ -167,7 +202,7 @@ func cmdD1Sub(sub string, args []string) error {
 	if err := s.requireUp(); err != nil {
 		return err
 	}
-	tn, err := s.tenant(*tenantF)
+	tn, err := s.tenant(*o.tenant)
 	if err != nil {
 		return err
 	}
@@ -194,7 +229,7 @@ func cmdD1Sub(sub string, args []string) error {
 			fmt.Printf("✓ database %s of workload %s (tenant %s)\n", name, workload, tn.Tailnet)
 			fmt.Printf("  bind it in wrangler.jsonc: \"d1_databases\": [{ \"binding\": \"DB\", \"database_name\": %q }]\n", name)
 		})
-	case "list":
+	case "ls":
 		items, err := listAll[mgmt.StoreInfo](ctx, c, wlBase+"/stores?kind=d1", 0)
 		if err != nil {
 			return err
@@ -214,7 +249,7 @@ func cmdD1Sub(sub string, args []string) error {
 				printStoreDegraded(d.Degraded, storeFix(d))
 			}
 		})
-	case "delete":
+	case "rm":
 		if err := c.DoHeaders(ctx, "DELETE", storePath, nil, nil, hdr); err != nil {
 			return err
 		}
@@ -223,20 +258,12 @@ func cmdD1Sub(sub string, args []string) error {
 			fmt.Printf("✓ database %s of workload %s deleted (tenant %s)\n", name, workload, tn.Tailnet)
 		})
 	case "execute":
-		sql := *command
-		if *file != "" {
-			b, err := os.ReadFile(*file)
-			if err != nil {
-				return fail("bad_request", err.Error())
-			}
-			sql = string(b)
-		}
 		var qs []d1mig.Query
-		for _, st := range d1mig.Split(sql) {
+		for _, st := range d1mig.Split(execSQL) {
 			qs = append(qs, d1mig.Query{SQL: st})
 		}
 		if len(qs) == 0 {
-			return fail("bad_request", "no SQL statement to run")
+			return fail("bad_request", "no SQL statement to run: pass --command <sql>, --file <file>, or SQL on stdin")
 		}
 		rs, err := exec(ctx, qs)
 		if err != nil {
@@ -250,20 +277,20 @@ func cmdD1Sub(sub string, args []string) error {
 			return d1Fix(err, workload)
 		}
 		res.Bytes = len(raw)
-		if *output == "" {
+		if *o.output == "" {
 			os.Stdout.Write(raw)
 			return nil
 		}
-		if err := os.WriteFile(*output, raw, 0o600); err != nil {
+		if err := os.WriteFile(*o.output, raw, 0o600); err != nil {
 			return fail("bad_request", err.Error())
 		}
-		res.File = *output
-		emit(f, res, func() { fmt.Printf("✓ exported %s (%s) to %s\n", name, humanBytes(int64(len(raw))), *output) })
+		res.File = *o.output
+		emit(f, res, func() { fmt.Printf("✓ exported %s (%s) to %s\n", name, humanBytes(int64(len(raw))), *o.output) })
 	case "repair":
-		if err := d1Repair(ctx, c, f, &res, storePath, *skip, hdr); err != nil {
+		if err := d1Repair(ctx, c, f, &res, storePath, *o.skip, hdr); err != nil {
 			return err
 		}
-	case "migrations list":
+	case "migrations ls":
 		pend, err := d1mig.Pending(ctx, exec, filepath.Join(a.Dir, db.MigrationsDir), db.MigrationsTable)
 		if err != nil {
 			return d1Fix(err, workload)

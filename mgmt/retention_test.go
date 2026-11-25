@@ -12,6 +12,7 @@ import (
 // edit, gap or truncation among the kept records is still caught, and
 // appends after a prune link on as before.
 func TestAuditPruneKeepsChainVerifiable(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		appendN := func(from, n int) {
@@ -77,6 +78,7 @@ func TestAuditPruneKeepsChainVerifiable(t *testing.T) {
 // prunes every chain, records the prune on the mgmt chain, and verify
 // stays green; without a retention setting nothing is deleted.
 func TestAuditRetentionPruner(t *testing.T) {
+	t.Parallel()
 	e := newTestEnvWith(t, func(c *Config) { c.AuditMaxRecords = 3 })
 	ctx := context.Background()
 	for i := range 8 {

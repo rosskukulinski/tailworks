@@ -206,6 +206,7 @@ func New(cfg Config) (*Backend, error) {
 func (b *Backend) startInProcessHelper() error {
 	inst := fmt.Sprintf("p%d", os.Getpid())
 	b.srvBase = filepath.Join("/var/lib", "tw-vm-"+inst)
+	helper.SweepDeadInProcess(os.Getpid(), b.cfg.Log.With("component", "vmhelper")) // a crashed predecessor's VMs (#587)
 	srv, err := helper.New(helper.Config{Firecracker: b.cfg.Firecracker, Jailer: b.cfg.Jailer,
 		JailBase: filepath.Join(b.srvBase, "jail"), StateDir: b.srvBase, UIDBase: 3910000000 + (os.Getpid()%1000)*1000,
 		MaxVMs: 1000, Instance: inst, Log: b.cfg.Log.With("component", "vmhelper")})
@@ -235,6 +236,7 @@ func (b *Backend) Close() error {
 	if b.srv != nil {
 		b.srvLn.Close()
 		b.srv.Close()
+		b.srv.Sweep() // what the stopped VMs left (netns, jails)
 		os.RemoveAll(b.srvBase)
 	}
 	if b.ownDir {

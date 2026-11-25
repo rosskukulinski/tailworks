@@ -83,6 +83,18 @@ build() { # tag context [args...]
   $DOCKER buildx build --platform "$PLATFORM" --provenance=false -t "$tag" --load "$@" "$ctx"
 }
 
+# The rebuilds' Apache-2.0 notice travels with the image (they are
+# published as ghcr.io/<owner>/cloudflare-sandbox:<v>-arm64 by
+# .github/workflows/publish-sandbox-images.yml). NOTICE_REV is the
+# tailworks commit whose guest/images/README.md describes the change.
+NOTICE_REV=${NOTICE_REV:-master}
+notice() { # version
+  echo --label org.opencontainers.image.licenses=Apache-2.0
+  echo --label org.opencontainers.image.source=https://github.com/rosskukulinski/tailworks
+  echo --label org.opencontainers.image.documentation=https://github.com/rosskukulinski/tailworks/blob/$NOTICE_REV/guest/images/README.md
+  echo --label org.opencontainers.image.version=$1
+}
+
 IMAGES=() # "ref file" pairs for images.json
 if [ "$ARCH" = amd64 ]; then
   # linux/amd64 (x86-64 hosts, and Apple silicon with Rosetta for Linux):
@@ -99,12 +111,15 @@ if [ "$ARCH" = amd64 ]; then
 else
   # 0.12.14: the Bun control server image, as Cloudflare's CI builds it
   # (docker-bake.hcl "default" target; BUN/NODE versions from that tag).
-  build tw.local/cloudflare-sandbox:0.12.14-$ARCH "$WORK/v0" -f "$WORK/v0/packages/sandbox/Dockerfile" --target default \
+  # shellcheck disable=SC2046 # notice's words are flag/value pairs without spaces
+  build tw.local/cloudflare-sandbox:0.12.14-$ARCH "$WORK/v0" -f "$WORK/v0/packages/sandbox/Dockerfile" --target default $(notice 0.12.14) \
     --build-arg SANDBOX_VERSION=0.12.14 --build-arg BUN_VERSION="$(cat "$WORK/v0/.bun-version")" --build-arg NODE_VERSION=22.23.4
   # 1.0.x: the sandbox-shim donor image (static Rust binary; the Dockerfile's
   # "verify" stage asserts x86-64, so it builds the "image" target directly).
-  build tw.local/cloudflare-sandbox:1.0.0-$ARCH "$WORK/v100" -f "$WORK/v100/images/sandbox-tools/Dockerfile" --target image
-  build tw.local/cloudflare-sandbox:1.0.1-$ARCH "$WORK/v101" -f "$WORK/v101/images/sandbox-tools/Dockerfile" --target image
+  # shellcheck disable=SC2046
+  build tw.local/cloudflare-sandbox:1.0.0-$ARCH "$WORK/v100" -f "$WORK/v100/images/sandbox-tools/Dockerfile" --target image $(notice 1.0.0)
+  # shellcheck disable=SC2046
+  build tw.local/cloudflare-sandbox:1.0.1-$ARCH "$WORK/v101" -f "$WORK/v101/images/sandbox-tools/Dockerfile" --target image $(notice 1.0.1)
   # The raw ctx.container flow's image.
   build tw.local/debian-trixie-python:1 "$HERE" -f "$HERE/Dockerfile.debian-trixie-python" \
     --build-context "docker.io/cloudflare/sandbox:1.0.1=docker-image://tw.local/cloudflare-sandbox:1.0.1-$ARCH"

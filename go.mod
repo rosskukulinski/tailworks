@@ -10,7 +10,7 @@ require (
 	github.com/getkin/kin-openapi v0.153.0
 	github.com/jackc/pgx/v5 v5.13.0
 	github.com/jsimonetti/rtnetlink v1.4.2
-	github.com/klauspost/compress v1.20.4
+	github.com/klauspost/compress v1.20.5
 	github.com/landlock-lsm/go-landlock v0.11.2
 	github.com/oapi-codegen/nullable v1.2.0
 	github.com/oapi-codegen/runtime v1.9.0

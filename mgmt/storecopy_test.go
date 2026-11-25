@@ -26,6 +26,7 @@ import (
 // fence moved the epochs. A second copy into the now non-empty target, and
 // a copy from a store a replica is live on, are refused.
 func TestMigrateStoreCopy(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	q := newQueueEnv(t)
 	h1 := q.e.asHost("h1")

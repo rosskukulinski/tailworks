@@ -2,11 +2,14 @@ package mgmt
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/rosskukulinski/tailworks/internal/replicaname"
 )
 
 // Replicas (tailworks.jsonc "replicas": N) run one stateless workload on N
@@ -29,15 +32,12 @@ import (
 // MaxReplicas bounds tailworks.jsonc "replicas".
 const MaxReplicas = 16
 
-const replicaSep = "--r"
+// replicaSep and ReplicaName are internal/replicaname's: hostd reads a
+// replica's name with the same package (hostd/r2.go r2Group).
+const replicaSep = replicaname.Sep
 
 // ReplicaName is the workload name of replica i (0-based) of workload.
-func ReplicaName(workload string, i int) string {
-	if i == 0 {
-		return workload
-	}
-	return workload + replicaSep + strconv.Itoa(i+1)
-}
+func ReplicaName(workload string, i int) string { return replicaname.Name(workload, i) }
 
 // replicaIndex parses a ReplicaName of group (0-based; -1 if it isn't one).
 func replicaIndex(group, name string) int {
@@ -118,6 +118,48 @@ func (m *Mgmt) checkReplicas(ctx context.Context, t Tenant, r DeployRequest, cfg
 		}
 	}
 	return n, nil
+}
+
+// checkReplicaName refuses a deploy of a workload that is named like a
+// replica ("<x>--r<n>", replicaname.Group) and is not one.
+//
+// hostd finds the workload whose R2 blobs a replica shares from the
+// replica's name alone (hostd/r2.go r2Group), while a bucket's index, the
+// other stores and the secrets follow the deployment record
+// (replicaGroupOf). A workload of its own called "web--r2" would keep its
+// bucket's index to itself and write its bytes under web's blob prefix
+// (#348, ledger H-r2group). So such a name belongs to replicas: both sides
+// read it with replicaname.Group, and for every name a deploy accepts they
+// agree.
+//
+// A workload deployed under such a name before this check is not renamed:
+// while it is live it keeps deploying.
+func (m *Mgmt) checkReplicaName(ctx context.Context, r DeployRequest) error {
+	g, ok := replicaname.Group(r.Workload)
+	if !ok {
+		return nil
+	}
+	if rc := r.replica; rc != nil && rc.index > 0 && r.Workload == ReplicaName(rc.group, rc.index) {
+		return nil // a replica, deployed through its workload
+	}
+	d, err := m.latestDeployment(ctx, r.TenantID, r.Workload)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	if err == nil && d.StoppedAt == 0 { // live under this name
+		of := replicaGroup(d.Namespaces)
+		if of == "" {
+			return nil // a workload from before this check
+		}
+		return errf(409, "replica_conflict", "%q is replica %d of workload %q; deploy %q instead (tailworks.jsonc \"replicas\")",
+			r.Workload, replicaIndex(of, r.Workload)+1, of, of)
+	}
+	if pc := r.preview; pc != nil && pc.of != "" {
+		return errf(409, "replica_conflict", "the preview would be the workload %q, and a name ending in %s<n> belongs to the replicas of a workload (here %q); pick another --preview-alias",
+			r.Workload, replicaname.Sep, g)
+	}
+	return errf(409, "replica_conflict", "%q is named like a replica of %q: a name ending in %s<n> (n ≥ 2) belongs to a workload's replicas (tailworks.jsonc \"replicas\"); rename the workload",
+		r.Workload, g, replicaname.Sep)
 }
 
 func hasWorkloadNode(classes []ClassConfig) bool {

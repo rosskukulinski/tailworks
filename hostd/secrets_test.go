@@ -32,7 +32,10 @@ func putSecret(t *testing.T, e *hostdtest.Env, workload, name, value string) {
 // Object, override a wrangler var of the same name, are fetched once per
 // deploy through the lease-fenced grant, and are written only inside the
 // instance directory.
-func TestWorkerSecrets(t *testing.T) { testWorkerSecrets(t, hostdtest.BackendFake) }
+func TestWorkerSecrets(t *testing.T) {
+	t.Parallel()
+	testWorkerSecrets(t, hostdtest.BackendFake)
+}
 
 // testWorkerSecrets is TestWorkerSecrets against backend (realmgmt_test.go).
 func testWorkerSecrets(t *testing.T, backend string) {
@@ -113,6 +116,7 @@ func testWorkerSecrets(t *testing.T, backend string) {
 // exec-time environment (on macOS any same-user process can read that), and
 // the preload deletes its file once it has read it.
 func TestNodeSecrets(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("short")
 	}

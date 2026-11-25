@@ -50,10 +50,16 @@ type Hooks interface {
 	// SetHeartbeatsDown answers the host's heartbeats 503 store_unavailable
 	// (mgmt partitioned from this host) while down.
 	SetHeartbeatsDown(down bool)
+	// DelayHeartbeat answers the host's next heartbeat only after d (a slow
+	// mgmt, or a loaded host: the heartbeat succeeds, late).
+	DelayHeartbeat(d time.Duration)
 	// QueueClaims counts messages the host claimed from the queue.
 	QueueClaims(tenantID, queue string) int
 	// QueueBacklog is the queue's backlog (-1: no such queue).
 	QueueBacklog(tenantID, queue string) int
+	// SetReadyFault delays (and optionally fails) the host's ready reports
+	// until reset with the zero value (issue #331).
+	SetReadyFault(f fakemgmt.ReadyFault)
 }
 
 var _ Hooks = (*fakemgmt.Server)(nil)
@@ -172,7 +178,10 @@ func fakeTailscaleAPI(t testing.TB) *httptest.Server {
 			w.WriteHeader(200)
 		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/acl"):
 			w.Header().Set("ETag", `"p1"`)
-			w.Write([]byte(`{"tagOwners": {"tag:ttest": ["autogroup:admin"]}}`))
+			// The grant is the one the hostd tests' testcontrol hands every
+			// node (startSuite), so spawns may delegate it (CheckSpawnCaps).
+			w.Write([]byte(`{"tagOwners": {"tag:ttest": ["autogroup:admin"]},
+				"grants": [{"src": ["tag:ttest"], "dst": ["tag:ttest"], "app": {"example.com/cap/mcp": [{"tools": ["lookup_order"]}]}}]}`))
 		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/devices"):
 			json.NewEncoder(w).Encode(map[string]any{"devices": []any{}})
 		default:
@@ -192,7 +201,16 @@ type realHooks struct {
 	appends int
 	grants  int
 	down    bool
+	hbDelay time.Duration  // the next heartbeat's delay (DelayHeartbeat)
 	claims  map[string]int // tenantID|queue → messages claimed
+
+	readyFault fakemgmt.ReadyFault // SetReadyFault
+}
+
+func (k *realHooks) SetReadyFault(f fakemgmt.ReadyFault) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.readyFault = f
 }
 
 func (k *realHooks) StoreAppends() int {
@@ -211,6 +229,12 @@ func (k *realHooks) SetHeartbeatsDown(down bool) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	k.down = down
+}
+
+func (k *realHooks) DelayHeartbeat(d time.Duration) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.hbDelay = d
 }
 
 func (k *realHooks) QueueClaims(tenantID, queue string) int {
@@ -237,13 +261,24 @@ func (k *realHooks) wrap(h http.Handler) http.Handler {
 		switch {
 		case r.Method == "PUT" && len(p) == 4 && p[1] == "hosts" && last == "status":
 			k.mu.Lock()
-			down := k.down
+			down, delay := k.down, k.hbDelay
+			k.hbDelay = 0
 			k.mu.Unlock()
+			if delay > 0 {
+				time.Sleep(delay)
+			}
 			if down {
 				w.Header().Set("Content-Type", "application/json")
 				w.Header().Set("Tw-Error", "store_unavailable")
 				w.WriteHeader(503)
 				w.Write([]byte(`{"code":"store_unavailable","message":"mgmt is partitioned from this host (test)"}`))
+				return
+			}
+		case r.Method == "PATCH" && len(p) == 3 && p[1] == "objects": // a ready report
+			k.mu.Lock()
+			f := k.readyFault
+			k.mu.Unlock()
+			if f.Apply(w) {
 				return
 			}
 		case r.Method == "POST" && last == "journal", r.Method == "POST" && last == "secret-grants":

@@ -15,6 +15,7 @@ const otlpToken = "Bearer otlp-s3cret-0123456789"
 // OTLP export. Header values go to custody only: never returned, logged
 // or audited.
 func TestTelemetryConfig(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	c := e.c
 	var tn struct{ TenantID string }
@@ -77,6 +78,7 @@ func TestTelemetryConfig(t *testing.T) {
 // the host holding the workload's lease at its epoch; the release is
 // audited once per host, workload and config version.
 func TestTelemetryRelease(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	c, h1, h2 := e.c, e.asHost("h1"), e.asHost("h2")
 	var tn struct{ TenantID string }
@@ -127,6 +129,7 @@ func TestTelemetryRelease(t *testing.T) {
 // (any other caller, tenant code included, is not_admin); only hosts take
 // a grant.
 func TestTelemetryRoles(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	var tn struct{ TenantID string }
 	e.c.ok("POST", "/v1/tenants", map[string]any{"tailnet": "t.ts.net", "mintMode": "oauth", "oauthClientFile": e.keyFile}, &tn)

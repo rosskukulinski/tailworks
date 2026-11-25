@@ -10,6 +10,7 @@ import (
 )
 
 func TestApplySecrets(t *testing.T) {
+	t.Parallel()
 	app := &bundle.App{Name: "w"}
 	if got, err := applySecrets(app, bundle.TierProcess, "w", nil); err != nil || got != app {
 		t.Fatalf("no secrets: %v %v", got, err)

@@ -89,7 +89,10 @@ func kvJournal(e *hostdtest.Env, workload, name string) mgmtapi.StoreJournalPage
 // get types, metadata, TTL validation and expiry (with the alarm that
 // journals the delete), list with prefix/limit/cursor, bulk get, limits,
 // namespace sharing between bindings, and one journal entry per write.
-func TestWorkersKV(t *testing.T) { testWorkersKV(t, hostdtest.BackendFake) }
+func TestWorkersKV(t *testing.T) {
+	t.Parallel()
+	testWorkersKV(t, hostdtest.BackendFake)
+}
 
 // testWorkersKV is TestWorkersKV against backend (realmgmt_test.go).
 func testWorkersKV(t *testing.T, backend string) {
@@ -153,42 +156,63 @@ func testWorkersKV(t *testing.T, backend string) {
 		eq(t, "ttl/a metadata", a["metadata"], map[string]any{"k": 1})
 		eq(t, "ttl/b", b, map[string]any{"name": "ttl/b", "expiration": abs})
 
-		// Expiry: an admin writes a key that expires in 3 s straight into
-		// the journal (the 60 s minimum is the binding's, as on
-		// Cloudflare). The worker's next write conflicts and catches up.
-		p := kvJournal(e, "kv", "main")
-		exp := time.Now().Unix() + 3
-		var ar mgmtapi.StoreAppendResult
-		if err := e.Mgmt.Do(context.Background(), "POST", "/v1/tenants/"+e.TenantID+"/workloads/kv/stores/kv/main/journal", map[string]any{
-			"after": p.Head, "incarnation": p.Incarnation,
-			"entries": []any{map[string]any{"ckey": "ttl/soon", "data": kvwire.Encode(kvwire.Header{Key: "ttl/soon", Expiration: exp}, []byte("brief"))}},
-		}, &ar); err != nil {
-			t.Fatal(err)
+		// Expiry: an admin writes a key that expires in a few seconds
+		// straight into the journal (the 60 s minimum is the binding's, as
+		// on Cloudflare). The worker's next write conflicts and catches up.
+		//
+		// The object's alarm journals the delete once the key expires, so
+		// every host (and a catch-up from scratch) drops the key too.
+		dropped := func() {
+			t.Helper()
+			deadline := time.Now().Add(10 * time.Second)
+			for {
+				items, err := kvFold(kvJournal(e, "kv", "main"), 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, ok := items["ttl/soon"]; !ok {
+					return
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("the expired key was not deleted from the journal")
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
 		}
-		c.must(W, "KV", "put", "poke", "1")
-		eq(t, "before expiry", c.must(W, "KV", "get", "ttl/soon"), "brief")
+		// A null read before expiry is a bug only if the read finished
+		// before the key expired. On a loaded runner the append, the
+		// catch-up and the read can outlast the window (expiration is whole
+		// seconds: "3 s" is 2 to 3 s). Then, once the alarm has journalled
+		// the delete, the key is written again with a wider window (#392).
+		var exp int64
+		for window := int64(3); ; window *= 2 {
+			p := kvJournal(e, "kv", "main")
+			exp = time.Now().Unix() + window
+			var ar mgmtapi.StoreAppendResult
+			if err := e.Mgmt.Do(context.Background(), "POST", "/v1/tenants/"+e.TenantID+"/workloads/kv/stores/kv/main/journal", map[string]any{
+				"after": p.Head, "incarnation": p.Incarnation,
+				"entries": []any{map[string]any{"ckey": "ttl/soon", "data": kvwire.Encode(kvwire.Header{Key: "ttl/soon", Expiration: exp}, []byte("brief"))}},
+			}, &ar); err != nil {
+				t.Fatal(err)
+			}
+			c.must(W, "KV", "put", "poke", "1")
+			got := c.must(W, "KV", "get", "ttl/soon")
+			if got == "brief" {
+				break
+			}
+			if time.Now().Unix() < exp || window >= 24 {
+				eq(t, "before expiry", got, "brief")
+			}
+			t.Logf("the read finished after the key's %d s expiry; again with a wider window", window)
+			dropped()
+		}
 		time.Sleep(time.Until(time.Unix(exp, 0)) + 1100*time.Millisecond)
 		eq(t, "after expiry", c.must(W, "KV", "get", "ttl/soon"), nil)
 		eq(t, "after expiry, facet", c.must(F, "KV", "get", "ttl/soon"), nil)
 		if names := c.must(W, "KV", "listAll", map[string]any{"prefix": "ttl/"}).(map[string]any)["names"]; fmt.Sprint(names) != "[ttl/a ttl/b]" {
 			t.Fatalf("list after expiry: %v", names)
 		}
-		// The object's alarm journals the delete, so every host (and a
-		// catch-up from scratch) drops the key too.
-		deadline := time.Now().Add(10 * time.Second)
-		for {
-			items, err := kvFold(kvJournal(e, "kv", "main"), 0)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, ok := items["ttl/soon"]; !ok {
-				break
-			}
-			if time.Now().After(deadline) {
-				t.Fatal("the expired key was not deleted from the journal")
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
+		dropped()
 	})
 
 	t.Run("ListPaging", func(t *testing.T) {

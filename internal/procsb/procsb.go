@@ -111,8 +111,16 @@ func Load(path string) (*Profile, error) {
 }
 
 // Command runs bin args under the profile at path (launched by launcher).
+//
+// The child's environment is exactly what the caller puts in Env: the
+// launcher forwards the environment it is started with and adds nothing.
+// It starts empty, not nil (nil would hand the launcher, and so the child,
+// the caller's whole environment, #336); hostd adds what the workload needs
+// (hostd.WorkerdEnv, the Node tier's list).
 func Command(launcher, profile, bin string, args ...string) *exec.Cmd {
-	return exec.Command(launcher, append([]string{ExecArg, "-f", profile, "--", bin}, args...)...)
+	cmd := exec.Command(launcher, append([]string{ExecArg, "-f", profile, "--", bin}, args...)...)
+	cmd.Env = []string{}
+	return cmd
 }
 
 // Probe ops (ProbeCommand): each exits 0 if the operation succeeded and 3

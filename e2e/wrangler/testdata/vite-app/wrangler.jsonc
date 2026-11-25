@@ -1,0 +1,10 @@
+// A @cloudflare/vite-plugin project after `vite build` (issue #301): this
+// config's main only builds through Vite, and its assets directory is not
+// where the client went. .wrangler/deploy/config.json points tw at the
+// config the build wrote, build/server/wrangler.json.
+{
+  "name": "vite-app",
+  "main": "./src/index.ts",
+  "compatibility_date": "2025-04-01",
+  "assets": { "directory": "./dist", "binding": "ASSETS" }
+}

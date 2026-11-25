@@ -324,6 +324,9 @@ type Options struct {
 	Version string
 	// Remove plans `tw agent remove` instead of setup.
 	Remove bool
+
+	// Refresh only updates what tailworks already wrote (refresh.go).
+	Refresh bool
 }
 
 // target is one place to write, shared by the agents that read it.
@@ -377,7 +380,7 @@ func MakePlan(env Env, opts Options) (*Plan, error) {
 		if err != nil {
 			return nil, err
 		}
-		p.Changes = append(p.Changes, cs...)
+		p.Changes = append(p.Changes, refreshOnly(cs, opts)...)
 	}
 	return p, nil
 }
@@ -453,6 +456,10 @@ func planBlock(t *target, skills []Skill, opts Options) (Change, error) {
 			c.content = []byte(rest) // the file stays, without the block
 			c.Note = "removes the tailworks block; the rest of the file stays"
 		}
+		return c, nil
+	}
+	if opts.Refresh && !has {
+		c.Action = Skip // refresh.go: no tailworks block to update
 		return c, nil
 	}
 	block := renderBlock(skills, opts.Version)

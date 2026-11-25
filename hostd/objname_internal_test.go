@@ -11,6 +11,7 @@ import (
 // to create it. Names that already exist are not backfilled: they keep
 // working (and render through internal/termsafe).
 func TestObjectNameControlsRefused(t *testing.T) {
+	t.Parallel()
 	h, inst, creates := admitKillHost(t)
 	as := map[string]any{"class": "Room", "name": "parent"}
 	bad := []string{"a\x1b[31mb", "a\x00", "a\r\nb", "a\tb", "a\x7f", "a\u009bb", "a\u202eb", "a\u2066b"}

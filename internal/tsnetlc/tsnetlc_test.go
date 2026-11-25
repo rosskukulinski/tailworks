@@ -2,7 +2,9 @@ package tsnetlc_test
 
 import (
 	"context"
+	"net"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,21 +14,74 @@ import (
 	"tailscale.com/tsnet"
 )
 
-const dialDelay = 200 * time.Millisecond
+// wait is how long stray waits for each step before it gives up.
+const wait = 30 * time.Second
 
 // stray leaves the kind of LocalAPI connection that held Close on real
 // hosts: a connection the transport dialed for a request that no longer
-// needs it (here: one given up on during a slow dial) is pooled with no
+// needs it (here: one given up on during its dial) is pooled with no
 // request on it, so the server sees it as new, "active" for 5 s.
+//
+// Each step waits on a signal, not a timer (#304). It used to give the
+// request a 50 ms deadline, slow the dial by 200 ms and sleep 400 ms. Under
+// load the transport's dial goroutine could start after the deadline, and
+// net/http then skips a dial whose request is gone, so there was no stray
+// connection and plain ts.Close returned at once. Now the dial is held
+// until the request has given up, and stray returns once the dial has
+// succeeded. A successful dial is a server-side fact: memnet's Dial returns
+// only once the LocalAPI server's Accept has taken the connection, and
+// http.Server tracks an accepted connection before Shutdown can return. If
+// the transport pools the connection only after tsnetlc.Close's
+// CloseIdleConnections, it closes it instead (that call makes the transport
+// close newly idle connections).
 func stray(t *testing.T, ts *tsnet.Server, lc *local.Client) {
 	t.Helper()
 	tsnetlc.CloseIdle(ts) // the next request dials
-	ctx, cancel := context.WithTimeout(context.Background(), dialDelay/4)
+	started, release, dialed := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	var once sync.Once
+	tsnetlc.SetDialHook(func(dial func() (net.Conn, error)) (net.Conn, error) {
+		held := false
+		once.Do(func() { held = true })
+		if !held {
+			return dial()
+		}
+		close(started)
+		<-release
+		c, err := dial()
+		dialed <- err
+		return c, err
+	})
+	defer tsnetlc.SetDialHook(nil)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if _, err := lc.StatusWithoutPeers(ctx); err == nil {
-		t.Fatal("the request outlived its context")
+	reqErr := make(chan error, 1)
+	go func() {
+		_, err := lc.StatusWithoutPeers(ctx)
+		reqErr <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(wait):
+		t.Fatal("the request never dialed")
 	}
-	time.Sleep(2 * dialDelay) // the dial completes, into the idle pool
+	cancel()
+	select {
+	case err := <-reqErr:
+		if err == nil {
+			t.Fatal("the request outlived its context")
+		}
+	case <-time.After(wait):
+		t.Fatal("the request did not give up on its context")
+	}
+	close(release)
+	select {
+	case err := <-dialed:
+		if err != nil {
+			t.Fatalf("the given-up request's dial: %v", err)
+		}
+	case <-time.After(wait):
+		t.Fatal("the given-up request's dial never completed")
+	}
 }
 
 // TestCloseDrainsLocalAPIConns (#245): tsnetlc.Close closes a node whose
@@ -40,8 +95,6 @@ func TestCloseDrainsLocalAPIConns(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(ctl.Close)
-	tsnetlc.SetDialDelay(dialDelay)
-	t.Cleanup(func() { tsnetlc.SetDialDelay(0) })
 	for _, c := range []struct {
 		name     string
 		close    func(*tsnet.Server) error

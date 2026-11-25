@@ -53,6 +53,7 @@ func entry(ckey, data string) map[string]any {
 // (store_conflict otherwise), reads back everything after a seq, a ckey
 // supersedes earlier entries (compaction), and the data is sealed at rest.
 func TestStoresJournal(t *testing.T) {
+	t.Parallel()
 	s := newStoreEnv(t)
 	h1 := s.e.asHost("h1")
 
@@ -117,6 +118,7 @@ func TestStoresJournal(t *testing.T) {
 // reads or writes; after the lease moves, the old holder is refused and the
 // new one reads everything.
 func TestStoresFence(t *testing.T) {
+	t.Parallel()
 	s := newStoreEnv(t)
 	h1, h2 := s.e.asHost("h1"), s.e.asHost("h2")
 	h2.ok("PUT", "/v1/hosts/h2", map[string]any{"capacityNodes": 100, "tiers": []string{"process"}}, nil)
@@ -147,6 +149,7 @@ func TestStoresFence(t *testing.T) {
 // object holding the deleted incarnation gets store_conflict, and the next
 // write from 0 starts a new incarnation.
 func TestStoresLifecycle(t *testing.T) {
+	t.Parallel()
 	s := newStoreEnv(t)
 	c, h1 := s.e.c, s.e.asHost("h1")
 	base := "/v1/tenants/" + s.tenant + "/workloads/support/stores"
@@ -198,6 +201,7 @@ func TestStoresLifecycle(t *testing.T) {
 
 // TestStoresLimits: entry, append and ckey sizes.
 func TestStoresLimits(t *testing.T) {
+	t.Parallel()
 	s := newStoreEnv(t)
 	h1 := s.e.asHost("h1")
 	big := strings.Repeat("x", StoreEntryMaxBytes+1)

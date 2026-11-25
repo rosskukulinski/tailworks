@@ -43,7 +43,7 @@ func checkDevPort(port int, warn io.Writer) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fail("bad_request", fmt.Sprintf("port %d is in use on 127.0.0.1 (another `tw dev`, or `wrangler dev`, which uses 8787 too?)", port), err.Error()).
-			withFix(fmt.Sprintf("tw dev --port %d", port+1))
+			withFix(fmt.Sprintf("tw dev --port %d", port+1), "or tw dev --port 0 (any free port)")
 	}
 	ln.Close()
 	if ln6, err := net.Listen("tcp", net.JoinHostPort("::1", strconv.Itoa(port))); err == nil {

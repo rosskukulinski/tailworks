@@ -27,6 +27,10 @@ type appOpts struct {
 
 	// SourceMap: deploy follows upload_source_maps; tw dev sets it (sourcemap.go).
 	SourceMap sourceMapMode
+
+	// DevBuild: tw dev runs build.command itself, only when build.watch_dir
+	// changes (buildcmd.go), so a.build doesn't.
+	DevBuild bool
 }
 
 // builder names the bundler for messages and warnings.
@@ -57,6 +61,19 @@ func (e errNoWrangler) Error() string { return "no wrangler config in " + e.dir 
 // for an environment "<base>-<env>" unless the env sets its own name.
 func (a *app) loadWrangler(twName string) (string, error) {
 	file, shadowed := findWranglerConfig(a.Dir)
+	redirect, auxNotes, err := redirectedWranglerConfig(a.Dir) // viteredirect.go
+	if err != nil {
+		return "", err
+	}
+	if redirect != "" {
+		if a.Opts.Env != "" {
+			return "", fail("bad_request", fmt.Sprintf("--env %s: %s is the config `vite build` already wrote for one environment (%s)", a.Opts.Env, redirect, viteDeployConfig)).
+				withFix("CLOUDFLARE_ENV="+a.Opts.Env+" npm run build, then tw deploy without --env", "or delete "+viteDeployConfig+" to use the project's own wrangler config")
+		}
+		file, shadowed = redirect, nil
+		a.Warnings = append(a.Warnings, fmt.Sprintf("using %s, the config `vite build` wrote (%s), as wrangler deploy does", file, viteDeployConfig))
+		a.Warnings = append(a.Warnings, auxNotes...)
+	}
 	if file == "" {
 		return "", errNoWrangler{a.Dir}
 	}
@@ -68,20 +85,19 @@ func (a *app) loadWrangler(twName string) (string, error) {
 	if err != nil {
 		return "", fail("bad_request", file+": "+err.Error())
 	}
+	a.WranglerName, _ = cfg["name"].(string)
+	rebaseWranglerPaths(cfg, filepath.Dir(file)) // viteredirect.go: "." unless redirected
 	w, explicit, notes, err := applyWranglerEnv(cfg, a.Opts.Env, file)
 	if err != nil {
 		return "", err
 	}
 	a.Wrangler = w
 	a.Warnings = append(a.Warnings, notes...)
-	a.Warnings = append(a.Warnings, wranglerWarnings(file, w, a.Opts.builder())...)
-	base := twName
-	if base == "" {
-		base, _ = cfg["name"].(string)
+	a.Warnings = append(a.Warnings, wranglerWarnings(file, w, a.builder())...)
+	if err := a.detectPages(); err != nil { // pages.go
+		return "", err
 	}
-	if base == "" {
-		base = filepath.Base(a.Dir)
-	}
+	base := appBaseName(twName, a.WranglerName, a.Dir) // appworkload.go
 	switch {
 	case a.Opts.Env == "":
 		return base, nil
@@ -103,11 +119,19 @@ func (a *app) printWarnings(w io.Writer) {
 // define, alias, rules, minify, keep_names, jsx_* and tsconfig.
 func (a *app) buildEsbuild(out string, np []string) (files map[string][]byte, types map[string]string, js int, err error) {
 	o := esbundle.Options{Dir: a.Dir, Main: wranglerMain(a.Wrangler), Outfile: filepath.Join(out, "index.js"), NodePaths: np}
+	if a.Pages.hasCode() {
+		if o.Main, err = a.pagesEntry(out); err != nil { // pages.go
+			return nil, nil, 0, err
+		}
+	}
 	if err := esbuildWranglerOptions(a.Wrangler, &o); err != nil {
 		return nil, nil, 0, fail("bad_request", a.WranglerFile+": "+err.Error())
 	}
 	o.SourceMap, o.SourcesContent = a.wantSourceMap() // sourcemap.go
 	r, err := esbundle.BuildApp(o)
+	if ee := emailImportFailure(err); ee != nil { // emailimport.go
+		return nil, nil, 0, ee
+	}
 	if err != nil {
 		return nil, nil, 0, withBundleFix(fail("build_failed", "esbuild failed for "+a.Dir, strings.Split(strings.TrimSpace(err.Error()), "\n")...), err.Error()) // sourcehints.go
 	}
@@ -151,6 +175,25 @@ func wranglerBin(dir string) (string, error) {
 		withFix("npm install --save-dev wrangler", "or bundle with tailworks' built-in esbuild: drop --wrangler")
 }
 
+// wranglerEnv is the environment wrangler runs in. A project's own
+// wrangler (node_modules/.bin) gets that directory first on PATH, as under
+// `npm run deploy`, so a "build" command that calls a locally installed
+// tool (esbuild, tsc) finds it.
+func wranglerEnv(bin string) []string {
+	env := os.Environ()
+	dir := filepath.Dir(bin)
+	if filepath.Base(dir) != ".bin" || filepath.Base(filepath.Dir(dir)) != "node_modules" {
+		return env
+	}
+	for i, kv := range env {
+		if v, ok := strings.CutPrefix(kv, "PATH="); ok {
+			env[i] = "PATH=" + dir + string(os.PathListSeparator) + v
+			return env
+		}
+	}
+	return append(env, "PATH="+dir)
+}
+
 // runWrangler runs `wrangler deploy --dry-run --outdir <outdir>` in the
 // app dir: wrangler bundles locally and sends nothing to Cloudflare.
 func (a *app) runWrangler(outdir string) error {
@@ -163,7 +206,7 @@ func (a *app) runWrangler(outdir string) error {
 	args := []string{"deploy", "--dry-run", "--outdir", outdir, "--config", a.WranglerFile, "--env=" + a.Opts.Env}
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = a.Dir
-	cmd.Env = append(os.Environ(), "WRANGLER_SEND_METRICS=false")
+	cmd.Env = append(wranglerEnv(bin), "WRANGLER_SEND_METRICS=false")
 	if b, err := cmd.CombinedOutput(); err != nil {
 		return fail("build_failed", "wrangler "+strings.Join(args, " ")+" failed in "+a.Dir, tailLines(string(b), 20)...)
 	}
@@ -279,6 +322,9 @@ func readWranglerOut(outdir, main string, userRules []esbundle.Rule) (files map[
 // packWorkerd adds tw-bundle.json, tailworks.jsonc and the resolved wrangler
 // config (as wrangler.jsonc, with --var overrides) to files and packs them.
 func (a *app) packWorkerd(files map[string][]byte, main string, types map[string]string, vars map[string]string) ([]byte, error) {
+	if err := a.addAssets(files); err != nil { // assets.go
+		return nil, err
+	}
 	tb := map[string]any{"main": main}
 	if len(types) > 0 {
 		tb["modules"] = types
@@ -301,5 +347,9 @@ func (a *app) packWorkerd(files map[string][]byte, main string, types map[string
 		w["vars"] = nv
 	}
 	files["wrangler.jsonc"], _ = json.MarshalIndent(w, "", "  ")
-	return bundle.Pack(files)
+	tb2, err := bundle.Pack(files)
+	if err != nil {
+		return nil, err
+	}
+	return tb2, checkBundleSize(tb2)
 }

@@ -111,13 +111,15 @@ func TestInternetEgress(t *testing.T) {
 	inet.answer("api.example.com", "203.0.113.10")
 	inet.answer("also.example.com", "203.0.113.11")
 	inet.answer("rebind.example.com", "203.0.113.12", "10.0.0.5") // one private answer refuses the name
+	inet.answer("smtp.example.com", "203.0.113.20")
 	policies := map[string]netd.InternetPolicy{
-		"b": {Off: true},                          // tailnet.egress.internet: false
-		"c": {Allow: []string{"api.example.com"}}, // an allowlist
+		"b": {Off: true},                                                                      // tailnet.egress.internet: false
+		"c": {Allow: []string{"api.example.com"}},                                             // an allowlist
+		"d": {Allow: []string{"api.example.com", "smtp.example.com:25", "203.0.113.0/24:25"}}, // the port policy's override
 	}
 	e := startEnvWith(t, func(c *netd.Config) {
 		c.Internet = inet.config(func(id string) netd.InternetPolicy { return policies[id] })
-	}, "a", "b", "c")
+	}, "a", "b", "c", "d")
 	hostIP := firstHostIP(t)
 
 	fetch := func(t *testing.T, obj, u string) (int, string, netd.Error, []byte) {
@@ -312,6 +314,77 @@ func TestInternetEgress(t *testing.T) {
 		_, err = e.reg.DialEgress(context.Background(), "a", "169.254.169.254:80")
 		if ne, ok := netd.AsError(err); !ok || ne.Code != netd.CodeForbiddenDestination {
 			t.Fatalf("CONNECT to metadata: %v", err)
+		}
+		assertNoBadDial(t)
+	})
+
+	// The default port policy (ADR-052 follow-up, issue #339): TCP 25 to a
+	// public address is refused on every internet path that names a port,
+	// before DNS and before any dial, unless the workload's allowlist names
+	// the destination with that port. Submission ports are untouched.
+	t.Run("Port25Refused", func(t *testing.T) {
+		rBefore, before, _, _ := inet.snapshot()
+		for _, dst := range []string{"smtp.example.com:25", "203.0.113.20:25"} {
+			_, err := e.reg.DialEgress(context.Background(), "a", dst) // connect(), node:net, CONNECT
+			ne, ok := netd.AsError(err)
+			if !ok || ne.Code != netd.CodeInternetPortRefused || ne.Object != "a" || ne.Destination != dst {
+				t.Fatalf("connect(%s): %v, want %s", dst, err, netd.CodeInternetPortRefused)
+			}
+			if !strings.Contains(ne.Detail, "port 25") || !strings.Contains(ne.Detail, "tailnet.egress.internet") || !strings.Contains(ne.Detail, netd.RecipeInternetAPI) {
+				t.Errorf("connect(%s): detail %q should name the port, the setting and the recipe", dst, ne.Detail)
+			}
+			// On the allowlist (object c), but the entry doesn't name the port.
+			if _, err := e.reg.DialEgress(context.Background(), "c", "api.example.com:25"); err == nil || !strings.Contains(err.Error(), netd.CodeInternetPortRefused) {
+				t.Fatalf("connect(api.example.com:25) from an allowlisted object: %v", err)
+			}
+		}
+		// fetch() to port 25 takes the same path.
+		code, te, er, b := fetch(t, "a", "http://smtp.example.com:25/")
+		if code != 403 || te != netd.CodeInternetPortRefused || er.Object != "a" {
+			t.Fatalf("fetch(http://smtp.example.com:25/): got %d %q %s", code, te, b)
+		}
+		if resolved, after, _, _ := inet.snapshot(); len(after) != len(before) || len(resolved) != len(rBefore) {
+			t.Fatalf("a refused port 25 flow dialled or resolved: dialled %v resolved %v", after[len(before):], resolved[len(rBefore):])
+		}
+	})
+
+	t.Run("SubmissionPortsProceed", func(t *testing.T) {
+		for _, port := range []string{"587", "465"} {
+			c, err := e.reg.DialEgress(context.Background(), "a", "smtp.example.com:"+port)
+			if err != nil {
+				t.Fatalf("connect(smtp.example.com:%s): %v", port, err)
+			}
+			c.Close()
+			if _, dialled, _, _ := inet.snapshot(); !contains(dialled, "203.0.113.20:"+port) {
+				t.Fatalf("dialled %v, want the checked address 203.0.113.20:%s", dialled, port)
+			}
+		}
+		assertNoBadDial(t)
+	})
+
+	t.Run("Port25Override", func(t *testing.T) {
+		// Object d lists "smtp.example.com:25" and "203.0.113.0/24:25".
+		for _, dst := range []string{"smtp.example.com:25", "203.0.113.20:25"} {
+			c, err := e.reg.DialEgress(context.Background(), "d", dst)
+			if err != nil {
+				t.Fatalf("connect(%s) with the port listed: %v", dst, err)
+			}
+			c.Close()
+		}
+		if _, dialled, _, _ := inet.snapshot(); !contains(dialled, "203.0.113.20:25") {
+			t.Fatalf("dialled %v, want 203.0.113.20:25", dialled)
+		}
+		if code, te, _, b := fetch(t, "d", "http://smtp.example.com:25/"); code != 200 || te != "" {
+			t.Fatalf("fetch(http://smtp.example.com:25/) with the port listed: got %d %q %s", code, te, b)
+		}
+		// An entry that names a port covers that port only.
+		_, err := e.reg.DialEgress(context.Background(), "d", "smtp.example.com:587")
+		if ne, ok := netd.AsError(err); !ok || ne.Code != netd.CodeInternetEgressUnavailable || !strings.Contains(ne.Detail, "another port") {
+			t.Fatalf("connect(smtp.example.com:587) with only :25 listed: %v", err)
+		}
+		// An entry without a port still doesn't allow 25.
+		if _, err := e.reg.DialEgress(context.Background(), "d", "api.example.com:25"); err == nil || !strings.Contains(err.Error(), netd.CodeInternetPortRefused) {
+			t.Fatalf("connect(api.example.com:25) with api.example.com listed without a port: %v", err)
 		}
 		assertNoBadDial(t)
 	})

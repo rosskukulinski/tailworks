@@ -33,6 +33,7 @@ func tarGz(t *testing.T, files map[string]string) []byte {
 }
 
 func TestExtractTarGzRefusesEscapes(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	for name, files := range map[string]map[string]string{
 		"dotdot":   {"../evil": "x"},
@@ -53,6 +54,7 @@ func TestExtractTarGzRefusesEscapes(t *testing.T) {
 
 // installArtifact runs the tarball's install.sh into the prefix.
 func TestSelfUpgradeInstalls(t *testing.T) {
+	t.Parallel()
 	prefix := t.TempDir()
 	pub, priv := testReleaseKey(t)
 	tgz := tarGz(t, signRelease(t, priv, "tailworks-0.2.0-linux-amd64", map[string]string{
@@ -86,6 +88,7 @@ func TestSelfUpgradeInstalls(t *testing.T) {
 // approvals.json: records from before versioning load; a newer version is
 // not loaded; saves stamp "v":1.
 func TestApprovalsFormat(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	p := filepath.Join(dir, "approvals.json")
 	os.WriteFile(p, []byte(`[{"tenantID":"t","workload":"w","workflow":"f","instance":"i","step":"s","type":"x","status":"pending","requestedAt":"2026-11-15T00:00:00Z"}]`), 0o600)
@@ -137,6 +140,7 @@ func tarGzEntries(t *testing.T, es []tarEntry) []byte {
 // check, so hostile tarballs must not write, or leave a link, outside dir
 // (the PR #79 review's chain: a -> ., a/b -> .., then b/evil).
 func TestExtractTarGzSymlinkEscapes(t *testing.T) {
+	t.Parallel()
 	sym := func(name, link string) tarEntry { return tarEntry{name: name, link: link, typ: tar.TypeSymlink} }
 	reg := func(name string) tarEntry { return tarEntry{name: name, body: "x", typ: tar.TypeReg} }
 	for name, es := range map[string][]tarEntry{
@@ -181,6 +185,7 @@ func TestExtractTarGzSymlinkEscapes(t *testing.T) {
 // version (an older one with a known bug, say) under the ordered version's
 // name is refused.
 func TestSelfUpgradeRefusesOtherVersion(t *testing.T) {
+	t.Parallel()
 	prefix := t.TempDir()
 	pub, priv := testReleaseKey(t)
 	top := "tailworks-0.3.0-linux-amd64"

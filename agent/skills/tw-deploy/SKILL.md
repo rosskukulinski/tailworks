@@ -49,7 +49,11 @@ exact policy lines to add.
 
 1. Show the user the lines from `hint` and ask them to add them in the
    Tailscale admin console (Access controls). Don't edit the policy
-   yourself (see `tw-policy`).
+   yourself (see `tw-policy`). Run `tw deploy` with `--json`: then it
+   never asks and never writes the policy, it fails with the snippet. (On
+   a terminal, plain `tw deploy` asks the user y/N itself.) If the user
+   wants tailworks to write the lines, run `tw deploy --apply-policy
+   --yes --json` only after they agreed to the lines you showed them.
 2. When they say it's done, run `tw policy --json` (or `tw deploy --json`) again. Tailworks re-reads
    the policy every few seconds, so if the same `acl_denied` comes back
    right after they saved it, wait about 10 seconds and retry once more
@@ -65,13 +69,15 @@ Other deploy failures (`build_failed`, `deploy_failed`,
 
 <!-- tw-eval: inspect -->
 ```sh
-tw ls --json        # {"deployments": [...], "objects": [...]}: every deployment and every object's node
-tw status --json    # health of mgmt, the hosts and deployments
+tw ls --json        # {"deployments": [...], "objects": [...], "truncated": false}: running deployments and live objects (--all adds killed and stopped)tw status --json    # health of mgmt, the hosts and deployments
 ```
 
 Each object in `tw ls` is a Durable Object instance (or a workload)
 with its own node: `objectID`, `workload`, `namespace`, `objectName`,
 `status`, `tags`, `magicDNS` and `parent` (the object that spawned it).
+Give `tw ls` a workload name to list only that workload, its previews
+and its replicas. `"truncated": true` means more objects matched than
+were listed (`--limit 0` lists them all).
 
 ## Redeploy
 

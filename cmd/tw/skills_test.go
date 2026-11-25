@@ -55,6 +55,7 @@ func TestSkillCommandsExist(t *testing.T) {
 // `tw docs show` refs that resolve, and the eval steps the eval test
 // replays.
 func TestSkillsWellFormed(t *testing.T) {
+	t.Parallel()
 	nameRE := regexp.MustCompile(`^[a-z0-9-]{1,64}$`)
 	names := map[string]bool{}
 	for _, s := range twagent.Skills() {

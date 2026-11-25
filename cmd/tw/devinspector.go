@@ -7,6 +7,7 @@ package main
 // port is this proxy, which forwards to the active workerd's. It rewrites
 // workerd's /json discovery answers to point at itself, and passes the
 // DevTools WebSocket through (httputil.ReverseProxy handles the upgrade).
+// devinspectorguard.go decides who may connect and which targets exist.
 
 import (
 	"bytes"
@@ -52,19 +53,22 @@ func devInspectorHandler(outer string, target func() string) http.Handler {
 				return err
 			}
 			b = rewriteInspectorJSON(b, r.Request.URL.Host, outer)
+			if p := r.Request.URL.Path; p == "/json" || p == "/json/list" {
+				b = filterInspectorTargets(b, outer) // devinspectorguard.go
+			}
 			r.Body = io.NopCloser(bytes.NewReader(b))
 			r.ContentLength = int64(len(b))
 			r.Header.Set("Content-Length", strconv.Itoa(len(b)))
 			return nil
 		},
 	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return devInspectorGuard(outer, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if target() == "" {
 			http.Error(w, "tw dev: no workerd is running yet", http.StatusServiceUnavailable)
 			return
 		}
 		rp.ServeHTTP(w, r)
-	})
+	}))
 }
 
 // rewriteInspectorJSON points workerd's /json answers (webSocketDebuggerUrl,

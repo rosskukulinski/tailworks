@@ -1,0 +1,13 @@
+{
+  // e2e/dataplane fixture: one stateful workload with every data-plane
+  // primitive the loop checks, so one lease (and one fault) covers them all.
+  "name": "dp",
+  "tailnet": {
+    "tags": ["tag:ttest"],
+    "objects": {
+      "Lock": { "tags": ["tag:ttest"], "egress": "workload" },
+      "Pulse": { "tags": ["tag:ttest"], "egress": "workload" },
+      "Reg": { "tags": ["tag:ttest"], "egress": "workload" },
+    },
+  },
+}

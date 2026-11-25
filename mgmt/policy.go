@@ -25,6 +25,17 @@ type Policy struct {
 		Services map[string][]string `json:"services"`
 	} `json:"autoApprovers"`
 	NodeAttrs []NodeAttr `json:"nodeAttrs"`
+
+	// ACLs are the legacy "acls" rules, read only to tell whether people
+	// already reach a node (callergrant.go).
+	ACLs []ACL `json:"acls"`
+}
+
+// ACL is one legacy acls entry; Dst entries are "host:ports".
+type ACL struct {
+	Action string   `json:"action"`
+	Src    []string `json:"src"`
+	Dst    []string `json:"dst"`
 }
 
 // NodeAttr is one nodeAttrs entry. Attr values may be strings or objects

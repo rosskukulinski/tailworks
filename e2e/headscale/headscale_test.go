@@ -31,8 +31,9 @@ import (
 const TestTag = "tag:ttest"
 
 // workloadSnippet is a workload's policy on the Headscale profile: its
-// tags owned by tag:tw, the test client's tag, an IP grant and a grant
-// with an app capability (caps travel in grants only).
+// tags owned by tag:tw, the test client's tag, an IP grant, the caller
+// grant from autogroup:member and a grant with an app capability (caps
+// travel in grants only).
 func workloadSnippet() policy.Snippet {
 	s := policy.Headscale(policy.InfraSnippet(7474))
 	s.TagOwners["tag:tw-wl-hello"] = []string{"tag:tw"}
@@ -41,6 +42,8 @@ func workloadSnippet() policy.Snippet {
 	s.TagOwners[TestTag] = []string{"tag:tw"}
 	s.Grants = append(s.Grants,
 		map[string]any{"src": []string{TestTag}, "dst": []string{"tag:tw-wl-hello", "tag:tw-agent-support"}, "ip": []string{"tcp:80"}},
+		// The caller grant (#552): Headscale accepts autogroup:member as a source.
+		map[string]any{"src": []string{"autogroup:member"}, "dst": []string{"tag:tw-wl-hello"}, "ip": []string{"tcp:80"}},
 		map[string]any{"src": []string{"tag:tw-agent-support"}, "dst": []string{TestTag}, "ip": []string{"tcp:80"},
 			"app": map[string]any{"example.com/cap/mcp": []any{map[string]any{"tools": []string{"lookup_order"}, "limits": map[string]any{"refund": map[string]any{"maxUsd": 50}}}}}},
 	)
@@ -50,7 +53,7 @@ func workloadSnippet() policy.Snippet {
 func TestPolicyProfile(t *testing.T) {
 	hs := startServer(t)
 	ctx := ctxT(t, 2*time.Minute)
-	opts := policy.Options{Headscale: true, AllowTags: []string{TestTag}}
+	opts := policy.Options{Headscale: true, AllowTags: []string{TestTag}, AllowSrcs: []string{"autogroup:member"}}
 
 	// Applied to a server with no policy yet (read → merge → check → write).
 	want := workloadSnippet()
@@ -98,6 +101,7 @@ func TestPolicyProfile(t *testing.T) {
 	// validated by the real server.
 	rejected := map[string]string{
 		"autogroup:admin owner":  `"tagOwners": {"tag:tw-x": ["autogroup:admin", "tag:tw"]}`,
+		"autogroup:admin source": `"grants": [{"src": ["autogroup:admin"], "dst": ["tag:tw"], "ip": ["tcp:443"]}]`,
 		"funnel nodeAttr":        `"nodeAttrs": [{"target": ["tag:tw"], "attr": ["funnel"]}]`,
 		"svc: destination":       `"grants": [{"src": ["tag:tw"], "dst": ["svc:web"], "ip": ["tcp:443"]}]`,
 		"autoApprovers.services": `"autoApprovers": {"services": {"svc:web": ["tag:tw"]}}`,
@@ -127,7 +131,7 @@ func TestPolicyProfile(t *testing.T) {
 func TestNodeLifecycle(t *testing.T) {
 	hs := startServer(t)
 	ctx := ctxT(t, 4*time.Minute)
-	if _, err := policy.ApplyWith(ctx, hs.Client, workloadSnippet(), policy.Options{Headscale: true, AllowTags: []string{TestTag}}); err != nil {
+	if _, err := policy.ApplyWith(ctx, hs.Client, workloadSnippet(), policy.Options{Headscale: true, AllowTags: []string{TestTag}, AllowSrcs: []string{"autogroup:member"}}); err != nil {
 		t.Fatal(err)
 	}
 	// An unused key is expired by DeleteKey (warm-key revoke).

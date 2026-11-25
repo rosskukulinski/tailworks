@@ -11,6 +11,7 @@ import (
 // runs nothing of (GET /v1/tenants hides those from it), and nothing that
 // names a tenant; it may read only its own host ID.
 func TestHostSandboxDeny(t *testing.T) {
+	t.Parallel()
 	a := newAuthzEnv(t)
 	// A third tenant with its own key file, deployed nowhere.
 	other := writeTestOAuthFile(t, filepath.Join(t.TempDir(), "other-oauth.env"))

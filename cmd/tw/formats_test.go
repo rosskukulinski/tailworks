@@ -29,6 +29,7 @@ func formatFixture(t *testing.T, name string, gen func() []byte) []byte {
 
 // TestConfigFormatFixtures: every committed tw.json still reads.
 func TestConfigFormatFixtures(t *testing.T) {
+	t.Parallel()
 	gens := map[string]func() []byte{
 		// tw.json as `tw up` wrote it before versioning.
 		"tw-v0.json": func() []byte {
@@ -62,6 +63,7 @@ func TestConfigFormatFixtures(t *testing.T) {
 
 // TestSaveWritesConfigVersion: save stamps tw.json.
 func TestSaveWritesConfigVersion(t *testing.T) {
+	t.Parallel()
 	s := &state{Dir: t.TempDir(), Cfg: Config{Tailnet: "example.ts.net"}}
 	if err := s.save(); err != nil {
 		t.Fatal(err)

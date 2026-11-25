@@ -7,6 +7,497 @@ work and what may break: [docs/RELEASING.md](docs/RELEASING.md#versions).
 What may run together, and how to upgrade:
 [docs/upgrading.md](docs/upgrading.md).
 
+## v0.5.0 (2026-11-24)
+
+workerd 1.20261121.1.
+
+### Upgrade actions
+
+#### deps-workerd-1.20261121.1
+
+The pinned workerd moves from 1.20261118.1 to 1.20261121.1. `fetch()` now
+rejects with a `TypeError` when a response head doesn't parse
+(cloudflare/workerd#8535), `Body.formData()` rejects with the body stream's
+error (#8679), `new Request(request, init)` leaves the original body usable
+when it throws (#8681), and `TextDecoder` keeps its state after a fatal
+streaming error (#8658). In `node:net`, connect failures to unknown hosts carry
+Node's `ENOTFOUND` properties (#8648) and IDN hosts are converted to ASCII
+(#8709). Apps don't need changes.
+
+Operator action: workerd moves to 1.20261121.1.
+
+#### policy-define-connects-tags
+
+`tw policy` is easier to act on:
+
+- `tw policy --apply` and `tw deploy --apply-policy` now handle a
+  `tailnet.connects` target that is another tailworks app's tag before that
+  app is deployed (say `tag:tw-wl-mcp`). Before, the tag had no `tagOwners`
+  entry, so tailworks left the grants to it for you to add, and the snippet
+  `tw policy` printed was rejected by the control plane (a grant to an
+  undefined tag). Now tailworks adds the tag's `tagOwners` entry (the one
+  deploying that app would add) and writes the grants; the printed snippet
+  includes it too. Tenants with their own owner tag (teams) still define
+  such tags themselves: the tag may be another team's.
+- `tw policy --apply` prints one report: the checks, what it will add, and
+  after writing either "run tw deploy" or what is still missing. It no
+  longer prints the whole report a second time or shows policy ETags.
+- What tailworks won't write is listed once, as a short reason, and stays in
+  the snippet to paste.
+- An app whose workload and object tags both need the same grant gets one
+  grant with both sources, not one per tag. `tw policy` also names which
+  node carries each of the app's tags.
+
+The preflight result has a new `undefinedConnects` field.
+
+#### readme-simplify-quickstart-tw-up
+
+`tw up` needs no flags on a new machine. With the default state dir it reads
+the OAuth client from `~/.config/tailworks/oauth.env`, and on the first run
+asks for the Client Secret and saves it there (0600). It installs the login
+service by default (`--service=false` to skip it); an existing state dir keeps
+how it runs, so `tw upgrade` doesn't change it. It no longer asks for
+confirmation (`--yes` is accepted and does nothing), and it tightens an OAuth
+client file other users can read to 0600 instead of refusing it.
+
+The `hello` template no longer declares `tailnet.connects: ["tag:db"]`, a tag
+most tailnets don't have (pasting its grant failed with `tag not found`).
+`tw deploy` now ends with a `curl` line for the app and `tw logs <app> -f`.
+The README is rewritten as a short quick start.
+
+#### release-rehearsal-fixes-4
+
+The `node-workflow` template now builds from an installed release. Before,
+`tw dev` and `tw deploy` failed with `Cannot find package 'esbuild'`
+because create-tailworks loaded esbuild from its own install directory,
+which a release doesn't include. It now uses the app's own esbuild, and the
+template lists esbuild as a dependency.
+
+Operator action: in an app made from the `node-workflow` template with an
+earlier release, run `npm install --save-dev esbuild@0.28.2`.
+
+#### service-bindings-293
+
+wrangler `services` (service bindings) work between workloads of one
+tenant: `env.AUTH.fetch()` (streaming bodies, WebSocket upgrades) and JS RPC
+to the target's default `WorkerEntrypoint` or a named `entrypoint`, with
+structured-clone arguments and results. The call is a tailnet call from the
+calling node (the workload, or the facet object), so the target's
+`getCaller()` names it (`getCaller(this.ctx)` in an RPC method), and it
+needs a grant from the caller's tags to the target's like any tailnet call.
+`tw types` emits each binding as `Fetcher`, and `tw deploy` no longer warns
+that `env.<binding>` will be undefined. Functions, `RpcTarget` stubs and
+streams can't be RPC values (`rpc_not_forwardable`); a missing target is
+`service_not_found`.
+
+A tailnet call between objects or workloads on the **same host** now works
+without `tw up --allow-sibling-egress`: netd delivers it in process to the
+destination's ingress, after the same netmap and packet-filter checks a call
+from another host gets (so `addMcpServer` to an MCP server on the same host,
+and clients of the `lock` workload on its host, work). `--allow-sibling-egress`
+now only makes those calls hairpin over WireGuard.
+
+Operator action: mgmt gains `GET /v1/tenants/{id}/workloads/{workload}/service-bindings/{binding}`
+(host role). A deployment with `services` is placed only on hosts that
+advertise the `service-bindings` feature, so upgrade mgmt and hosts first.
+
+#### static-assets-278
+
+wrangler `assets` (static files) now work. `tw deploy` and `tw dev` read
+`assets.directory` and ship its files with the Worker; the host serves them
+with Cloudflare's semantics: `Content-Type`, `ETag` and `304 Not Modified`,
+`html_handling`, `not_found_handling` (`single-page-application`,
+`404-page`, `none`), `run_worker_first` (so the Worker can check
+`getCaller(req)` before a file is served) and `env.ASSETS.fetch()`. `tw dev`
+reloads when a file changes. `.assetsignore` is honoured, and `_redirects`
+and `_headers` work with Cloudflare's syntax (`tw` rejects a bad line
+before uploading). A config with `assets` and no `main` deploys as a site
+with no Worker. The files
+count against the 64 MiB bundle. `tw types` types the binding as `Fetcher`.
+The `assets: not supported` warning is gone. Try it with
+`tw init my-site --template static-site` (docs/wrangler.md#assets).
+
+Operator action: upgrade hosts before deploying an app with `assets`. A
+bundle with `assets` needs the new `assets` host feature, so mgmt places it
+only on upgraded hosts.
+
+#### tcp-egress-294
+
+Workers and Durable Objects can open raw TCP sockets. Stock `connect()`
+from `cloudflare:sockets` now works, so database and cache drivers built for
+Workers (postgres.js, and others that use `connect()`) reach a server on your
+tailnet. A socket gets the identity and policy of `fetch()`:
+
+- From a facet-mode Durable Object it leaves as the object's own node.
+- From the Worker and from plain-DO objects it leaves as the workload node.
+
+The same refusals apply (`forbidden_destination`, `peer_not_visible`,
+`internet_egress_unavailable` under `tailnet.egress.internet`). `tw kill`
+resets an object's open sockets. Each flow is a trace span and an `egress`
+audit record (bytes and duration), and each refusal is a `deny` record.
+
+`ctx.tailnet.connect()` is built. It returns the same socket, and a refusal
+rejects `opened` with a typed `TailnetError`. `{ tls: "netd" }` has the host
+do TLS to the destination. In a plain-DO object it throws `not_supported`.
+`tailnet.connects` entries can name a port (`"tag:db:5432"`), so `tw deploy`
+checks and prints the grant for that port. Recipe:
+docs/recipes.md#connect-to-postgres-on-your-tailnet. Design: ADR-052.
+
+Not yet: `secureTransport: "on"` / `"starttls"` on stock `connect()`
+(workerd can't hand a TLS socket to tailworks' egress). On the tailnet, turn
+the driver's TLS off: WireGuard already encrypts the flow. Each object has at
+most 256 open sockets (`socket_limit`).
+
+Operator action: upgrade hosts before deploying apps that use `connect()`.
+On an older host `connect()` still fails.
+
+### Features
+
+#### doctor-readable
+
+`tw doctor` now prints a short summary instead of one long paragraph per
+check. It starts with how many checks failed, warned, passed and were
+skipped. Failures and warnings come next, each with its fix, and the
+passing checks are folded into one line per group (Install, Tailnet,
+Storage, Isolation, and Linux host on Linux). Long lines wrap to the
+terminal width, and your home directory is shown as `~`. `tw doctor -v`
+prints the full detail of every check, as before. `tw doctor --json` is
+unchanged, except that each check now has a `group`.
+
+In single-process mode, missing `tw-mgmt` and `tw-hostd` binaries are now
+reported as info rather than a warning, because they aren't needed there.
+
+#### fix-295-autoapprovers
+
+`tw policy --apply` and `tw deploy --apply-policy` now write the
+`autoApprovers.services` entry a workload with `tailnet.service` needs, so
+you no longer paste it into the policy by hand. The entry is as narrow as
+it gets: only the workload's own `svc:` name, approved only for the tags
+its node is deployed with, and only `tag:tw*` tags (`policy.Check`
+refuses anything else, and the merge never changes existing
+`autoApprovers` entries, routes or exit nodes). On Headscale, or when the
+workload's tag isn't defined in `tagOwners`, the entry stays in the
+"add it yourself" list. The `api/openapi.yaml` change is to the
+description of `POST /v1/tenants/{id}/workloads/{workload}/policy` only:
+no field was added or removed.
+
+#### fix-295-custody-setec
+
+`tw custody migrate --to setec --setec-url <url>` moves an install that
+started on file custody to setec, so it can run several mgmt replicas. Run
+it with tailworks stopped. It maps every file custody entry back to its
+name, and refuses (`custody_unmapped`) if any entry can't be named. To name
+entries written before mgmt indexed custody names, it first backfills
+`custody_names` from the store's rows and the audit trail. It copies every
+entry, reads each one back from setec, backs up the state, and then
+switches `tw.json` to setec custody. File custody is left as it was. See
+`docs/postgres.md`, "Move file custody to setec".
+
+#### fix-295-hostd-backup
+
+`tw backup` now also copies each workload's Durable Object storage and,
+with the `fs` backend, R2 object bytes, while tailworks runs. Before, you
+had to `tw down` to back these up. Each object's SQLite database is copied
+with `VACUUM INTO` through a read-only connection that shares workerd's
+locks, so each copy is the object as of one committed write and workerd
+keeps serving. R2 blobs are immutable, so they are copied (or hard-linked
+on the same disk) before and after mgmt's store. `backup.json` has a new
+`hostd` entry that lists the workloads and counts the databases and blobs.
+`tw restore` puts them back and moves what it replaces into the safety
+backup. `tw backup --hostd=false` copies the control plane only, as
+before. microVM DO volumes, Node.js workloads' data directories and other
+hosts' storage are still not included; `backup.json` says so.
+
+#### fix-295-tracing
+
+Traces now cover Durable Object RPC, alarms and cron runs. An RPC call
+(`stub.method(...)`) gets a CLIENT span in the caller and a SERVER span in
+the object, in the caller's trace. Each alarm and each cron run starts its
+own trace, so their records in `tw logs --source requests` now carry a trace
+ID. Egress, `ctx.tailnet.fetch()` and DO calls made inside them join that
+trace. What is still not traced is listed in `docs/observability.md`.
+
+#### fix-295-worker-internet
+
+`tw up --worker-internet=off` turns off Workers' internet egress for the
+whole host, as `tw-hostd -worker-internet=off` already could. The default
+is `direct`: Workers' `fetch()` reaches public internet hosts through the
+host's network, narrowed by each workload's `tailnet.egress.internet`. The
+setting is saved in `tw.json`, so `tw down` / `tw up`, a service restart
+and `tw upgrade` keep it; give the flag again to change it. `tw status`
+shows it on a new `internet` line (and as `workerInternet` in
+`tw status --json`), and `tw doctor` has a `worker_internet` check that
+warns when the running host still runs a different setting than `tw.json`.
+
+#### fix-301
+
+Projects built with the Cloudflare Vite plugin (`@cloudflare/vite-plugin`:
+React Router, the React and Workflows starters, Agents SDK examples) now
+deploy with `npm run build && tw deploy`. Like `wrangler deploy`, `tw
+deploy`, `tw dev`, `tw policy` and `tw types` follow
+`.wrangler/deploy/config.json` to the config the build wrote, print one line
+saying so, and keep `tailworks.jsonc` from the project directory. The
+built-in bundler packs a pre-built `no_bundle` Worker (ES-module `rules` for
+only `.js` / `.mjs`, as the Vite plugin writes) as it is, instead of failing
+with `build_failed`; `--wrangler` is no longer needed for these projects
+(docs/wrangler.md#vite).
+
+#### implement-issue-240
+
+The tw CLI is on npm (issue #240): `npx tailworks init hello && cd hello && npx tailworks dev`, or `npm install -g tailworks` for `tw` (and `tailworks`) on your PATH. The `tailworks` package is a small shim. npm installs it with one platform package, `@tailworks/cli-darwin-arm64`, `@tailworks/cli-linux-arm64` or `@tailworks/cli-linux-amd64`. Each is made from the signed release tarball and published with provenance: the same `tw`, daemons, workerd and bundler, without the microVM guest. State stays in `~/.tailworks`.
+
+On an npm install, `tw upgrade` refuses with the new `npm_install` error and says to upgrade with npm (`tw down && npm install -g tailworks@latest && tw up`). `tw version --check` prints that command, and `tw-hostd -self-upgrade` refuses. `tw up` from `npx` runs without a login service, because npm can clear npx's cache, and `tw up --service` from there refuses. `tw doctor` has a new "installed by" check (install.sh, npm or npx), and on Linux its microVM check says the npm package has no guest. The README quick start now starts with npm. `scripts/get.sh` remains the way to install without Node.js, and the only one with the microVM tier.
+
+#### init-existing-tags
+
+`tw init` can now use tags your tailnet policy already has, instead of
+naming new ones after the app. `--tags tag:tw-app` sets the workload
+node's tags, and `--object-tags tag:tw-agent` sets the tags of every
+Durable Object class with its own node (`--object-tags <Class>=tag:a` sets
+one class). A new app then needs no policy change, which helps when someone
+else manages the policy file. `tw init` checks the tags before it writes
+anything, and refuses tailworks' own tags (`reserved_tag`).
+
+#### pages-functions-issue-285
+
+Cloudflare Pages projects deploy with `tw deploy` and run under `tw dev`.
+A wrangler config with `pages_build_output_dir` (or no `main` plus a
+`functions/` directory or a `_worker.js`) is a Pages project: the output
+directory is served as static assets, and `tw` compiles `functions/` into
+the Worker itself, with no wrangler needed. File-based routing
+(`[param]`, `[[catchall]]`, nested directories), `onRequest` and
+per-method handlers, `_middleware` chains, the full EventContext
+(`params`, `data`, `next()`, `waitUntil`, `passThroughOnException`,
+`functionPath`), `_routes.json` and advanced-mode `_worker.js` work as on
+Cloudflare. `tw dev` reloads on an edit under `functions/`. `tw` warns
+when `functions/` reads an `env.X` that the config doesn't declare (Pages
+dashboard bindings aren't in git). See docs/wrangler.md#pages.
+
+The bundle is an ordinary static-assets bundle, so hosts need the
+`assets` feature (an earlier release) and nothing new.
+
+#### readme-simplify-quickstart-tw-up
+
+`tw up` needs no flags on a new machine. With the default state dir it reads
+the OAuth client from `~/.config/tailworks/oauth.env`, and on the first run
+asks for the Client Secret and saves it there (0600). It installs the login
+service by default (`--service=false` to skip it); an existing state dir keeps
+how it runs, so `tw upgrade` doesn't change it. It no longer asks for
+confirmation (`--yes` is accepted and does nothing), and it tightens an OAuth
+client file other users can read to 0600 instead of refusing it.
+
+The `hello` template no longer declares `tailnet.connects: ["tag:db"]`, a tag
+most tailnets don't have (pasting its grant failed with `tag not found`).
+`tw deploy` now ends with a `curl` line for the app and `tw logs <app> -f`.
+The README is rewritten as a short quick start.
+
+#### require-exit-node-egress-hosts-workloads
+
+A host can send every workload's internet egress through a tailnet exit
+node: `tw up --worker-internet=exit-node=<node>` (or `tw-hostd
+-worker-internet=exit-node=<node> -container-internet=exit-node`). The
+host's own node (`tag:tw-host`) uses the exit node, so the destination
+sees the exit node's address and the host's resolver never sees the names
+(they resolve at the exit node, or at `dns=<ip>` through it). netd's SSRF
+guard is unchanged. When the exit node is missing, not offered, offline or
+refuses DNS, internet egress is refused with the new `exit_node_unavailable`
+code; the host never falls back to its own network. `tw status` and
+`tw doctor` show the exit node and why it is unusable.
+
+A workload can require it with `tailnet.egress.via: "exit-node"` in
+tailworks.jsonc. Such a deploy needs the new host feature
+`internet-exit-node`, which a host advertises only when its path is an
+exit node; mgmt places it only there (`feature_unavailable` otherwise).
+
+Operator action: none unless you use it. To use it, grant `tag:tw-host` →
+`autogroup:internet` in the tailnet policy and approve the exit node's
+routes.
+
+#### service-bindings-293
+
+wrangler `services` (service bindings) work between workloads of one
+tenant: `env.AUTH.fetch()` (streaming bodies, WebSocket upgrades) and JS RPC
+to the target's default `WorkerEntrypoint` or a named `entrypoint`, with
+structured-clone arguments and results. The call is a tailnet call from the
+calling node (the workload, or the facet object), so the target's
+`getCaller()` names it (`getCaller(this.ctx)` in an RPC method), and it
+needs a grant from the caller's tags to the target's like any tailnet call.
+`tw types` emits each binding as `Fetcher`, and `tw deploy` no longer warns
+that `env.<binding>` will be undefined. Functions, `RpcTarget` stubs and
+streams can't be RPC values (`rpc_not_forwardable`); a missing target is
+`service_not_found`.
+
+A tailnet call between objects or workloads on the **same host** now works
+without `tw up --allow-sibling-egress`: netd delivers it in process to the
+destination's ingress, after the same netmap and packet-filter checks a call
+from another host gets (so `addMcpServer` to an MCP server on the same host,
+and clients of the `lock` workload on its host, work). `--allow-sibling-egress`
+now only makes those calls hairpin over WireGuard.
+
+Operator action: mgmt gains `GET /v1/tenants/{id}/workloads/{workload}/service-bindings/{binding}`
+(host role). A deployment with `services` is placed only on hosts that
+advertise the `service-bindings` feature, so upgrade mgmt and hosts first.
+
+#### static-assets-278
+
+wrangler `assets` (static files) now work. `tw deploy` and `tw dev` read
+`assets.directory` and ship its files with the Worker; the host serves them
+with Cloudflare's semantics: `Content-Type`, `ETag` and `304 Not Modified`,
+`html_handling`, `not_found_handling` (`single-page-application`,
+`404-page`, `none`), `run_worker_first` (so the Worker can check
+`getCaller(req)` before a file is served) and `env.ASSETS.fetch()`. `tw dev`
+reloads when a file changes. `.assetsignore` is honoured, and `_redirects`
+and `_headers` work with Cloudflare's syntax (`tw` rejects a bad line
+before uploading). A config with `assets` and no `main` deploys as a site
+with no Worker. The files
+count against the 64 MiB bundle. `tw types` types the binding as `Fetcher`.
+The `assets: not supported` warning is gone. Try it with
+`tw init my-site --template static-site` (docs/wrangler.md#assets).
+
+Operator action: upgrade hosts before deploying an app with `assets`. A
+bundle with `assets` needs the new `assets` host feature, so mgmt places it
+only on upgraded hosts.
+
+#### tcp-egress-294
+
+Workers and Durable Objects can open raw TCP sockets. Stock `connect()`
+from `cloudflare:sockets` now works, so database and cache drivers built for
+Workers (postgres.js, and others that use `connect()`) reach a server on your
+tailnet. A socket gets the identity and policy of `fetch()`:
+
+- From a facet-mode Durable Object it leaves as the object's own node.
+- From the Worker and from plain-DO objects it leaves as the workload node.
+
+The same refusals apply (`forbidden_destination`, `peer_not_visible`,
+`internet_egress_unavailable` under `tailnet.egress.internet`). `tw kill`
+resets an object's open sockets. Each flow is a trace span and an `egress`
+audit record (bytes and duration), and each refusal is a `deny` record.
+
+`ctx.tailnet.connect()` is built. It returns the same socket, and a refusal
+rejects `opened` with a typed `TailnetError`. `{ tls: "netd" }` has the host
+do TLS to the destination. In a plain-DO object it throws `not_supported`.
+`tailnet.connects` entries can name a port (`"tag:db:5432"`), so `tw deploy`
+checks and prints the grant for that port. Recipe:
+docs/recipes.md#connect-to-postgres-on-your-tailnet. Design: ADR-052.
+
+Not yet: `secureTransport: "on"` / `"starttls"` on stock `connect()`
+(workerd can't hand a TLS socket to tailworks' egress). On the tailnet, turn
+the driver's TLS off: WireGuard already encrypts the flow. Each object has at
+most 256 open sockets (`socket_limit`).
+
+Operator action: upgrade hosts before deploying apps that use `connect()`.
+On an older host `connect()` still fails.
+
+#### ui-console-workload-node-logs
+
+The admin UI now shows logs. A workload's logs page
+(`/ui/tenants/<tenant>/workloads/<workload>/logs`, linked from the
+deployment, tenant and overview pages) has two tabs: **Requests** shows the
+request records newest first, with each request's `console.*` lines and
+exceptions, and filters by node, status, caller, trace and errors only.
+**Console output** shows the workload's raw output. Each node (object) page
+links to `/ui/objects/<id>/logs`, which shows that node's records. The pages
+refresh every 5 s, so they follow the log, and they work for workloads with
+replicas. They read the same `GET /v1/…/logs` as `tw logs`, so there is no
+API change.
+
+### Fixes
+
+#### cloudflare-examples-compat-suite
+
+`tw deploy --wrangler` (and `tw dev --wrangler`) now runs wrangler with the
+project's `node_modules/.bin` first on PATH, as `npm run deploy` does. A
+wrangler `build.command` that calls a locally installed tool (for example
+`esbuild …` in Cloudflare's `durable-chat-template`) used to fail with
+`command not found`.
+
+A Python Worker (`main: *.py` or the `python_workers` flag) is now refused
+with `not_supported: Python Workers are not supported`, instead of
+esbuild's "No loader is configured for .py files".
+
+New: `make e2e-compat` deploys 30 of Cloudflare's own example projects,
+unmodified, to a real host on a real tailnet and calls each one as its
+README does (`e2e/compat/README.md`).
+
+#### deps-workerd-1.20261121.1
+
+The pinned workerd moves from 1.20261118.1 to 1.20261121.1. `fetch()` now
+rejects with a `TypeError` when a response head doesn't parse
+(cloudflare/workerd#8535), `Body.formData()` rejects with the body stream's
+error (#8679), `new Request(request, init)` leaves the original body usable
+when it throws (#8681), and `TextDecoder` keeps its state after a fatal
+streaming error (#8658). In `node:net`, connect failures to unknown hosts carry
+Node's `ENOTFOUND` properties (#8648) and IDN hosts are converted to ASCII
+(#8709). Apps don't need changes.
+
+Operator action: workerd moves to 1.20261121.1.
+
+#### fix-268
+
+The `ai-agent` template now works when you follow its README. Its default
+`vars.MCP_URL` was `http://mcp/mcp`, which named no node: a workload's node
+is `tw-<workload>` (with `tw up`'s default `--hostname-prefix`), so the
+agent got `peer_not_visible` even with the `mcp` template deployed. The
+default is now `http://tw-mcp/mcp`, and the `node-workflow` README uses the
+same address. The README walks through the whole two-workload setup:
+deploying `mcp` under that name, the capability grant that gives the agent
+its tools, what a working reply looks like, and that the scripted model
+ignores the prompt. `tw init --template ai-agent` and the template listings
+say it needs `mcp`. Apps already made from the template keep their old
+`MCP_URL`: set it to `http://tw-mcp/mcp` (or `tw deploy --var MCP_URL=…`).
+
+#### fix-288-early-response
+
+A Worker or Durable Object that answers a request without reading its body
+(a killed object's 410, a handler that rejects an upload with 401 or 413)
+now reaches the caller with that answer. Before, when the body was about
+16 KB or more, the caller often got `503 upstream_unavailable` ("write:
+broken pipe" or "socket is not connected") instead.
+
+#### fix-303
+
+A Worker's `fetch`, a Durable Object and a Workflow no longer see the
+internal `x-tw-object` header in `request.headers`. netd sets it so hostd
+can route the request to the right object; hostd now removes it (and any
+other internal `x-tw-*` routing header) before the request reaches tenant
+code, so apps that log, sign or forward all request headers no longer carry
+a tailworks object ID. Use `getCaller` and `request.cf` for the caller.
+
+#### policy-define-connects-tags
+
+`tw policy` is easier to act on:
+
+- `tw policy --apply` and `tw deploy --apply-policy` now handle a
+  `tailnet.connects` target that is another tailworks app's tag before that
+  app is deployed (say `tag:tw-wl-mcp`). Before, the tag had no `tagOwners`
+  entry, so tailworks left the grants to it for you to add, and the snippet
+  `tw policy` printed was rejected by the control plane (a grant to an
+  undefined tag). Now tailworks adds the tag's `tagOwners` entry (the one
+  deploying that app would add) and writes the grants; the printed snippet
+  includes it too. Tenants with their own owner tag (teams) still define
+  such tags themselves: the tag may be another team's.
+- `tw policy --apply` prints one report: the checks, what it will add, and
+  after writing either "run tw deploy" or what is still missing. It no
+  longer prints the whole report a second time or shows policy ETags.
+- What tailworks won't write is listed once, as a short reason, and stays in
+  the snippet to paste.
+- An app whose workload and object tags both need the same grant gets one
+  grant with both sources, not one per tag. `tw policy` also names which
+  node carries each of the app's tags.
+
+The preflight result has a new `undefinedConnects` field.
+
+#### release-rehearsal-fixes-4
+
+The `node-workflow` template now builds from an installed release. Before,
+`tw dev` and `tw deploy` failed with `Cannot find package 'esbuild'`
+because create-tailworks loaded esbuild from its own install directory,
+which a release doesn't include. It now uses the app's own esbuild, and the
+template lists esbuild as a dependency.
+
+Operator action: in an app made from the `node-workflow` template with an
+earlier release, run `npm install --save-dev esbuild@0.28.2`.
+
 ## v0.4.0 (2026-11-23)
 
 workerd 1.20261118.1.

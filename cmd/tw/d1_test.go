@@ -137,8 +137,26 @@ func TestCLID1(t *testing.T) {
 	if _, err := e.call(t, cmdD1, "execute", "DB", "--command", "SELECT * FROM nope"); cliCode(err) != "d1_error" || !strings.Contains(cliText(err), "no such table") {
 		t.Fatalf("SQL error: %v", err)
 	}
-	if _, err := e.call(t, cmdD1, "execute", "DB"); cliCode(err) != "bad_request" {
-		t.Fatalf("execute without SQL: %v", err)
+	withD1Input(t, "", true)
+	if _, err := e.call(t, cmdD1, "execute", "DB"); cliCode(err) != "bad_request" || !strings.Contains(cliText(err), "SQL on stdin") {
+		t.Fatalf("execute without SQL on a terminal: %v", err)
+	}
+	if _, err := e.call(t, cmdD1, "execute", "DB", "--command", "SELECT 1", "--file", sqlFile); cliCode(err) != "bad_request" {
+		t.Fatalf("execute --command --file: %v", err)
+	}
+	withD1Input(t, "SELECT count(*) AS n FROM users;\n", false)
+	out, err = e.call(t, cmdD1, "execute", "DB", "--json")
+	r = d1Result{}
+	if err != nil || json.Unmarshal([]byte(out), &r) != nil || len(r.Results) != 1 || r.Results[0].Results.Rows[0][0] != float64(2) {
+		t.Fatalf("execute from stdin: %v\n%s", err, out)
+	}
+	withD1Input(t, "-- nothing\n", false)
+	if _, err := e.call(t, cmdD1, "execute", "DB"); cliCode(err) != "bad_request" || !strings.Contains(cliText(err), "SQL on stdin") {
+		t.Fatalf("execute with an empty pipe: %v", err)
+	}
+	withD1Input(t, strings.Repeat("x", mgmt.D1BodyLimit+1), false)
+	if _, err := e.call(t, cmdD1, "execute", "DB"); cliCode(err) != "bad_request" || !strings.Contains(cliText(err), "over") {
+		t.Fatalf("execute with too much SQL on stdin: %v", err)
 	}
 	dump := filepath.Join(t.TempDir(), "dump.sql")
 	if out, err := e.call(t, cmdD1, "export", "DB", "--output", dump); err != nil || !strings.Contains(out, "exported app-db") {
@@ -171,4 +189,11 @@ func TestCLID1(t *testing.T) {
 	if _, err := e.call(t, cmdD1, "migrations", "list", "OTHER"); cliCode(err) != "bad_request" {
 		t.Fatalf("migrations of an unbound database: %v", err)
 	}
+}
+
+// withD1Input makes tw d1 execute's stdin s, a terminal when tty.
+func withD1Input(t *testing.T, s string, tty bool) {
+	old := d1Input
+	d1Input = func() (io.Reader, bool) { return strings.NewReader(s), tty }
+	t.Cleanup(func() { d1Input = old })
 }

@@ -14,6 +14,7 @@ import (
 // records older than it, from an open workload log and from the log of a
 // workload that no longer runs here; newer records and later writes stay.
 func TestRecordLogMaxAge(t *testing.T) {
+	t.Parallel()
 	h, w := telHost(t, TelemetryOptions{RecordRate: 1e6, RecordBurst: 1e6, RecordMaxAge: time.Hour})
 	now := time.Now()
 	for _, age := range []time.Duration{3 * time.Hour, 2 * time.Hour, 30 * time.Minute, time.Minute} {

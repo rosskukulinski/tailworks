@@ -167,6 +167,7 @@ func (o *Object) serveIngress(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	stripIdentityHeaders(req.Header)
+	markTLS(req) // tailnethttps.go: arrived on :443
 	var blob CFBlob
 	blob.Tailscale.Caller = CallerFromWhoIs(who)
 	o.reg.applyCert(req.Context(), &blob.Tailscale.Caller)
@@ -192,15 +193,16 @@ func UnixUpstream(path string) http.Handler {
 			return (&net.Dialer{}).DialContext(ctx, "unix", path)
 		},
 		MaxIdleConnsPerHost: 64,
-		IdleConnTimeout:     60 * time.Second,
+		IdleConnTimeout:     UpstreamIdleTimeout, // below workerd's idle close (#287)
 	}
 	target := &url.URL{Scheme: "http", Host: "workerd"}
 	return &httputil.ReverseProxy{
-		Transport:     tr,
+		Transport:     KeepEarlyAnswer(tr), // upstream_early.go (#288)
 		FlushInterval: -1,
 		ErrorLog:      log.New(io.Discard, "", 0), // errors are reported via ErrorHandler
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
+			KeepBodyEOF(pr) // proxybody.go (#138)
 			pr.Out.Host = pr.In.Host
 			KeepForwarded(pr)
 		},

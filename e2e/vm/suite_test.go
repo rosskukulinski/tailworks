@@ -27,6 +27,9 @@ type vmSuite struct {
 	e      *hostdtest.Env
 	client *nettest.Node
 	hc     *http.Client
+
+	// ctlURL is the testcontrol's URL, for more tailnet nodes.
+	ctlURL string
 }
 
 // startVMSuite skips without the guest assets; opt adjusts the hostd
@@ -59,7 +62,7 @@ func startVMSuite(t *testing.T, opt func(*hostdtest.Options)) *vmSuite {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { client.Close() })
-	return &vmSuite{t: t, e: e, client: client, hc: client.HTTPClient(60 * time.Second)}
+	return &vmSuite{t: t, e: e, client: client, hc: client.HTTPClient(60 * time.Second), ctlURL: ctl.URL}
 }
 
 // vmApp returns the path of an e2e/vm test app.

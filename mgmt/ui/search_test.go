@@ -19,25 +19,21 @@ func (f *fakeAPI) called(sub string) bool {
 	return false
 }
 
-// TestObjectsSearch: /ui/objects passes tenant, workload and status to
-// /v1 and filters tag and acting-for itself, newest first, 50 a page.
+// TestObjectsSearch: /ui/objects passes tenant, workload, status, tag and
+// acting-for (human) to /v1, and shows the matches newest first, 50 a page.
 func TestObjectsSearch(t *testing.T) {
 	api := populatedAPI()
 	now := time.Now().UnixMilli()
 	var objs []any
-	for i := range 120 {
-		tag := "tag:a"
-		if i%2 == 1 {
-			tag = "tag:b"
-		}
+	for i := 1; i < 120; i += 2 { // the 60 objects /v1 matched
 		objs = append(objs, map[string]any{"objectID": fmt.Sprintf("obj_%03d", i), "tenantID": "tn_1", "workload": "w", "namespace": "A", "objectName": fmt.Sprintf("n%03d", i),
-			"hostname": fmt.Sprintf("host-%03d", i), "tags": []string{tag}, "status": "ready", "actingFor": "ross@x", "createdAt": now - int64(120-i)*1000})
+			"hostname": fmt.Sprintf("host-%03d", i), "tags": []string{"tag:b"}, "status": "ready", "actingFor": "ROSS", "createdAt": now - int64(120-i)*1000})
 	}
 	api.routes["GET /v1/objects"] = pageOf(objs...)
 	h := serve(t, api)
-	body := get(t, h, "/ui/objects?tenant=tn_1&workload=w&status=ready&tag=b&caller=ROSS").Body.String()
-	if !api.called("state=ready") || !api.called("workload=w") || !api.called("tenant=tn_1") {
-		t.Fatalf("server-side filters not sent: %v", api.calls)
+	body := get(t, h, "/ui/objects?tenant=tn_1&workload=w&status=ready&tag=b&human=ROSS").Body.String()
+	if !api.called("state=ready") || !api.called("workload=w") || !api.called("tenant=tn_1") || !api.called("tag=tag%3Ab") || !api.called("human=ROSS") {
+		t.Fatalf("filters not sent: %v", api.calls)
 	}
 	if !strings.Contains(body, `<span class="count">60</span>`) || !strings.Contains(body, "Showing 1–50 of 60") || strings.Contains(body, "host-118") ||
 		!strings.Contains(body, "Older →") || strings.Contains(body, "← Newer") {
@@ -46,22 +42,31 @@ func TestObjectsSearch(t *testing.T) {
 	if i, j := strings.Index(body, "host-119"), strings.Index(body, "host-117"); i < 0 || j < 0 || i > j {
 		t.Fatalf("not newest first")
 	}
-	body = get(t, h, "/ui/objects?tenant=tn_1&workload=w&status=ready&tag=b&caller=ROSS&page=2").Body.String()
+	body = get(t, h, "/ui/objects?tenant=tn_1&workload=w&status=ready&tag=b&human=ROSS&page=2").Body.String()
 	if !strings.Contains(body, "Showing 51–60 of 60") || !strings.Contains(body, "← Newer") || strings.Contains(body, "Older →") || !strings.Contains(body, "host-001") {
 		t.Fatalf("page 2: %s", body)
 	}
+	// The acting-for filter's key is human, as on /ui/audit and in the API;
+	// the paging links carry it.
+	if !strings.Contains(body, "human=ROSS") || !strings.Contains(body, `name="human" value="ROSS"`) {
+		t.Fatalf("human filter not kept: %s", body)
+	}
+	// caller, its name before issue #449, still filters.
+	if body = get(t, h, "/ui/objects?caller=nobody&tag=tag:x").Body.String(); !api.called("human=nobody") || !api.called("tag=tag%3Ax") || !strings.Contains(body, `value="nobody"`) {
+		t.Fatalf("legacy caller key: %v %s", api.calls, body)
+	}
 }
 
-// TestAuditFilters: /ui/audit asks for newest first with every filter /v1
-// has, keeps them in the paging links, and filters the app itself.
+// TestAuditFilters: /ui/audit asks for newest first with every filter,
+// the app (workload) included, and keeps them in the paging links.
 func TestAuditFilters(t *testing.T) {
 	api := populatedAPI()
 	h := serve(t, api)
 	body := get(t, h, "/ui/audit?tenant=tn_1&kind=kill&human=alice@x&workload=nope").Body.String()
-	if !api.called("order=desc") || !api.called("kind=kill") || !api.called("tenant=tn_1") || !api.called("human=alice%40x") {
+	if !api.called("order=desc") || !api.called("kind=kill") || !api.called("tenant=tn_1") || !api.called("human=alice%40x") || !api.called("workload=nope") {
 		t.Fatalf("filters not sent: %v", api.calls)
 	}
-	if !strings.Contains(body, "it hid 7 records on this page") || !strings.Contains(body, "Older →") || !strings.Contains(body, "cursor=c2") ||
+	if strings.Contains(body, "hid") || !strings.Contains(body, "Older →") || !strings.Contains(body, "cursor=c2") ||
 		!strings.Contains(body, "workload=nope") || strings.Contains(body, "← Newest") {
 		t.Fatalf("audit page: %s", body)
 	}

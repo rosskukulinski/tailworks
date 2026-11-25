@@ -10,6 +10,7 @@ import (
 // TestUnknownCommandSuggests: a typo or another CLI's verb names the tailworks
 // command to run instead; a word near nothing gets no suggestion.
 func TestUnknownCommandSuggests(t *testing.T) {
+	t.Parallel()
 	for in, want := range map[string]string{"deplo": "tw deploy", "Logs": "tw logs", "tail": "tw logs", "list": "tw ls", "secrets": "tw secret", "xyzzyqq": ""} {
 		got := asCLIErr(unknownCommand(in)).Message
 		if want == "" {

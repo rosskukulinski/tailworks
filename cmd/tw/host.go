@@ -31,19 +31,19 @@ func cmdHost(args []string) error {
 		}
 	}
 	if sub < 0 {
-		return fail("bad_request", "usage: tw "+usageOf("host"))
+		return needsSubcommand("host")
 	}
 	rest := append(append([]string{}, args[:sub]...), args[sub+1:]...)
-	switch args[sub] {
+	switch normalizeVerb(args[sub]) {
 	case "setup":
 		return cmdHostSetup(rest)
 	case "vmcheck":
 		return cmdHostVMCheck(rest)
 	case "add":
 		return cmdHostAdd(rest)
-	case "ls", "list":
+	case "ls":
 		return cmdHostLs(rest)
-	case "rm", "remove", "delete":
+	case "rm":
 		return cmdHostRm(rest)
 	case "cordon":
 		return cmdHostCordon(rest, true) // host_cordon.go
@@ -74,6 +74,7 @@ func cmdHostSetup(args []string) error {
 	huge := f.Int("hugepages", -1, "2 MiB huge pages to reserve for guest RAM (default: enough for 4 VMs, at most a quarter of RAM; 0 = none)")
 	fc := f.String("firecracker", "", "firecracker binary to install (default: the release's share/tailworks/vm/firecracker)")
 	jl := f.String("jailer", "", "jailer binary to install (default: the release's share/tailworks/vm/jailer)")
+	f.hidden("to install other firecracker builds", "firecracker", "jailer") // helpflags.go
 	if _, err := f.parse(args); err != nil {
 		return err
 	}
@@ -185,12 +186,12 @@ func cmdHostVMCheck(args []string) error {
 // 10-minute tag:tw-host join key through the tenant's credential (its
 // OAuth client, or the Headscale API key). The key goes to --out as a TS_AUTHKEY=… file (0600; default
 // <host-id>.join.env in the current directory), never to the terminal or
-// the log. On the new machine: `tw-hostd join --token-file <file>`, then
-// start tw-hostd (or tw up on that machine).
+// the log, with the host ID, mgmt's URL and the control server. On the new
+// machine: `tw-hostd -join-token-file <file>`.
 func cmdHostAdd(args []string) error {
 	f := newFlags("host add")
 	tenantF := tenantFlag(f)
-	out := f.String("out", "", "write the join key (TS_AUTHKEY=…) and the one-time registration secret (TW_REGISTRATION_SECRET=…) here (default ./<host-id>.join.env)")
+	out := f.String("out", "", "write the join file here (default ./<host-id>.join.env): the join key (TS_AUTHKEY=…), the one-time registration secret (TW_REGISTRATION_SECRET=…), and the host ID, mgmt URL and control URL tw-hostd -join-token-file reads")
 	pos, err := f.parse(args)
 	if err != nil {
 		return err
@@ -220,29 +221,23 @@ func cmdHostAdd(args []string) error {
 	if err := s.mgmt().DoHeaders(ctx, "POST", "/v1/hosts", map[string]any{"hostID": pos[0], "tenantID": tn.TenantID}, &hj,
 		map[string]string{"Tw-Actor": actor()}); err != nil {
 		if me, ok := mgmtapi.AsError(err); ok && me.Code == "exists" {
-			return fail("exists", me.Message).withFix("tw host rm " + pos[0] + " --drain, then tw host add again")
+			return fail("exists", me.Message).withFix("tw host rm " + pos[0] + " --force, then tw host add again")
 		}
 		return err
 	}
 	if hj.RegistrationSecret == "" {
 		return fail("bootstrap_failed", "mgmt returned no registration secret for host "+pos[0]).withFix("upgrade tw-mgmt (POST /v1/hosts must answer registrationSecret)")
 	}
-	if err := os.WriteFile(path, hj.joinFileContent(), 0o600); err != nil {
+	mgmtURL := s.hostJoinMgmtURL(hj) // host_joinfile.go
+	if err := os.WriteFile(path, hj.hostJoinFileContent(pos[0], mgmtURL), 0o600); err != nil {
 		return err
 	}
 	res := map[string]any{"hostID": pos[0], "hostname": hj.Hostname, "tags": hj.Tags, "expiresAt": hj.ExpiresAt, "controlURL": hj.ControlURL,
-		"tailnet": hj.Tailnet, "joinFile": path, "mgmt": "http://" + s.Cfg.MgmtDNSName}
+		"tailnet": hj.Tailnet, "joinFile": path, "mgmt": mgmtURL}
 	emit(f, res, func() {
 		fmt.Printf("✓ host     %s added (pending) · join key for %s (%s) written to %s (single use, expires %s)\n", pos[0], hj.Hostname,
 			strings.Join(hj.Tags, ","), path, time.UnixMilli(hj.ExpiresAt).Local().Format("15:04:05"))
-		fmt.Printf("  on %s:  install tw, copy the file there (scp, 0600), then\n", pos[0])
-		keyTags := ""
-		if s.Cfg.headscale() {
-			keyTags = " --key-tags-only" // Headscale refuses a key join that requests tags
-		}
-		fmt.Printf("    tw-hostd join --host-id %s --token-file %s --control-url %s%s\n", pos[0], filepath.Base(path), hj.ControlURL, keyTags)
-		fmt.Printf("    tw-hostd -host-id %s -mgmt http://%s -tsnet-control-url %s%s\n", pos[0], s.Cfg.MgmtDNSName, hj.ControlURL, strings.Replace(keyTags, "--key-tags-only", "-tsnet-key-tags-only", 1))
-		fmt.Printf("  the key is used once by the join and the file is deleted (its registration secret is kept beside the node state);\n  mgmt binds the node to host %s on its first PUT /v1/hosts/%s, which must present that secret\n", pos[0], pos[0])
+		printHostRunbook(pos[0], path) // host_joinfile.go
 	})
 	return nil
 }
@@ -265,7 +260,7 @@ func cmdHostLs(args []string) error {
 	type hostRow struct {
 		HostID    string   `json:"hostID"`
 		Status    string   `json:"status"`
-		Tiers     []string `json:"tiers"`
+		Tiers     []string `json:"tiers"` // what it offers (HostTier): its isolation tiers and containers
 		Pool      string   `json:"pool"`
 		NodeID    string   `json:"nodeID"`
 		DNSName   string   `json:"dnsName"`
@@ -275,13 +270,22 @@ func cmdHostLs(args []string) error {
 			Namespace string `json:"namespace"`
 			Epoch     int64  `json:"epoch"`
 		} `json:"leases"`
+
+		// The host's GOARCH (container images must match it) and features.
+		Arch     string   `json:"arch,omitempty"`
+		Features []string `json:"features"`
 	}
 	hosts, err := listAll[hostRow](ctx, s.mgmt(), "/v1/hosts", 0)
 	if err != nil {
 		return err
 	}
+	for i := range hosts {
+		if hosts[i].Features == nil {
+			hosts[i].Features = []string{} // empty lists are [], never null (docs/cli-json.md)
+		}
+	}
 	emit(f, hosts, func() {
-		fmt.Printf("  %-16s %-8s %-18s %-36s %-6s %-10s %s\n", "HOST", "STATUS", "TIERS", "NODE", "LIVE", "SEEN", "LEASES")
+		fmt.Printf("  %-16s %-8s %-26s %-6s %-36s %-6s %-10s %s\n", "HOST", "STATUS", "OFFERS", "ARCH", "NODE", "LIVE", "SEEN", "LEASES")
 		for _, h := range hosts {
 			seen := "never"
 			if h.LastSeen > 0 {
@@ -291,16 +295,25 @@ func cmdHostLs(args []string) error {
 			for _, l := range h.Leases {
 				ls = append(ls, fmt.Sprintf("%s@%d", l.Namespace, l.Epoch))
 			}
-			fmt.Printf("  %-16s %-8s %-18s %-36s %-6d %-10s %s\n", tsafe(h.HostID), tsafe(h.Status), tsafe(strings.Join(h.Tiers, ",")), tsafe(h.DNSName), h.LiveNodes, seen, tsafe(strings.Join(ls, " ")))
+			arch := h.Arch
+			if arch == "" {
+				arch = "-"
+			}
+			fmt.Printf("  %-16s %-8s %-26s %-6s %-36s %-6d %-10s %s\n", tsafe(h.HostID), tsafe(h.Status), tsafe(strings.Join(h.Tiers, ",")), tsafe(arch), tsafe(h.DNSName), h.LiveNodes, seen, tsafe(strings.Join(ls, " ")))
 		}
 	})
 	return nil
 }
 
-// cmdHostRm is `tw host rm <host-id> [--drain]` (DELETE /v1/hosts/{id}).
+// cmdHostRm is `tw host rm <host-id> [--force]` (DELETE /v1/hosts/{id}).
+// --force sends the API's ?drain=true: it kills the host's objects and
+// releases its leases, losing whatever they kept on that host. It is not
+// `tw host drain`, which moves workloads off without losing data. The flag
+// used to be --drain; that spelling is still accepted, as a deprecated alias.
 func cmdHostRm(args []string) error {
 	f := newFlags("host rm")
-	drain := f.Bool("drain", false, "kill the host's objects and release its leases first")
+	force := f.Bool("force", false, "kill the host's objects and release its leases first (their data on that host is lost; to move them instead, tw host drain)")
+	drain := f.Bool("drain", false, "deprecated: same as --force")
 	yes := yesFlag(f)
 	pos, err := f.parse(args)
 	if err != nil {
@@ -322,7 +335,7 @@ func cmdHostRm(args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	q := ""
-	if *drain {
+	if *force || *drain {
 		q = "?drain=true"
 	}
 	var res struct {
@@ -333,7 +346,7 @@ func cmdHostRm(args []string) error {
 	}
 	if err := s.mgmt().DoHeaders(ctx, "DELETE", "/v1/hosts/"+pos[0]+q, nil, &res, map[string]string{"Tw-Actor": actor()}); err != nil {
 		if me, ok := mgmtapi.AsError(err); ok && me.Code == "host_holds_leases" {
-			return fail("host_holds_leases", me.Message).withFix("tw host rm " + pos[0] + " --drain --yes")
+			return fail("host_holds_leases", me.Message).withFix("tw host drain "+pos[0]+"   (move its workloads off first)", "or tw host rm "+pos[0]+" --force --yes   (kill them; their data on that host is lost)")
 		}
 		return err
 	}

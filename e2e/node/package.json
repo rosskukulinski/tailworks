@@ -5,13 +5,13 @@
   "description": "Pinned npm deps for make test-node (the node-workflow template + Node tier fixtures). Kept out of the root workspace so make test stays light.",
   "dependencies": {
     "@tailworks/node": "file:../../js/packages/node",
-    "workflow": "5.6.1",
-    "@workflow/world-local": "5.4.1",
-    "@ai-sdk/workflow": "2.0.109",
+    "workflow": "5.7.1",
+    "@workflow/world-local": "5.5.1",
+    "@ai-sdk/workflow": "2.0.111",
     "@ai-sdk/provider": "4.0.39",
-    "@ai-sdk/provider-utils": "5.0.82",
-    "ai": "7.0.177",
+    "@ai-sdk/provider-utils": "5.0.83",
+    "ai": "7.0.179",
     "zod": "4.6.7",
-    "undici": "8.12.4"
+    "undici": "8.13.1"
   }
 }

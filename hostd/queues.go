@@ -41,6 +41,7 @@ import (
 	"github.com/rosskukulinski/tailworks/hostd/gen"
 	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
 	"github.com/rosskukulinski/tailworks/internal/queuecfg"
+	"github.com/rosskukulinski/tailworks/internal/wallclock"
 	"github.com/rosskukulinski/tailworks/netd"
 )
 
@@ -287,11 +288,32 @@ func (h *Host) consumeQueue(ctx context.Context, k queueRunKey, c queuecfg.Consu
 	}
 }
 
-// errNotRun: the batch never reached queue() (no instance, or it refused
-// the connection), so its attempts don't count.
+// errNotRun: the batch never reached queue() (no instance, it refused the
+// connection, or hostd itself cancelled the delivery), so its attempts
+// don't count.
 var errNotRun = errors.New("queue batch not run")
 
 func notRun(err error) error { return fmt.Errorf("%w: %w", errNotRun, err) }
+
+// invokeErr classifies a failed POST of a batch to the platform, made under
+// ctx (the run's context, bounded by DefaultQueueTimeout). Cancellation by
+// hostd (the consumer loop was stopped: a redeploy, a stale heartbeat or
+// self-fence, shutdown) and a refused connection (workerd restarting) are
+// errNotRun: queue() never finished, through no fault of its own, so the
+// batch is handed back uncounted (#387). The time limit and anything else
+// count as a failed run, which retries the batch.
+func invokeErr(ctx context.Context, err error) error {
+	var op *net.OpError
+	switch {
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		return fmt.Errorf("queue() exceeded the %v limit", DefaultQueueTimeout)
+	case ctx.Err() != nil:
+		return notRun(fmt.Errorf("delivery cancelled: %w", err))
+	case errors.As(err, &op) && op.Op == "dial":
+		return notRun(err)
+	}
+	return err
+}
 
 // claimBatch long-polls for a first message, then fills the batch up to
 // max_batch_size until max_batch_timeout after the first claim.
@@ -497,7 +519,7 @@ func (h *Host) invokeQueue(ctx context.Context, w *workload, k queueRunKey, batc
 	trace := newTraceID()
 	blob, _ := json.Marshal(map[string]any{
 		// The ticket lets queue() create objects through its guarded env.
-		"tw":      map[string]any{"kind": "queue", "queue": k.queue, "workload": w.name, "ticket": gen.CreateTicket(inst.macKey(), trace, time.Now())},
+		"tw":      map[string]any{"kind": "queue", "queue": k.queue, "workload": w.name, "ticket": gen.CreateTicket(inst.macKey(), trace, wallclock.Now())},
 		"traceId": trace,
 	})
 	req, _ := http.NewRequestWithContext(ctx, "POST", "http://platform/_tw/queue", strings.NewReader(string(body)))
@@ -505,14 +527,7 @@ func (h *Host) invokeQueue(ctx context.Context, w *workload, k queueRunKey, batc
 	req.Header.Set("content-type", "application/json")
 	resp, err := (&http.Client{Transport: inst.direct.Transport}).Do(req)
 	if err != nil {
-		var op *net.OpError
-		switch {
-		case errors.Is(ctx.Err(), context.DeadlineExceeded):
-			return res, fmt.Errorf("queue() exceeded the %v limit", DefaultQueueTimeout)
-		case errors.As(err, &op) && op.Op == "dial":
-			return res, notRun(err) // workerd is restarting: nothing ran
-		}
-		return res, err
+		return res, invokeErr(ctx, err)
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))

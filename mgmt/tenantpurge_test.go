@@ -265,6 +265,7 @@ func containsName(ss []string, s string) bool {
 
 // TestCustodyTenant: custody names index under their tenant.
 func TestCustodyTenant(t *testing.T) {
+	t.Parallel()
 	for name, want := range map[string]string{
 		"tw/tn_a/workloads/w/secrets": "tn_a",
 		"tw/tn_a/obo-root":            "tn_a",

@@ -1,0 +1,6 @@
+{
+  // Test fixture: a Worker (and a facet object) calling svctarget through
+  // wrangler services (ADR-service-bindings).
+  "name": "svccaller",
+  "tailnet": { "tags": ["tag:ttest"], "objects": { "Agent": { "tags": ["tag:ttest"] } } },
+}

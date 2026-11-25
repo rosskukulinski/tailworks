@@ -60,7 +60,8 @@
    - Reads are strongly consistent: a read catches up with the journal
      first (a cheap call when nothing changed), as R2 is
      read-after-write consistent. If mgmt can't be reached, the store
-     serves its local index (fail static, ADR-044 §8).
+     serves its local index after waiting at most 2 s (fail static,
+     ADR-044 §8).
 
 2. **The backend is per host, set by the operator.** `tw-hostd
    -r2-backend fs|s3` (default `fs`):
@@ -114,8 +115,12 @@
    workload can cause names another workload's or tenant's data, and an
    object key (any UTF-8, up to 1 KiB) never becomes a path at all. A
    workload's replicas (`<w>--r<n>`) use `<w>`'s blobs, as they use its
-   stores. Tenant and workload names are validated (no `/`, no `..`)
-   before they become path elements.
+   stores. hostd knows a replica by that name alone, while mgmt scopes
+   its stores from the deployment record, so mgmt gives such a name to
+   nothing else: a workload that is not a replica can't be deployed as
+   `<w>--r<n>` (`replica_conflict`; #348, `internal/replicaname`). Tenant
+   and workload names are validated (no `/`, no `..`) before they become
+   path elements.
 
 5. **Bodies stream end to end.** workerd sends a put body with its length;
    `R2Backend` passes the stream on (a `FixedLengthStream`, after taking
@@ -153,7 +158,15 @@
    delete <workload> [<bucket>]` call `GET|PUT|DELETE
    …/workloads/{w}/stores/r2/{bucket}`, and `tw r2 object list` reads the
    bucket's journal (admin) and folds it into the live keys. No new mgmt
-   endpoint. Object bodies (`tw r2 object get|put`) need the blob
+   endpoint. (Amended 2026-11-25, #493: superseded by `GET
+   …/stores/r2/{bucket}/objects` (`admin|tenant:data`, like KV's
+   `…/keys`). mgmt folds the index journal itself (`internal/r2wire`,
+   streaming over journal pages and holding only the requested prefix),
+   so the CLI no longer pages the raw journal or carries a copy of
+   store-r2.js's fold and its entry-version check. An index entry from a
+   newer tailworks is `409 version_skew`, never skipped. Against an older
+   mgmt, `tw r2 object ls` fails with `not_found` and says to upgrade
+   mgmt, as ADR-041 §7 allows.) Object bodies (`tw r2 object get|put`) need the blob
    backend, which only hosts have; they need an mgmt endpoint proxied to
    the lease holder (as `tw logs` is) and are a follow-up.
 
@@ -167,7 +180,9 @@
   encrypted by tailworks. With `s3`, durability and encryption at rest are the
   backend's.
 - Writes need mgmt (as for every store); reads keep working from the
-  local index while mgmt is down, as long as the backend is up.
+  local index while mgmt is down, as long as the backend is up and the
+  workload runs: one with a fenceable Durable Object class stops after
+  30 s without mgmt (ADR-028 §3, ADR-044 §8).
 - Cloudflare's bucket-level features are not here: public buckets and
   custom domains, presigned URLs and the S3 API to the bucket itself,
   lifecycle rules, event notifications, storage classes (`storageClass`

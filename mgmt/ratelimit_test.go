@@ -44,6 +44,7 @@ func wantRateLimited(t *testing.T, w *httptest.ResponseRecorder) {
 // with Retry-After, while another caller, a host (its own larger bucket)
 // and mgmt's own node are unaffected. Tokens come back with time.
 func TestAPIRateLimitPerCaller(t *testing.T) {
+	t.Parallel()
 	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
 	a := NewAPILimiter(APILimits{RPS: 5, HostRPS: 50})
 	now := time.Unix(1_000_000, 0)
@@ -96,6 +97,7 @@ func TestAPIRateLimitPerCaller(t *testing.T) {
 // InFlight requests; the next is 429 rate_limited until one finishes.
 // Hosts are outside the gate, so a user flood can't delay a heartbeat.
 func TestAPIInFlightGate(t *testing.T) {
+	t.Parallel()
 	release := make(chan struct{})
 	var started sync.WaitGroup
 	h := NewAPILimiter(APILimits{InFlight: 2}).Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -139,6 +141,7 @@ func TestAPIInFlightGate(t *testing.T) {
 // not the connection: a caller reconnecting from a new port is still
 // limited, and mgmt's own node (the operator console) never is.
 func TestAPIRateLimitBehindTailnetHandler(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	srv := &Server{M: e.m, Self: SelfInfo{NodeID: "nMGMT", DNSName: "tw-mgmt.t.ts.net", Tailnet: "t.ts.net"}}
 	whois := func(ctx context.Context, addr string) (WhoIsInfo, error) {

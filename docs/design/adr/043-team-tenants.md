@@ -253,6 +253,12 @@ guide: [docs/teams.md](../../teams.md).
      Ownership (D4) decides who may use a tag, not its name, and the
      preflight prints the `tagOwners` line for the tenant's owner tag.
      `tw init` runs before `tw link` and doesn't know the tenant.
+     (2026-11-24, #491: a `tailworks.jsonc` without `tailnet.tags` now
+     gets the same `tag:tw-wl-<name>` from `tw deploy`, written into the
+     bundled file, as a project with no `tailworks.jsonc` always has. mgmt
+     checks it like a written tag, so the same rule holds: a team whose
+     workload shares a name with another team's is refused (tag ownership) for
+     that tag, not its grants.)
    - **The tenant ID.** `tw tenant add --name-prefix p` gives the tenant
      the ID `tn_<label>-p`. Naming a shared tailnet with `--tenant` is
      `ambiguous_tenant`, so name tenants by ID.

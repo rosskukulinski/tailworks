@@ -82,3 +82,30 @@ func TestDevWrangler(t *testing.T) {
 		run(t, "--wrangler")
 	})
 }
+
+// TestDevViteRedirect: testdata/vite-app is a @cloudflare/vite-plugin
+// project after `vite build` (issue #301). tw follows
+// .wrangler/deploy/config.json to build/server/wrangler.json and packs its
+// pre-built no_bundle modules as they are; the Worker imports a chunk and
+// reads build/client through its assets binding.
+func TestDevViteRedirect(t *testing.T) {
+	wd, err := nettest.WorkerdBinary()
+	if err != nil || !hostdtest.HasNode() {
+		t.Skip("needs workerd and node (make deps)")
+	}
+	t.Setenv("TW_WORKERD", wd)
+	bin := cliflow.BuildBinaries(t)
+	work := t.TempDir()
+	app := filepath.Join(work, "vite-app")
+	if err := os.CopyFS(app, os.DirFS("testdata/vite-app")); err != nil {
+		t.Fatal(err)
+	}
+	e := &cliflow.Env{T: t, BinDir: bin, StateDir: filepath.Join(work, "state"), WorkDir: work}
+	var r devOnce
+	e.MustJSON(&r, "dev", app, "--once", "--port", "0")
+	want := map[string]any{"status": float64(200), "greeting": "hello from a pre-built chunk", "asset": "served from build/client"}
+	if r.Workload != "vite-app" || !reflect.DeepEqual(r.Smoke, want) {
+		b, _ := json.MarshalIndent(r, "", "  ")
+		t.Fatalf("tw dev vite-app:\n%s", b)
+	}
+}

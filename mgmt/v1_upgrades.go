@@ -135,7 +135,7 @@ func (a *v1api) GetReleaseArtifact(w http.ResponseWriter, r *http.Request, ver s
 	}
 	f, err := os.Open(filepath.Join(dir, name))
 	if err != nil {
-		writeErr(w, r, errf(404, "not_found", "release %s has no %s on this tw-mgmt replica (tw release import it)", ver, name))
+		writeErr(w, r, errf(404, "not_found", "release %s has no %s on this tw-mgmt replica (tw upgrade import it)", ver, name))
 		return
 	}
 	defer f.Close()

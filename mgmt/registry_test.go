@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -39,17 +40,18 @@ func (rt handlerRT) RoundTrip(r *http.Request) (*http.Response, error) {
 	return w.Result(), nil
 }
 
-var imgN int
+// imgN makes each test image unique. Atomic: the tests run in parallel.
+var imgN atomic.Int64
 
 // pushTestImage writes a one-layer linux/arch image into dst repo (tag
 // optional) and returns its manifest digest.
 func pushTestImage(t *testing.T, dst oci.Target, repo, arch, tag string) string {
 	t.Helper()
 	ctx := context.Background()
-	imgN++
+	n := imgN.Add(1)
 	var layer bytes.Buffer
 	tw := tar.NewWriter(&layer)
-	body := fmt.Sprintf("image %d %s", imgN, arch)
+	body := fmt.Sprintf("image %d %s", n, arch)
 	tw.WriteHeader(&tar.Header{Name: "id", Mode: 0o644, Size: int64(len(body)), Typeflag: tar.TypeReg})
 	tw.Write([]byte(body))
 	tw.Close()
@@ -165,6 +167,7 @@ func (e *regEnv) deploy(t *testing.T, tn Tenant, host, image string, built map[s
 // tenant, never pushes, and always reads "public"; non-admins get nothing;
 // a namespace that is not a tenant can't be pushed to.
 func TestRegistryAccess(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRegEnv(t)
 	adm := e.client(addrAdmin)
@@ -236,6 +239,7 @@ func TestRegistryAccess(t *testing.T) {
 // assignment nor what the registry serves; a redeploy picks up the new
 // digest. A built image must be in the deploying tenant's namespace.
 func TestDeployPinsDigests(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRegEnv(t)
 	d1 := pushTestImage(t, e.upstream, "app", "arm64", "v1")
@@ -297,6 +301,7 @@ func TestDeployPinsDigests(t *testing.T) {
 // host); the arm64 alias makes the stock ref placeable on arm64 too, with
 // tailworks' rebuild.
 func TestDeployPlacesByPinnedArch(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRegEnv(t)
 	if _, _, err := e.m.RegisterHost(ctx, RegisterRequest{HostID: "hx", CapacityNodes: 1, Tiers: []string{"process", "microvm", "containers"}, Arch: "amd64",
@@ -336,6 +341,7 @@ func TestDeployPlacesByPinnedArch(t *testing.T) {
 // public/ and every tenant's deploy pins that same digest (so hosts cache
 // it once); unmarked, the next deploy mirrors it into the tenant.
 func TestPublicImages(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRegEnv(t)
 	d := pushTestImage(t, e.upstream, "base", "arm64", "3")

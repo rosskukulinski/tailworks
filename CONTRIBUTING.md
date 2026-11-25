@@ -9,7 +9,7 @@ issue or pull request.
 
 ## Set up
 
-You need Go ≥ 1.27 and Node.js ≥ 20 ([README › Prerequisites](README.md#prerequisites)),
+You need Go ≥ 1.27 and Node.js ≥ 20 ([prerequisites](docs/INSTALL.md#prerequisites)),
 on macOS or Linux.
 
 ```sh
@@ -48,7 +48,9 @@ The `## <target>:` comment above each target in the Makefile says what
 it runs and what it needs. Tests that check the docs against the
 code run in `make test`: every `tw <command> --flag` named in README.md
 and `docs/*.md` must exist (`TestDocsNameRealCommands`), and
-`docs/cli.md` must match `--help` (`TestCLIReferenceUpToDate`).
+`docs/cli.md` must match `--help` (`TestCLIReferenceUpToDate`). Its
+Environment section comes from `cmd/tw/envvars.go`: a new `TW_*` variable
+goes there (`TestCLIReferenceEnvVars`).
 
 ## Release notes: `changes/<branch>.md`
 

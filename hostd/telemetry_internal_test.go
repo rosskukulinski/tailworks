@@ -56,6 +56,7 @@ func records(t *testing.T, path string) []obs.Record {
 // "dropped" record per second says how many; another workload is not
 // affected.
 func TestRecordRateLimit(t *testing.T) {
+	t.Parallel()
 	h, w := telHost(t, TelemetryOptions{RecordRate: 1, RecordBurst: 5})
 	other := &workload{tenantID: "tnA", name: "quiet"}
 	for i := 0; i < 50; i++ {
@@ -89,6 +90,7 @@ func TestRecordRateLimit(t *testing.T) {
 
 // The request log rotates at RecordFileMax: at most two files.
 func TestRecordLogRotates(t *testing.T) {
+	t.Parallel()
 	h, w := telHost(t, TelemetryOptions{RecordFileMax: 4 << 10, RecordRate: 1e6, RecordBurst: 1e6})
 	for i := 0; i < 500; i++ {
 		h.tel.emit(w, &obs.Record{Time: time.Now(), Kind: obs.KindRequest, Path: "/x", Logs: []obs.LogLine{{Message: strings.Repeat("y", 100)}}})
@@ -108,6 +110,7 @@ func TestRecordLogRotates(t *testing.T) {
 // Ingress and tail halves join by span ID in either order; a half with no
 // partner is written alone after JoinWait.
 func TestJoin(t *testing.T) {
+	t.Parallel()
 	h, w := telHost(t, TelemetryOptions{JoinWait: time.Hour})
 	in := func(span string) *obs.Record {
 		return &obs.Record{Time: time.Now(), Kind: obs.KindRequest, SpanID: span, Status: 200, Caller: &obs.Caller{User: "ross@example.com"}}
@@ -140,6 +143,7 @@ func TestJoin(t *testing.T) {
 // A public request never adopts the caller's traceparent; a tailnet one
 // does. The SERVER span's ID reaches workerd.
 func TestIngressTraceContext(t *testing.T) {
+	t.Parallel()
 	h, w := telHost(t, TelemetryOptions{})
 	inst := &instance{w: w, depID: "d1"}
 	o := &object{ID: "o-1", TenantID: "tnA", Workload: "web"}
@@ -169,6 +173,7 @@ func TestIngressTraceContext(t *testing.T) {
 
 // The raw console follow survives the capped log rotating under it.
 func TestConsoleFollowAcrossRotation(t *testing.T) {
+	t.Parallel()
 	h, path := logsHost(t)
 	rf, err := obs.OpenRotating(path, 64)
 	if err != nil {
@@ -209,6 +214,7 @@ func TestConsoleFollowAcrossRotation(t *testing.T) {
 // The export queue keeps the newest QueueMax items, whatever the mix of
 // queued and new.
 func TestExportQueueBound(t *testing.T) {
+	t.Parallel()
 	h, w := telHost(t, TelemetryOptions{QueueMax: 5})
 	e := h.tel.exporterOf(w)
 	e.known, e.cfg = true, &mgmtapi.OTLPExport{Endpoint: "http://otel:4318", Signals: obs.AllSignals}

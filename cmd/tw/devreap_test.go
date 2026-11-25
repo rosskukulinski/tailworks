@@ -2,8 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,6 +20,7 @@ import (
 // coding agent or CI timeout sends) must not leave its workerd running or
 // its /tmp/tw-dev-* dir behind.
 func TestDevSIGKILL(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("short")
 	}
@@ -30,13 +29,9 @@ func TestDevSIGKILL(t *testing.T) {
 		t.Skip("needs workerd and node (make deps)")
 	}
 	bin := cliflow.BuildBinaries(t)
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	ln.Close()
-	cmd := exec.Command(filepath.Join(bin, "tw"), "dev", hostdtest.Fixture("probe"), "--port", fmt.Sprint(port))
+	// --port 0: a port picked and closed here can be taken by a parallel
+	// test before tw dev binds it.
+	cmd := exec.Command(filepath.Join(bin, "tw"), "dev", hostdtest.Fixture("probe"), "--port", "0")
 	cmd.Env = append(os.Environ(), "TW_WORKERD="+wd)
 	var out strings.Builder
 	cmd.Stdout, cmd.Stderr = &out, &out

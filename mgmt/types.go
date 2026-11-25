@@ -207,7 +207,6 @@ func (h Host) Live(now time.Time) bool {
 type ClassConfig struct {
 	Class string   `json:"class"`
 	Tags  []string `json:"tags"`
-	Agent bool     `json:"agent,omitempty"`
 	TTL   string   `json:"ttl,omitempty"`
 	// Service (the _workload namespace only) is the Tailscale Service the
 	// workload entry node hosts (tailworks.jsonc tailnet.service).
@@ -372,6 +371,10 @@ type Error struct {
 	TraceID string         `json:"trace_id"`
 	// RetryAfter (seconds), when set, is sent as the Retry-After header.
 	RetryAfter int `json:"-"`
+
+	// hostNames (misdirected_request only) are mgmt's own names, for the
+	// browser error page's fix (errors_html.go). Never serialized.
+	hostNames []string
 }
 
 func (e *Error) Error() string { return e.Code + ": " + e.Message }

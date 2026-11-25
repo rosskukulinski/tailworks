@@ -17,6 +17,7 @@ import (
 // a data race in TestTelemetry (http.go vs objects.go). Run under -race
 // (as `make test` does), this test fails on the unlocked read.
 func TestEgressObjHandlerReadsStatusUnderLock(t *testing.T) {
+	t.Parallel()
 	h, _ := ctrHost(t, nil)
 	inst := ctrInst(h, "tn", "probe")
 	inst.w.status = "active"

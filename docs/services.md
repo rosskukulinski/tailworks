@@ -71,6 +71,10 @@ caps the caller didn't use (H22, measured below).
   ```jsonc
   "autoApprovers": { "services": { "svc:support": ["tag:tw-wl-support"] } }
   ```
+  `tw policy --apply` (or `tw deploy --apply-policy`) writes this entry
+  for you: only the workload's own `svc:` name, approved only for the tags
+  the workload node is deployed with. On Headscale, or when those tags
+  aren't defined, it stays a line for you to add.
 - **Service definition:** mgmt creates it (port `tcp:80`, the attributed
   HTTP ingress) with the comment `managed by tw: tenant=<id> workload=<name>`.
   - A redeploy adopts its own definition.
@@ -129,10 +133,11 @@ the workload is gone for good.
 **Egress to Services.** An object's `fetch("http://support.<tailnet>/")`
 (or the bare `http://support/`, or the VIP itself) resolves from that
 object's own netmap: the Service's MagicDNS record, routed by a peer that
-has the VIP in its AllowedIPs. Host DNS is never used. The sibling rule
-still applies: if every host of the Service is a sibling object on the same
-host, the call is refused with `forbidden_destination`, because same-host
-calls go through the platform.
+has the VIP in its AllowedIPs. Host DNS is never used. If every host of
+the Service is an object on the same host, netd delivers the call in
+process to that object's Service ingress (RFC §4.8), after the same checks:
+the caller sees the Service in its netmap, and the host's packet filter
+accepts it.
 
 ### Replicas: one stateless workload on several hosts
 
@@ -169,8 +174,16 @@ the preflight and at the deploy.
   - a redeploy with a smaller count undeploys the extra replicas, and
     undeploying the workload undeploys them all;
   - a replica can't be deployed by its own name (`409 replica_conflict`);
-  - a replica name already used by a separate workload is also refused
-    with `409 replica_conflict`;
+  - a name ending in `--r<n>` (n ≥ 2) belongs to replicas: a workload
+    that is not a replica can't be deployed under one, nor can a preview
+    (`--preview-alias pr7--r2`), with the same
+    [`409 replica_conflict`](errors.md#replica_conflict). tailworks tells
+    a replica by its name where it has nothing else: a replica's R2
+    objects are stored with its workload's. A workload that an earlier
+    release deployed under such a name keeps deploying until it is
+    undeployed; rename it when you can;
+  - a replica name that such an older, separate workload still uses is
+    refused to the replica, also with `409 replica_conflict`;
   - `tw deploy` waits for every replica and prints
     `✓ replicas 3 · web@h1, web--r2@h2, web--r3@h3`.
 - **Routing:** in the measured runs, Tailscale sent every fresh connection
@@ -221,7 +234,7 @@ tw-hostd -mgmt http://tw-mgmt.<tailnet> …
   ]
   ```
   Create the Service definition (`svc:tw-mgmt`, `tcp:80`) in the admin
-  console. `tw up --policy-apply` doesn't write `autoApprovers`.
+  console. `tw up --apply-policy` doesn't write `autoApprovers`.
   The admin cap in the `svc:tw-mgmt` grant counts on calls through the
   Service; a grant to `tag:tw-mgmt` counts only on calls to a replica's own
   node name.

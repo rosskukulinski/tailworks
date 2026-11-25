@@ -31,24 +31,39 @@ A namespace's first write creates it, or you can create it first:
 
 ```sh
 tw kv namespace create oauth          # for the app in the current directory
-tw kv namespace list
-tw kv namespace delete oauth          # deletes the data, irrecoverably
+tw kv namespace ls
+tw kv namespace rm oauth              # deletes the data, irrecoverably
 ```
+
+`list` and `delete`, wrangler's spellings, work as well as `ls` and `rm`.
 
 ## Keys
 
+In the directory of an app with one `kv_namespaces` entry, the key
+commands use that namespace:
+
 ```sh
-tw kv key put client:1 '{"name":"app"}' --binding OAUTH_KV --metadata '{"kind":"client"}'
-tw kv key put grant:1 --path grant.json --namespace oauth --ttl 3600
-printf %s "$TOKEN" | tw kv key put token:1 --binding OAUTH_KV
-tw kv key get client:1 --binding OAUTH_KV        # the raw value on stdout
-tw kv key list --binding OAUTH_KV --prefix grant:
-tw kv key delete token:1 --binding OAUTH_KV
+tw kv key put client:1 '{"name":"app"}' --metadata '{"kind":"client"}'
+tw kv key get client:1                           # the raw value on stdout
 ```
 
-`--binding` is looked up in the app's `wrangler.jsonc`; `--namespace`
-names the namespace directly; `--workload` picks another workload than the
-app in the current directory. Every command takes `--json`. The same
+With more than one, name it with `--namespace`, by its name (the entry's
+`id`) or its binding:
+
+```sh
+tw kv key put grant:1 --path grant.json --namespace oauth --ttl 3600
+printf %s "$TOKEN" | tw kv key put token:1 --namespace OAUTH_KV
+tw kv key ls --namespace OAUTH_KV --prefix grant:
+tw kv key rm token:1 --namespace oauth
+```
+
+A name the app declares as a namespace means that namespace, even if
+another entry's binding has the same name; one the app doesn't declare is
+taken as a namespace name. `--binding` is the same as `--namespace`
+(wrangler's spelling). `--workload` picks another workload than the app in
+the current directory; then `--namespace` is required. Each flag belongs to
+its command: `--ttl` on `key get` is refused (`bad_request`), as in
+wrangler. Every command takes `--json`. The same
 operations are on mgmt's REST API (`GET …/stores/kv/{name}/keys`,
 `GET|PUT|DELETE …/stores/kv/{name}/value?key=`; see
 [mgmt-api.md](contracts/mgmt-api.md)). Only admins can use them. Each
@@ -72,10 +87,22 @@ holding the workload's lease can append. So:
   or the read's `cacheTtl`. Cloudflare KV is eventually consistent, with
   about 60 s between locations.
 - **Writes need mgmt.** If mgmt is unreachable, `put` and `delete` fail
-  (`KV PUT failed: 503 …`), and reads keep serving the local copy. Use a
-  Durable Object for state that is written often.
+  (`KV PUT failed: 503 …`). Reads serve the local copy: a read that wants
+  fresher data waits at most 2 s for mgmt, and later ones don't wait until
+  mgmt is back. A host that has never synced the namespace fails reads.
+  If the workload has a Durable Object class (not `"fence": "never"`), the
+  host stops the whole workload after 30 s without mgmt, reads included.
+  Use a Durable Object for state that is written often.
 - **Expiry.** An expired key disappears from `get` and `list` at once. The
-  namespace's alarm then deletes it from the journal too.
+  namespace's alarm then deletes it from the journal too. Expiry is
+  measured on the wall clock of the host serving the namespace, so if that
+  clock is stepped forward a key expires early (in real time), and if it is
+  stepped back the key lasts longer.
+
+Read-your-writes, durability across restarts, moves and takeovers, and
+expiry are measured under faults by the data-plane chaos loop
+(`e2e/dataplane:TestDataplane`, invariant KV), with the host's clock
+stepped forward and back on Linux.
 
 ## Limits
 

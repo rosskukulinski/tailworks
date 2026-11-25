@@ -25,6 +25,7 @@ import (
 //     "direct 0.1 ms" from a real one, and #156 decided against adding
 //     a second measurement to check it.
 func TestRT3_H23_PlacementPoison(t *testing.T) {
+	t.Parallel()
 	a := newAuthzEnv(t)
 	type sample = map[string]any
 	report := func(tenant string, ss ...sample) map[string]any {
@@ -109,6 +110,7 @@ func TestRT3_H23_PlacementPoison(t *testing.T) {
 // TestRT3_H23_StoredRowsBounded: rows stored before the ingest clamp (a
 // negative or huge RTT, a measuredAt in the future) are not scored.
 func TestRT3_H23_StoredRowsBounded(t *testing.T) {
+	t.Parallel()
 	db := []string{"tag:db"}
 	cands := []Candidate{cand("h1", 1), cand("h2", 1)}
 	honest := meas("h2", "tag:db", PathDirect, 5, 0)

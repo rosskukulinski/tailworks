@@ -1,7 +1,6 @@
 package gen_test
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/rosskukulinski/tailworks/hostd/hostdtest"
@@ -39,18 +38,7 @@ func TestRuntimeCompat(t *testing.T) {
 		}
 	})
 
-	// connect() is not built: the egress entrypoints (the Worker's
-	// globalOutbound and the facets' Egress) carry HTTP only, so workerd
-	// refuses the socket. Raw TCP egress would need netd support
-	// (ctx.tailnet.connect() is a typed plan_feature_missing stub).
-	t.Run("ConnectTCPRefused", func(t *testing.T) {
-		for w, tw := range where {
-			code, _, r := in.get("/connect?host=echo&port=80", tw)
-			if code != 200 || r["ok"] != false || !strings.Contains(fmtAny(r["error"]), "cannot connect") {
-				t.Fatalf("%s: connect() changed (update docs/COMPAT.md): %d %v", w, code, r)
-			}
-		}
-	})
+	// connect() egress is covered by TestConnectEgress (connect_test.go).
 }
 
 // addWasm is a minimal module exporting add(i32, i32) i32.

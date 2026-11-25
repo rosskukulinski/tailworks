@@ -24,6 +24,9 @@ tw logs hello-mcp --errors --json    # only failed requests: status >= 400, exce
   `{"event": "log", "line"}` per line.
 - `-f` follows. With `--json` that is a stream of one JSON object per
   line, so run it in the background and stop it when you've seen enough.
+- Without a workload, `tw logs` shows the app in the current directory,
+  else the tenant's only workload; with several it fails `bad_request`
+  and lists one `tw logs <workload>` per workload.
 - `--component mgmt|hostd|supervisor` prints tailworks' own daemons' logs
   instead. That only works on the machine that ran `tw up`.
 - With replicas, each line has the `host` it came from.
@@ -56,6 +59,7 @@ The ones you'll meet most:
 | `unknown_workload` | no such deployment; `tw ls` |
 | `peer_not_visible` | the app called a tailnet name that isn't in its netmap (missing or not granted); check `tailnet.connects` and the grants |
 | `internet_egress_unavailable` | the app called an internet destination that config refuses: `tailnet.egress.internet` is `false`/`[]` or doesn't list the host, or the host runs `-worker-internet=off`. Allow the host and redeploy, or call a gateway on the tailnet (docs/recipes.md#call-an-internet-api) |
+| `internet_port_refused` | the app opened an internet flow to TCP port 25 (`connect()`, `fetch()` to `host:25`), which is refused by default because it would leave from the host's own address. List the relay with the port in `tailnet.egress.internet` (`"smtp.example.com:25"`) and redeploy, or use a submission port (587) or a provider's API |
 | `cap_missing` | an MCP caller lacks the tool in its grant's app capability (see `tw-policy`) |
 
 ## Check the machine
@@ -73,6 +77,7 @@ ones that are plain edits in the app.
 ```sh
 tw audit <object-id> --json     # one object's history: created, called, spawned, killed
 tw audit --trace <trace-id>     # every record of one request (trace_id comes with mgmt errors)
+tw audit --json                 # the newest 50 records (-n for more)
 tw audit --all --json           # the whole tenant's trail
 ```
 

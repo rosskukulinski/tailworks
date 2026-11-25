@@ -6,6 +6,7 @@ import (
 )
 
 func TestBundleCrons(t *testing.T) {
+	t.Parallel()
 	for name, tc := range map[string]struct {
 		files map[string]string
 		want  string // joined crons, or "error:<substring>"
@@ -40,6 +41,7 @@ func TestBundleCrons(t *testing.T) {
 // TestAPIDeployRejectsBadCrons: an invalid cron trigger fails the deploy
 // (and its preflight) with 400 bad_bundle before anything is written.
 func TestAPIDeployRejectsBadCrons(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	c, h1 := e.c, e.asHost("h1")
 	var tn struct{ TenantID string }

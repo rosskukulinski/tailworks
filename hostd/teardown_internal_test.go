@@ -11,6 +11,7 @@ import (
 // already in flight are done: `tw down --purge` lists objects after it, so
 // its list is complete.
 func TestTeardownGate(t *testing.T) {
+	t.Parallel()
 	h := &Host{
 		cfg:        Config{PoolNodes: 1},
 		ctx:        context.Background(),

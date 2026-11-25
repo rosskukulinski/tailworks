@@ -14,6 +14,7 @@ func nopLogf(string, ...any) {}
 // (Restart=on-failure) and launchd (KeepAlive SuccessfulExit=false)
 // restart it (#110).
 func TestWaitSingleListenerFailureExitsNonZero(t *testing.T) {
+	t.Parallel()
 	errs := make(chan error, 1)
 	errs <- errors.New("tsnet:443: use of closed network connection")
 	err := waitSingle(context.Background(), errs, nopLogf)
@@ -28,6 +29,7 @@ func TestWaitSingleListenerFailureExitsNonZero(t *testing.T) {
 
 // A shutdown signal (tw down, systemctl stop) is the clean stop: exit 0.
 func TestWaitSingleSignalExitsZero(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if err := waitSingle(ctx, make(chan error), nopLogf); err != nil {
@@ -44,6 +46,7 @@ func TestWaitSingleSignalExitsZero(t *testing.T) {
 }
 
 func TestSupStop(t *testing.T) {
+	t.Parallel()
 	s := newSupStop()
 	s.stop(nil)
 	s.stop(errors.New("late")) // only the first stop counts

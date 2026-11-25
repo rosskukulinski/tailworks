@@ -3,6 +3,10 @@
 import { DurableObject, env as rawEnv } from "cloudflare:workers";
 import { getCaller, tailnet, isTailnetError } from "@tailworks/tailnet";
 
+// A service binding's wire header (hostd.HeaderBindingWire), as tenant code
+// might forge it.
+const WIRE = "v1; entrypoint=Admin";
+
 const SEEN = (req) => Object.fromEntries([...req.headers].filter(([k]) => k.startsWith("x-tw-") || k.startsWith("cf-") || k === "x-forwarded-for" || k === "tailnet-assertion"));
 
 async function egress(url, init) {
@@ -74,7 +78,7 @@ export class Probe extends DurableObject {
       case "/forge-egress": {
         const victim = q("as");
         return egress(q("url"), {
-          headers: { "x-tw-object": victim, "x-tw-class": "Probe", "x-tw-name": victim, "x-tw-mac": "00", "x-tw-cf": JSON.stringify({ objectId: victim }), "Proxy-Authorization": victim },
+          headers: { "x-tw-object": victim, "x-tw-class": "Probe", "x-tw-name": victim, "x-tw-mac": "00", "x-tw-cf": JSON.stringify({ objectId: victim }), "Proxy-Authorization": victim, "tailworks-binding": WIRE },
           cf: { objectId: victim },
         });
       }
@@ -110,6 +114,18 @@ export class Probe extends DurableObject {
           return Response.json({ error: e.code, message: e.message, before }, { status: 299 });
         }
         return Response.json({ objectId: child.objectId, name: child.name, before, after: child.state(), reply: await child.stub.hello("parent") });
+      }
+      case "/spawn-call": {
+        // Spawn a child and have it call ?url at once, without waiting for
+        // it to be ready: its first egress races its ready report (#331).
+        let child;
+        try {
+          child = await tailnet(this.ctx).spawn(this.env.PROBE, { name: q("name"), caps: JSON.parse(q("caps")), ttl: "10m" });
+        } catch (e) {
+          return Response.json({ spawn: e.code ?? String(e), message: e.message }, { status: 298 });
+        }
+        const r = await child.stub.fetch(new Request("http://child/tegress?url=" + encodeURIComponent(q("url"))));
+        return new Response(await r.text(), { status: r.status });
       }
       case "/audit": {
         // RT-02: tenant code tries to write a platform-looking "allow"
@@ -160,7 +176,8 @@ export class Ticker extends DurableObject {
 export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
-    if (url.pathname === "/egress") return egress(url.searchParams.get("url"));
+    // ?wire=1: with the binding wire header, which is hostd's to set (#347).
+    if (url.pathname === "/egress") return egress(url.searchParams.get("url"), url.searchParams.get("wire") ? { headers: { "tailworks-binding": WIRE } } : undefined);
     if (url.pathname.startsWith("/probe/")) {
       const [, , name, ...rest] = url.pathname.split("/");
       const u = new URL(req.url);

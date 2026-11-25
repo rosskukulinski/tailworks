@@ -17,6 +17,7 @@ import (
 // the lease holder reserves, a stale host's reservations stop counting, and
 // heartbeat reconciliation renews, releases and adopts.
 func TestStoreContainerReservations(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		tn := fmt.Sprintf("tn_c%d", time.Now().UnixNano()%1e9)
@@ -160,6 +161,7 @@ func TestStoreContainerReservations(t *testing.T) {
 // objects never exceed maxContainers (the check and the insert are one
 // transaction, serialised on the tenant row).
 func TestStoreContainerQuotaConcurrent(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		tn := fmt.Sprintf("tn_q%d", time.Now().UnixNano()%1e9)

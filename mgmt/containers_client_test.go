@@ -14,6 +14,7 @@ import (
 // reservation is not an error), a quota refusal arrives as a typed 429, and
 // the heartbeat carries usage and the running containers.
 func TestV1ContainerHostClient(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	ctx := context.Background()
 	var tn struct{ TenantID string }

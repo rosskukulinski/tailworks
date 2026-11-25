@@ -64,6 +64,7 @@ func codeOf(err error) string {
 // No container backend: start() is refused (ADR-032 D5, no fallback),
 // never run some other way.
 func TestContainerNoBackendRefuses(t *testing.T) {
+	t.Parallel()
 	h, _ := ctrHost(t, func(c *Config) { c.Containers = nil })
 	err := ctrStart(t, h, ctrInst(h, "t", "w"), "a", startReq{})
 	if codeOf(err) != "tier_unavailable" {
@@ -74,6 +75,7 @@ func TestContainerNoBackendRefuses(t *testing.T) {
 // Only the class's own (pinned) images start, and only container classes
 // have a container.
 func TestContainerImageAndClassScope(t *testing.T) {
+	t.Parallel()
 	h, procs := ctrHost(t, nil)
 	inst := ctrInst(h, "t", "w")
 	if err := ctrStart(t, h, inst, "a", startReq{Image: "tw.test/other:1"}); codeOf(err) != "bad_request" || !strings.Contains(err.Error(), "not one of class Box's images") {
@@ -103,6 +105,7 @@ func TestContainerImageAndClassScope(t *testing.T) {
 // Host capacity and the mgmt quota both gate start(); a quota error fails
 // closed (nothing boots).
 func TestContainerCapacityAndQuota(t *testing.T) {
+	t.Parallel()
 	h, procs := ctrHost(t, func(c *Config) { c.ContainerCapacity = ContainerCapacity{Max: 1} })
 	inst := ctrInst(h, "t", "w")
 	if err := ctrStart(t, h, inst, "a", startReq{}); err != nil {
@@ -158,6 +161,7 @@ func TestContainerCapacityAndQuota(t *testing.T) {
 // the stateful workload's containers (two live copies under one identity
 // must not happen) and leaves a stateless workload's running.
 func TestContainerFencedWithParent(t *testing.T) {
+	t.Parallel()
 	h, procs := ctrHost(t, nil)
 	stateful := ctrInst(h, "t", "w")
 	stateless := ctrInst(h, "t", "w2")
@@ -186,6 +190,7 @@ func TestContainerFencedWithParent(t *testing.T) {
 // The operator's hard max lifetime and the inactivity timeout stop a
 // container no matter what the object does.
 func TestContainerTimers(t *testing.T) {
+	t.Parallel()
 	h, procs := ctrHost(t, func(c *Config) { c.ContainerMaxLife = 700 * time.Millisecond })
 	inst := ctrInst(h, "t", "w")
 	if err := ctrStart(t, h, inst, "old", startReq{}); err != nil {
@@ -229,6 +234,7 @@ func TestContainerTimers(t *testing.T) {
 
 // An exec ID is only good for the container it was started in.
 func TestContainerExecIDsAreScoped(t *testing.T) {
+	t.Parallel()
 	h, _ := ctrHost(t, nil)
 	inst := ctrInst(h, "t", "w")
 	a, b := ctrKey{"t", "w", "Box", "a"}, ctrKey{"t", "w", "Box", "b"}
@@ -248,6 +254,7 @@ func boxClass(inst *instance) *container.Class {
 // pre-joined node pool (whose pool nodes and warm keys serve object creates
 // only), even with the pool on.
 func TestContainerNoTailnetNode(t *testing.T) {
+	t.Parallel()
 	h, procs := ctrHost(t, func(c *Config) { c.PoolNodes = 2 })
 	inst := ctrInst(h, "t", "w")
 	for _, n := range []string{"a", "b"} {

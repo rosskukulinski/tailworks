@@ -45,6 +45,7 @@ tenants sharing a host is in
 | Tailnet request body size | none | bodies are streamed through netd and hostd to workerd, never buffered |
 | Request rate over the tailnet | none | every caller is a WireGuard-identified node your tailnet policy admitted; public traffic is rate-limited (see [Public ingress](#public-ingress)) |
 | Outbound `fetch()` duration or count (subrequests) | none | every `fetch()` goes through netd: tailnet egress leaves as the workload's or object's own node, where your tailnet policy decides what it can reach, and internet egress is allowed, narrowed or turned off per workload (`tailnet.egress.internet`) |
+| New internet flows per workload per unit of time (`fetch()`, `connect()`, `node:net`) | none | a per-workload token bucket on new internet flows needs a design for the typed refusal and for the rolled-up audit record of a refused flood, as public ingress has; until then a workload that is allowed internet egress can open flows from the host's address as fast as the host lets it, and every TCP flow and every first `fetch()` per destination is audited (ADR-052 follow-up, [#339](https://github.com/rosskukulinski/tailworks/issues/339)). What is bounded: TCP port 25 is refused by default (`internet_port_refused`), an object has at most 256 open sockets, and `tailnet.egress.internet: false` or a list is the control ([security-model.md](security-model.md#egress)) |
 | Concurrent requests per workload or object | none | WebSockets make an in-flight count a poor bound (one Durable Object can hold thousands), and a flood of requests to one workload mostly costs that workload's own workerd |
 | WebSocket duration | none | as for wall time |
 | Queue message retention | none | a message is kept until it is consumed; a full queue refuses new sends ([queues.md](queues.md#differences-from-cloudflare)) |
@@ -55,8 +56,13 @@ tenants sharing a host is in
 |---|---|---|---|
 | Deploy request body (the bundle, JSON-encoded) | 64 MiB | no | `mgmt/server.go:#mgmt-body` |
 | Unpacked bundle, all files | 64 MiB | no | `hostd/bundle/bundle.go:MaxBundle` |
+| Static assets (`assets.directory`), counted in the bundle | 64 MiB (about 48 MiB fits one deploy request) | no | `hostd/bundle/bundle.go:MaxBundle` |
+| `_redirects` rules: static, dynamic | 2000, 100 | no | `hostd/bundle/assetrules.go:MaxStaticRedirects`, `hostd/bundle/assetrules.go:MaxDynamicRedirects` |
+| `_redirects` line | 1000 characters | no | `hostd/bundle/assetrules.go:MaxRedirectLine` |
+| `_headers` rules | 100 | no | `hostd/bundle/assetrules.go:MaxHeaderRules` |
+| `_headers` line | 2000 characters | no | `hostd/bundle/assetrules.go:MaxHeaderLine` |
 | Bundle sent into a microVM guest | 256 MiB | no | `guest/tw-guestd/main_linux.go:maxBundle` |
-| `tw deploy` wait for ready | 3 min | `tw deploy --wait` | `cmd/tw/app.go:-wait` |
+| `tw deploy` wait for ready | 3 min | `tw deploy --wait` | `cmd/tw/placementflags.go:-wait` |
 | One host bringing up a deployment | 2 min | no | `hostd/workload.go:#deploy-bringup` |
 | In-flight requests on the old instance at a redeploy (then it stops) | 10 s | no | `hostd/host.go:DrainTimeout` |
 | Replicas of a stateless workload | 16 | `tailworks.jsonc` `replicas` | `mgmt/workload_replicas.go:MaxReplicas` |
@@ -73,7 +79,14 @@ See [Limits that don't exist](#limits-that-dont-exist) for duration, body and CP
 | Wait for a running instance during a redeploy | 15 s (the 10 s drain plus 5 s), then `upstream_unavailable` | no | `hostd/http.go:#redeploy-wait` |
 | Wait for an object's node (`identity_pending` after) | 30 s | no | `hostd/host.go:ReadyTimeout` |
 | `Retry-After` on `identity_pending` | 1 s | no | `mgmt/server.go:#identity-pending-retry-after` |
-| Node-tier caller header clock skew | 60 s | `maxSkewMs` in `@tailworks/node` | `js/packages/node/src/index.ts:DEFAULT_MAX_SKEW_MS` |
+| Node-runtime caller header clock skew | 60 s | `maxSkewMs` in `@tailworks/node` | `js/packages/node/src/index.ts:DEFAULT_MAX_SKEW_MS` |
+| Open `connect()` sockets per object (the workload node counts as one, for the Worker and plain-DO objects), per instance | 256, then `socket_limit` | no | `hostd/connect.go:maxSocketsPerObject` |
+| Time for the platform to authenticate a `connect()` tunnel | 10 s | no | `hostd/connect.go:connectPreambleTimeout` |
+| `connect()` dial (and `tls: "netd"` handshake) | 30 s, as an object's node wait | no | `hostd/host.go:ReadyTimeout` |
+| A service binding RPC call's encoded arguments, or its result | 32 MiB (`RangeError` / `bad_request` over it) | no | `hostd/gen/js/svc.js:RPC_MAX_BYTES` |
+| How long hostd reuses a service binding's resolved target | 5 s (dropped sooner when netd can't reach it) | no | `hostd/servicebind.go:svcTargetTTL` |
+| Wait for mgmt to accept a new object's ready report (and so issue its node certificate) before its first outbound call | 20 s, then `identity_pending` (a failed report is re-sent at most every 5 s) | no | `hostd/egressgate.go:#egress-report-wait`, `hostd/egressgate.go:rereportEvery` |
+| How long a receiver reuses a caller's node certificate; a "not a tailworks object" answer | 60 s; 2 s | no | `hostd/certs.go:certCacheTTL`, `hostd/certs.go:#cert-no-cert-ttl` |
 
 ## Process tier
 
@@ -86,7 +99,7 @@ other crash.
 | Limit | Value | Configurable? | Source |
 |---|---|---|---|
 | V8 heap of each isolate in a workerd (the Worker, each Durable Object class) | 1024 MiB | `-workerd-heap-mib` (-1: no cap) | `hostd/limits.go:DefaultWorkerdHeapMiB` |
-| V8 heap of a Node-tier app (`--max-old-space-size`) | 2048 MiB | `-node-heap-mib` (-1: no cap); the app's own `--max-old-space-size` in `node.args` or `NODE_OPTIONS` wins | `hostd/limits.go:DefaultNodeHeapMiB` |
+| V8 heap of a Node-runtime app (`--max-old-space-size`) | 2048 MiB | `-node-heap-mib` (-1: no cap); the app's own `--max-old-space-size` in `node.args` or `NODE_OPTIONS` wins | `hostd/limits.go:DefaultNodeHeapMiB` |
 | Process memory beyond the heap, CPU | none | — | [Limits that don't exist](#limits-that-dont-exist) |
 
 ## Durable Objects
@@ -105,6 +118,94 @@ See also [create-admission.md](create-admission.md).
 | Retries of a failed node join | 5 (1, 2, 4, 8, 16 s) | no | `hostd/objects.go:maxTries` |
 | Storage per object (workerd tier) | none | — | |
 | Storage per object (microVM tier) | 1024 MiB volume (sparse) | `tw-hostd -vm-volume-mib` | `cmd/tw-hostd/main.go:-vm-volume-mib` |
+
+## Tailnet node budget
+
+Every node tailworks runs for an app is a device on your tailnet. **Your
+Tailscale plan's device limit applies to those nodes** as it does to any
+other device: see [Tailscale's pricing page](https://tailscale.com/pricing)
+for what each plan includes. tailworks doesn't know your plan and can't
+check against it, so count before you deploy a class with many objects.
+
+What an app uses:
+
+| In `tailworks.jsonc` | Nodes |
+|---|---|
+| The workload (`tailnet.tags`) | 1, the workload node. It is one node wherever the workload runs, not one per host |
+| `"replicas": N` | N: each replica is a copy of the workload on its own host, with its own workload node |
+| `"public"` routes | 1 more per copy: the public node |
+| A class in `tailnet.objects` with `tags` | 1 per object, in facet mode and in plain-DO mode alike. `"egress"` picks which node outbound requests leave from, not whether the object has a node. A sub-agent (`ctx.tailnet.spawn()`) is an object |
+| A class with `"node": false` | 0: its objects are reached through the workload |
+| Containers | 0 |
+
+Also on the tailnet, and not in `tailworks.jsonc`:
+
+- **Previews.** `tw deploy --preview` runs a second copy of the workload,
+  with its own workload node and its own objects' nodes, until `tw promote`
+  or `tw undeploy`.
+- **Pool nodes.** tailworks keeps one pre-joined node per class that had a
+  new object on that host in the last hour ([concepts.md](concepts.md#pool-node-_pool)).
+  `tw up --pool-nodes 0` turns them off.
+- **tailworks itself.** The default `tw up` is one node, `tw-mgmt`. Each
+  host added with `tw host add` (and the host of `tw up --separate-host`)
+  is one more.
+
+An object's node stays on the tailnet for as long as the object lives. It
+does not go away when the object is idle (workerd evicts an idle object
+from memory; its node stays online). It goes away when the object is
+killed (`tw kill`), when its `ttl` runs out, or when its workload is
+undeployed; a pool node goes away after an hour without new objects of its
+class.
+
+To spend fewer nodes, give fewer classes their own:
+[recipes.md](recipes.md#choose-which-classes-get-their-own-node) says how
+to choose. A class without a node must say `"node": false`. A project with
+no `tailworks.jsonc` gets that for every class
+([wrangler.md](wrangler.md#without-a-tailworksjsonc)). A class that has a
+binding in the wrangler config but no entry in `tailnet.objects` is not a
+way to say it: mgmt mints no node for it and answers
+[`unknown_namespace`](errors.md#unknown_namespace) when the host asks for
+one.
+
+**Where to see it.** `tw policy` and `tw deploy`'s preflight print what
+the app uses and what the tenant has now:
+
+```
+✓ preflight  nodes: this app is 1 workload node + 1 node per Room object (Counter objects share the workload node); tenant example.ts.net has 14 live nodes: 2 workloads, 11 objects, 1 pool (maxObjects 1000; host runs 14 of 500 node capacity)
+```
+
+`tw ls` prints the tenant's count in its `NODES` line, and `tw doctor` in
+its `node_budget` check. With `--json`, all of them carry it in `nodes`
+([cli-json.md](cli-json.md#node-budget-nodes)). The count is the tenant's
+live objects in mgmt, including nodes that are still joining; tailworks'
+own nodes are not in it.
+
+tailworks has two limits of its own on the same count, and these it does
+check:
+
+| Limit | Value | Configurable? | Source |
+|---|---|---|---|
+| Live nodes per tenant (every row of the first table, previews and pool nodes) | 1000; past it a new object is refused 429 [`object_quota_exceeded`](errors.md#object_quota_exceeded) | `tw tenant set --max-objects` | `mgmt/types.go:DefaultMaxObjects` |
+| `tw policy`, `tw deploy`, `tw ls` and `tw doctor` warn when the tenant's nodes are this close to that quota or to its hosts' node capacity | 80% | no | `cmd/tw/nodebudget.go:nodeBudgetWarnPct` |
+
+The second limit is the node capacity each host advertises
+(`tw-hostd -capacity-nodes`, in [Hosts](#hosts-and-the-microvm-tier)).
+Placement uses it: a host with no free node capacity takes no new
+workloads. It does not refuse new objects of the workloads a host already
+runs. The warning compares the sum of the live hosts' capacity with the
+larger of the tenant's count and the nodes those hosts report (which
+covers every tenant they serve). Only an admin can read host capacity, so
+a linked developer machine gets the `maxObjects` warning alone.
+
+## Platform store reads while mgmt is slow
+
+KV, D1 and R2 (ADR-044 §8). Details: [kv.md](kv.md), [d1.md](d1.md).
+
+| Limit | Value | Configurable? | Source |
+|---|---|---|---|
+| A read's wait for mgmt before it serves the host's copy | 2 s | no | `hostd/gen/js/store.js:READ_WAIT_MS` |
+| Background catch-up while mgmt is unreachable (reads don't wait) | at most every 5 s | no | `hostd/gen/js/store.js:STALE_RETRY_MS` |
+| One journal read from mgmt (hostd) | 10 s | no | `hostd/stores.go:storeReadTimeout` |
 
 ## KV
 
@@ -135,7 +236,7 @@ Details: [d1.md](d1.md#limits).
 | Database | 1 GiB | no | `hostd/gen/js/store-d1.js:D1_LIMITS.databaseBytes` |
 | One write (statement or batch), encoded | 2 MiB | no | `hostd/gen/js/store-d1.js:D1_LIMITS.entryBytes` |
 | Journal (every write, no compaction yet) | 1 GiB | no | `mgmt/stores.go:StoreMaxBytes` |
-| `tw d1 execute` / migration body | 8 MiB | no | `mgmt/d1.go:d1BodyLimit` |
+| `tw d1 execute` / migration body | 8 MiB | no | `mgmt/d1.go:D1BodyLimit` |
 | Query duration | none | — | |
 
 ## R2
@@ -254,6 +355,7 @@ Details: [observability.md](observability.md#volume-bounds).
 | OTLP export interval: logs and spans / metrics | 2 s / 30 s | no | `hostd/telemetry.go:ExportEvery`, `hostd/telemetry.go:MetricsEvery` |
 | OTLP headers / header value / endpoint | 16 / 4 KiB / 2048 bytes | no | `mgmt/telemetry.go:TelemetryMaxHeaders`, `mgmt/telemetry.go:TelemetryMaxHeaderValue`, `mgmt/telemetry.go:TelemetryMaxEndpoint` |
 | `tw logs` lines | default 50, at most 10,000 | `tw logs -n` | `cmd/tw/ops.go:#logs-n`, `mgmt/logs.go:MaxLogLines` |
+| `tw audit` records (bare command: the newest) | default 50, fetched in pages of 500 | `tw audit -n` (an object, `--human`, `--trace` and `--all` are always complete) | `cmd/tw/ops.go:#audit-n` |
 | One `tw logs -f` stream | 1 h (the CLI reconnects) | no | `hostd/logs.go:maxLogFollow` |
 | Request record max age | none (0): only the rotation above | `tw up --request-log-max-age`, `tw-hostd -request-log-max-age` (e.g. `168h`) | `cmd/tw-hostd/main.go:-request-log-max-age`, `cmd/tw/up_retention.go:-request-log-max-age` |
 | Request record max age applied every | 10 min (or the max age, if shorter) | no | `hostd/telemetry_retention.go:RecordPruneEvery` |
@@ -308,7 +410,7 @@ Details: [containers.md](containers.md#instance-types) and
 | Outbound intercepts per container | 128 | no | `netd/sbxnet/sbxnet.go:MaxIntercepts` |
 | Image, uncompressed | 40 GiB | `tw-hostd -container-image-max-mib` | `hostd/image/limits.go:DefaultMaxImageBytes` |
 | Image layers / entries / path depth / path length | 128 / 1 Mi / 256 / 4096 bytes | no | `hostd/image/limits.go:MaxLayers`, `hostd/image/limits.go:MaxEntries`, `hostd/image/limits.go:MaxDepth`, `hostd/image/limits.go:MaxName` |
-| Converted image cache | unlimited | `tw-hostd -container-image-cache-max-mib` | `cmd/tw-hostd/main.go:-container-image-cache-max-mib` |
+| Converted image cache | 20 GiB (least recently used images not in use are removed past it; images in use stay, even past it) | `tw-hostd -container-image-cache-max-mib` (0 = no cap) | `internal/hostdrun/hostdrun.go:DefaultImageCacheMiB`, `cmd/tw-hostd/main.go:-container-image-cache-max-mib` |
 | `exec()` duration | none | — | |
 
 ## Hosts and the microVM tier
@@ -327,15 +429,15 @@ heartbeat, 12 s kill tombstone).
 | microVM boot | 60 s | no | `hostd/workload.go:#vm-boot` |
 | Tailnet nodes advertised per host | 25% of RAM at 8 MiB per node, at least 50 and at most 1000 (500 when RAM can't be read); see [Per-node memory](#per-node-memory-measured) | `-capacity-nodes` (0: derived) | `hostd/capacitynodes.go:nodeMemShare`, `hostd/capacitynodes.go:NodeMemMiB`, `hostd/capacitynodes.go:MinCapacityNodes`, `hostd/capacitynodes.go:MaxCapacityNodes`, `hostd/capacitynodes.go:FallbackCapacityNodes` |
 | Pre-joined nodes per hot class | 1 | `-pool-nodes` | `internal/hostdrun/hostdrun.go:DefaultPoolNodes` |
-| Concurrent node joins | 16 | `tw-netd -join-parallel` | `cmd/tw-netd/main.go:-join-parallel` |
+| Concurrent node joins | 16 | no | `netd/registry.go:JoinParallel` |
 | One node join | 2 min | no | `netd/registry.go:JoinTimeout` |
 | Heartbeat | 3 s | `-heartbeat` | `cmd/tw-hostd/main.go:-heartbeat` |
 | Stop serving stateful workloads without a heartbeat | 30 s, at most 40 s | `-fence-after` | `hostd/host.go:DefaultFenceAfter`, `hostd/host.go:MaxFenceAfter` |
 | Namespace lease (a DO's host) | 45 s | no | `mgmt/types.go:NamespaceLeaseTTL` |
 | Host lease | 10 s | no | `mgmt/types.go:HostLeaseTTL` |
 | Killed node keeps refusing connections | 10 s | `-kill-tombstone` | `cmd/tw-hostd/main.go:-kill-tombstone` |
-| Node-tier restart backoff | 250 ms doubling to 10 s, never gives up | no | `hostd/node.go:#node-restart-backoff` |
-| Node-tier stop: SIGTERM to SIGKILL | 3 s | no | `hostd/node.go:#node-stop-grace` |
+| Node-runtime restart backoff | 250 ms doubling to 10 s, never gives up | no | `hostd/node.go:#node-restart-backoff` |
+| Node-runtime stop: SIGTERM to SIGKILL | 3 s | no | `hostd/node.go:#node-stop-grace` |
 | Warm keys per (tenant, tag set) | 5 | `tw-mgmt -warm-keys` | `internal/mgmtd/mgmtd.go:DefaultWarmKeys` |
 | Warm key lifetime | 30 min | `tw-mgmt -warm-key-ttl` | `mgmt/warmkeys.go:DefaultWarmKeyTTL` |
 
@@ -406,7 +508,7 @@ tailnet, `make e2e-regrate-real` (`e2e/regrate`).
 
 No registration was refused or slowed: the register round trip stayed at
 0.43 s at 50-way. At these sizes the rate is concurrent joins ÷ join time,
-set by netd's `-join-parallel`, not by control. Sustained rates over more
+set by netd's concurrent-join limit (`JoinParallel`), not by control. Sustained rates over more
 than 50 nodes, and several hosts registering at once, were not measured.
 
 ## Management API
@@ -423,5 +525,5 @@ operator console) and the local socket are not limited.
 | Request rate per host | 1000 requests/s, bursts of 2000 | `tw-mgmt -api-host-rps` (-1: off) | `mgmt/ratelimit.go:DefaultAPIHostRPS` |
 | Concurrent requests from non-host tailnet callers, all together (hosts are not counted) | 256, then `rate_limited` | `tw-mgmt -api-inflight` (-1: off) | `mgmt/ratelimit.go:DefaultAPIInFlight` |
 | List page | default 50, at most 500 | `limit` query parameter | `mgmt/page.go:PageDefaultLimit`, `mgmt/page.go:PageMaxLimit` |
-| D1 SQL body | 8 MiB | no | `mgmt/d1.go:d1BodyLimit` |
+| D1 SQL body | 8 MiB | no | `mgmt/d1.go:D1BodyLimit` |
 | Upgrade artifact upload | 2 GiB | no | `mgmt/v1_upgrades.go:maxArtifactBytes` |

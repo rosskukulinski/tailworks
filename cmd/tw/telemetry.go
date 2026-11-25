@@ -27,24 +27,33 @@ type repeated []string
 func (r *repeated) String() string     { return strings.Join(*r, ",") }
 func (r *repeated) Set(s string) error { *r = append(*r, s); return nil }
 
-func cmdTelemetry(args []string) error {
-	sub, rest := "show", args
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		if !strings.HasPrefix(a, "-") {
-			sub, rest = a, append(append([]string{}, args[:i]...), args[i+1:]...)
-			break
-		}
-		if (a == "--state-dir" || a == "-state-dir" || a == "--tenant" || a == "-tenant") && i+1 < len(args) {
-			i++
-		}
+// telemetryOpts are tw telemetry's flags. Only set has its own
+// (telemetryFlags).
+type telemetryOpts struct {
+	tenant *string
+
+	// set
+	otlp, signals *string
+	headers       *repeated
+}
+
+// telemetryFlags registers verb's flags (anyVerb: every verb's) on f.
+func telemetryFlags(f *flags, verb string) *telemetryOpts {
+	o := &telemetryOpts{otlp: new(string), signals: new(string), headers: &repeated{}}
+	o.tenant = tenantFlag(f)
+	if onVerb(verb, "set") {
+		o.otlp = f.String("otlp", "", "the OTLP/HTTP base URL of a collector on the tailnet (http://otel-collector:4318)")
+		f.Var(o.headers, "header", "a header for every export, NAME=VALUE, or NAME alone to read its value from stdin (repeatable)")
+		o.signals = f.String("signals", "", "what to export, comma-separated (default logs,metrics,traces)")
 	}
+	return o
+}
+
+func cmdTelemetry(args []string) error {
+	sub, rest := scanVerbOr(args, func(f *flags) { telemetryFlags(f, anyVerb) }, "show")
 	f := newFlags("telemetry")
-	tenantF := tenantFlag(f)
-	endpoint := f.String("otlp", "", "set: the OTLP/HTTP base URL of a collector on the tailnet (http://otel-collector:4318)")
-	var headers repeated
-	f.Var(&headers, "header", "set: a header for every export, NAME=VALUE, or NAME alone to read its value from stdin (repeatable)")
-	signals := f.String("signals", "", "set: what to export, comma-separated (default logs,metrics,traces)")
+	o := telemetryFlags(f, sub)
+	tenantF, endpoint, signals := o.tenant, o.otlp, o.signals
 	pos, err := f.parse(rest)
 	if err != nil {
 		return err
@@ -52,14 +61,12 @@ func cmdTelemetry(args []string) error {
 	if len(pos) != 0 {
 		return fail("bad_request", "unexpected arguments", "usage: tw "+usageOf("telemetry"))
 	}
-	if sub != "set" && (*endpoint != "" || len(headers) > 0 || *signals != "") {
-		return fail("bad_request", "--otlp, --header and --signals are for tw telemetry set")
-	}
+	headers := *o.headers
 	var put mgmtapi.OTLPExport
 	switch sub {
 	case "show", "ls":
 		sub = "show"
-	case "rm", "delete", "off":
+	case "rm", "off":
 		sub = "rm"
 	case "set":
 		put.Endpoint = *endpoint

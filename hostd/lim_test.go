@@ -22,6 +22,7 @@ import (
 // cap_missing while admitting the parent's, and must fail closed when the
 // certificate cannot be fetched.
 func TestSpawnLimEnforcedAtReceiver(t *testing.T) {
+	t.Parallel()
 	// The agent and the MCP server share this host: let the child reach the
 	// server over the tailnet (hairpin), as e2e check (d) does.
 	s := startSuiteCapsOpts(t, fakemgmt.Config{}, tailcfg.PeerCapMap{
@@ -87,6 +88,7 @@ func TestSpawnLimEnforcedAtReceiver(t *testing.T) {
 // assigns object, trace and principal, and the note can never masquerade
 // as an allow/deny decision.
 func TestTenantAuditIsOnlyANote(t *testing.T) {
+	t.Parallel()
 	s := startSuite(t, fakemgmt.Config{})
 	e := s.e
 	d := e.Deploy(hostdtest.Fixture("probe"), "probe", nil)

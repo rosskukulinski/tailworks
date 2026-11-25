@@ -10,6 +10,7 @@ import (
 )
 
 func TestUnitFor(t *testing.T) {
+	t.Parallel()
 	s := &state{Dir: "/home/u/.tailworks", Cfg: Config{Tailnet: "example.ts.net"}}
 	u := unitFor(s, "/home/u/.tailworks/bin/tw")
 	for _, want := range []string{
@@ -29,6 +30,7 @@ func TestUnitFor(t *testing.T) {
 }
 
 func TestPlistFor(t *testing.T) {
+	t.Parallel()
 	s := &state{Dir: "/Users/u/.tailworks", Cfg: Config{Tailnet: "example.ts.net"}}
 	p := plistFor(s, "/Users/u/.tailworks/bin/tw")
 	for _, want := range []string{
@@ -76,6 +78,7 @@ func TestUserUnitDir(t *testing.T) {
 }
 
 func TestServiceUnsupportedOffLinuxAndMac(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "linux" || runtime.GOOS == "darwin" {
 		t.Skip("supported here")
 	}
@@ -85,6 +88,7 @@ func TestServiceUnsupportedOffLinuxAndMac(t *testing.T) {
 }
 
 func TestParseVer(t *testing.T) {
+	t.Parallel()
 	for in, want := range map[string][2]int{"2.39": {2, 39}, "6.8.0-45-generic": {6, 8}, "2.35\n": {2, 35}} {
 		if got, ok := parseVer(in); !ok || got != want {
 			t.Errorf("parseVer(%q) = %v %v", in, got, ok)
@@ -99,6 +103,7 @@ func TestParseVer(t *testing.T) {
 }
 
 func TestWorkerdGlibcNeedNonELF(t *testing.T) {
+	t.Parallel()
 	p := filepath.Join(t.TempDir(), "x")
 	os.WriteFile(p, []byte("#!/bin/sh\n"), 0o755)
 	if v, ok := workerdGlibcNeed(p); ok || v != minGlibc {

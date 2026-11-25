@@ -34,6 +34,10 @@ type backupManifest struct {
 	// secrets stay in setec).
 	Custody string             `json:"custody"`
 	Schema  *mgmt.SchemaStatus `json:"schema,omitempty"`
+	// Hostd is what of <state>/hostd is in the backup (Durable Object
+	// storage and fs R2 bytes); nil when tw backup --hostd=false (or an
+	// older tw) wrote it.
+	Hostd *hostdBackup `json:"hostd,omitempty"`
 	// NotIncluded lists what lives elsewhere and needs its own backup.
 	NotIncluded []string `json:"notIncluded"`
 }
@@ -49,6 +53,7 @@ type backupResult struct {
 func cmdBackup(args []string) error {
 	f := newFlags("backup")
 	out := f.String("out", "", "write the backup to this new directory (default <state>/backups/<time>-backup-<version>)")
+	withHostd := f.Bool("hostd", true, "also copy each workload's Durable Object storage and the fs backend's R2 bytes (--hostd=false: the control plane only)")
 	pos, err := f.parse(args)
 	if err != nil {
 		return err
@@ -76,21 +81,36 @@ func cmdBackup(args []string) error {
 	if rel, err := filepath.Rel(filepath.Join(s.Dir, "mgmt"), dst); err == nil && !strings.HasPrefix(rel, "..") {
 		return fail("bad_request", "--out "+dst+" is inside the state it backs up").withFix("tw backup --out <a directory outside " + filepath.Join(s.Dir, "mgmt") + ">")
 	}
+	if rel, err := filepath.Rel(filepath.Join(s.Dir, "hostd"), dst); err == nil && !strings.HasPrefix(rel, "..") {
+		return fail("bad_request", "--out "+dst+" is inside the state it backs up").withFix("tw backup --out <a directory outside " + filepath.Join(s.Dir, "hostd") + ">")
+	}
 	if ents, err := os.ReadDir(dst); err == nil && len(ents) > 0 {
 		return fail("bad_request", dst+" already exists and is not empty").withFix("tw backup --out <a new directory>")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
-	if _, err := backupMgmtTo(ctx, s, dst); err != nil { // upgrade.go
+	mgmtSnapshot := func() error {
+		_, err := backupMgmtTo(ctx, s, dst) // upgrade.go
+		return err
+	}
+	var hb *hostdBackup
+	if *withHostd {
+		hb, err = backupHostd(ctx, s, dst, mgmtSnapshot) // backup_hostd.go
+	} else {
+		err = mgmtSnapshot()
+	}
+	if err != nil {
 		os.RemoveAll(dst)
 		return fail("backup_failed", "backup: "+err.Error())
 	}
 	m := backupManifest{V: 1, Version: version, CreatedAt: time.Now().UTC().Format(time.RFC3339), StateDir: s.Dir,
-		Store: "sqlite", Custody: custodyName(s.Cfg.Custody),
-		NotIncluded: []string{
-			filepath.Join(s.Dir, "hostd") + " (Durable Object storage and R2 object bytes: tw down, then copy it)",
-			filepath.Join(s.Dir, "mgmt", "registry") + " (container image blobs: copy it separately if you deploy container images)",
-		}}
+		Store: "sqlite", Custody: custodyName(s.Cfg.Custody), Hostd: hb,
+		NotIncluded: append(hostdNotIncluded(filepath.Join(s.Dir, "hostd"), *withHostd),
+			filepath.Join(s.Dir, "mgmt", "registry")+" (container image blobs: copy it separately if you deploy container images)",
+		)}
+	if hb != nil {
+		m.NotIncluded = append(m.NotIncluded, hb.Skipped...)
+	}
 	if !s.Cfg.storeIsSQLite() {
 		m.Store = "postgres"
 		m.NotIncluded = append(m.NotIncluded, "the Postgres store (pg_dump it at the same time)")
@@ -111,6 +131,9 @@ func cmdBackup(args []string) error {
 	res := backupResult{Backup: dst, Manifest: m, Bytes: dirBytes(dst)}
 	emit(f, res, func() {
 		fmt.Printf("✓ backup   %s (%s; store %s, custody %s)\n", dst, humanBytes(res.Bytes), m.Store, m.Custody)
+		if hb != nil {
+			fmt.Printf("✓ hostd    DO storage of %d workload(s) (%d databases), %d R2 blob(s) (%s)\n", len(hb.Workloads), hb.Databases, hb.R2Blobs, humanBytes(hb.R2Bytes))
+		}
 		fmt.Println("  it holds the custody key and mgmt's node key: keep it like a secret")
 		for _, n := range m.NotIncluded {
 			fmt.Println("  not included:", n)
@@ -129,6 +152,9 @@ type restoreResult struct {
 	// RestoreGeneration counts the store's restores (SQLite stores; a
 	// Postgres store is fenced with tw-mgmt restore-fence after pg_restore).
 	RestoreGeneration int64 `json:"restoreGeneration,omitempty"`
+	// Hostd is whether the backup's Durable Object storage and R2 bytes
+	// were put back.
+	Hostd bool `json:"hostd,omitempty"`
 }
 
 func cmdRestore(args []string) error {
@@ -145,7 +171,7 @@ func cmdRestore(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := confirmDestroy(f, *yes, "restoring "+pos[0]+" replaces this install's control plane (mgmt's store, custody and tw.json) with the backup's; every change made after the backup is lost", pos[0], "tw restore "+pos[0],
+	if err := confirmDestroy(f, *yes, "restoring "+pos[0]+" replaces this install's control plane (mgmt's store, custody and tw.json) and, when the backup holds them, its Durable Object storage and R2 bytes with the backup's; every change made after the backup is lost", pos[0], "tw restore "+pos[0],
 		"tw backup   (first, to keep what you have now)"); err != nil {
 		return err
 	}
@@ -194,6 +220,16 @@ func cmdRestore(args []string) error {
 	if err := restoreMgmt(s, dir); err != nil { // upgrade.go
 		return fail("restore_failed", "restore: "+err.Error()).withFix("tw restore " + res.SafetyBackup + " --yes   (puts the state from before back)")
 	}
+	if m.Hostd != nil {
+		safety := res.SafetyBackup
+		if safety == "" {
+			safety = filepath.Join(s.Dir, "backups", time.Now().UTC().Format("20060102T150405Z")+"-before-restore")
+		}
+		if err := restoreHostd(s, dir, safety); err != nil { // backup_hostd.go
+			return fail("restore_failed", "restore hostd: "+err.Error()).withFix("tw restore " + safety + " --yes   (puts the state from before back)")
+		}
+		res.Hostd = true
+	}
 	if m.Store == "sqlite" {
 		gen, err := mgmt.RestoreFenceDSN(ctx, filepath.Join(s.Dir, "mgmt", "mgmt.db"))
 		if err != nil {
@@ -203,6 +239,9 @@ func cmdRestore(args []string) error {
 	}
 	emit(f, res, func() {
 		fmt.Printf("✓ restore  %s → %s\n", dir, s.Dir)
+		if res.Hostd {
+			fmt.Println("✓ hostd    Durable Object storage and R2 bytes as of the backup")
+		}
 		if res.SafetyBackup != "" {
 			fmt.Printf("  the state it replaced: %s\n", res.SafetyBackup)
 		}

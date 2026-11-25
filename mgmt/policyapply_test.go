@@ -96,6 +96,7 @@ func policyApp(t *testing.T, connects string) []byte {
 // TestPolicyApply: plan, refuse without the write scope, write additively
 // with If-Match, audit, then nothing more to do.
 func TestPolicyApply(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	e.ts.policy = operatorOnly
 	tn := v1Tenant(t, e, "t.ts.net", nil)
@@ -104,7 +105,7 @@ func TestPolicyApply(t *testing.T) {
 
 	var plan PolicyApplyResult
 	e.c.ok("POST", path+"?dryRun=true", body, &plan)
-	if !plan.DryRun || plan.Changed || plan.Preflight.OK || !strings.Contains(plan.Added, `"tag:tw-wl-app"`) || !strings.Contains(plan.Added, `"dst":["tag:db"]`) {
+	if !plan.DryRun || plan.Changed || plan.Preflight.OK || !strings.Contains(plan.Added, `"tag:tw-wl-app"`) || !strings.Contains(plan.Added, `"dst": ["tag:db"]`) {
 		t.Fatalf("plan %+v", plan)
 	}
 	if _, n := e.policyState(); n != 0 {
@@ -130,7 +131,8 @@ func TestPolicyApply(t *testing.T) {
 		}
 	}
 	added := policy.Snippet{TagOwners: map[string][]string{"tag:tw-wl-app": {"autogroup:admin", "tag:tw"}},
-		Grants: []map[string]any{{"src": []string{"tag:tw-wl-app"}, "dst": []string{"tag:db"}, "ip": []string{"tcp:80"}}}}
+		Grants: []map[string]any{{"src": []string{"tag:tw-wl-app"}, "dst": []string{"tag:db"}, "ip": []string{"tcp:80"}},
+			{"src": []string{"autogroup:member"}, "dst": []string{"tag:tw-wl-app"}, "ip": []string{"tcp:80"}}}} // callergrant.go
 	if err := policy.VerifyAdditive([]byte(operatorOnly), []byte(after), added); err != nil {
 		t.Fatalf("not purely additive: %v", err)
 	}
@@ -155,6 +157,7 @@ func TestPolicyApply(t *testing.T) {
 // TestPolicyApplyConflict: a 412 is retried once from a fresh read; a
 // second one is 409 policy_conflict with nothing written.
 func TestPolicyApplyConflict(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		conflicts, writes int
 		code              string
@@ -192,6 +195,7 @@ func TestPolicyApplyConflict(t *testing.T) {
 // grant to "*" or the internet gets the tw-owned part written and the rest
 // reported as manual; validation failures write nothing.
 func TestPolicyApplyHostile(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	e.ts.policy = operatorOnly
 	grantPolicyWrite(e)
@@ -246,6 +250,7 @@ func TestPolicyApplyHostile(t *testing.T) {
 // TestPolicyApplyAdminOnly: tenant admins may deploy, but the tailnet
 // policy is the tailnet admins'.
 func TestPolicyApplyAdminOnly(t *testing.T) {
+	t.Parallel()
 	e := newTenantEnv(t)
 	body := map[string]any{"bundle": policyApp(t, `["tag:db"]`)}
 	for _, q := range []string{"", "?dryRun=true"} {

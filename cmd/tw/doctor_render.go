@@ -37,6 +37,7 @@ var doctorGroups = []string{
 var (
 	reDiskFree     = regexp.MustCompile(`^([\d.]+ \S+ free)`)
 	reWorkerdVer   = regexp.MustCompile(`: workerd (\S+)`)
+	reWorkerdAge   = regexp.MustCompile(`, (\d+ days?) old`)
 	reSandboxKind  = regexp.MustCompile(`^(.+?) works? on `)
 	reBeforeColon  = regexp.MustCompile(`^([^:;(]+)[:;(]`)
 	reStoreTenants = regexp.MustCompile(`^(\d+ tenants?, \d+ stores?, \d+ queues?)`)
@@ -56,19 +57,23 @@ var doctorMetas = map[string]doctorMeta{
 	"binaries":                   {group: "Install", label: "daemon binaries", fact: binariesFact},
 	"bundler":                    {group: "Install", label: "bundler"},
 	"cgroups_v2":                 {group: "Linux host", label: "cgroups v2"},
+	"containers":                 {group: "Isolation", label: "containers"},
 	"data_disk":                  {group: "Storage", label: "disk", fact: submatch(reDiskFree)},
 	"firecracker":                {group: "Linux host", label: "Firecracker"},
 	"glibc":                      {group: "Install", label: "glibc"},
 	"host_sockets":               {group: "Isolation", label: "host sockets"},
 	"https_certs":                {group: "Tailnet", label: "HTTPS certs"},
+	"install":                    {group: "Install", label: "installed by", fact: installFact},
 	"kernel":                     {group: "Linux host", label: "kernel"},
 	"kvm":                        {group: "Linux host", label: "KVM"},
 	"landlock":                   {group: "Linux host", label: "Landlock"},
 	"microvm_tier":               {group: "Linux host", label: "microVM tier"},
 	"mint_mode":                  {group: "Tailnet", label: "mint", fact: mintFact},
+	"node_budget":                {group: "Tailnet", label: "node budget", fact: nodeBudgetFact}, // nodebudget.go
 	"node_egress":                {group: "Isolation", label: "Node egress"},
 	"public_ingress":             {group: "Tailnet", label: "public ingress"},
 	"sandbox":                    {group: "Isolation", label: "sandbox", fact: submatch(reSandboxKind)},
+	"side_channels":              {group: "Isolation", label: "side channels"},
 	"state_dir_writable":         {group: "Install", label: "state dir writable"},
 	"store_sizes":                {group: "Storage", label: "stores", fact: submatch(reStoreTenants)},
 	"system_tailscaled_not_used": {group: "Tailnet", label: "system tailscaled unused"},
@@ -76,12 +81,26 @@ var doctorMetas = map[string]doctorMeta{
 	"transport":                  {group: "Tailnet", label: "transport", fact: submatch(reBeforeColon)},
 	"tw_home_writable":           {group: "Install", label: "~/.tailworks writable"},
 	"user_namespaces":            {group: "Linux host", label: "user namespaces"},
+	"worker_internet":            {group: "Isolation", label: "Worker internet", fact: submatch(reBeforeColon)},
 	"workerd":                    {group: "Install", label: "workerd", fact: submatch(reWorkerdVer)},
+	"workerd_age":                {group: "Install", label: "workerd age", fact: submatch(reWorkerdAge)}, // doctor_workerdage.go
 }
 
 func binariesFact(d string) string {
 	if strings.Contains(d, "not needed in single-process mode") {
 		return "in-process"
+	}
+	return ""
+}
+
+func installFact(d string) string {
+	switch {
+	case strings.HasPrefix(d, "npm package") && strings.Contains(d, "(npx"):
+		return "npx"
+	case strings.HasPrefix(d, "npm package"):
+		return "npm"
+	case strings.HasPrefix(d, "release tarball"):
+		return "install.sh"
 	}
 	return ""
 }

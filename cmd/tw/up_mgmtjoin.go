@@ -73,7 +73,7 @@ func needsLogin(msg string) bool { return strings.Contains(msg, "needs an intera
 // joinFailure turns mgmt's start error into tw up's error.
 func joinFailure(hostname string, tags []string, msg string) error {
 	if tsapi.IsTagsNotPermitted(errors.New(msg)) {
-		return policyMissingTagOwners("the control server refused the join of "+hostname+" with tags "+strings.Join(tags, ", "), errors.New(msg))
+		return policyMissingTagOwners("the control server refused the join of "+hostname+" with tags "+strings.Join(tags, ", "), errors.New(msg), nil)
 	}
 	e := fail("bootstrap_failed", "tw-mgmt failed to start", msg).withFix("tw logs --component mgmt")
 	if strings.Contains(strings.ToLower(msg), "tag") {

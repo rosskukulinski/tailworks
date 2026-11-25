@@ -21,8 +21,9 @@ tw deploy                             # then curl the URL it prints, from any de
   (in the `tw-error` header). An internet URL works too: it leaves from the
   host's network, unless `tailnet.egress.internet` in tailworks.jsonc turns
   it off ([call an internet API](https://github.com/rosskukulinski/tailworks/blob/master/docs/recipes.md#call-an-internet-api)).
-- `tailworks.jsonc` `tailnet.connects`: the tags you call (the template says
-  `tag:db`). `tw deploy` checks that your tailnet policy grants them.
+- `tailworks.jsonc` `tailnet.connects`: the tags you call, e.g. `["tag:db"]`
+  (the tag must already exist in your policy's `tagOwners`). `tw deploy`
+  checks that your tailnet policy grants them.
 - `tailworks.jsonc` `tailnet.tags`: the workload node's tag, named after your app
   by `tw init`.
 

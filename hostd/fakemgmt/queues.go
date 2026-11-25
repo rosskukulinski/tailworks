@@ -368,6 +368,7 @@ func (s *Server) pullQueue(w http.ResponseWriter, r *http.Request) {
 		q := s.queueLocked(r.PathValue("id"), r.PathValue("queue"), true)
 		now := time.Now().UnixMilli()
 		out := []map[string]any{}
+		var claimed []fakeClaim
 		dead := 0
 		for _, m := range q.sorted() {
 			if len(out) == o.BatchSize || m.visible > now {
@@ -382,6 +383,15 @@ func (s *Server) pullQueue(w http.ResponseWriter, r *http.Request) {
 			m.visible = now + o.VisibilityTimeoutMs
 			m.lease = leaseToken()
 			out = append(out, qmsgView(m, true))
+			claimed = append(claimed, fakeClaim{m, m.lease})
+		}
+		if len(claimed) > 0 && r.Context().Err() != nil {
+			// The caller left as the claim was made: hand it back
+			// uncounted, as mgmt does (#412).
+			releaseUndeliveredLocked(claimed, now)
+			s.mu.Unlock()
+			writeJSON(w, 200, map[string]any{"messages": []any{}})
+			return
 		}
 		if len(out) > 0 || dead > 0 || !time.Now().Before(deadline) {
 			q.pulls++
@@ -395,7 +405,13 @@ func (s *Server) pullQueue(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			s.mu.Unlock()
-			writeJSON(w, 200, map[string]any{"messages": out, "deadLettered": dead})
+			w.Header().Set("content-type", "application/json")
+			w.WriteHeader(200)
+			if err := json.NewEncoder(w).Encode(map[string]any{"messages": out, "deadLettered": dead}); err != nil && len(claimed) > 0 {
+				s.mu.Lock() // the answer never reached the caller (#412)
+				releaseUndeliveredLocked(claimed, time.Now().UnixMilli())
+				s.mu.Unlock()
+			}
 			return
 		}
 		s.mu.Unlock()
@@ -528,4 +544,23 @@ func (s *Server) deployedConsumerLocked(tenant, workload, queue string) *queuecf
 		return nil
 	}
 	return c.ConsumerOf(queue)
+}
+
+// fakeClaim is one message a pull leased, with the lease it got.
+type fakeClaim struct {
+	m     *fakeQMsg
+	lease string
+}
+
+// releaseUndeliveredLocked hands back messages a pull claimed for a caller
+// that never got them: visible at once, the claim's attempt taken back, as
+// a Release does (mgmt/queueclaimgone.go). A message whose lease has moved
+// on since is left alone.
+func releaseUndeliveredLocked(cs []fakeClaim, now int64) {
+	for _, c := range cs {
+		if c.m.lease != c.lease {
+			continue
+		}
+		c.m.visible, c.m.lease, c.m.attempts = now, "", max(c.m.attempts-1, 0)
+	}
 }

@@ -138,7 +138,8 @@ registerStoreKind("kv", {
       await afterRead(s);
       return keys.map((k) => row(s, k));
     },
-    async put(s, key, value, x, m) {
+    async put(s, key, value, x, m, ttl) {
+      if (ttl) x = nowSec() + ttl; // on this object's clock (parsePut, #568)
       const data = encodeEntry(x || m != null ? { k: key, ...(x ? { x } : {}), ...(m != null ? { m } : {}) } : { k: key }, toBytes(value));
       await s.commit([{ ckey: key, data }]);
       if (x) await schedule(s);
@@ -257,16 +258,23 @@ function unb64url(s) {
   }
 }
 
+// parsePut checks a put's options. An expiration_ttl comes back as ttl,
+// not as an absolute x: the store object turns it into one on its own
+// clock, the one that later decides the key has expired. A Durable
+// Object's Date.now() never goes back while this stateless isolate's
+// follows the host's clock, so after a step back an expiry stamped here
+// could already be past there (#568).
 function parsePut(q, metaHeader) {
   const now = nowSec();
   let x = 0;
+  let rel = 0;
   const ttl = q.get("expiration_ttl");
   const exp = q.get("expiration");
   if (ttl !== null) {
     const t = Number(ttl);
     if (!Number.isInteger(t) || t <= 0) throw new HttpError(400, `Invalid expiration_ttl of ${ttl}. Please specify integer greater than 0.`);
     if (t < MIN_TTL) throw new HttpError(400, `Invalid expiration_ttl of ${ttl}. Expiration TTL must be at least ${MIN_TTL}.`);
-    x = now + t;
+    rel = t;
   } else if (exp !== null) {
     x = Number(exp);
     if (!Number.isInteger(x) || x <= now)
@@ -284,7 +292,7 @@ function parsePut(q, metaHeader) {
     }
     m = metaHeader;
   }
-  return { x, m };
+  return { x, ttl: rel, m };
 }
 
 function typed(r, type, withMetadata) {
@@ -376,8 +384,8 @@ export class KVBackend extends WorkerEntrypoint {
       }
       case "PUT": {
         const v = await readCapped(req.body, MAX_VALUE); // first: see drain()
-        const { x, m } = parsePut(q, req.headers.get("cf-kv-metadata"));
-        await s.op("put", [key, v, x, m]);
+        const { x, ttl, m } = parsePut(q, req.headers.get("cf-kv-metadata"));
+        await s.op("put", [key, v, x, m, ttl]);
         return new Response(null);
       }
       case "DELETE":

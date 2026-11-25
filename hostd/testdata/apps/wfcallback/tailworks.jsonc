@@ -1,0 +1,10 @@
+{
+  "name": "wfcallback",
+  "tailnet": {
+    "tags": ["tag:ttest"],
+    // Unlisted is not in tailnet.objects (as with e2e/compat's overlay, which
+    // gives only the workload's tags); Internal is "node": false (tw deploy's
+    // default for every class of a project without a tailworks.jsonc).
+    "objects": { "Internal": { "node": false } },
+  },
+}

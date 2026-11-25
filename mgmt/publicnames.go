@@ -22,7 +22,8 @@ import (
 //     for its tenant;
 //   - the claim survives undeploys, redeploys without "public" and kills;
 //     it ends only when the owner releases it (DELETE
-//     /v1/tenants/{id}/public-names/{name}) or the tenant is deleted;
+//     /v1/tenants/{id}/public-names/{name}, tw expose release) or the
+//     tenant is deleted;
 //   - a deploy (or dry run) by another tenant on the same tailnet is
 //     refused with 409 public_name_owned, and so is a host's create of
 //     that tenant's public node.
@@ -219,17 +220,26 @@ func (m *Mgmt) ReleasePublicName(ctx context.Context, tenantID, name, by string)
 	if err != nil {
 		return asAPIError(err)
 	}
+	// A team tenant's public name is its workload's name with the tenant's
+	// prefix (t.Name, the claim in public.go); check the workload under
+	// both spellings, so a prefixed name can't be released while served.
+	workload := name
+	if t.NamePrefix != "" {
+		workload = strings.TrimPrefix(name, t.NamePrefix+"-")
+	}
 	inUse := false
 	for _, d := range ds {
-		inUse = inUse || (d.Workload == name && d.Public != nil && d.StoppedAt == 0)
+		inUse = inUse || ((d.Workload == name || d.Workload == workload) && d.Public != nil && d.StoppedAt == 0)
 	}
-	if o, err := m.store.GetObjectByName(ctx, t.ID, name, PublicNamespace, name); err == nil && o.Live() {
-		inUse = true
+	for _, w := range []string{name, workload} {
+		if o, err := m.store.GetObjectByName(ctx, t.ID, w, PublicNamespace, w); err == nil && o.Live() {
+			inUse = true
+		}
 	}
 	if inUse {
 		return errf(409, "public_name_in_use",
-			"workload %q still serves public routes as %s.%s; undeploy it (tw undeploy %s), or remove \"public\" from its tailworks.jsonc and redeploy, then release the name",
-			name, name, key, name)
+			"workload %q still serves public routes as %s.%s; undeploy it (tw undeploy %s), or remove \"public\" from its tailworks.jsonc and redeploy, then release the name (tw expose release %s)",
+			workload, name, key, workload, name)
 	}
 	actx, ai := m.intend(ctx, AuditRecord{TenantID: t.ID, Kind: "public_name_release", ActingFor: by},
 		map[string]any{"name": name, "tailnet": key, "by": by})

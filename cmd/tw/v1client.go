@@ -22,8 +22,15 @@ type page[T any] struct {
 }
 
 // listAll fetches a /v1 list, following nextCursor. max > 0 stops after
-// that many items (tw ls --limit); 0 fetches everything (--all).
+// that many items; 0 fetches everything.
 func listAll[T any](ctx context.Context, c *mgmtapi.Client, path string, max int) ([]T, error) {
+	out, _, err := listUpTo[T](ctx, c, path, max)
+	return out, err
+}
+
+// listUpTo is listAll that also says whether it stopped at max with items
+// left over (tw ls's "truncated").
+func listUpTo[T any](ctx context.Context, c *mgmtapi.Client, path string, max int) ([]T, bool, error) {
 	out := []T{} // never nil: --json prints an empty list as [], not null
 	cursor := ""
 	for {
@@ -42,11 +49,12 @@ func listAll[T any](ctx context.Context, c *mgmtapi.Client, path string, max int
 		}
 		var pg page[T]
 		if err := c.Do(ctx, "GET", u, nil, &pg); err != nil {
-			return out, err
+			return out, false, err
 		}
 		out = append(out, pg.Items...)
-		if pg.NextCursor == nil || *pg.NextCursor == "" || (max > 0 && len(out) >= max) {
-			return out, nil
+		more := pg.NextCursor != nil && *pg.NextCursor != ""
+		if !more || (max > 0 && len(out) >= max) {
+			return out, more, nil
 		}
 		cursor = *pg.NextCursor
 	}
@@ -67,6 +75,10 @@ type hostJoin struct {
 	Hostname           string   `json:"hostname"`
 	ControlURL         string   `json:"controlURL"`
 	Tailnet            string   `json:"tailnet"`
+
+	// host_joinfile.go: what the join file carries besides the secrets.
+	KeyTagsOnly bool   `json:"keyTagsOnly"`
+	MgmtURL     string `json:"mgmtURL"`
 }
 
 func (hostJoin) String() string { return "hostJoin{[REDACTED]}" }
@@ -86,10 +98,10 @@ func (s *state) mintHostJoin(ctx context.Context, hostID, tenantID string) error
 		map[string]string{"Tw-Actor": actor()}); err != nil {
 		if me, ok := mgmtapi.AsError(err); ok && me.Code == "exists" {
 			return fail("state_conflict", "mgmt already has a host "+hostID+" bound to another node", me.Message).
-				withFix("tw host rm "+hostID+" --drain   (then tw up again)", "or tw up --host-id <another id>")
+				withFix("tw host rm "+hostID+" --force   (then tw up again)", "or tw up --host-id <another id>")
 		}
 		if me, ok := mgmtapi.AsError(err); ok && me.Code == "policy_missing_tag_owners" {
-			return policyMissingTagOwners("mgmt could not mint the host's "+mgmt.HostTag+" join key: "+me.Message, nil)
+			return policyMissingTagOwners("mgmt could not mint the host's "+mgmt.HostTag+" join key: "+me.Message, nil, nil)
 		}
 		return err
 	}
@@ -100,7 +112,7 @@ func (s *state) mintHostJoin(ctx context.Context, hostID, tenantID string) error
 		return err
 	}
 	tmp := s.hostJoinFile() + ".tmp"
-	if err := os.WriteFile(tmp, hj.joinFileContent(), 0o600); err != nil {
+	if err := os.WriteFile(tmp, hj.hostJoinFileContent(hostID, s.hostJoinMgmtURL(hj)), 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, s.hostJoinFile())

@@ -11,13 +11,13 @@
     "@ai-sdk/openai-compatible": "3.0.94",
     "@ai-sdk/provider": "4.0.39",
     "@cloudflare/ai-chat": "0.12.3",
-    "@tailworks/tailnet": "^0.4.0",
+    "@tailworks/tailnet": "^0.5.0",
     "agents": "0.34.0",
     "ai": "7.0.177",
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "5.20261118.1",
+    "@cloudflare/workers-types": "5.20261121.1",
     "typescript": "7.0.2"
   }
 }

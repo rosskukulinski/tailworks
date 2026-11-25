@@ -10,7 +10,7 @@
 //	TW_E2E_API_KEY_FILE=~/.config/tailnet-agents-design/tailnet1_api.env TW_E2E_TAILNET=tail7906d5.ts.net \
 //	  go test -tags e2esvc -count=1 -v -timeout 20m ./e2e/svc/
 //
-// Policy (tailnet 1, added by hand; tailworks never writes autoApprovers):
+// Policy (tailnet 1, added by hand; this test never writes the policy):
 // tagOwners tag:tw-wl-svc; autoApprovers.services "svc:ttest-svc-hello":
 // ["tag:tw-wl-svc"]; grant tag:ttest → svc:ttest-svc-hello, tag:tw-wl-svc
 // tcp:80. Cleanup deletes exactly this run's IDs and the Service.
@@ -160,7 +160,7 @@ func TestE2EService(t *testing.T) {
 
 	// The app: hello with its own tag and a Service.
 	dir := filepath.Join(work, "svchello")
-	e.MustJSON(nil, "init", dir, "--template", "hello", "--keep-tags")
+	e.MustJSON(nil, "init", dir, "--template", "hello")
 	tj := filepath.Join(dir, "tailworks.jsonc")
 	cfg := []byte(`{
   "name": "svchello",

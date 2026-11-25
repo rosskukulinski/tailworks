@@ -6,14 +6,20 @@ description: Use when a tailworks workload needs tailnet policy changes - tagOwn
 # Tailnet policy for a tailworks workload
 
 On tailworks, access control is the user's Tailscale tailnet policy, not code.
-Each workload node carries the tags from `tailworks.jsonc` `tailnet.tags`; each
+Each workload node carries the tags from `tailworks.jsonc` `tailnet.tags`
+(default `tag:tw-wl-<workload>`); each
 Durable Object class with its own nodes carries its class's tags. Grants
 between tags decide who can call whom.
 
 **You draft policy; the user applies it.** Show the user the exact lines
 and ask them to add them in the Tailscale admin console (Access
-controls). Tailworks never changes the policy during a deploy, and you
-shouldn't either.
+controls). Tailworks writes the policy only after the user answers y
+to the lines it shows (plain `tw up`, `tw deploy` and `tw tenant add`
+ask on a terminal; so do `--apply-policy` and `tw policy --apply`), or
+with `--apply-policy --yes`. With `--json`, which you use, nothing asks
+and nothing is written; a bare `--yes` never writes the policy. Pass
+`--apply-policy --yes` only after the user agreed to the lines you
+showed them, and don't edit the policy yourself.
 
 ## 1. Let tailworks own the app's tags
 

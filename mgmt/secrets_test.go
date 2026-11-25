@@ -19,6 +19,7 @@ const secretValue = "sk-live-0123456789abcdef"
 // delete, limits, and the custody entry is sealed (the value never appears
 // in plaintext in mgmt's directory, its logs or its audit).
 func TestSecretsStore(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	c := e.c
 	var tn struct{ TenantID string }
@@ -118,6 +119,7 @@ func assertNoValue(t *testing.T, e *testEnv, v string) {
 // TestSecretsRelease: values are released only to the host holding the
 // workload's lease at its epoch (as volume keys), with no-store.
 func TestSecretsRelease(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	c, h1, h2 := e.c, e.asHost("h1"), e.asHost("h2")
 	var tn struct{ TenantID string }
@@ -161,6 +163,7 @@ func TestSecretsRelease(t *testing.T) {
 // TestSecretsRoles: over the tailnet only admins put, list and delete
 // secrets; hosts may only take a grant (and admins may not).
 func TestSecretsRoles(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	var tn struct{ TenantID string }
 	e.c.ok("POST", "/v1/tenants", map[string]any{"tailnet": "t.ts.net", "mintMode": "oauth", "oauthClientFile": e.keyFile}, &tn)
@@ -257,6 +260,7 @@ func TestSecretsRoles(t *testing.T) {
 // TestSecretsReplicas: each replica of a workload ("web--r2", its own
 // lease) gets the secrets set on the workload, fenced by its own lease.
 func TestSecretsReplicas(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	e.ts.policy = svcPolicy
 	tn := v1Tenant(t, e, "ttest.ts.net", nil)

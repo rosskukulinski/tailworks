@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rosskukulinski/tailworks/netd"
 	"github.com/rosskukulinski/tailworks/netd/nettest"
 )
 
@@ -128,6 +129,7 @@ func startDevCallers(ctx context.Context, controlURL, tmp string, specs callerFl
 			Rewrite: func(pr *httputil.ProxyRequest) {
 				ip := target()
 				pr.Out.URL.Scheme, pr.Out.URL.Host, pr.Out.Host = "http", ip, ip
+				netd.KeepBodyEOF(pr) // #138
 			},
 		}
 		ln, err := net.Listen("tcp", "127.0.0.1:0")

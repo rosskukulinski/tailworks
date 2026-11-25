@@ -25,6 +25,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -129,6 +130,16 @@ func (e *env) stop(name string, crash bool) {
 	sig := syscall.SIGTERM
 	if crash {
 		sig = syscall.SIGKILL
+		// hostd starts each workerd in a process group of its own, so the
+		// group signal below doesn't reach them: kill them too (a crash of
+		// hostd *and* workerd, #432).
+		if out, err := exec.Command("pgrep", "-P", strconv.Itoa(p.cmd.Process.Pid)).Output(); err == nil {
+			for _, f := range strings.Fields(string(out)) {
+				if pid, err := strconv.Atoi(f); err == nil {
+					syscall.Kill(-pid, syscall.SIGKILL)
+				}
+			}
+		}
 	}
 	syscall.Kill(-p.cmd.Process.Pid, sig)
 	select {

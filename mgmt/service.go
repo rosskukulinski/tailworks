@@ -31,6 +31,7 @@ import (
 
 	"github.com/rosskukulinski/tailworks/internal/container"
 	"github.com/rosskukulinski/tailworks/internal/oci"
+	"github.com/rosskukulinski/tailworks/internal/policy"
 	"github.com/rosskukulinski/tailworks/internal/registry"
 	"github.com/rosskukulinski/tailworks/internal/tsapi"
 	"github.com/rosskukulinski/tailworks/internal/tssvc"
@@ -543,7 +544,7 @@ func (m *Mgmt) RegisterHost(ctx context.Context, r RegisterRequest, nodeID, node
 	auditKey := r.AuditPubKey
 	if old.AuditPubKey != "" {
 		if auditKey != "" && auditKey != old.AuditPubKey {
-			return Host{}, false, errf(403, "host_identity_mismatch", "host %s: auditPubKey is pinned to the key of its first registration (rotate with tw host rm %s --drain, then tw host add)", r.HostID, r.HostID)
+			return Host{}, false, errf(403, "host_identity_mismatch", "host %s: auditPubKey is pinned to the key of its first registration (rotate with tw host rm %s --force, then tw host add)", r.HostID, r.HostID)
 		}
 		auditKey = old.AuditPubKey
 	}
@@ -859,6 +860,12 @@ func (m *Mgmt) Deploy(ctx context.Context, r DeployRequest) (DeployResponse, err
 	if !validName(r.Workload) {
 		return resp, errf(400, "bad_request", "workload must be a DNS label ([a-z0-9-], ≤63)")
 	}
+	if err := m.checkReplicaName(ctx, r); err != nil { // workload_replicas.go (#348)
+		return resp, err
+	}
+	if err := m.checkCompatFlags(ctx, r); err != nil { // compatflags.go (#337)
+		return resp, err
+	}
 	classes := slices.Clone(r.Namespaces)
 	maxLive, maxDepth := DefaultMaxLive, DefaultMaxDepth
 	var svcCfg *TwConfig
@@ -911,7 +918,7 @@ func (m *Mgmt) Deploy(ctx context.Context, r DeployRequest) (DeployResponse, err
 	classes = withPublicNamespace(classes, pub)
 	for _, c := range classes {
 		if c.Class == "" || len(c.Tags) == 0 {
-			return resp, errf(400, "bad_request", "namespace %q needs tags", c.Class)
+			return resp, errf(400, "bad_request", "namespace %q needs tags (or \"node\": false for an internal class with no node)", c.Class)
 		}
 		for _, tag := range c.Tags {
 			if e := validateObjectTag(c.Class, tag); e != nil {
@@ -1018,6 +1025,7 @@ func (m *Mgmt) Deploy(ctx context.Context, r DeployRequest) (DeployResponse, err
 			return resp, err
 		}
 	}
+	m.releaseUndeployedNames(ctx, t.ID, r.Workload) // redeploy.go (#364)
 	d := Deployment{ID: newID("dp_"), TenantID: t.ID, Workload: r.Workload, HostID: host, Namespaces: classes,
 		MaxLive: maxLive, MaxDepth: maxDepth, Epoch: lease.Epoch, Bundle: r.Bundle, DeployedBy: r.By, CreatedAt: m.now().UnixMilli(), Fence: fence,
 		Containers: ctrs, Public: pub, Placement: &dec}
@@ -1044,6 +1052,8 @@ func (m *Mgmt) Deploy(ctx context.Context, r DeployRequest) (DeployResponse, err
 	}
 	m.recordIntent(ctx, ai, nil)
 	m.afterDeploy(ctx, d, r.rollbackOf) // deployhistory.go: bundle hash, retention
+	// Another host's pool nodes can't be used here (poolstale.go, #567).
+	go m.killStalePoolNodes(context.WithoutCancel(ctx), t.ID, r.Workload, host, r.By)
 	if pub != nil {
 		m.purgeDeadPublicNode(ctx, t.ID, r.Workload)
 	}
@@ -1179,7 +1189,7 @@ func (m *Mgmt) guardTakeover(ctx context.Context, t Tenant, r DeployRequest, hos
 	if old.LastSeen > 0 {
 		seen = now.Sub(time.UnixMilli(old.LastSeen)).Round(time.Second).String() + " ago"
 	}
-	return "", errf(409, "takeover_unconfirmed", "workload %q runs on host %s, which mgmt last heard from %s; it may still be serving the workload's %s from its own disk, so moving it to %s could run two copies. If %s is gone for good: `tw host rm %s --drain`, or redeploy with --force-takeover. If it is coming back, wait for it. Classes that tolerate two instances can set \"fence\": \"never\" in tailworks.jsonc",
+	return "", errf(409, "takeover_unconfirmed", "workload %q runs on host %s, which mgmt last heard from %s; it may still be serving the workload's %s from its own disk, so moving it to %s could run two copies. If %s is gone for good: `tw host rm %s --force`, or redeploy with --force-takeover. If it is coming back, wait for it. Classes that tolerate two instances can set \"fence\": \"never\" in tailworks.jsonc",
 		r.Workload, old.ID, seen, why, host, old.ID, old.ID)
 }
 
@@ -1200,8 +1210,8 @@ func (m *Mgmt) leaseHeldError(ctx context.Context, name, workload string) *Error
 	}
 	if herr == nil && h.Live(now) {
 		// A live holder keeps renewing: its lease won't run out.
-		return errf(409, "lease_held", "workload %q runs on host %s (live, epoch %d, last seen %s); it can't be placed elsewhere while %s holds it. To move it, drain that host first (`tw host rm %s --drain`)",
-			workload, l.Holder, l.Epoch, seen, l.Holder, l.Holder)
+		return errf(409, "lease_held", "workload %q runs on host %s (live, epoch %d, last seen %s); it can't be placed elsewhere while %s holds it. Redeploy with --replace to move it (or `tw host drain %s` to move everything off that host); if %s is gone for good, `tw host rm %s --force`",
+			workload, l.Holder, l.Epoch, seen, l.Holder, l.Holder, l.Holder, l.Holder)
 	}
 	left := time.UnixMilli(l.ExpiresAt).Sub(now)
 	if left < 0 {
@@ -1510,6 +1520,9 @@ func (m *Mgmt) CreateObject(ctx context.Context, r CreateObjectRequest) (CreateO
 		in := ""
 		if workload != "" {
 			in = " of workload " + workload
+		}
+		if r.Namespace == PoolNamespace { // name the class the pool node is for (#359)
+			return resp, errf(404, "unknown_namespace", "no deployment%s of tenant %s declares namespace %q (for a %s node)", in, t.ID, classNS, PoolNamespace)
 		}
 		return resp, errf(404, "unknown_namespace", "no deployment%s of tenant %s declares namespace %q", in, t.ID, r.Namespace)
 	}
@@ -3071,13 +3084,17 @@ func (m *Mgmt) IngestAudit(ctx context.Context, hostID string, recs []json.RawMe
 		if err != nil {
 			return 0, ChainStatus{}, err
 		}
-		if first := parsed[0].PrevHash; first != head && first != "" {
+		// A batch the host re-sends (its POST failed after mgmt stored it)
+		// overlaps the stored chain: skip what is stored. That holds for
+		// a batch that starts a new segment (prevHash "") too: storing it
+		// twice would break the chain at the copy (#427).
+		if first := parsed[0].PrevHash; first != head {
 			for k := range parsed {
 				if parsed[k].Hash == head {
 					start = k + 1 // already stored up to here
 				}
 			}
-			if start == 0 {
+			if start == 0 && first != "" {
 				return 0, ChainStatus{}, errf(400, "bad_request", "record 0: prevHash does not link to the head of chain %s", chain)
 			}
 		}
@@ -3179,7 +3196,7 @@ func auditSource(r AuditRecord) string {
 // every tag it will mint is in tagOwners.
 type PreflightRequest struct {
 	SrcTags  []string `json:"srcTags"`  // workload + object tags
-	Connects []string `json:"connects"` // tags ("tag:db") or "*"; names are reported unchecked
+	Connects []string `json:"connects"` // tags ("tag:db", "tag:db:5432") or "*"; names are reported unchecked
 	Port     string   `json:"port,omitempty"`
 	// Service, with WorkloadTags, checks autoApprovers.services.
 	Service      string   `json:"service,omitempty"`
@@ -3194,6 +3211,9 @@ type PreflightMissing struct {
 	Src     string `json:"src"`
 	Dst     string `json:"dst"`
 	Snippet string `json:"snippet"`
+
+	// IP is the grant's port ("tcp:5432"); older mgmt leaves it out.
+	IP string `json:"ip,omitempty"`
 }
 
 // PreflightResult is the preflight verdict.
@@ -3225,6 +3245,20 @@ type PreflightResult struct {
 	// TagOwnerProblems: for a tenant with its own owner tag, tags owned by
 	// another tenant's owner tag, or not by its own (teams.go). Fail it.
 	TagOwnerProblems []string `json:"tagOwnerProblems,omitempty"`
+
+	// UndefinedConnects: tailnet.connects tags in tag:tw* (another app's,
+	// not deployed yet) with no tagOwners entry; TagOwnersSnippet defines
+	// them too (connectstags.go).
+	UndefinedConnects []string `json:"undefinedConnects,omitempty"`
+
+	// Snippet: everything above that is missing as one typed policy
+	// snippet (preflightsnippet.go, #535); the string fields are rendered
+	// from it. Never the caller grant.
+	Snippet *policy.Snippet `json:"snippet,omitempty"`
+
+	// workloadTags: the tags the workload node is deployed with, the only
+	// ones tw policy --apply lets host its Service (policyapply.go).
+	workloadTags []string
 }
 
 // Preflight checks the request against the tenant's current policy (read
@@ -3246,40 +3280,41 @@ func (m *Mgmt) Preflight(ctx context.Context, tenantID string, r PreflightReques
 	if port == "" {
 		port = "tcp:80"
 	}
-	var owners []string
 	res.TagOwnerProblems = m.tagOwnerProblems(ctx, t, r.SrcTags, pol) // teams.go
 	for _, tag := range r.SrcTags {
 		if _, ok := pol.TagOwners[tag]; !ok && !slices.Contains(res.MissingTagOwners, tag) {
 			res.MissingTagOwners = append(res.MissingTagOwners, tag)
-			owners = append(owners, fmt.Sprintf("%q: %s", tag, tagOwnersFor(t)))
 		}
 	}
-	if len(owners) > 0 {
-		res.TagOwnersSnippet = `"tagOwners": { ` + strings.Join(owners, ", ") + ` }`
-	}
-	for _, dst := range r.Connects {
+	res.UndefinedConnects = undefinedConnectsTags(t, pol, r.Connects, r.SrcTags)
+	for _, c := range r.Connects {
+		dst, ip := SplitConnect(c) // connects.go: "tag:db:5432"
 		if dst != "*" && !strings.HasPrefix(dst, "tag:") && !strings.HasPrefix(dst, "autogroup:") {
-			res.Unchecked = append(res.Unchecked, dst)
+			res.Unchecked = append(res.Unchecked, c)
 			continue
 		}
+		want := ip
+		if want == "" {
+			want = port
+		}
 		for _, src := range r.SrcTags {
-			if !pol.HasIPGrant(src, dst) {
-				res.Missing = append(res.Missing, PreflightMissing{Src: src, Dst: dst,
-					Snippet: fmt.Sprintf(`{ "src": [%q], "dst": [%q], "ip": [%q] }`, src, dst, port)})
+			if !pol.HasIPGrantPort(src, dst, ip) {
+				res.Missing = append(res.Missing, missingGrant(src, dst, want)) // preflightsnippet.go
 			}
 		}
 	}
 	if r.Public && !pol.HasNodeAttr(PublicTag, "funnel") {
 		res.MissingNodeAttrs = append(res.MissingNodeAttrs, "funnel on "+PublicTag)
-		res.NodeAttrsSnippet = publicFunnelSnippet(t) // teams.go
 	}
 	if r.Service != "" {
 		servicePreflight(pol, &res, r.Service, r.WorkloadTags)
 	}
+	// The snippets for what is missing (preflightsnippet.go).
+	res.setSnippets(t)
 	res.AccessWarnings = m.accessWarnings(ctx, t, pol) // tenantscope_lint.go
 	// svccaps_lint.go: caps on the workload tags that calls through its Service lose (#155).
 	res.AccessWarnings = append(res.AccessWarnings, serviceCapWarnings(pol, res.Service, r.WorkloadTags)...)
-	res.OK = len(res.Missing) == 0 && len(res.MissingTagOwners) == 0 && len(res.MissingNodeAttrs) == 0 && !res.ServiceUnapproved && len(res.TagOwnerProblems) == 0
+	res.OK = len(res.Missing) == 0 && len(res.MissingTagOwners) == 0 && len(res.UndefinedConnects) == 0 && len(res.MissingNodeAttrs) == 0 && !res.ServiceUnapproved && len(res.TagOwnerProblems) == 0
 	return res, nil
 }
 

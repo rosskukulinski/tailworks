@@ -14,6 +14,7 @@ import (
 // takes no Service or replicas, gets the workload's secrets, and promote
 // deploys its bundle to the workload through Deploy, then undeploys it.
 func TestV1PreviewPromote(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	e.ts.policy = svcPolicy
 	tn := v1Tenant(t, e, "ttest.ts.net", nil)
@@ -196,6 +197,7 @@ func TestV1PreviewPromote(t *testing.T) {
 // strip drops the Service, public routes and replicas from a preview's
 // config (and nothing from anyone else's).
 func TestPreviewStrip(t *testing.T) {
+	t.Parallel()
 	cfg := func() *TwConfig {
 		var c TwConfig
 		if err := json.Unmarshal([]byte(`{"replicas": 3, "public": {"routes": ["/"]}, "tailnet": {"tags": ["tag:a"], "service": true,
@@ -222,6 +224,7 @@ func TestPreviewStrip(t *testing.T) {
 }
 
 func TestAuthzPreviewIsAdminOnly(t *testing.T) {
+	t.Parallel()
 	a := newAuthzEnv(t)
 	a.fail(nodeH1, "GET", "/v1/tenants/"+a.tn+"/workloads/w/previews", nil, 403, "forbidden")
 	a.fail(nodeH1, "POST", "/v1/tenants/"+a.tn+"/workloads/w/promotions", map[string]any{"preview": "x"}, 403, "forbidden")

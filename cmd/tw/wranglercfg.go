@@ -224,11 +224,16 @@ func wranglerKeyNote(k string, v any, builder string) string {
 	case "name", "main", "compatibility_date", "compatibility_flags", "vars", "durable_objects",
 		"migrations", "triggers", "containers", "placement", "workflows", "queues", "$schema", "env":
 		return ""
+	case "services":
+		return "" // service bindings (ADR-053): another workload of this tenant
 	case "define", "alias", "rules", "minify", "keep_names", "jsx_factory", "jsx_fragment", "tsconfig":
 		return "" // both bundlers honour these
 	case "build", "no_bundle", "find_additional_modules", "base_dir", "preserve_file_names":
-		if builder == "wrangler" {
-			return ""
+		if builder == "wrangler" || (builder == builderPrebuilt && k != "build") {
+			return "" // nobundle.go packs a pre-built no_bundle Worker as wrangler does
+		}
+		if builder == "esbuild" && k == "build" {
+			return "" // buildcmd.go runs build.command before the built-in esbuild
 		}
 		return "needs wrangler's bundler; ignored by tailworks' built-in esbuild (use tw deploy --wrangler)"
 	case "upload_source_maps":
@@ -238,9 +243,13 @@ func wranglerKeyNote(k string, v any, builder string) string {
 		return "" // sourcemap.go: false leaves the map out of tw deploy
 	case "routes", "route", "workers_dev", "preview_urls", "account_id", "zone_id":
 		return "ignored: there is no Cloudflare zone or workers.dev; the workload answers at its MagicDNS name (tailworks.jsonc \"public\" for the internet)"
-	case "assets", "site":
-		return "not supported: tailworks does not serve static assets; import them as modules (rules) or serve them from the Worker"
-	case "kv_namespaces", "r2_buckets", "services", "ai", "browser", "vectorize",
+	case "assets":
+		return "" // assets.go: served by a generated router Worker
+	case "pages_build_output_dir":
+		return "" // pages.go: a Cloudflare Pages project's assets directory
+	case "site":
+		return "not supported: Workers Sites is deprecated; use \"assets\" (docs/wrangler.md#assets)"
+	case "kv_namespaces", "r2_buckets", "ai", "browser", "vectorize",
 		"hyperdrive", "analytics_engine_datasets", "send_email", "dispatch_namespaces",
 		"mtls_certificates", "images", "pipelines", "ratelimits", "secrets_store_secrets", "version_metadata",
 		"worker_loaders", "vpc_services", "media", "unsafe", "unsafe_hello_world", "cloudchamber",
@@ -250,9 +259,13 @@ func wranglerKeyNote(k string, v any, builder string) string {
 		}
 		return bindingHint + "ignored"
 	// limits.md#wrangler-limits-ignored
-	case "observability", "logpush", "limits", "usage_model", "send_metrics", "keep_vars", "dev",
-		"compliance_region", "first_party_worker", "legacy_env", "python_modules":
+	case "dev":
+		return devWranglerNote(v) // dev_port.go: tw dev honours dev.port
+	case "observability", "logpush", "limits", "usage_model", "send_metrics", "keep_vars",
+		"compliance_region", "first_party_worker", "legacy_env":
 		return "ignored by tailworks"
+	case "python_modules":
+		return "ignored: tw deploy ships python_modules/ whole, less __pycache__ and *.pyc (docs/python.md#modules-and-files)"
 	case "secrets":
 		return "" // secrets.required: names `tw types` declares (deploy doesn't check them)
 	case "node_compat":
@@ -301,6 +314,7 @@ func wranglerWarnings(file string, cfg map[string]any, builder string) []string 
 			out = append(out, fmt.Sprintf("%s: %s: %s", file, k, n))
 		}
 	}
+	out = append(out, containerKeyWarnings(file, cfg)...) // containerbuild.go
 	if dos, ok := cfg["durable_objects"].(map[string]any); ok {
 		bs, _ := dos["bindings"].([]any)
 		for _, b := range bs {
@@ -354,30 +368,16 @@ func esbuildWranglerOptions(w map[string]any, o *esbundle.Options) error {
 	if ts, _ := w["tsconfig"].(string); ts != "" {
 		o.Tsconfig = ts
 	}
+	o.NodeCompat = nodeCompat(w) // requirebuiltins.go
 	return nil
 }
 
 // defaultTwConfig is the tailworks.jsonc used when an app has only a wrangler
-// config: the workload node tagged tag:tw-wl-<name>, and every Durable
-// Object class internal ("node": false, as on Cloudflare: reachable through
-// its binding, with no tailnet node of its own).
-func defaultTwConfig(name string, w map[string]any) []byte {
-	objects := map[string]any{}
-	if dos, ok := w["durable_objects"].(map[string]any); ok {
-		bs, _ := dos["bindings"].([]any)
-		for _, b := range bs {
-			if m, ok := b.(map[string]any); ok {
-				if c, _ := m["class_name"].(string); c != "" {
-					objects[c] = map[string]any{"node": false}
-				}
-			}
-		}
-	}
-	tn := map[string]any{"tags": []string{"tag:tw-wl-" + name}}
-	if len(objects) > 0 {
-		tn["objects"] = objects
-	}
-	b, _ := json.MarshalIndent(map[string]any{"name": name, "tailnet": tn}, "", "  ")
+// config: the workload node tagged tag:tw-wl-<name>. Every Durable Object
+// class is made internal ("node": false) after, as for any tailworks.jsonc
+// that leaves it out of tailnet.objects (defaultInternalClasses).
+func defaultTwConfig(name string) []byte {
+	b, _ := json.MarshalIndent(map[string]any{"name": name, "tailnet": map[string]any{"tags": []string{"tag:tw-wl-" + name}}}, "", "  ")
 	return b
 }
 

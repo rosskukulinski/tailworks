@@ -257,9 +257,6 @@ func TestChain(t *testing.T) {
 			{"own-ip", "http://" + e.objIP["a"] + "/", netd.CodeForbiddenDestination},
 			{"own-ip-other-port", "http://" + e.objIP["a"] + ":8080/", netd.CodeForbiddenDestination},
 			{"own-name", "http://tw-a/", netd.CodePeerNotVisible}, // self is not a peer in its own netmap
-			{"sibling-ip", "http://" + e.objIP["b"] + "/", netd.CodeForbiddenDestination},
-			{"sibling-name", "http://tw-b/", netd.CodeForbiddenDestination},
-			{"sibling-fqdn", "http://tw-c." + nettest.MagicDNSDomain + "/", netd.CodeForbiddenDestination},
 			{"host-ip", "http://" + hostIP + "/", netd.CodeForbiddenDestination},
 			{"loopback-v4", "http://127.0.0.1/", netd.CodeForbiddenDestination},
 			{"loopback-v4-alt", "http://127.1.2.3:18080/", netd.CodeForbiddenDestination},
@@ -292,6 +289,8 @@ func TestChain(t *testing.T) {
 			})
 		}
 	})
+
+	t.Run("SameHostHop", func(t *testing.T) { testSameHostHop(t, e) }) // samehost_test.go
 
 	t.Run("InternetEgressUnavailable", func(t *testing.T) {
 		// A name that is not tailnet-shaped is internet egress, which Workers

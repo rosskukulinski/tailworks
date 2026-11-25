@@ -14,14 +14,14 @@ import (
 // (env.NAME, overriding a wrangler var), through the same hostd path as
 // `tw secret put`.
 func TestDevVars(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("short")
 	}
-	wd, err := nettest.WorkerdBinary()
+	_, err := nettest.WorkerdBinary()
 	if err != nil || !hostdtest.HasNode() {
 		t.Skip("needs workerd and node (make deps)")
 	}
-	t.Setenv("TW_WORKERD", wd)
 	bin := cliflow.BuildBinaries(t)
 	work := t.TempDir()
 	app := filepath.Join(work, "dv")

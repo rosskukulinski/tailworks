@@ -13,9 +13,21 @@ import (
 // back from mgmt's assignments.
 func (e *Env) Restart() {
 	e.T.Helper()
+	e.RestartAfter(nil)
+}
+
+// RestartAfter is Restart, running between (if set) while hostd is down.
+func (e *Env) RestartAfter(between func()) {
+	e.T.Helper()
 	e.Host.Close()
+	if between != nil {
+		between()
+	}
 	e.Host = e.startHost(e.cfg)
 }
+
+// DataDir is the data directory of e's tw-hostd.
+func (e *Env) DataDir() string { return e.cfg.DataDir }
 
 // StartHost starts a second tw-hostd, id, on e's fakemgmt, with its own
 // data and run directories (another machine, as far as mgmt and the stores

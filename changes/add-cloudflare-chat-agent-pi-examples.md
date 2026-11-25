@@ -9,7 +9,8 @@ Two new templates follow Cloudflare's Agents examples:
 and `--template pi-agent` is the
 [Pi harness](https://developers.cloudflare.com/agents/harnesses/pi/)
 (`PiHarness`: Pi Durable in a Durable Object). Each runs one agent per
-caller on its own node. `chat-agent` serves a chat page at `/`.
+caller on its own node. `chat-agent` serves a chat page at `/`. `tw init
+--list` shows both.
 
 Neither needs Workers AI: set `vars.LLM_URL` to
 `http://<aperture-hostname>/v1` to use Aperture (or any OpenAI-compatible

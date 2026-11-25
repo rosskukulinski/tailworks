@@ -87,7 +87,7 @@ func (o *Object) internetRoute(host string, port uint16, ipLiteral bool) (*inter
 		if ipLiteral {
 			return refuse(CodeForbiddenDestination, "non-tailnet destination (this host has no internet egress path)")
 		}
-		return refuse(CodeInternetEgressUnavailable, internetEgressDetail(host, "this host has internet egress turned off (tw-hostd -worker-internet=off)"))
+		return refuse(CodeInternetEgressUnavailable, internetEgressDetail(host, "this host has internet egress turned off (tw up --worker-internet=off, or tw-hostd -worker-internet=off)"))
 	}
 	if ipLiteral {
 		ip, _ := netip.ParseAddr(host)
@@ -101,11 +101,11 @@ func (o *Object) internetRoute(host string, port uint16, ipLiteral bool) (*inter
 	if ic.Policy != nil {
 		pol = ic.Policy(o.id)
 	}
-	switch {
-	case pol.Off:
+	if pol.Off {
 		return refuse(CodeInternetEgressUnavailable, internetEgressDetail(host, "this workload has internet egress turned off (tailnet.egress.internet)"))
-	case pol.Allow != nil && !publicip.ParseAllowlist(pol.Allow).Allows(host):
-		return refuse(CodeInternetEgressUnavailable, internetEgressDetail(host, "it is not on this workload's tailnet.egress.internet allowlist"))
+	}
+	if code, detail := internetPortPolicy(host, port, pol); code != "" { // internetports.go
+		return refuse(code, detail)
 	}
 	return &internetDst{host: host, port: port}, nil
 }
@@ -154,6 +154,9 @@ func (o *Object) dialInternet(ctx context.Context, d *internetDst) (net.Conn, er
 	} else {
 		as, err := ic.Resolve(ctx, d.host)
 		if err != nil {
+			if e, ok := AsError(err); ok {
+				return nil, o.internetErr(e, d)
+			}
 			return refuse(CodeDialFailed, "resolving "+d.host+": "+err.Error())
 		}
 		addrs = as
@@ -171,6 +174,9 @@ func (o *Object) dialInternet(ctx context.Context, d *internetDst) (net.Conn, er
 		ap := netip.AddrPortFrom(a.Unmap(), d.port)
 		c, err := ic.Dial(ctx, "tcp", ap.String())
 		if err != nil {
+			if e, ok := AsError(err); ok {
+				return nil, o.internetErr(e, d)
+			}
 			last = err
 			continue
 		}
@@ -185,6 +191,18 @@ func (o *Object) dialInternet(ctx context.Context, d *internetDst) (net.Conn, er
 		return f, nil
 	}
 	return nil, last
+}
+
+// internetErr is a typed refusal from the internet path itself (for
+// example exit_node_unavailable), attributed to this object and
+// destination. The path's error is copied, never mutated.
+func (o *Object) internetErr(e *Error, d *internetDst) *Error {
+	c := *e
+	c.Object, c.Destination = o.id, d.hostport()
+	if c.DocURL == "" {
+		c.DocURL = DocBase + c.Code
+	}
+	return &c
 }
 
 // internetOnce dedups per-object, per-destination events (the first flow

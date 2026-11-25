@@ -80,8 +80,12 @@ type Config struct {
 	// sandbox, still serve process-tier workloads of several tenants
 	// (incl. Node-tier apps whose egress is then unenforced, RT-08).
 	InsecureSharedHost bool `json:"insecureSharedHost,omitempty"`
-	// AllowSiblingEgress: objects may reach other objects on this host over
-	// the tailnet (single-host tests/demos).
+	// AllowExperimentalFlags (tw up --allow-experimental-flags): the host
+	// lets deployments set workerd's experimental compatibility flags
+	// (hostd/gen/compatflags.go, #337).
+	AllowExperimentalFlags bool `json:"allowExperimentalFlags,omitempty"`
+	// AllowSiblingEgress: objects dial other objects on this host over
+	// WireGuard instead of netd's in-process hop (tests).
 	AllowSiblingEgress bool `json:"allowSiblingEgress,omitempty"`
 	// Fast identity (STATUS.md "Fast identity"). WarmKeys and PoolNodes are
 	// pointers so state written before they existed (nil) keeps the
@@ -99,6 +103,16 @@ type Config struct {
 	AuditMaxAge      string `json:"auditMaxAge,omitempty"`
 	AuditMaxRecords  int64  `json:"auditMaxRecords,omitempty"`
 	RequestLogMaxAge string `json:"requestLogMaxAge,omitempty"`
+
+	// WorkerInternet (up_workerinternet.go): "direct" or "off"
+	// (tw-hostd -worker-internet); empty = direct.
+	WorkerInternet string `json:"workerInternet,omitempty"`
+
+	// InstallPrefix is the install.sh prefix of the tw that last ran
+	// `tw up` here (upgrade_prefix.go; issue #532), rewritten by every
+	// tw up: empty for npm, dev builds and checkouts. tw upgrade trusts it
+	// only while it is still an install prefix.
+	InstallPrefix string `json:"installPrefix,omitempty"`
 
 	// Tenants are the tenants added with `tw tenant add` (the operator
 	// tenant above is the default for every command).
@@ -159,7 +173,7 @@ func (c Config) removedMode() bool { return !c.oauth() && !c.headscale() }
 func (c Config) errRemovedMode(dir string) error {
 	return fail("mint_mode_removed", dir+" is in mint mode "+c.modeName()+", which tailworks no longer supports",
 		"Tailscale tailnets now mint with an OAuth client only; switching keeps the tenant, its deployments and mgmt's node").
-		withFix("create an OAuth client (admin console › Settings › OAuth clients: Auth Keys write, tag tag:tw; see docs/INSTALL.md), save it 0600, then:",
+		withFix("create an OAuth client (admin console › Settings › Trust credentials: Auth Keys write, tag tag:tw; see docs/INSTALL.md), save it 0600, then:",
 			"tw up --oauth-client-file <file>")
 }
 
@@ -506,7 +520,7 @@ func findWorkerd(flagVal string) (string, error) {
 			return p, nil
 		}
 	}
-	return "", fail("not_installed", "workerd not found").withFix("pass --workerd <path> or set $TW_WORKERD (tw pins workerd 1.20261118.1)")
+	return "", fail("not_installed", "workerd not found").withFix("pass --workerd <path> or set $TW_WORKERD (tw pins workerd 1.20261121.1)")
 }
 
 // createTailworksDir finds the create-tailworks package (bundler + templates).

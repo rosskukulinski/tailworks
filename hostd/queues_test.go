@@ -35,15 +35,24 @@ type queueRec struct {
 // export's queue() with workerd's MessageBatch: batching by size and by
 // max_batch_timeout, retry() with a delay, max_retries landing in the
 // dead-letter queue, a throw retrying the batch but not an explicit ack,
-// queue() creating a Durable Object (the batch's create ticket), a
+// queue() creating a Durable Object (the batch's create ticket), a slow
+// heartbeat cancelling a run and the batch handed back uncounted, a
 // workerd crash mid-batch losing nothing, and a fenced host consuming
 // nothing until it is back.
-func TestQueues(t *testing.T) { testQueues(t, hostdtest.BackendFake) }
+func TestQueues(t *testing.T) {
+	t.Parallel()
+	testQueues(t, hostdtest.BackendFake)
+}
 
 // testQueues is TestQueues against backend (realmgmt_test.go).
 func testQueues(t *testing.T, backend string) {
 	s := startSuiteCapsOpts(t, fakemgmt.Config{}, tailcfg.PeerCapMap{nettest.TestCap: []tailcfg.RawMessage{nettest.TestCapValue}}, onBackend(backend, func(o *hostdtest.Options) {
-		o.FenceAfter, o.HeartbeatEvery = time.Second, 100*time.Millisecond
+		// FenceAfter is short so FencedHostConsumesNothing fences quickly,
+		// but not 1 s: on a loaded runner a heartbeat round trip or an
+		// assignment sync now and then takes over a second, and every such
+		// moment stopped the consumer loops. A loop stopped just as its
+		// claim landed lost the claim, counted as an attempt (#392).
+		o.FenceAfter, o.HeartbeatEvery = 3*time.Second, 100*time.Millisecond
 		o.QueueVisibility = 3 * time.Second
 	}))
 	e := s.e
@@ -212,6 +221,25 @@ func testQueues(t *testing.T, backend string) {
 		}
 		if m := call("/big"); !strings.Contains(fmt.Sprint(m["error"]), "queue_limit") {
 			t.Fatalf("a 130 KB message: %v", m)
+		}
+	})
+
+	t.Run("SlowHeartbeatReleasesBatch", func(t *testing.T) {
+		// A heartbeat later than FenceAfter (3 s here: a loaded host, a slow
+		// mgmt) makes the host's lease stale, and its consumer loops stop
+		// until the next good one. The run they were in is cancelled; hostd
+		// hands the batch back uncounted, so the message comes again as
+		// attempt 1. (#387: it was retried as attempt 2, and a wait for
+		// attempt 1 never ended.)
+		call("/send", "k", "sh1", "do", "slow-once") // its first run takes 8 s
+		time.Sleep(1500 * time.Millisecond)          // past max_batch_timeout: queue() is running
+		e.Hooks.DelayHeartbeat(4 * time.Second)      // stale 3 s in, fresh again at 4 s
+		wait("sh1", 1, 20*time.Second)
+		time.Sleep(time.Second)
+		for _, r := range recs() {
+			if r.K == "sh1" && r.Attempts != 1 {
+				t.Fatalf("a delivery hostd cancelled counted as an attempt: %+v", r)
+			}
 		}
 	})
 

@@ -10,6 +10,7 @@ import (
 // with 400 bad_object_name and creates nothing. Names already in the store
 // are not backfilled (they render through internal/termsafe).
 func TestCreateObjectRefusesControlNames(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	c, h1 := e.c, e.asHost("h1")
 	var tn struct{ TenantID string }

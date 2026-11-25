@@ -9,6 +9,8 @@
 // Checked (and set):
 //   - every workspace package (js/packages/*: @tailworks/*, create-tailworks) is at the
 //     version, and one workspace package depends on another at exactly it;
+//   - the tw CLI's package (js/cli/tailworks) is at the version, and so is
+//     each platform package it lists (@tailworks/cli-<os>-<arch>);
 //   - every create-tailworks template depends on the workspace packages at
 //     "^<version>", the range `npm install` resolves after a release;
 //   - the published packages carry what npm needs: name, license,
@@ -72,6 +74,31 @@ for (const [name, f] of workspaces) {
       if (!p[k]) meta.push(`${rel(f)}: ${name} has no "${k}" (needed to publish)`);
     }
     if (p.publishConfig?.access !== "public") meta.push(`${rel(f)}: ${name} needs "publishConfig": { "access": "public" }`);
+  }
+  if (set) fs.writeFileSync(f, text);
+}
+
+// The tw CLI's npm package (js/cli/tailworks, issue #240): not a workspace
+// (npm install would fetch its platform packages), but published at the
+// same version, with every @tailworks/cli-<target> at exactly it.
+{
+  const f = path.join(root, "js", "cli", "tailworks", "package.json");
+  let text = fs.readFileSync(f, "utf8");
+  const p = JSON.parse(text);
+  if (p.version !== want) {
+    problems.push(`${rel(f)}: ${p.name} is at ${p.version}, want ${want}`);
+    text = fix(text, "version", want);
+  }
+  const cli = Object.entries(p.optionalDependencies ?? {}).filter(([d]) => d.startsWith("@tailworks/cli-"));
+  if (!cli.length) meta.push(`${rel(f)}: no @tailworks/cli-* optionalDependencies`);
+  for (const [dep, v] of cli) {
+    if (v !== want) {
+      problems.push(`${rel(f)}: optionalDependencies.${dep} is ${v}, want ${want} (published together, at one version)`);
+      text = fix(text, dep, want);
+    }
+  }
+  for (const k of ["license", "repository", "files", "bin"]) {
+    if (!p[k]) meta.push(`${rel(f)}: ${p.name} has no "${k}" (needed to publish)`);
   }
   if (set) fs.writeFileSync(f, text);
 }

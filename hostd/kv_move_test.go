@@ -19,6 +19,7 @@ import (
 // fail. Two tw-hostd processes (each with its own data dir and
 // workerd) share one mgmt and one tailnet.
 func TestWorkersKVMove(t *testing.T) {
+	t.Parallel()
 	s := startSuiteCapsOpts(t, fakemgmt.Config{}, tailcfg.PeerCapMap{nettest.TestCap: []tailcfg.RawMessage{nettest.TestCapValue}}, nil)
 	e := s.e
 	dep := e.Deploy(hostdtest.Fixture("kv"), "kv", nil)

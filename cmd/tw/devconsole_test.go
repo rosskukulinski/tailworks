@@ -90,6 +90,7 @@ func consoleGet(t *testing.T, h http.Handler, method, target, host string) (int,
 // keys gone), shows values, lists D1 tables and rows, escapes what the app
 // wrote, and refuses writes and foreign Host headers.
 func TestDevConsole(t *testing.T) {
+	t.Parallel()
 	var seen []string
 	_, h := devConsoleForTest(t, &seen)
 	const host = "127.0.0.1:4000"
@@ -175,6 +176,7 @@ func TestDevConsole(t *testing.T) {
 
 // TestDevConsoleListen: --console-port -1 serves nothing; 0 picks a port.
 func TestDevConsoleListen(t *testing.T) {
+	t.Parallel()
 	u, stop, err := startDevConsole(-1, nil)
 	stop()
 	if err != nil || u != "" {
@@ -202,6 +204,7 @@ func TestDevConsoleListen(t *testing.T) {
 
 // TestDevHotkeyConsole: e opens the console, as in wrangler dev.
 func TestDevHotkeyConsole(t *testing.T) {
+	t.Parallel()
 	if devHotkey('e') != hotkeyConsole || devHotkey('E') != hotkeyConsole {
 		t.Fatal("e is not the console hotkey")
 	}

@@ -18,7 +18,9 @@ tw deploy
 
 Connect a client to `http://<workload node>/mcp`; an MCP client in another
 tailworks app calls it over the tailnet (the `agent` and `ai-agent` templates
-do).
+do). To use it from claude.ai or ChatGPT, which need a public URL with
+OAuth, see
+[mcp-public.md](https://github.com/rosskukulinski/tailworks/blob/master/docs/mcp-public.md).
 
 ## What to change
 

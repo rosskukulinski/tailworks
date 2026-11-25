@@ -19,6 +19,7 @@ var updateGolden = flag.Bool("update", false, "rewrite testdata/*.golden")
 // writes nothing, that setup is idempotent, and that remove restores the
 // user's files byte for byte. Run with -update to rewrite the golden file.
 func TestAgentSetupSnapshot(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("short")
 	}

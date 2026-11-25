@@ -1,0 +1,7 @@
+{
+  // e2e/dataplane Workflows fixture (#418, ledger/workflows.md): one
+  // Workflow whose steps, sleep, event wait and approval wait all report to
+  // the recorder node.
+  "name": "wf",
+  "tailnet": { "tags": ["tag:ttest"] },
+}

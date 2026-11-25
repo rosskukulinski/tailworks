@@ -12,6 +12,7 @@ import (
 // The dbClock extrapolates from the last sample with the local monotonic
 // clock, and keeps doing so when a sample fails.
 func TestDBClockExtrapolates(t *testing.T) {
+	t.Parallel()
 	server := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC) // far from the local wall clock
 	fail := false
 	c := newDBClock(func(ctx context.Context) (time.Time, error) {
@@ -47,6 +48,7 @@ func TestDBClockExtrapolates(t *testing.T) {
 // On Postgres, the store clock follows the server: Now() matches
 // clock_timestamp() closely, and Mgmt.now() uses it.
 func TestStoreClockPostgres(t *testing.T) {
+	t.Parallel()
 	dsn := os.Getenv("TW_TEST_POSTGRES_DSN")
 	if dsn == "" {
 		t.Skip("TW_TEST_POSTGRES_DSN not set")
@@ -81,6 +83,7 @@ func TestStoreClockPostgres(t *testing.T) {
 
 // SQLite: the store clock is the local clock, and Mgmt.now() uses it.
 func TestStoreClockSQLite(t *testing.T) {
+	t.Parallel()
 	st, err := OpenStore(context.Background(), filepath.Join(t.TempDir(), "m.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -113,6 +116,7 @@ func (f *fakeClockStore) ClockSource() string                     { return "post
 // store clock and turns ok=false beyond MaxClockOffset or a stale sample
 // (ADR-028 §2). It warns; it does not refuse.
 func TestMM_F2_SkewGate(t *testing.T) {
+	t.Parallel()
 	sq, err := OpenStore(context.Background(), filepath.Join(t.TempDir(), "m.db"))
 	if err != nil {
 		t.Fatal(err)

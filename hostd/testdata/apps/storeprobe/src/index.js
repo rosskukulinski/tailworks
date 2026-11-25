@@ -8,6 +8,8 @@ async function serve(env, u) {
       return Response.json({ seq: await env.P.put(q.get("k"), q.get("v")) });
     case "/del":
       return Response.json({ seq: await env.P.del(q.get("k")) });
+    case "/delif":
+      return Response.json({ seq: await env.P.delIf(q.get("k")) });
     case "/get":
       return Response.json({ v: await env.P.get(q.get("k")) });
     case "/all":

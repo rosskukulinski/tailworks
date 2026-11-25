@@ -18,6 +18,7 @@ import (
 )
 
 func TestSemver(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		a, b  string
 		newer bool
@@ -61,7 +62,7 @@ func TestVersionCheck(t *testing.T) {
 
 	version = "0.2.0"
 	out, err := captureStdout(t, func() error { return cmdVersion([]string{"--check", "--state-dir", state}) })
-	if err != nil || !strings.Contains(out, "tw 0.3.0 is out (this is 0.2.0)") || !strings.Contains(out, "upgrade: "+upgradeCommand()) {
+	if err != nil || !strings.Contains(out, "tw 0.3.0 is out (this is 0.2.0)") || !strings.Contains(out, "upgrade: "+upgradeCommand("0.3.0")) {
 		t.Fatalf("version --check: %v %q", err, out)
 	}
 	out, err = captureStdout(t, func() error { return cmdVersion([]string{"--check", "--json", "--state-dir", state}) })
@@ -155,8 +156,7 @@ func TestNoUpdateCheckAfterLocalCommands(t *testing.T) {
 	if code := run([]string{"init", app, "--template", "hello"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("tw init: exit %d: %s%s", code, stdout.String(), stderr.String())
 	}
-	if wd, err := nettest.WorkerdBinary(); err == nil && hostdtest.HasNode() {
-		t.Setenv("TW_WORKERD", wd)
+	if _, err := nettest.WorkerdBinary(); err == nil && hostdtest.HasNode() {
 		if code := run([]string{"dev", app, "--once", "--port", "0"}, &stdout, &stderr); code != 0 {
 			t.Fatalf("tw dev --once: exit %d: %s%s", code, stdout.String(), stderr.String())
 		}

@@ -44,6 +44,7 @@ func mustLink(t *testing.T, recs []mgmtapi.AuditRecord) {
 // H03: past the memory cap host records go to disk and come back in chain
 // order, in batches no larger than auditFlushBatch.
 func TestAuditSpillKeepsOrder(t *testing.T) {
+	t.Parallel()
 	a, p := newTestAudit(t, 10)
 	for i := range 2500 {
 		a.add(mgmtapi.AuditRecord{Kind: "deny", TraceID: string(rune('a' + i%26))})
@@ -75,6 +76,7 @@ func TestAuditSpillKeepsOrder(t *testing.T) {
 
 // A failed send leaves the batch queued; nothing is lost or reordered.
 func TestAuditFlushFailureKeepsBatch(t *testing.T) {
+	t.Parallel()
 	a, _ := newTestAudit(t, 5)
 	for range 20 {
 		a.add(mgmtapi.AuditRecord{Kind: "deny"})
@@ -101,6 +103,7 @@ func TestAuditFlushFailureKeepsBatch(t *testing.T) {
 // Spilled records of an earlier run can't link to this run's chain: they
 // are discarded and reported as audit_dropped{restart}.
 func TestAuditSpillAfterRestart(t *testing.T) {
+	t.Parallel()
 	a, p := newTestAudit(t, 1)
 	for range 5 {
 		a.add(mgmtapi.AuditRecord{Kind: "deny"})
@@ -127,6 +130,7 @@ func TestAuditSpillAfterRestart(t *testing.T) {
 
 // Tenant notes: a per-object bucket, refused before chaining, counted.
 func TestTenantNoteBucket(t *testing.T) {
+	t.Parallel()
 	a, _ := newTestAudit(t, 100000)
 	now := time.Unix(1_700_000_000, 0)
 	a.now = func() time.Time { return now }

@@ -166,7 +166,7 @@ node after reboot" delay".
 ## Fast identity
 
 How fast a new object's own node comes up with the
-[tuning](INSTALL.md#tuning-how-fast-a-new-objects-own-node-comes-up)
+[tuning](concepts.md#tuning-how-fast-a-new-objects-own-node-comes-up)
 defaults (warm keys, pool nodes, no port mapping), measured on a production
 tailnet: the first request on the object's own node arrives ~0.23 s after
 it is created (p95 ~0.3 s), down from ~7 s. The breakdown, and the numbers

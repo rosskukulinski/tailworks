@@ -35,10 +35,9 @@ type Options struct {
 	KillTombstone  time.Duration
 	HeartbeatEvery time.Duration
 	Verbose        bool
-	// VM, DefaultTier and VMDebug are passed to hostd (microVM tier).
-	VM          sandbox.Backend
-	DefaultTier string
-	VMDebug     bool
+	// VM and VMDebug are passed to hostd (microVM tier).
+	VM      sandbox.Backend
+	VMDebug bool
 	// Sandbox is hostd's process-tier sandbox ("" = none unless
 	// $TW_TEST_SANDBOX is set, "auto", "seatbelt", "landlock", "none").
 	Sandbox string
@@ -68,6 +67,9 @@ type Options struct {
 	// PublicListen is passed to hostd (ADR-029 public nodes; tests inject a
 	// listener of *ipn.FunnelConn because testcontrol has no certificates).
 	PublicListen func(srv *tsnet.Server) (net.Listener, error)
+	// TailnetHTTPSCert is passed to hostd (tailnet.https; testcontrol
+	// issues no real certificates).
+	TailnetHTTPSCert netd.HTTPSCertFunc
 	// CronTimeout is passed to hostd (cron trigger run limit).
 	CronTimeout time.Duration
 	// CronClock is passed to hostd (the cron loop's clock; tests that tick
@@ -77,6 +79,9 @@ type Options struct {
 	// QueueVisibility is passed to hostd (how long a claimed queue batch
 	// stays hidden; short in tests of crash recovery).
 	QueueVisibility time.Duration
+
+	// PyodideDir is passed to hostd (Python Workers' Pyodide bundles).
+	PyodideDir string
 	// Telemetry is passed to hostd (ADR-045).
 	Telemetry hostd.TelemetryOptions
 
@@ -91,6 +96,10 @@ type Options struct {
 	// MgmtClock is the real mgmt's clock and its store's (BackendReal
 	// only; nil: the real time). Tests that age leases move it forward.
 	MgmtClock mgmt.Clock
+
+	// Workerd is the workerd binary hostd runs ("": nettest.WorkerdBinary).
+	// A test can wrap the real one (kvclock_test.go skews its clock).
+	Workerd string
 }
 
 // Env is fakemgmt (on a unix socket) plus one running tw-hostd.
@@ -117,6 +126,9 @@ func Start(t testing.TB, o Options) *Env {
 	wd, err := nettest.WorkerdBinary()
 	if err != nil {
 		t.Skip(err)
+	}
+	if o.Workerd != "" {
+		wd = o.Workerd
 	}
 	if !HasNode() {
 		t.Skip("node not available (needed to bundle apps)")
@@ -190,7 +202,7 @@ func hostConfig(o Options, dir, wd string, log *slog.Logger, hc *mgmtapi.Client)
 		HostID: "h1", Mgmt: hc, DataDir: filepath.Join(dir, "data"), RunDir: filepath.Join(dir, "run"),
 		WorkerdBin: wd, HeartbeatEvery: o.HeartbeatEvery, Ephemeral: o.Ephemeral, ControlURL: o.ControlURL,
 		KillTombstone: o.KillTombstone, HostnamePrefix: o.HostnamePrefix, Logger: log,
-		VM: o.VM, DefaultTier: o.DefaultTier, VMDebug: o.VMDebug, Sandbox: testSandbox(o.Sandbox), InsecureSharedHost: o.InsecureSharedHost, HostSockets: o.HostSockets, AllowSiblingEgress: o.AllowSiblingEgress,
+		VM: o.VM, VMDebug: o.VMDebug, Sandbox: testSandbox(o.Sandbox), InsecureSharedHost: o.InsecureSharedHost, HostSockets: o.HostSockets, AllowSiblingEgress: o.AllowSiblingEgress,
 		Containers: o.Containers, Images: o.Images, ContainerIdle: o.ContainerIdle, ContainerGrace: o.ContainerGrace,
 		ContainerCapacity: o.ContainerCapacity, ContainerQuota: o.ContainerQuota, ContainerMaxLife: o.ContainerMaxLife,
 		ContainerInternet: o.ContainerInternet, FenceAfter: o.FenceAfter, WorkerInternet: o.WorkerInternet,
@@ -200,6 +212,10 @@ func hostConfig(o Options, dir, wd string, log *slog.Logger, hc *mgmtapi.Client)
 		R2:        o.R2,
 
 		QueueVisibility: o.QueueVisibility,
+
+		PyodideDir: o.PyodideDir,
+
+		TailnetHTTPSCert: o.TailnetHTTPSCert,
 	}
 }
 

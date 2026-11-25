@@ -4,12 +4,19 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+
+	repodocs "github.com/rosskukulinski/tailworks/docs"
 )
 
 // cliReference renders docs/cli.md (issue #51): every command in `tw
 // help`'s groups, and under it the `tw <path> --help` output of each
-// command path the completion tree knows (`tw kv`, `tw kv get`, …);
-// a subcommand's section has only its flags.
+// command path the completion tree knows (`tw kv`, `tw kv key put`, …),
+// then the environment variables tw reads (envvars.go).
+// A subcommand's section has only its flags, or, when they are its
+// command's or an earlier subcommand's (`tw d1` has one flag set for every
+// subcommand), a "Same flags as" link to the section that lists them.
+// Every path keeps its heading, so `tw docs show cli.md#tw-kv-key-put`
+// still resolves.
 // TestCLIReferenceUpToDate fails when docs/cli.md differs; `make cli-docs`
 // rewrites it. Since the text is the --help output itself, the reference
 // can't drift from it.
@@ -21,7 +28,8 @@ func cliReference() string {
 	b.WriteString("and each flag with its default. `tw help` lists the commands by group;\n")
 	b.WriteString("`tw <command> --help` prints one of these sections. Every command also\n")
 	b.WriteString("takes `--state-dir` (default `$TW_STATE_DIR` or `~/.tailworks`) and `--json`\n")
-	b.WriteString("([cli-json.md](cli-json.md)).\n")
+	b.WriteString("([cli-json.md](cli-json.md)). The environment variables tw reads are at the\n")
+	b.WriteString("end: [Environment](#environment).\n")
 
 	tree := buildCompletionTree()
 	titles, groups := groupedCommands()
@@ -29,20 +37,30 @@ func cliReference() string {
 		fmt.Fprintf(&b, "\n## %s\n", title)
 		for _, c := range groups[i] {
 			fmt.Fprintf(&b, "\n### tw %s\n\n%s\n", c.name, helpLine(c))
+			first := map[string]string{} // a flag block → the heading that printed it
 			for _, p := range tree.paths() {
 				if p != c.name && !strings.HasPrefix(p, c.name+" ") {
 					continue
 				}
 				text := cliHelpText(c, strings.Fields(p)[1:])
-				if p != c.name {
+				i := strings.Index(text, "\nflags:\n")
+				if p == c.name {
+					if i >= 0 {
+						first[text[i+1:]] = "tw " + p
+					}
+				} else {
 					// The description and usage line are the command's
 					// (above); a subcommand adds its own flag set.
-					i := strings.Index(text, "\nflags:\n")
 					if i < 0 {
 						continue
 					}
 					text = text[i+1:]
 					fmt.Fprintf(&b, "\n#### tw %s\n", p)
+					if h, ok := first[text]; ok {
+						fmt.Fprintf(&b, "\nSame flags as [%s](#%s).\n", h, repodocs.Anchor(h))
+						continue
+					}
+					first[text] = "tw " + p
 				}
 				b.WriteString("\n```text\n")
 				b.WriteString(text)
@@ -50,6 +68,7 @@ func cliReference() string {
 			}
 		}
 	}
+	b.WriteString(envReference()) // envvars.go
 	return b.String()
 }
 

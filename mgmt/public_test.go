@@ -3,6 +3,7 @@ package mgmt
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -44,10 +46,14 @@ func (p *pushRecorder) count(path string) int {
 }
 
 // publicHost registers host h1 with a push listener.
+// publicHostSeq keeps publicHost's socket names apart when parallel tests
+// start within the same microsecond.
+var publicHostSeq atomic.Int64
+
 func publicHost(t *testing.T, e *testEnv) *pushRecorder {
 	t.Helper()
 	rec := &pushRecorder{hits: map[string]int{}}
-	sock := filepath.Join(os.TempDir(), "tw-pub-"+filepath.Base(e.sock)+"-"+time.Now().Format("150405.000000")+".sock")
+	sock := filepath.Join(os.TempDir(), fmt.Sprintf("tw-pub-%s-%s-%d.sock", filepath.Base(e.sock), time.Now().Format("150405.000000"), publicHostSeq.Add(1)))
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
 		t.Fatal(err)
@@ -63,24 +69,7 @@ func publicHost(t *testing.T, e *testEnv) *pushRecorder {
 	if _, _, err := e.m.RegisterHost(context.Background(), RegisterRequest{HostID: "h1", CapacityNodes: 100, Tiers: []string{"process"}, PushURL: "unix://" + sock}, "", ""); err != nil {
 		t.Fatal(err)
 	}
-	// Heartbeat as a real host does. Without it h1 is live only for
-	// HostLeaseTTL after it registers, and a test that runs longer than that
-	// (a loaded CI runner) gets 503 no_host "h1: not live" (issue #183).
-	stop, done := make(chan struct{}), make(chan struct{})
-	go func() {
-		defer close(done)
-		tick := time.NewTicker(HostLeaseTTL / 10)
-		defer tick.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-tick.C:
-				e.m.Heartbeat(context.Background(), "h1", 0, nil)
-			}
-		}
-	}()
-	t.Cleanup(func() { close(stop); <-done })
+	keepHostsLive(t, e, "h1") // hostlive_test.go
 	return rec
 }
 
@@ -128,6 +117,7 @@ func auditKinds(t *testing.T, e *testEnv, tenant string, kinds ...string) []Audi
 }
 
 func TestPublicGateAndAssignment(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	c := e.c
 	push := publicHost(t, e)
@@ -215,6 +205,7 @@ func TestPublicGateAndAssignment(t *testing.T) {
 }
 
 func TestPublicNodeObject(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	c, h1 := e.c, e.asHost("h1")
 	publicHost(t, e)
@@ -276,6 +267,7 @@ func mustJSON(v any) []byte {
 }
 
 func TestPublicExpose(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	c := e.c
 	push := publicHost(t, e)
@@ -337,6 +329,7 @@ func TestPublicExpose(t *testing.T) {
 }
 
 func TestPublicPreflight(t *testing.T) {
+	t.Parallel()
 	run := func(t *testing.T, policy string) PreflightResult {
 		e := newTestEnv(t)
 		e.ts.policy = policy
@@ -366,6 +359,7 @@ func TestPublicPreflight(t *testing.T) {
 // TestAssignmentPublicWireShape: mgmt's PublicAssignment and hostd's
 // mgmtapi.PublicAssignment are the same JSON.
 func TestAssignmentPublicWireShape(t *testing.T) {
+	t.Parallel()
 	p := PublicAssignment{Routes: []string{"/a/*"}, Upgrade: []string{"/a/*"}, Limits: publicspec.Defaults, Tags: []string{"tag:tw-public"}, Exposed: true}
 	b, _ := json.Marshal(p)
 	var h mgmtapi.PublicAssignment

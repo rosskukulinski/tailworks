@@ -76,7 +76,7 @@
 
 <section data-live="audit">
   <div class="sect-head"><div>
-    <h2>Activity <span class="count">{{len .Audit}}</span> {{if .Verified}}<span class="badge ok">verified</span>{{else}}<span class="badge bad">NOT VERIFIED</span>{{end}}</h2>
+    <h2>Activity <span class="count">{{len .Audit}}</span> {{if not .Verified}}<span class="badge bad">NOT VERIFIED</span>{{end}}</h2>
     <p class="hint">Audit log entries for this object, newest first. <a href="/ui/audit?object={{.Obj.ObjectID}}">See all of them →</a></p>
   </div></div>
   <div class="tbl">
@@ -85,7 +85,7 @@
     <tbody>{{template "auditrows" (auditSet .Audit .Names)}}{{if not .Audit}}<tr><td colspan="6" class="empty">No records</td></tr>{{end}}</tbody>
   </table>
   </div>
-  <p class="chains">{{template "chains" .Chains}}</p>
+  {{if not .Verified}}<p class="chains">{{template "chains" .Chains}}</p>{{end}}
 </section>
 
 {{if not .Killed}}
@@ -93,7 +93,7 @@
   <h2>Kill this object</h2>
   <form method="post" action="/ui/objects/{{.Obj.ObjectID}}/kill"
         data-confirm="Kill {{.Obj.NodeName}} ({{.Obj.ObjectID}})? Its node is tombstoned and its flows dropped.">
-    <label><input type="checkbox" name="cascade" value="true"> Cascade: also kill the {{.Children}} descendant(s)</label>
+    <label><input type="checkbox" name="cascade" value="true" checked> Cascade: also kill the {{.Children}} descendant(s)</label>
     <input type="text" name="reason" placeholder="Reason (recorded in the audit log)" maxlength="200">
     <button type="submit" class="danger">Kill</button>
   </form>

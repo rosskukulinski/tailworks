@@ -23,6 +23,7 @@ import (
 // isolation; the microVM backend is e2e/container in Lima). Facet and
 // plain-DO classes both.
 func TestContainerPolyfill(t *testing.T) {
+	t.Parallel()
 	procs := &sandboxtest.Procs{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "port server: %s %s?%s as=%q probe=%q", r.Method, r.URL.Path, r.URL.RawQuery, r.Header.Get("x-tw-as"), r.Header.Get("x-probe"))

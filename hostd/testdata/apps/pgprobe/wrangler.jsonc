@@ -1,0 +1,10 @@
+{
+  "name": "pgprobe",
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [{ "name": "COUNTER", "class_name": "Counter" }],
+  },
+  "vars": { "DATABASE_URL": "postgres://postgres:twtest@ttest-pg:5432/postgres?sslmode=disable" },
+}

@@ -58,6 +58,7 @@ func (e *poolEnv) requireNoWarmKeysLeft(t *testing.T, ids []string) {
 // TestWarmKeysCountedInTenant (#158, H25): GET /v1/tenants/{id} reports how
 // many pooled preauthorized keys the tenant has in custody (`tw status`).
 func TestWarmKeysCountedInTenant(t *testing.T) {
+	t.Parallel()
 	e := newPoolEnv(t, 0, nil)
 	support := PoolName([]string{"tag:tw-agent-support"}, false)
 	e.waitWarm(t, support, 1, 5*time.Second)
@@ -82,6 +83,7 @@ func TestWarmKeysCountedInTenant(t *testing.T) {
 // key at the fake Tailscale API when it stops, and leaves none in custody.
 // Without it (replicas sharing a store) the pool survives a restart.
 func TestWarmKeysRevokedOnClose(t *testing.T) {
+	t.Parallel()
 	t.Run("tw down", func(t *testing.T) {
 		e := newPoolEnv(t, 0, func(c *Config) { c.RevokeWarmKeysOnClose = true })
 		e.waitPoolKeys(t, 2)
@@ -115,6 +117,7 @@ func TestWarmKeysRevokedOnClose(t *testing.T) {
 // /v1/tenants/{id}) revokes every unused pooled key at the fake Tailscale
 // API and leaves none in custody.
 func TestWarmKeysRevokedOnTenantDelete(t *testing.T) {
+	t.Parallel()
 	e := newPoolEnv(t, 0, nil)
 	e.waitPoolKeys(t, 2)
 	if st := e.c.okStatus("DELETE", "/v1/tenants/"+e.tenant+"?force=true", nil, nil); st == 202 {

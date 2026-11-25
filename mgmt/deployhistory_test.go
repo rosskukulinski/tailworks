@@ -14,6 +14,7 @@ import (
 // the newest bundles. SQLite always; Postgres with TW_TEST_POSTGRES_DSN
 // (make test-pg).
 func TestStoreDeploymentHistory(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		bundles := [][]byte{[]byte("bundle-0"), []byte("bundle-1"), nil, []byte("bundle-3"), []byte("bundle-4")}
@@ -126,6 +127,7 @@ func TestStoreDeploymentHistory(t *testing.T) {
 // unknown ID), the audit kind and retention. Every exchange is checked
 // against api/openapi.yaml.
 func TestV1DeployHistoryRollback(t *testing.T) {
+	t.Parallel()
 	e := newTestEnvWith(t, func(c *Config) { c.BundleRetention = 2 })
 	tn := v1Tenant(t, e, "ttest.ts.net", nil)
 	h1 := v1Host(t, e, "h1")
@@ -269,6 +271,7 @@ func TestV1DeployHistoryRollback(t *testing.T) {
 
 // Rollback and history have deploy's role: a host may not call them.
 func TestAuthzRollbackIsAdminOnly(t *testing.T) {
+	t.Parallel()
 	a := newAuthzEnv(t)
 	a.fail(nodeH1, "GET", "/v1/tenants/"+a.tn+"/workloads/w/deployments", nil, 403, "forbidden")
 	a.fail(nodeH1, "POST", "/v1/tenants/"+a.tn+"/workloads/w/rollbacks", map[string]any{}, 403, "forbidden")

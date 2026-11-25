@@ -4,7 +4,7 @@ package attacks
 // (internal/policy/hostile_test.go) doesn't cover: a Unicode homoglyph tag
 // that visually reads as `tag:tw-*` but isn't ASCII, and a live tenant
 // policy whose JSON has duplicate `grants`/`tagOwners` keys (hujson/encoding
-// quirks). `--policy-apply` must still only ever add real `tag:tw*` owners
+// quirks). `--apply-policy` must still only ever add real `tag:tw*` owners
 // and tw-sourced grants, and refuse anything else, byte-for-byte.
 
 import (

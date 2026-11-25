@@ -76,6 +76,7 @@ tw agent setup · scope user · tw skills dev (10 skills)
   create    ~/.config/opencode/AGENTS.md (tw block)              OpenCode
   skipped   Cursor: Cursor keeps user rules in its settings, not in files: use --scope project
 ✓ 13 files changed
+next: register tailworks' MCP server with your agent: tw mcp --config
 
 $ tw agent setup --dry-run
 tw agent setup · scope user · tw skills dev (10 skills)

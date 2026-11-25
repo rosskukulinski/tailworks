@@ -8,6 +8,7 @@ import (
 )
 
 func TestDropLines(t *testing.T) {
+	t.Parallel()
 	var b bytes.Buffer
 	d := dropLines{w: &b, drop: [][]byte{[]byte("STUN server listening on ")}}
 	d.Write([]byte("2026/11/14 STUN server listening on 127.0.0.1:1\n"))
@@ -18,6 +19,7 @@ func TestDropLines(t *testing.T) {
 }
 
 func TestCheckDevPort(t *testing.T) {
+	t.Parallel()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

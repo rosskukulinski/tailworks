@@ -1,0 +1,10 @@
+{
+  "name": "ctrs",
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "containers": [{ "class_name": "Box", "image": "./Dockerfile", "instance_type": "lite" }],
+  "durable_objects": { "bindings": [{ "name": "BOX", "class_name": "Box" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Box"] }],
+  "vars": { "REC": "http://rec.invalid" },
+}

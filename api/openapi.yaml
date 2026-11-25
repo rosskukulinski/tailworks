@@ -49,8 +49,11 @@ info:
     scheme; `tw doctor` reports `transport: tsnet` in normal operation and
     flags any local-socket use.
 
-    mgmt → hostd pushes (kill, assignments) go to the host's tsnet node and are
-    hostd's API, not this document's.
+    mgmt → hostd pushes and calls (`POST /v1/push/*`, `GET /v1/logs`,
+    `POST /v1/store-admin`, `/v1/approvals*`) and the operator's local-socket
+    calls (`tw status`, `tw down --purge`, `tw host vmcheck`) are hostd's API,
+    not this document's: see
+    [hostd-api.md](hostd-api.md).
 
     ## Conventions
 
@@ -483,8 +486,8 @@ paths:
         - name: source
           in: query
           description: |
-            `console`: the app's raw output (workerd's stdout, the node
-            tier's `app.log`, the microVM console). `requests`: the
+            `console`: the app's raw output (workerd's stdout, the Node
+            runtime's `app.log`, the microVM console). `requests`: the
             workload's structured request records (ADR-045), as
             JSON Lines (`application/x-ndjson`), one `RequestRecord` per
             line; `n` and the filters below then count records, not lines.
@@ -909,25 +912,34 @@ paths:
       description: |
         Issue #116. mgmt preflights the bundle as `POST /v1/deployments?dryRun=true`
         does, turns what is missing into a policy snippet (the `tagOwners`
-        of its tags, a grant per `tailnet.connects`, and for public routes
+        of its tags, a grant per `tailnet.connects`, for `tailnet.service`
+        the `autoApprovers.services` entry of its own `svc:` name for the
+        workload node's own tags (issue #295), and for public routes
         `tag:tw-public` with the funnel `nodeAttrs`) and adds it to the
-        tenant's tailnet policy:
+        tenant's tailnet policy. For an app that is new to the policy it
+        also adds the caller grant (issue #320): `autogroup:member` to the
+        workload node's own tags on `tcp:80`, so every user of the tailnet
+        can call the app. mgmt builds that grant itself and adds it only
+        when the same write adds every one of those tags to `tagOwners`,
+        each is a tailworks app tag (`tag:tw-*`, not a reserved one), the
+        control plane is Tailscale, and no grant or ACL from outside
+        `tag:tw*` already reaches the tag or `*`. `callerGrant` carries it:
 
         1. read the policy with its ETag;
         2. merge additively (comments kept; no existing entry is changed,
            reordered or removed), refusing anything outside `tag:tw*`
-           (RT-06, `internal/policy.Check`);
+           but the caller grant's source (RT-06, `internal/policy.Check`);
         3. validate it with the control plane;
         4. write it with `If-Match`. If the policy changed in between
            (`412`), steps 1–4 run once more; a second conflict is
            `409 policy_conflict` and nothing is written.
 
         `added` is what was (or, with `dryRun`, would be) added, and
-        `manual` what is missing that tailworks never writes (the
-        `autoApprovers.services` entry of a Tailscale Service, tag
+        `manual` what is missing that tailworks never writes (an
+        `autoApprovers.services` entry wider than that, or on Headscale, tag
         ownership problems of a team tenant, grants it refuses, and grants
-        to a tag the policy doesn't define, which the control plane would
-        reject); add those
+        to a tag outside `tag:tw*` that the policy doesn't define, which the
+        control plane would reject); add those
         in the admin console. `dryRun=true` writes nothing and needs only
         Policy File › Read; the write needs the tenant's OAuth client to
         hold Policy File write (`403 policy_write_denied` otherwise).
@@ -1431,7 +1443,7 @@ paths:
         host, once per change: with `degraded` when it stops, without it
         when the entry applies (or was skipped with `…/repair`). mgmt
         keeps the latest report on the store (`Store.degraded`, shown by
-        `tw d1 list`, `tw kv namespace ls`, `tw r2 bucket ls`, `tw status`
+        `tw d1 ls`, `tw kv namespace ls`, `tw r2 bucket ls`, `tw status`
         and the console) and audits the first report of each failing
         entry on each host (`kind: store_replay_failed`). A report for
         another incarnation is ignored. A healthy report clears the record
@@ -1507,7 +1519,7 @@ paths:
       operationId: ListKVKeys
       summary: List a KV namespace's keys
       description: |
-        Workers KV's `list()` for operators (`tw kv key list`,
+        Workers KV's `list()` for operators (`tw kv key ls`,
         ADR-037): live keys in UTF-8 byte order, with their
         expiration and metadata, `limit` at a time (default and maximum
         1000). Pass the answer's `cursor` to get the next page. mgmt reads
@@ -1608,7 +1620,7 @@ paths:
       tags: [stores]
       operationId: DeleteKVValue
       summary: Delete one KV value
-      description: "`tw kv key delete`. Deleting a key that does not exist succeeds and writes nothing. Audited (`kind: kv_delete`, the namespace only) when it deletes."
+      description: "`tw kv key rm`. Deleting a key that does not exist succeeds and writes nothing. Audited (`kind: kv_delete`, the namespace only) when it deletes."
       x-tw-role: admin|tenant:data
       x-tw-audit: true
       responses:
@@ -1618,6 +1630,48 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/StoreConflict" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/tenants/{id}/workloads/{workload}/stores/r2/{name}/objects:
+    parameters:
+      - $ref: "#/components/parameters/tenantID"
+      - $ref: "#/components/parameters/workloadName"
+      - $ref: "#/components/parameters/storeName"
+    get:
+      tags: [stores]
+      operationId: ListR2Objects
+      summary: List an R2 bucket's objects
+      description: |
+        `tw r2 object ls` (ADR-036 §8): the bucket's live objects in key
+        order (UTF-8 bytes), with their size, etag, upload time and content
+        type. mgmt folds the bucket's index journal (its own copy, written
+        by the workload's R2 binding), so the answer includes every
+        acknowledged write; object bytes stay in the hosts' R2 backend.
+        `404 unknown_store` if the bucket does not exist. `409
+        version_skew` if the index has entries written by a newer
+        tailworks; `409 store_conflict` if the bucket was deleted or
+        recreated during the read.
+      x-tw-role: admin|tenant:data
+      parameters:
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+        - name: prefix
+          in: query
+          description: Only objects whose keys start with this.
+          schema: { type: string, maxLength: 1024 }
+      responses:
+        "200":
+          description: One page of objects.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/R2ObjectPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
         default: { $ref: "#/components/responses/Error" }
 
   /v1/tenants/{id}/workloads/{workload}/d1/{name}/query:
@@ -2016,6 +2070,61 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/LeaseLost" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/tenants/{id}/workloads/{workload}/service-bindings/{binding}:
+    parameters:
+      - $ref: "#/components/parameters/tenantID"
+      - $ref: "#/components/parameters/workloadName"
+      - name: binding
+        in: path
+        required: true
+        description: The env name of a wrangler `services` entry of the workload's latest deployment.
+        schema: { type: string, pattern: "^[A-Za-z_$][A-Za-z0-9_$]{0,127}$" }
+    get:
+      tags: [objects]
+      operationId: GetServiceBindingTarget
+      summary: Resolve a workload's service binding to its target's entry node
+      description: |
+        hostd calls this when a workload uses a service binding
+        (`env.<binding>.fetch()` or an RPC call; ADR-053). The
+        caller must hold the workload's lease at `epoch` (`409
+        lease_lost`), and the workload's latest deployment must declare the
+        binding (`404 service_not_found`). The target is the workload
+        named by the binding's `service`, in the same tenant: there is no
+        way to name another tenant's workload. The answer is the target's
+        entry node (its MagicDNS name), which the call is sent to as the
+        calling node over the tenant's tailnet (in process when it is on
+        the same host).
+
+        - `404 service_not_found`: the binding is not declared, or the
+          target workload was never deployed in this tenant.
+        - `410 killed`: the target's entry node was killed.
+        - `503 identity_pending`: the target is deployed but its entry
+          node has no MagicDNS name yet (retry).
+      x-tw-role: host
+      parameters:
+        - $ref: "#/components/parameters/epoch"
+      responses:
+        "200":
+          description: The target.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceBindingTarget" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: "`service_not_found`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409": { $ref: "#/components/responses/LeaseLost" }
+        "410": { $ref: "#/components/responses/Gone" }
+        "503":
+          description: "`identity_pending`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         default: { $ref: "#/components/responses/Error" }
 
   /v1/tenants/{id}/telemetry:
@@ -2468,7 +2577,7 @@ paths:
         is not enough: a workload started before another tenant's first
         deploy would otherwise be able to read that tenant's key file. A
         host may read only its own `{id}`.
-      x-tw-role: host|admin
+      x-tw-role: admin|host
       responses:
         "200":
           description: The paths.
@@ -2492,7 +2601,7 @@ paths:
       tags: [hosts, deployments]
       operationId: ListHostAssignments
       summary: List the deployments assigned to a host
-      x-tw-role: host|admin
+      x-tw-role: admin|host
       parameters:
         - $ref: "#/components/parameters/limit"
         - $ref: "#/components/parameters/cursor"
@@ -2516,7 +2625,7 @@ paths:
       description: |
         mgmt reads `tailworks.jsonc` from the bundle (a tar, optionally gzipped;
         the shallowest `tailworks.jsonc`): `tailnet.tags` (the `_workload` entry
-        node), `tailnet.objects.<Class>.{tags, agent, ttl, node}`,
+        node), `tailnet.objects.<Class>.{tags, ttl, node}`,
         `tailnet.spawn.{maxLive ≤ 64, maxDepth ≤ 3}`, `tailnet.connects`,
         `tier`, `runtime`, `placement.{mode, targets, aggregate}` (or
         wrangler's `placement`). A bundle with neither `tailnet.tags` nor
@@ -2725,7 +2834,7 @@ paths:
       operationId: GetDeploymentBundle
       summary: Download the raw bundle
       description: Hosts fetch the bundle named by `Assignment.bundleURL`. Only the lease holder (or an admin) may read it.
-      x-tw-role: host|admin|tenant:read
+      x-tw-role: admin|host|tenant:read
       responses:
         "200":
           description: The bundle bytes (tar, optionally gzipped) exactly as uploaded.
@@ -2881,6 +2990,14 @@ paths:
           in: query
           description: DO class name, or `_workload`.
           schema: { type: string }
+        - name: tag
+          in: query
+          description: Objects carrying this tag (the full `tag:<name>`, matched exactly).
+          schema: { type: string }
+        - name: human
+          in: query
+          description: Objects whose `actingFor` is this principal (exact match, as on `GET /v1/audit`).
+          schema: { type: string }
         - name: state
           in: query
           description: Repeatable. Default is every state, tombstones included.
@@ -2956,7 +3073,7 @@ paths:
 
         Any other field, or a host sending admin fields (and vice versa), is
         `400 immutable_field`.
-      x-tw-role: host|admin|tenant:kill
+      x-tw-role: admin|host|tenant:kill
       x-tw-audit: true
       parameters:
         - $ref: "#/components/parameters/ifMatch"
@@ -3121,15 +3238,15 @@ paths:
       tags: [objects, credentials]
       operationId: GetObjectCertificate
       summary: Read the object's node certificate
+      deprecated: true
       description: |
-        The certificate mgmt signed at `ready` (re-issued on fetch when missing
-        or within 1 h of expiry). The receiving netd verifies it against the
-        tenant's `oboPublicKey` and narrows the caller's caps to `cert.lim`;
-        a certificate that fails verification, names another node or cannot
-        be fetched makes netd withhold the caller's caps. `410 killed` for
-        tombstones. Replaces `GET /v0/certs/{nodeID}`; see also
-        `GET /v1/certificates/{stableNodeID}` for lookup by node.
-      x-tw-role: host|admin
+        **Deprecated:** use `GET /v1/certificates/{stableNodeID}?tenant=`
+        with the object's `stableNodeID` and `tenantID` (both on `Object`).
+        This route returns the same certificate, sends a `Deprecation` header
+        and a `Link` to that route (`rel="successor-version"`), and will be
+        removed no earlier than two releases later. `409 not_ready` when the
+        object has no node yet; `410 killed` for tombstones.
+      x-tw-role: admin|host
       responses:
         "200":
           description: The certificate.
@@ -3158,7 +3275,18 @@ paths:
         object, and what is its `lim`?" `404 not_found` when no live object
         of the tenant has that node (the receiver then applies the WhoIs caps
         unchanged: the peer is not a tailworks object); `410 killed` for a tombstone.
-      x-tw-role: host|admin
+
+        The certificate is the one mgmt signed at `ready` (re-issued on fetch
+        when missing or within 1 h of expiry). The receiving netd verifies it
+        against the tenant's `oboPublicKey` and narrows the caller's caps to
+        `cert.lim`; a certificate that fails verification, names another node
+        or cannot be fetched makes netd withhold the caller's caps.
+
+        To read an object's certificate, pass the object's `stableNodeID` and
+        `tenantID` (the admin UI's object page does). Replaces
+        `GET /v0/certs/{nodeID}` and the deprecated
+        `GET /v1/objects/{id}/certificate`.
+      x-tw-role: admin|host
       parameters:
         - name: stableNodeID
           in: path
@@ -3249,6 +3377,13 @@ paths:
         - name: chain
           in: query
           description: "`mgmt` or `host:<hostID>`."
+          schema: { type: string }
+        - name: workload
+          in: query
+          description: |
+            Records about this workload: records whose object belongs to it,
+            and mgmt records that name it in their detail (deploy, undeploy,
+            secrets). Combine with `tenant` when several tenants use the name.
           schema: { type: string }
         - name: kind
           in: query
@@ -3451,7 +3586,7 @@ paths:
         Only the holding host (or an admin) may release it (`403 forbidden`).
         Idempotent from the host's side: `404` means it is already gone.
         Audited (`kind: container_release`).
-      x-tw-role: host|admin
+      x-tw-role: admin|host
       x-tw-audit: true
       responses:
         "204":
@@ -3797,7 +3932,7 @@ paths:
       summary: Import catalog entries (from a release's share/tailworks/catalog.json)
       description: |
         Adds or replaces imported entries. Entries built into this tw-mgmt are never replaced.
-        `tw release import <tarball>` reads the tarball's `share/tailworks/catalog.json`, posts it here,
+        `tw upgrade import <tarball>…|<version>` reads the tarball's `share/tailworks/catalog.json`, posts it here,
         then uploads the tarball (`PUT /v1/releases/{version}/artifacts/{name}`). Audited
         `release_import`.
       x-tw-role: admin
@@ -4426,6 +4561,7 @@ components:
         | `tenant_forbidden` | 403 | a tenant admin's `github.com/rosskukulinski/tailworks/cap/tenant-admin` grants don't name the tenant with the action, or the route is admin-only (`snippet` given) |
         | `cap_missing` | 403 | an approval the caller's `github.com/rosskukulinski/tailworks/cap/approve` grants do not cover (`snippet` given) |
         | `forbidden` | 403 | role ok, but outside the caller's records / namespaces |
+        | `experimental_flag` | 403 | the bundle's `compatibility_flags` list flags workerd marks experimental (`unsafe_module`, `rtti_api`, `precise_timers`, …) and no host allows them (`tw-hostd -allow-experimental-flags`); the deploy and its dry run |
         | `host_not_registered` | 403 | `tag:tw-host` node that never did `PUT /v1/hosts/{id}`, or a `PUT` for a host ID the admin never created |
         | `host_identity_mismatch` | 403 | host ID bound to another node; `registrationSecret` missing or wrong; `auditPubKey` differs from the pinned one |
         | `delegation_invalid` | 403 | child tag not owned by the parent's, parent unknown (404) or dead (410) |
@@ -4438,6 +4574,7 @@ components:
         | `unknown_secret` | 404 | the workload has no secret of that name |
         | `unknown_store` | 404 | the workload has no store of that kind and name |
         | `unknown_queue` | 404 | the tenant has no queue of that name |
+        | `service_not_found` | 404 | a workload's service binding is not declared, or its target workload was never deployed in the tenant |
         | `exists` | 409 | create of an existing ID |
         | `lease_lost` | 409 | epoch/holder fence failed |
         | `lease_held` | 409 | another host holds the lease |
@@ -4448,7 +4585,7 @@ components:
         | `queue_limit` | 400 | a send exceeds a message, batch, delay or queue size limit |
         | `store_unavailable` | 503 | the store is unreachable, restarting or contended (a row-lock or idle-transaction timeout); retry after `Retry-After` |
         | `tier_unavailable` | 409 | the chosen host (`--host`, or the workload's current host) does not offer the deployment's tier, or `containers` (for the image's `arch`) when the bundle declares containers |
-        | `replica_conflict` | 409 | a deploy names a replica (`<workload>--r<n>`) instead of its workload, or a replica name is taken by a separate workload |
+        | `replica_conflict` | 409 | a deploy names a replica (`<workload>--r<n>`) instead of its workload, a replica name is taken by a separate workload, or a workload that is not a replica is given a name of that shape (n ≥ 2), which belongs to replicas |
         | `preview_conflict` | 409 | a preview's name (`<workload>--preview-<alias>`) is taken by a workload that is not a preview of this one |
         | `preview_failed` | 409 | promote of a preview its host reported `failed` |
         | `preview_unsupported` | 400 | `preview` for a bundle with queue bindings (queues are tenant-wide), or of a workload that is itself a preview or replica |
@@ -4460,7 +4597,7 @@ components:
         | `public_name_in_use` | 409 | release of a public name the workload still serves: its latest deployment declares public routes, or its public node is live |
         | `move_unconfirmed` | 409 | `replace` would move a stateful workload off its live host, leaving its DO storage behind; confirm with `forceTakeover` |
         | `lease_changed` | 409 | the workload's lease changed while `replace` was moving it (a concurrent deploy); retry |
-        | `takeover_unconfirmed` | 409 | the workload has Durable Objects and its host stopped heartbeating but is still registered: it may still be serving them. `tw host rm <host> --drain`, or redeploy with `--force-takeover` |
+        | `takeover_unconfirmed` | 409 | the workload has Durable Objects and its host stopped heartbeating but is still registered: it may still be serving them. `tw host rm <host> --force`, or redeploy with `--force-takeover` |
         | `already_joined` | 409 | credential for an object that has a node |
         | `identity_conflict` | 409 | object ID collision across identities |
         | `namespace_ambiguous` | 409 | class declared by several workloads, `workload` missing |
@@ -4514,6 +4651,7 @@ components:
         - name_prefix_required
         - cap_missing
         - forbidden
+        - experimental_flag
         - host_not_registered
         - host_identity_mismatch
         - delegation_invalid
@@ -4526,6 +4664,7 @@ components:
         - unknown_secret
         - unknown_store
         - unknown_queue
+        - service_not_found
         - exists
         - lease_lost
         - lease_held
@@ -5160,6 +5299,16 @@ components:
         nodeID: { type: string, description: "Stable node ID of the host's `tag:tw-host` tsnet node (bound at registration)." }
         dnsName: { type: string, description: "`tw-host-<hostID>.<tailnet>`." }
         auditPubKey: { type: string, description: base64 ed25519; verifies `hostSig`. }
+        auditHead:
+          type: string
+          description: |
+            Only in the answer to `PUT /v1/hosts/{id}`: the hash of the last
+            record mgmt stores on the host's audit chain (`host:<hostID>`);
+            absent when the chain is empty. A restarted host continues its
+            chain from this head only when it matches the last record the
+            host itself chained and flushed before a clean shutdown;
+            otherwise it starts a new segment (`prevHash: ""`), which
+            verification reports as a break.
         push: { $ref: "#/components/schemas/HostPush" }
         liveNodes: { type: integer }
         leases: { type: array, items: { $ref: "#/components/schemas/Lease" }, description: Namespace leases the host currently holds. }
@@ -5199,6 +5348,13 @@ components:
         tags: { type: array, items: { type: string } }
         hostname: { type: string, description: "`tw-host-<hostID>`" }
         controlURL: { type: string, format: uri }
+        keyTagsOnly:
+          type: boolean
+          description: The host's node must advertise no tags; its join key carries `tag:tw-host` (Headscale, ADR-015). `tw-hostd -tsnet-key-tags-only`.
+        mgmtURL:
+          type: string
+          format: uri
+          description: "Where the host reaches mgmt over the tailnet (`tw-hostd -mgmt`): `http://tw-mgmt.<tailnet>`. Absent when mgmt doesn't know its own node name (local-dev)."
         tailnet: { type: string }
       x-tw-secret: true
     HostRegistration:
@@ -5524,7 +5680,6 @@ components:
       properties:
         class: { type: string }
         tags: { type: array, items: { type: string } }
-        agent: { type: boolean }
         ttl: { type: string, description: "`10m`-style duration or seconds." }
         service:
           type: string
@@ -5774,6 +5929,7 @@ components:
         src: { type: string }
         dst: { type: string }
         snippet: { type: string, description: The grant to add (HuJSON). }
+        ip: { type: string, description: "The grant's port (`tcp:5432`)." }
     PreflightResult:
       type: object
       required: [ok, missing, missingTagOwners]
@@ -5801,6 +5957,19 @@ components:
           type: array
           items: { type: string }
           description: For a tenant with its own `ownerTag`, the tags its owner tag doesn't own, or that another tenant's owner tag on the tailnet owns. Makes `ok` false.
+        undefinedConnects:
+          type: array
+          items: { type: string }
+          description: >-
+            `tailnet.connects` tags in `tag:tw*` (another tailworks app's, not deployed yet) that have no `tagOwners`
+            entry; the control plane rejects a grant to them. `tagOwnersSnippet` defines them too, so
+            `tw policy --apply` writes them with the grants. Never set for a tenant with its own `ownerTag`. Makes `ok` false.
+        snippet:
+          $ref: "#/components/schemas/PolicySnippet"
+          description: >-
+            Everything above that is missing, as one typed policy snippet: the string fields (`tagOwnersSnippet`,
+            `nodeAttrsSnippet`, `serviceSnippet`, each `missing[].snippet`) are renderings of its parts. Absent when
+            nothing is missing. Never holds the caller grant (`PolicyApply.callerGrant`).
         accessWarnings:
           type: array
           items: { type: string }
@@ -5808,6 +5977,25 @@ components:
             Grants to `tag:tw-mgmt` that don't do what they look like: values on `github.com/rosskukulinski/tailworks/cap/admin` (they don't narrow it),
             invalid `github.com/rosskukulinski/tailworks/cap/tenant-admin` values or unknown tenant IDs in them, and, on a tailnet with several tenants,
             `github.com/rosskukulinski/tailworks/cap/mcp` or `github.com/rosskukulinski/tailworks/cap/approve` grants (they apply to every tenant). Never make `ok` false.
+    PolicySnippet:
+      type: object
+      description: Additions to a tailnet policy, in the policy file's own shape.
+      properties:
+        tagOwners:
+          type: object
+          additionalProperties: { type: array, items: { type: string } }
+        grants:
+          type: array
+          items: { type: object, additionalProperties: true }
+        nodeAttrs:
+          type: array
+          items: { type: object, additionalProperties: true }
+        autoApprovers:
+          type: object
+          properties:
+            services:
+              type: object
+              additionalProperties: { type: array, items: { type: string } }
     PolicyApplyCreate:
       type: object
       required: [bundle]
@@ -5833,6 +6021,12 @@ components:
           type: array
           items: { type: string }
           description: What the bundle still needs that tailworks doesn't write; add it in the admin console.
+        callerGrant:
+          type: string
+          description: The grant in `added` that lets every user of the tailnet call the app (`autogroup:member` to the workload's own tags, `tcp:80`), as JSON. Absent when `added` has none.
+        canWrite:
+          type: boolean
+          description: With `dryRun`, when `added` is not empty — the control plane accepted the policy with `added` merged in, so the write would go through (Tailscale refuses a client without Policy File write). `tw deploy` on a terminal offers to write the lines only when it is true. Absent otherwise.
         oldETag: { type: string, description: The policy's ETag before the write. }
         newETag: { type: string, description: Its ETag after. }
         preflight: { $ref: "#/components/schemas/PreflightResult" }
@@ -6335,6 +6529,18 @@ components:
           type: object
           additionalProperties: { type: string, format: password }
         signals: { type: array, items: { $ref: "#/components/schemas/TelemetrySignal" } }
+    ServiceBindingTarget:
+      type: object
+      description: Where a service binding's calls go (ADR-053).
+      required: [binding, service, objectID, hostname, magicDNS, status]
+      properties:
+        binding: { type: string }
+        service: { type: string, description: The target workload. }
+        entrypoint: { type: string, description: The named export the binding calls; absent for the default export. }
+        objectID: { type: string, description: The target's entry node object. }
+        hostname: { type: string }
+        magicDNS: { type: string, description: The entry node's MagicDNS name (no trailing dot). }
+        status: { $ref: "#/components/schemas/ObjectStatus" }
     TelemetryGrant:
       type: object
       description: A fenced release of the tenant's OTLP export config. Never logged.
@@ -6550,6 +6756,24 @@ components:
         expirationTtl: { type: integer, format: int64, description: "Seconds from now (at least 60). Wins over `expiration`." }
         metadata: { description: "Any JSON, at most 1024 bytes serialized." }
       additionalProperties: false
+
+    R2Object:
+      type: object
+      description: One live object of an R2 bucket, as its index describes it.
+      required: [key, version, size, etag, uploaded]
+      properties:
+        key: { type: string }
+        version: { type: string, description: "The object's version (R2's `R2Object.version`): new on every put." }
+        size: { type: integer, format: int64, description: Bytes. }
+        etag: { type: string }
+        uploaded: { type: integer, format: int64, description: Upload time (unix ms). }
+        contentType: { type: string, description: "The object's `httpMetadata.contentType`, if set." }
+    R2ObjectPage:
+      allOf:
+        - $ref: "#/components/schemas/Page"
+        - type: object
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/R2Object" } }
 
     D1Query:
       type: object
@@ -6836,6 +7060,12 @@ components:
         from: { type: string }
         to: { type: string }
         arch: { type: string, description: '"" = every arch.' }
+        source:
+          type: string
+          description: >-
+            A digest-pinned external image (`ghcr.io/…:<tag>@sha256:…`) that fills `to` when it is not in
+            tailworks' registry yet: mgmt copies it into `public/` at deploy (unless `-no-mirror`), and
+            `tw deploy` builds from it. Absent: `to` must be pushed (`tw image push`).
     ImageAliasList:
       type: object
       required: [items]

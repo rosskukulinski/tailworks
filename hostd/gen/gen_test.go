@@ -115,6 +115,10 @@ func fmtAny(v any) string {
 
 func (f *fakeHost) egressObj() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodConnect {
+			f.connect(w, r, true) // connect_test.go
+			return
+		}
 		cls, name, ok := gen.VerifyEgress(f.key, r.Header, r.Method, r.RequestURI, time.Now())
 		if !ok {
 			w.Header().Set("tw-error", "unknown_object")
@@ -131,6 +135,10 @@ func (f *fakeHost) egressObj() http.Handler {
 
 func (f *fakeHost) egressWL() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodConnect {
+			f.connect(w, r, false) // connect_test.go
+			return
+		}
 		if egressRedirect(w, r) { // egress_sink_test.go
 			return
 		}
@@ -195,7 +203,7 @@ func startFilesOpts(t *testing.T, files map[string][]byte, mod func(*gen.Options
 	f.serve(t, res.Sockets.EgressObj, f.egressObj())
 	f.serve(t, res.Sockets.EgressWL, f.egressWL())
 	logf, _ := os.Create(filepath.Join(dir, "workerd.log"))
-	cmd := exec.Command(wdBin, "serve", res.Config, "--experimental")
+	cmd := exec.Command(wdBin, append([]string{"serve", res.Config, "--experimental"}, pythonArgs(t, app)...)...) // python_test.go
 	cmd.Stdout, cmd.Stderr = logf, logf
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -213,14 +221,21 @@ func startFilesOpts(t *testing.T, files map[string][]byte, mod func(*gen.Options
 	}}}
 	in := &inst{t: t, hc: hc, cmd: cmd, f: f}
 	in.cfg, in.log = res.Config, filepath.Join(dir, "workerd.log")
-	deadline := time.Now().Add(20 * time.Second)
+	// A Python Worker loads Pyodide before workerd listens: seconds on an
+	// idle machine, past 20 s on a loaded CI runner (#428).
+	wait := 20 * time.Second
+	if app.Python {
+		wait = 90 * time.Second
+	}
+	t0 := time.Now()
 	for {
 		code, _, _ := in.get("/", map[string]any{"kind": "admin", "op": "health"})
 		if code == 200 {
+			t.Logf("workerd up in %v", time.Since(t0).Round(time.Millisecond))
 			break
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("workerd did not come up")
+		if time.Since(t0) > wait {
+			t.Fatalf("workerd did not come up within %v", wait)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -302,6 +317,11 @@ func TestGeneratedWrapperProbe(t *testing.T) {
 		if code != 200 || r["as"] != "workload" || r["url"] != "http://echo/x" {
 			t.Fatalf("%d %v", code, r)
 		}
+		// #347: the Worker can't hand hostd a service binding's wire header.
+		code, _, r = in.get("/egress?wire=1&url=http://echo/x", wl)
+		if h, _ := r["headers"].(map[string]any); code != 200 || r["as"] != "workload" || h == nil || h["Tailworks-Binding"] != nil {
+			t.Fatalf("a tenant-set Tailworks-Binding reached hostd's workload egress: %d %v", code, r)
+		}
 	})
 	t.Run("ObjectRoute", func(t *testing.T) {
 		code, _, r := in.get("/", obj("Probe", "a"))
@@ -332,7 +352,7 @@ func TestGeneratedWrapperProbe(t *testing.T) {
 			t.Fatalf("%d %v", code, r)
 		}
 		h := r["headers"].(map[string]any)
-		if h["X-Tw-Object"] != nil || h["Proxy-Authorization"] != nil || h["X-Tw-Cf"] != nil {
+		if h["X-Tw-Object"] != nil || h["Proxy-Authorization"] != nil || h["X-Tw-Cf"] != nil || h["Tailworks-Binding"] != nil {
 			t.Fatalf("forged headers reached hostd: %v", h)
 		}
 	})

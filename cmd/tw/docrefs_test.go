@@ -26,15 +26,6 @@ var docRefGlobs = []string{
 	"docs/design/adr/[0-9][0-9][0-9]-*.md",
 }
 
-// docRefAliases are spellings the commands accept but their usage lines
-// don't show (kv.go: ls → list, rm → delete).
-var docRefAliases = map[string]string{
-	"kv key ls":       "kv key list",
-	"kv key rm":       "kv key delete",
-	"kv namespace ls": "kv namespace list",
-	"kv namespace rm": "kv namespace delete",
-}
-
 // docRefAllowed are commands the docs name on purpose although the CLI
 // doesn't offer them: ones that answer not_supported, and ones that were
 // removed (named so an upgrader recognises them).
@@ -172,7 +163,9 @@ func checkDocRef(tree *compTree, hidden map[string]bool, ref docRef) []string {
 			continue
 		}
 		next := joinPath(path, w)
-		if alias, ok := docRefAliases[next]; ok {
+		// Spellings the commands accept but their usage lines don't show
+		// (wrangler's list and delete for ls and rm: normalizeVerb).
+		if alias := joinPath(path, normalizeVerb(w)); tree.nodes[next] == nil && tree.nodes[alias] != nil {
 			next = alias
 		}
 		if !positional && tree.nodes[next] != nil {

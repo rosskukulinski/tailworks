@@ -61,7 +61,7 @@ say "4. tw doctor"
 
 say "5. every template under tw dev --once"
 export PATH=$PREFIX/bin:$PATH
-for t in hello agent mcp ai-agent chat-agent pi-agent lock refund-approval node-workflow; do
+for t in hello agent mcp ai-agent chat-agent pi-agent lock static-site refund-approval node-workflow; do
 	echo "-- $t"
 	app=$WORK/apps/$t
 	"$TW" init "$app" --template "$t" >/dev/null

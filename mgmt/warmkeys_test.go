@@ -16,6 +16,7 @@ import (
 // once, only to the right (tenant, pool), never an expired one. SQLite and
 // (TW_TEST_POSTGRES_DSN) Postgres.
 func TestStoreWarmKeyTakeOnce(t *testing.T) {
+	t.Parallel()
 	forEachStore(t, func(t *testing.T, s *SQLStore) {
 		ctx := context.Background()
 		pa := PoolName([]string{"tag:b", "tag:a"}, false)
@@ -171,6 +172,7 @@ func (f *fakeTS) wasDeleted(id string) bool {
 // credential is released through the normal fenced path; mint and release
 // are audited; the pool refills; a kill revokes the adopted key.
 func TestWarmKeyPool(t *testing.T) {
+	t.Parallel()
 	e := newPoolEnv(t, 0, nil)
 	support := PoolName([]string{"tag:tw-agent-support"}, false)
 	rogue := PoolName([]string{"tag:crm"}, false)
@@ -262,6 +264,7 @@ func TestWarmKeyPool(t *testing.T) {
 // TestWarmKeyExpiry: unused pooled keys are revoked before their API expiry
 // (decided on the store clock) and replaced; their custody copies go too.
 func TestWarmKeyExpiry(t *testing.T) {
+	t.Parallel()
 	clk := &offsetClock{}
 	e := newPoolEnv(t, 0, func(c *Config) {
 		c.WarmKeyTTL = 3 * time.Minute
@@ -385,6 +388,7 @@ func TestWarmKeyExpiry(t *testing.T) {
 // (burst 1), the deploy's seed refill takes the one token; after a take,
 // the next refill waits for a token (~6 s), not a moment less.
 func TestWarmKeyRefillRespectsThrottle(t *testing.T) {
+	t.Parallel()
 	e := newPoolEnv(t, 10, nil)
 	classOf := map[string]string{
 		PoolName([]string{"tag:tw-agent-support"}, false):     "SupportAgent",

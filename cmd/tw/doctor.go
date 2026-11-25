@@ -104,19 +104,9 @@ func cmdDoctor(args []string) error {
 		if err != nil {
 			return "fail", "workerd not found", "reinstall tw, or set $TW_WORKERD"
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		out, err := exec.CommandContext(ctx, wd, "--version").CombinedOutput()
-		v := strings.TrimSpace(string(out))
+		v, fix, err := workerdRuns(wd, "see the glibc check above") // up_preflight.go
 		if err != nil {
-			fix := "check the binary runs: " + wd + " --version"
-			if runtime.GOOS == "linux" {
-				fix += " (see the glibc check above)"
-			}
-			if runtime.GOOS == "darwin" {
-				fix += " (unsigned? `codesign -f -s - " + wd + "`; quarantined? `xattr -d com.apple.quarantine " + wd + "`)"
-			}
-			return "fail", wd + " does not run: " + err.Error() + " " + v, fix
+			return "fail", err.Error(), fix
 		}
 		if runtime.GOOS == "darwin" {
 			if q, _ := exec.Command("xattr", "-p", "com.apple.quarantine", wd).Output(); len(bytes.TrimSpace(q)) > 0 {
@@ -128,6 +118,8 @@ func cmdDoctor(args []string) error {
 		}
 		return "ok", wd + ": " + v + " (pinned " + workerdPin + ")", ""
 	})
+
+	run("workerd_age", func() (string, string, string) { return workerdAgeCheck(workerdPin, time.Now()) }) // doctor_workerdage.go
 
 	run("bundler", func() (string, string, string) {
 		ct, err := createTailworksDir()
@@ -151,7 +143,7 @@ func cmdDoctor(args []string) error {
 		if len(tms) == 0 {
 			return "fail", "no templates in " + ct, reinstallFix("reinstall tw")
 		}
-		var nodeTms []string
+		var nodeTms, pyTms []string
 		for _, tm := range tms {
 			dir := filepath.Join(ct, "templates", tm)
 			if isNodeRuntimeDir(dir) {
@@ -168,6 +160,10 @@ func cmdDoctor(args []string) error {
 				Main string `json:"main"`
 			}
 			bundle.UnmarshalJSONC(wb, &w)
+			if bundle.IsPythonMain(w.Main) {
+				pyTms = append(pyTms, tm) // python.go: packed as it is, no bundler
+				continue
+			}
 			n, err := esbundle.Build(esbundle.Options{Dir: dir, Main: w.Main, Outfile: filepath.Join(tmp, tm+".js"), NodePaths: np})
 			if err != nil {
 				return "fail", "bundling template " + tm + " failed: " + firstLine(err.Error()) + noNodeModules(np, ct), reinstallFix("reinstall tailworks (the vendored node_modules may be incomplete)")
@@ -178,8 +174,13 @@ func cmdDoctor(args []string) error {
 		if len(nodeTms) > 0 {
 			detail += "; Node-tier templates (need Node.js to deploy): " + strings.Join(nodeTms, ", ")
 		}
+		if len(pyTms) > 0 {
+			detail += "; Python templates (no bundling): " + strings.Join(pyTms, ", ")
+		}
 		return "ok", detail, ""
 	})
+
+	run("install", doctorInstall) // npm_install.go: tarball, npm or npx
 
 	run("tw_home_writable", func() (string, string, string) {
 		home, err := os.UserHomeDir()
@@ -253,9 +254,14 @@ func cmdDoctor(args []string) error {
 
 	doctorPublic(run, s)
 	doctorStorage(run, s) // doctor_storage.go: data_disk, store_sizes
+	// nodebudget.go: each tenant's live tailnet nodes.
+	run("node_budget", func() (string, string, string) { return doctorNodeBudget(s) })
 
 	run("sandbox", func() (string, string, string) { return doctorSandbox(s) })
 	run("host_sockets", func() (string, string, string) { return doctorHostSockets(s) })
+	run("side_channels", func() (string, string, string) { return doctorSideChannels(s) })
+	run("worker_internet", func() (string, string, string) { return doctorWorkerInternet(s) }) // up_workerinternet.go
+	run("containers", func() (string, string, string) { return doctorContainers(s) })
 
 	doctorLinuxHost(run, s) // Linux: kernel, Landlock, user namespaces, KVM, firecracker, cgroups v2, systemd, microvm_tier
 
@@ -280,7 +286,7 @@ func cmdDoctor(args []string) error {
 			}
 		}
 		if len(unenforced) == 0 {
-			return "ok", "no Node-tier workload with unenforced egress (" + runtime.GOOS + ": workerd apps egress only via netd)", ""
+			return "ok", "no Node-runtime workload with unenforced egress (" + runtime.GOOS + ": workerd apps egress only via netd)", ""
 		}
 		d := fmt.Sprintf("Node-tier egress is UNENFORCED for %s: the HTTP(S) proxy is cooperative; a hostile app can open raw sockets to loopback, LAN, metadata and the internet (RT-08, docs/node-tier.md)", strings.Join(unenforced, ", "))
 		if len(tenants) > 1 {

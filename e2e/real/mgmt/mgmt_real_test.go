@@ -233,7 +233,7 @@ func TestMgmtRealMintJoinKill(t *testing.T) {
 	call("PUT", "/v1/hosts/"+hostID, map[string]any{"capacityNodes": 4, "tiers": []string{"process"}}, nil)
 	var dep mgmt.DeployResponse
 	if call("POST", "/v1/deployments", map[string]any{"tenantID": tn.TenantID, "workload": prefix,
-		"namespaces": []mgmt.ClassConfig{{Class: prefix, Tags: []string{"tag:ttest"}, Agent: true}}}, &dep) != 200 {
+		"namespaces": []mgmt.ClassConfig{{Class: prefix, Tags: []string{"tag:ttest"}}}}, &dep) != 200 {
 		t.Fatal("deploy")
 	}
 

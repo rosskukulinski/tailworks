@@ -25,6 +25,7 @@ func mkPrefix(t *testing.T, dir, ver string) string {
 }
 
 func TestServiceBinary(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, def, want string }{
 		{"plist", plistFor(&state{Dir: "/Users/u/.tailworks"}, "/Users/u/.tailworks/bin/tw"), "/Users/u/.tailworks/bin/tw"},
 		{"plist escaped", plistFor(&state{Dir: "/Users/u/.tailworks"}, "/opt/a & b/bin/tw"), "/opt/a & b/bin/tw"},
@@ -41,6 +42,7 @@ func TestServiceBinary(t *testing.T) {
 // The issue #63 case: the new CLI runs from the extracted release (which
 // looks like a prefix) while ~/.tailworks is the real install.
 func TestResolvePrefixExtractedRelease(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	home := mkPrefix(t, filepath.Join(root, "home", ".tailworks"), "0.1.0")
 	extracted := mkPrefix(t, filepath.Join(root, "tmp", "tailworks-0.2.0-darwin-arm64"), "0.2.0")
@@ -81,6 +83,7 @@ func TestResolvePrefixExtractedRelease(t *testing.T) {
 }
 
 func TestResolvePrefixSame(t *testing.T) {
+	t.Parallel()
 	home := mkPrefix(t, filepath.Join(t.TempDir(), ".tailworks"), "0.2.0")
 	pc, err := resolvePrefix("", home, []prefixCandidate{{}, {Prefix: home, From: "the state dir is the install prefix"}})
 	if err != nil || pc.Mismatch != "" || pc.Prefix != home {
@@ -104,6 +107,7 @@ func TestResolvePrefixSame(t *testing.T) {
 }
 
 func TestPrefixOfBinary(t *testing.T) {
+	t.Parallel()
 	home := mkPrefix(t, filepath.Join(t.TempDir(), ".tailworks"), "0.2.0")
 	if got := prefixOfBinary(filepath.Join(home, "bin", "tw")); !samePath(got, home) {
 		t.Fatalf("prefixOfBinary = %q, want %q", got, home)

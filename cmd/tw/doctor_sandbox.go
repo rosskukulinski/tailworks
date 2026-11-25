@@ -30,9 +30,8 @@ func doctorSandbox(s *state) (string, string, string) {
 	case sb == hostd.SandboxLandlock:
 		return doctorLandlock(s)
 	case runtime.GOOS == "linux":
-		_, err := procsb.ABI()
-		return "warn", fmt.Sprintf("NO PROCESS SANDBOX: Landlock is unavailable on this kernel (%v). Process-tier workerd and Node apps of all tenants share one uid and are kept apart by 0700 dirs only, so tw-hostd refuses a second tenant's process-tier deployments (unless started with -insecure-shared-host)", err),
-			"use a kernel with Landlock (5.13+, CONFIG_SECURITY_LANDLOCK=y, \"landlock\" in the lsm= boot parameter; Ubuntu 22.04+, Debian 12+, Fedora have it), or deploy with tier \"microvm\""
+		detail, fix := noLandlock() // up_preflight.go
+		return "warn", detail, fix
 	case sb != hostd.SandboxSeatbelt:
 		return "skip", "no process sandbox on " + runtime.GOOS + ": process-tier workerd and Node apps of all tenants share one uid and are kept apart by 0700 dirs only",
 			"for isolation between tenants, deploy with tier \"microvm\" on Linux"
@@ -70,7 +69,9 @@ func doctorSandbox(s *state) (string, string, string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	if out, err := exec.CommandContext(ctx, "/usr/bin/sandbox-exec", "-f", prof, wd, "--version").CombinedOutput(); err != nil {
+	start := exec.CommandContext(ctx, "/usr/bin/sandbox-exec", "-f", prof, wd, "--version")
+	start.Env = hostd.WorkerdEnv() // what hostd gives a workerd, not tw's environment (#336)
+	if out, err := start.CombinedOutput(); err != nil {
 		return "fail", "workerd (" + wd + ") does not start under a tailworks Seatbelt profile on " + osv + ": " + err.Error() + " " + firstLine(string(out)),
 			"report this; meanwhile tw-hostd -sandbox none runs tenants unconfined"
 	}
@@ -174,7 +175,9 @@ func doctorLandlock(s *state) (string, string, string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	cmd := procsb.Command(self, prof, wd, "--version")
-	if out, err := exec.CommandContext(ctx, cmd.Path, cmd.Args[1:]...).CombinedOutput(); err != nil {
+	start := exec.CommandContext(ctx, cmd.Path, cmd.Args[1:]...)
+	start.Env = hostd.WorkerdEnv() // what hostd gives a workerd, not tw's environment (#336)
+	if out, err := start.CombinedOutput(); err != nil {
 		return "fail", fmt.Sprintf("workerd (%s) does not start under a tailworks Landlock profile on %s (ABI %d): %v %s", wd, osv, abi, err, firstLine(string(out))),
 			"report this; meanwhile tw-hostd -sandbox none runs tenants unconfined"
 	}
@@ -189,12 +192,13 @@ func doctorLandlock(s *state) (string, string, string) {
 	if r := probe(procsb.ProbeRead, canary); r == "ok" {
 		return "fail", "Landlock did not enforce on " + osv + " (a file outside the profile was readable)", "report this; tenants are not confined on this machine"
 	}
-	if home, err := os.UserHomeDir(); err == nil && home != "" && home != "/" {
-		if r := probe(procsb.ProbeList, home); r == "ok" {
-			return "fail", "Landlock did not enforce on " + osv + " (the home dir was listable)", "report this; tenants are not confined on this machine"
-		}
+	// The real deny list (#342): every path hostd would deny for this state
+	// dir, probed under the profile. Landlock has no deny rules, so one
+	// under an allowed tree (/opt, /etc, …) is readable whatever hostd says.
+	if st, det, fix := doctorLandlockLayout(s, probe, osv); st != "" { // sandbox_layout.go
+		return st, det, fix
 	}
-	detail := fmt.Sprintf("Landlock ABI %d + seccomp work on %s: workerd starts under a tailworks profile, files outside it and the home dir are unreadable", abi, osv)
+	detail := fmt.Sprintf("Landlock ABI %d + seccomp work on %s: workerd starts under a tailworks profile; files outside it, tailworks' state and run dirs, credential files and the home dir are unreadable", abi, osv)
 	warn := ""
 	if abi >= 4 {
 		if r := probe(procsb.ProbeConnectTCP, "1.1.1.1:443"); r == "ok" {

@@ -42,6 +42,7 @@ func TestCLITenantQuotas(t *testing.T) {
 }
 
 func TestParseByteSize(t *testing.T) {
+	t.Parallel()
 	for in, want := range map[string]int64{"0": 0, "1024": 1024, "1KiB": 1024, "2 MB": 2e6, "1.5GiB": 3 << 29, "20gb": 20e9, "1t": 1 << 40} {
 		if got, err := parseByteSize(in); err != nil || got != want {
 			t.Errorf("%q = %d, %v; want %d", in, got, err, want)

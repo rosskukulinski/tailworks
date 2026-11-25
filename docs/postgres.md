@@ -2,10 +2,11 @@
 
 `tw up` keeps mgmt's store in SQLite (`~/.tailworks/mgmt/mgmt.db`) and its
 secrets in file custody (`~/.tailworks/mgmt/custody`). This page covers
-three steps beyond that:
+four steps beyond that:
 
 - move a running install's store to Postgres,
 - back up and restore an install whose store is Postgres,
+- move file custody to setec,
 - run several mgmt replicas (HA).
 
 The store is the only authoritative copy of every tenant's KV, D1, R2
@@ -131,7 +132,63 @@ Hosts reach whichever replica is healthy:
 and the health gate are in [services.md](services.md#mgmt-replicas-svctw-mgmt).
 
 **Custody comes first.** Secrets and the keys that seal store data stay in
-the custody they were created in, and nothing moves file custody into
-setec yet. To run replicas later, start the install with setec custody:
-`tw up --custody setec --setec-url <url> …` on a new state dir. On an
-existing install, `tw up` refuses to change `--custody`.
+the custody they were created in. On an existing install, `tw up` refuses
+to change `--custody`. Move an install that started on file custody with
+`tw custody migrate` ([below](#move-file-custody-to-setec)), or start a new
+one with `tw up --custody setec --setec-url <url> …`.
+
+## Move file custody to setec
+
+File custody keeps one sealed file per secret, named by a hash of the
+secret's name, on one machine. Several mgmt replicas need setec instead.
+`tw custody migrate` moves a `tw up` install's custody there:
+
+```sh
+tw down
+tw custody migrate --setec-url https://secrets.<tailnet>.ts.net --dry-run
+tw custody migrate --setec-url https://secrets.<tailnet>.ts.net
+tw up
+```
+
+The machine must reach setec, and setec must grant this machine's node
+put, activate and get on the `tw/` names, as for `tw up --custody setec`.
+
+`tw custody migrate`:
+
+- **Needs tailworks stopped.** A secret written during the copy would land
+  in file custody only.
+- **Names every entry first.** File custody can't list its names, so the
+  command derives every name it could hold from mgmt's store: the
+  `custody_names` index, and the rows that imply a name (each workload's
+  secrets and volume key, each KV, D1, R2 and Queue data key, each object's
+  and warm pool's auth key, each tenant's notification and telemetry
+  settings and OBO root key, the shared ID secret). A never-deployed
+  workload's secrets are named by the audit records of their changes. A
+  name counts only when its file decrypts under it, which proves the
+  match.
+- **Backfills `custody_names`.** mgmt indexes each tenant name before it
+  writes it, but entries written before the index existed weren't. The
+  command indexes them, so the index covers every entry. The ID secret is
+  install-wide and stays out of it; its `secret_choice` row names it.
+- **Refuses an entry it can't name** (`custody_unmapped`) and copies
+  nothing. Nothing in tailworks reads such an entry, since no row names it:
+  it's left by an interrupted write, or by data deleted before the index
+  existed (for a never-deployed workload's secrets, also audit records
+  pruned by retention before then). The error lists the files. Move them
+  out of `~/.tailworks/mgmt/custody/secrets`, then run the command again.
+  Leftover `*.tmp` files are unfinished writes and are skipped.
+- **Refuses a setec that holds another value** under one of the names, and
+  copies nothing. An entry already there with the same value is kept, so
+  you can run the command again after an interruption.
+- **Verifies the copy.** It reads every entry back from setec and compares.
+- **Then switches `tw.json`** to `custody: setec` and the URL, after it
+  backs up the state to `~/.tailworks/backups/<time>-before-custody-migrate`.
+
+File custody is left as it was. Remove `~/.tailworks/mgmt/custody` once
+tailworks has served from setec for a while.
+
+**Going back.** `tw down`, `tw restore <the before-custody-migrate backup>
+--yes`, then `tw up`. As with any restore, every change made since the
+backup is lost. With a Postgres store, `tw restore` leaves the database as
+it is, but secrets and store keys created on setec aren't in file custody:
+go back before you create any.

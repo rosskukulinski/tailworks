@@ -28,6 +28,7 @@ func writeTestOAuthFile(t *testing.T, path string) string {
 // older tailworks stored in one fails to mint with the same code, stays
 // patchable, and mints again once switched to oauth.
 func TestRemovedMintModes(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	c := e.c
 	for _, body := range []map[string]any{

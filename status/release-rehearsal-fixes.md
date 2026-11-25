@@ -102,3 +102,25 @@ wanted ≥12 public_request records and saw 8. Stale test: since H03 (#68,
 checks as records (12 − 4 = 8). The check now wants ≥8 public_request
 records and a public_rejected summary with notPublic ≥2 and badRequest ≥1,
 waiting up to 90 s for the window.
+
+## Rehearsal 6 (run 45307109374) and the faster layout
+
+27 of 28 jobs passed, including, for the first time, both real-tailnet
+jobs: every distro row from the tarballs, the microVM tier from the arm64
+tarball with host reboots, e2e-mac, e2e-multi, and all hosted suites.
+
+- microvm-amd64 TestPoolNoCarryOver: the pooled VM exited during its
+  memory dump ("helper connection closed"), so the RAM scan never ran (not
+  a leak). Not reproduced: 20/20 on Firecracker in the runner machine's
+  Lima VM. Ruled out: the jail's memory.max (with hugepages it is only the
+  256 MiB overhead, and the dump's 512 MiB page cache is charged to it), as
+  5/5 still pass at 32 MiB. The test now reports the VM's exit reason and
+  console tail. The same dump backs `tw host vmcheck --keyscan`.
+
+Faster release.yml (the user's ask): tailnet no longer waits for gates
+(#276); `only=` reruns selected jobs (#276); gates is a 5-way matrix;
+mac-tailnet split into mac-linux (arm64 rows, 3 at a time), mac-linuxvm,
+mac-cli (still after tailnet: writes policy); the ubuntu24-amd64 row runs
+natively on a hosted runner (linux-amd64: Lima + qemu on KVM); the Linux
+jobs run alongside tailnet on tailnet 1 (the harness was built for parallel
+rows; they only read policy). Two more runner instances on the Mac (3).

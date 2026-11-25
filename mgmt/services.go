@@ -153,7 +153,7 @@ func (m *Mgmt) ensureService(ctx context.Context, t Tenant, workload, name strin
 func serviceAPIError(name, op string, err error) error {
 	if tsapi.IsForbidden(err) || tsapi.IsUnauthorized(err) {
 		return errf(502, "service_api_failed",
-			"the Tailscale API refused to %s Service %s (%v): an OAuth client needs the Services write scope (Settings › OAuth clients › Services › Write), or create the Service in the admin console",
+			"the Tailscale API refused to %s Service %s (%v): an OAuth client needs the Services write scope (Settings › Trust credentials › Credential › OAuth › Services › Write), or create the Service in the admin console",
 			op, name, err)
 	}
 	return errf(502, "service_api_failed", "can't %s Service %s: %v", op, name, err)
@@ -187,13 +187,9 @@ func (p *Policy) HasServiceGrant(src, name string) bool {
 // workload tags must be auto-approved to host it.
 func servicePreflight(pol *Policy, res *PreflightResult, name string, wlTags []string) {
 	res.Service = name
+	res.workloadTags = slices.Clone(wlTags)
 	if pol.serviceAutoApproved(name, wlTags) {
 		return
 	}
-	res.ServiceUnapproved = true
-	tag := "tag:tw"
-	if len(wlTags) > 0 {
-		tag = wlTags[0]
-	}
-	res.ServiceSnippet = fmt.Sprintf(`"autoApprovers": { "services": { %q: [%q] } }`, name, tag)
+	res.ServiceUnapproved = true // ServiceSnippet: preflightsnippet.go
 }

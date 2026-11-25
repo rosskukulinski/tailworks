@@ -105,9 +105,12 @@ Builds on [ADR-044](044-platform-stores.md).
      from two replicas are ordered by mgmt. On Cloudflare the last write
      wins by timestamp.
    - If mgmt is unreachable, writes fail (`503`, `KV PUT failed: 503 …`).
-     Reads keep answering from the local copy if this object has synced on
-     this host before (fail static, ADR-028), and fail on a host that never
-     has. A write costs one round trip to mgmt; reads are local SQLite.
+     Reads answer from the local copy if this object has synced on this
+     host before, after waiting at most 2 s for mgmt (then without
+     waiting until it answers again), and fail on a host that never has
+     (ADR-044 §8). A workload with a fenceable Durable Object class stops
+     altogether after 30 s without mgmt (ADR-028 §3). A write costs one
+     round trip to mgmt; reads are local SQLite.
 
 4. **Limits.** Cloudflare's published limits, except value size:
    - keys are 1 to 512 bytes of UTF-8, not `.` or `..`;
@@ -130,7 +133,10 @@ Builds on [ADR-044](044-platform-stores.md).
    - **CLI:** `tw kv namespace create|list|delete` and
      `tw kv key put|get|delete|list`, like `wrangler kv`. Key commands
      name the namespace with `--binding` (looked up in the app's
-     `wrangler.jsonc`) or `--namespace`. A value comes from an argument,
+     `wrangler.jsonc`) or `--namespace`. (Since #458: `--namespace` takes
+     the name or the binding, `--binding` is the same flag, and the app's
+     only `kv_namespaces` entry is the default; the verbs are spelled
+     `ls` and `rm`, with `list` and `delete` kept.) A value comes from an argument,
      `--path` or stdin, with `--ttl`, `--expiration` and `--metadata`.
    - **REST** (admin only; `api/openapi.yaml`):
      `GET …/stores/kv/{name}/keys` (prefix, cursor, limit) and

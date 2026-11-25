@@ -77,7 +77,7 @@ results in `status/observability-logs-metrics-traces-20.md`). Phases 2 and 3
      ingress span (another tailworks object, or any OTel-instrumented server)
      joins the same trace: caller → workload → DO → egress → next object.
    - RPC calls to a DO stub (`stub.method()`) carry no headers and are not
-     traced in phase 1.
+     traced in phase 1 (phase 2 below).
 3. **Logs: one structured record per invocation, from two halves.**
    - hostd's ingress produces the authoritative half: time, tenant,
      workload, deployment, object, class/name, **verified caller** (node,
@@ -173,8 +173,14 @@ results in `status/observability-logs-metrics-traces-20.md`). Phases 2 and 3
 - **Phase 1 (this branch):** everything above.
 - **Phase 2:**
   - trace context over DO RPC (`stub.method()`), alarms and cron runs (a
-    span per run, hostd-started);
-  - `ctx.tailnet.fetch` spans in the runtime (not only hostd's);
+    span per run, hostd-started). Done (#295): the runtime passes RPC
+    context as a trailing marker argument that the callee's wrapper
+    strips, opens a root span per alarm, and hostd opens one per cron
+    run; RPC and alarm records are matched to their spans by object,
+    event and start time (`docs/observability.md`);
+  - `ctx.tailnet.fetch` spans in the runtime (not only hostd's). Not
+    done: it joins the caller's trace (#295), and hostd's egress span
+    already is the hop's CLIENT span, with `error.type` for refusals;
   - mgmt's own traces (the mint stages as spans, linked from hostd's
     credential wait) and OTLP export of tailworks' own telemetry
     (`OTEL_EXPORTER_OTLP_ENDPOINT` on the daemons);

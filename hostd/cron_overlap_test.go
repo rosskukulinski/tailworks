@@ -26,6 +26,7 @@ import (
 // saw the first run start only after it had already timed out, and the next
 // tick then rightly started a new run.)
 func TestRT3_H17_CronOverlap(t *testing.T) {
+	t.Parallel()
 	const timeout = 2 * time.Second
 	frozen := time.Date(2000, 1, 1, 0, 1, 0, 0, time.UTC) // see TestCronTriggers
 	s := startSuiteCapsOpts(t, fakemgmt.Config{}, nil, func(o *hostdtest.Options) {

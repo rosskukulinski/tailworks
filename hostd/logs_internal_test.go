@@ -35,6 +35,7 @@ func logsHost(t *testing.T) (*Host, string) {
 // another tenant's workload, traversal and key-confusing names, and
 // workloads that aren't running are refused.
 func TestWorkloadLogFileResolution(t *testing.T) {
+	t.Parallel()
 	h, want := logsHost(t)
 	if p, err := h.WorkloadLogFile("tnA", "web"); err != nil || p != want {
 		t.Fatalf("own workload: %q %v, want %q", p, err, want)
@@ -72,6 +73,7 @@ func TestWorkloadLogFileResolution(t *testing.T) {
 }
 
 func TestLogsHandlerTailAndRefusals(t *testing.T) {
+	t.Parallel()
 	h, path := logsHost(t)
 	var sb strings.Builder
 	for i := 1; i <= 100; i++ {
@@ -117,6 +119,7 @@ func TestLogsHandlerTailAndRefusals(t *testing.T) {
 }
 
 func TestTailLinesLongAndPartial(t *testing.T) {
+	t.Parallel()
 	f, _ := os.CreateTemp(t.TempDir(), "log")
 	defer f.Close()
 	long := strings.Repeat("x", 200<<10)   // several read chunks
@@ -132,6 +135,7 @@ func TestTailLinesLongAndPartial(t *testing.T) {
 
 // follow=1 streams appended lines and a redeploy's new log file.
 func TestLogsHandlerFollow(t *testing.T) {
+	t.Parallel()
 	h, path := logsHost(t)
 	os.WriteFile(path, []byte("old\n"), 0o600)
 	srv := httptest.NewServer(http.HandlerFunc(h.logsHandler))

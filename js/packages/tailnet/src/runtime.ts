@@ -15,17 +15,19 @@ export { wrapWorkflowClass, isApprovalType } from "./workflows.js";
 import { wrapStores } from "./d1.js";
 import { sealedRequest } from "./seal.js";
 import { installFetchPropagation, runTraced, tracedStubFetch, type SpanRecord } from "./trace.js";
+import { rpcCall, tracedEntry, traceGate, type EntryInfo } from "./rpctrace.js";
+import { facetNamespaces } from "./facetns.js";
 
 // Egress fetch() carries the running handler's trace context
 // (ADR-045).
 installFetchPropagation();
 
 /** spanFlusher reports a handler's DO-call spans to hostd (TailnetApi "spans"). */
-function spanFlusher(tw: TailnetApiStub | undefined, ctx: any): (spans: SpanRecord[]) => void {
+function spanFlusher(tw: TailnetApiStub | undefined, ctx: any, as?: Self): (spans: SpanRecord[]) => void {
   return (spans) => {
     if (!tw || typeof tw.call !== "function") return;
     const p = Promise.resolve()
-      .then(() => tw.call("spans", { spans }))
+      .then(() => tw.call("spans", as ? { spans, as } : { spans }))
       .catch(() => {});
     try {
       ctx?.waitUntil?.(p);
@@ -38,9 +40,71 @@ function spanFlusher(tw: TailnetApiStub | undefined, ctx: any): (spans: SpanReco
 // The platform binding of each wrapped DO instance (for span reports).
 const twOf = new WeakMap<object, TailnetApiStub | undefined>();
 
+/**
+ * entryInfo: how a DO's entry points are traced (rpctrace.ts). A facet's
+ * span reports are attested by its platform binding; a plain DO's name its
+ * object and carry its ID, which is how hostd matches them to the
+ * invocation's tail record.
+ */
+function entryInfo(obj: any, cls: string, plain: boolean): EntryInfo {
+  const ctx = () => obj.ctx;
+  const oname = (): string | undefined => {
+    const n = ctx()?.id?.name;
+    return typeof n === "string" && n ? n : undefined;
+  };
+  return {
+    cls,
+    alarm: plain ? "alarm" : "__tw_alarm",
+    attrs() {
+      const a: Record<string, string> = {};
+      const n = oname();
+      if (n) a["tw.do.name"] = n;
+      if (plain) {
+        try {
+          const id = ctx()?.id?.toString?.();
+          if (typeof id === "string" && id) a["tw.do.id"] = id;
+        } catch {
+          /* no id */
+        }
+      }
+      return a;
+    },
+    flush() {
+      const n = oname();
+      return spanFlusher(twOf.get(obj), ctx(), plain && n ? { class: cls, name: n } : undefined);
+    },
+  };
+}
+
 /** The platform's TailnetApi stub (RPC). */
 export interface TailnetApiStub {
   call(op: string, args: Record<string, unknown>): Promise<{ ok: true; value: any } | { ok: false; error: Record<string, any> }>;
+  /** ctx.tailnet.connect(): the socket's streams (platform.js). */
+  tcpConnect?(args: Record<string, unknown>): Promise<{ ok: true; value: { readable: ReadableStream; writable: WritableStream } } | { ok: false; error: Record<string, any> }>;
+}
+
+/** A TCP destination: "host:port", or { hostname, port } as in cloudflare:sockets. */
+export type SocketAddress = string | { hostname: string; port: number };
+
+export interface TailnetSocketOptions {
+  /**
+   * "off" (the default) only: the flow is plaintext from the Worker. On the
+   * tailnet WireGuard already encrypts it; for TLS to the destination use
+   * `tls: "netd"`.
+   */
+  secureTransport?: "off";
+  /** "netd": the host originates TLS to the destination (system roots, SNI = hostname). */
+  tls?: "netd";
+}
+
+/** The socket ctx.tailnet.connect() returns (the cloudflare:sockets Socket shape). */
+export interface TailnetSocket {
+  readonly readable: ReadableStream<Uint8Array>;
+  readonly writable: WritableStream<Uint8Array>;
+  /** Resolves once the platform has dialled; rejects with a TailnetError (peer_not_visible, forbidden_destination, …). */
+  readonly opened: Promise<{ remoteAddress: string }>;
+  readonly closed: Promise<void>;
+  close(): Promise<void>;
 }
 
 export interface SpawnOptions {
@@ -64,18 +128,39 @@ export interface Spawned<T = unknown> {
 
 export interface TailnetContext {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
-  forward(request: Request, to: string | URL, init?: RequestInit): Promise<Response>;
   spawn<T = any>(ns: any, opts: SpawnOptions): Promise<Spawned<T>>;
   kill(opts?: { reason?: string; cascade?: boolean; target?: { class: string; name: string } }): Promise<{ killed: string[] }>;
   audit(records: Array<Record<string, unknown>>): Promise<void>;
   /**
-   * This object's (or the workload's) node, and `epoch`: the workload's
-   * lease epoch on this host. mgmt raises it on every deploy and every move
-   * to another host, so it orders this incarnation after every earlier one
-   * (fencing tokens, docs/locks.md).
+   * This object's (or the workload's) node; `workload`, the name of the
+   * workload it belongs to, and `deploymentId`, the deployment running now;
+   * and `epoch`: the workload's lease epoch on this host. mgmt raises it on
+   * every deploy and every move to another host, so it orders this
+   * incarnation after every earlier one (fencing tokens, docs/locks.md).
    */
-  self(): Promise<{ objectId: string; hostname: string; magicDNS?: string; status: string; kind: string; epoch: number }>;
-  connect(): never;
+  self(): Promise<TailnetSelf>;
+  /**
+   * A raw TCP socket from this object's own node (facet mode) or, in the
+   * Worker, the workload node, under the same policy as fetch(). Refusals
+   * reject `opened` with a TailnetError. In a plain-DO object it throws
+   * not_supported (no per-object identity; stock connect() leaves as the
+   * workload node).
+   */
+  connect(address: SocketAddress, options?: TailnetSocketOptions): TailnetSocket;
+}
+
+/** What ctx.tailnet.self() answers. */
+export interface TailnetSelf {
+  objectId: string;
+  hostname: string;
+  magicDNS?: string;
+  status: string;
+  kind: string;
+  /** The workload's name (what `tw deploy` named it). */
+  workload: string;
+  /** The deployment running now. */
+  deploymentId: string;
+  epoch: number;
 }
 
 export type BindingMap = Record<string, string>; // env binding name -> DO class
@@ -111,11 +196,14 @@ export function createTailnetContext(tw: TailnetApiStub, env: Record<string, any
     if (err) throw err;
     return r;
   };
-  const tn: TailnetContext = {
+  const tn: TailnetContext & { forward: unknown } = {
     fetch: tfetch,
+    // forward is no longer part of TailnetContext: signed on-behalf-of
+    // assertions (RFC §4.6) are not built, so it was only fetch with the
+    // request's headers copied. Kept, unlisted, for one minor release so
+    // deployed apps that call it keep working; use
+    // ctx.tailnet.fetch(new Request(url, request)) instead.
     forward(request: Request, to: string | URL, init?: RequestInit) {
-      // MVP: re-issues the request from this node. Signed act-chain
-      // assertions (RFC §4.6) are not implemented yet.
       const hasBody = request.method !== "GET" && request.method !== "HEAD";
       return tfetch(new Request(String(to), { method: request.method, headers: request.headers, body: hasBody ? request.body : undefined, ...init }));
     },
@@ -156,11 +244,67 @@ export function createTailnetContext(tw: TailnetApiStub, env: Record<string, any
     self() {
       return op("self", {});
     },
-    connect(): never {
-      throw new TailnetError("plan_feature_missing", "ctx.tailnet.connect() is not implemented yet (raw TCP egress)");
+    connect(address: SocketAddress, options: TailnetSocketOptions = {}) {
+      return tailnetSocket(tw, socketAddress(address), options, self);
     },
   };
   return Object.freeze(tn);
+}
+
+/** socketAddress is address as "host:port" (IPv6 hosts bracketed). */
+export function socketAddress(address: SocketAddress): string {
+  if (typeof address === "string") return address;
+  if (!address || typeof address.hostname !== "string" || !Number.isInteger(address.port)) {
+    throw new TailnetError("bad_request", "connect: address must be \"host:port\" or { hostname, port }");
+  }
+  const h = address.hostname.includes(":") && !address.hostname.startsWith("[") ? "[" + address.hostname + "]" : address.hostname;
+  return h + ":" + address.port;
+}
+
+// tailnetSocket returns a Socket at once (as cloudflare:sockets does) and
+// wires its streams to the platform's once the dial succeeds.
+function tailnetSocket(tw: TailnetApiStub, address: string, options: TailnetSocketOptions, self?: Self): TailnetSocket {
+  if (options.secureTransport && options.secureTransport !== "off") {
+    throw new TailnetError("not_supported", 'ctx.tailnet.connect: secureTransport "' + String(options.secureTransport) + '" is not supported; use { tls: "netd" }');
+  }
+  if (options.tls !== undefined && options.tls !== "netd") throw new TailnetError("bad_request", 'ctx.tailnet.connect: tls must be "netd"');
+  if (typeof tw.tcpConnect !== "function") throw new TailnetError("not_supported", "ctx.tailnet.connect() needs a newer tailworks host");
+  const toUp = new TransformStream<Uint8Array, Uint8Array>();
+  const fromUp = new TransformStream<Uint8Array, Uint8Array>();
+  let closeUp: () => Promise<void> = async () => {};
+  const opened = (async () => {
+    const args: Record<string, unknown> = { address };
+    if (options.tls) args.tls = options.tls;
+    if (self) args.as = self;
+    const r = await tw.tcpConnect!(args);
+    if (!r || !r.ok) throw TailnetError.from((r as any)?.error);
+    return r.value;
+  })();
+  const closed = opened.then(
+    async (up) => {
+      const a = new AbortController();
+      closeUp = async () => a.abort();
+      await Promise.allSettled([
+        toUp.readable.pipeTo(up.writable, { signal: a.signal }),
+        up.readable.pipeTo(fromUp.writable, { signal: a.signal }),
+      ]);
+    },
+    async (e) => {
+      await Promise.allSettled([toUp.readable.cancel(e), fromUp.writable.abort(e)]);
+      throw e;
+    },
+  );
+  closed.catch(() => {});
+  return {
+    readable: fromUp.readable,
+    writable: toUp.writable,
+    opened: opened.then(() => ({ remoteAddress: address })),
+    closed,
+    async close() {
+      await closeUp();
+      await Promise.allSettled([toUp.writable.abort(), fromUp.readable.cancel()]);
+    },
+  };
 }
 
 function define(ctx: any, tn: TailnetContext) {
@@ -217,7 +361,9 @@ export function wrapFacetClass(C: any, name: string, bindings: BindingMap, opts:
         const tw = env?.__TW;
         // Bindings admit before they reach an object (chained creation by
         // an attested object; hostd records it), and __TW stays platform-only.
-        const e = guardEnv(env, bindings, "tailnet", admitter(tw, {}));
+        // Its namespace bindings are NsProxy stubs: facetns.ts gives them
+        // idFromName and get() (#391).
+        const e = guardEnv(facetNamespaces(env, bindings), bindings, "tailnet", admitter(tw, {}));
         // Workflow bindings: the platform's WorkflowGate, as the Workflow API.
         for (const k of Object.keys(opts.workflows ?? {})) if (e?.[k]) e[k] = workflowClient(e[k]);
         define(ctx, createTailnetContext(tw, e, bindings));
@@ -226,6 +372,8 @@ export function wrapFacetClass(C: any, name: string, bindings: BindingMap, opts:
         if (tw && opts.container) defineContainer(ctx, createContainer(tw, ctx, name, opts.container));
         super(ctx, e);
         twOf.set(this, tw);
+        // RPC from the Host and the delegated alarm are traced (rpctrace.ts).
+        return traceGate(this, entryInfo(this, name, false));
       }
       // Called by the Host DO when the delegated alarm fires.
       async __tw_alarm(info: unknown) {
@@ -308,7 +456,7 @@ function findDescriptor(o: any, p: string): PropertyDescriptor | undefined {
  * and the object's own `this.method` lookups (decorator metadata, e.g.
  * the Agents SDK's @callable) are unchanged.
  */
-function killGate(obj: any, cls: string): any {
+function killGate(obj: any, cls: string, info: EntryInfo): any {
   const killedErr = (k: string) => new Error("[killed] object " + cls + "/" + (obj.ctx?.id?.name ?? "") + " was killed: " + k);
   const wrapped = new Map<PropertyKey, { v: Function; w: Function }>();
   return new Proxy(obj, {
@@ -330,7 +478,7 @@ function killGate(obj: any, cls: string): any {
             throw killedErr(k); // over RPC the caller's promise rejects with it
           }
         }
-        return v.apply(t, args);
+        return tracedEntry(info, p, args, (a) => v.apply(t, a)); // rpctrace.ts
       };
       wrapped.set(p, { v, w });
       return w;
@@ -362,7 +510,7 @@ export function wrapPlainClass(C: any, name: string, bindings: BindingMap, opts:
         if (tw && oname && opts.container) defineContainer(ctx, createContainer(tw, ctx, name, opts.container, { class: name, name: oname }));
         super(ctx, e);
         twOf.set(this, tw);
-        const gated = killGate(this, name);
+        const gated = killGate(this, name, entryInfo(this, name, true));
         if (tw && oname && opts.node && !killedMark(ctx)) {
           // The object's node comes up only if its creation was admitted
           // (RT3-06/07); fetch answers the refusal below. A killed object
@@ -497,7 +645,8 @@ function guardStub(adm: Admitter, cls: string, name: string, real: any): any {
           const target = real && typeof real.then === "function" ? await real : real;
           // A stub fetch() is a traced hop (its callee's parent span).
           if (p === "fetch") return tracedStubFetch(cls, name, args, (...a) => target.fetch(...a));
-          return target[p](...args);
+          // RPC: a traced hop too, its context passed as a marker argument.
+          return rpcCall(cls, name, String(p), args, (...a) => target[p](...a));
         };
       },
     },
@@ -548,9 +697,14 @@ function guardEnv(env: any, bindings: BindingMap, mode: GuardMode, adm: Admitter
   return out;
 }
 
-/** guardTailnetEnv guards env as for a tailnet caller without a create ticket (Workflows). */
+/**
+ * guardTailnetEnv guards env as for a tailnet caller without a create
+ * ticket (Workflows). Its admits say they are a Workflow's, so hostd lets
+ * them reach objects of classes with no node (no admission applies to
+ * those), which a public request may not (#359).
+ */
 export function guardTailnetEnv(env: any, bindings: BindingMap): any {
-  return guardEnv(env, bindings, "tailnet", admitter(env?.__TW, {}));
+  return guardEnv(env, bindings, "tailnet", admitter(env?.__TW, { workflow: true }));
 }
 
 /** publicEnv returns env guarded for a public request (kept for callers of the old name). */
@@ -721,9 +875,11 @@ export function wrapHandler(H: any, bindings: BindingMap) {
           if (tw) define(this.ctx, createTailnetContext(tw, this.env, bindings, undefined, ticket));
           if (isScheduledReq(req)) {
             const sc = scheduledCtx(this.ctx);
+            const flush = spanFlusher(tw, this.ctx);
             this.ctx = sc.ctx;
             const sf = typeof this.scheduled === "function" ? this.scheduled.bind(this) : undefined;
-            return runScheduled(sf, req, [], sc.drain);
+            // hostd opens the run's root span and sends it as traceparent.
+            return runTraced(req, () => runScheduled(sf, req, [], sc.drain), flush);
           }
         }
         try {
@@ -767,7 +923,8 @@ export function wrapHandler(H: any, bindings: BindingMap) {
         if (ctx && tw) define(ctx, createTailnetContext(tw, env, bindings, undefined, ticket));
         if (k === "fetch" && isScheduledReq(a)) {
           const sc = scheduledCtx(ctx);
-          return runScheduled(H.scheduled, a, [env, sc.ctx], sc.drain);
+          // hostd opens the run's root span and sends it as traceparent.
+          return runTraced(a, () => runScheduled(H.scheduled, a, [env, sc.ctx], sc.drain), spanFlusher(tw, ctx));
         }
       }
       let r: unknown;
@@ -793,4 +950,110 @@ export function wrapHandler(H: any, bindings: BindingMap) {
     };
   }
   return out;
+}
+
+// ---- Service bindings, the callee side (ADR-053) ----
+//
+// The platform reaches the tenant main module's __tw_binding entrypoint
+// (generated by hostd) for a service binding call to a named entrypoint or
+// an RPC method, which hostd admitted only from a tailworks node of this
+// tenant. The entrypoint is wrapped like the default export (guarded env,
+// ctx.tailnet, sealed caller). An RPC method sees its caller as
+// getCaller(this.ctx): ctx.cf is the call's cf, with only a caller hostd
+// sealed.
+
+const wrappedEntrypoints = new WeakMap<object, any>();
+
+/** callCtx is ctx with cf (the call's) for getCaller(this.ctx). */
+function callCtx(ctx: any, cf: unknown): any {
+  if (!ctx || typeof ctx !== "object") return ctx;
+  return new Proxy(ctx, {
+    get(t, k) {
+      if (k === "cf") return cf;
+      const v = Reflect.get(t, k, t);
+      return typeof v === "function" ? v.bind(t) : v;
+    },
+  });
+}
+
+export interface BindingDispatcher {
+  fetch(ctx: any, env: any, req: Request): Promise<Response>;
+  call(ctx: any, env: any, entrypoint: string, method: string, args: unknown[], cf: any): Promise<unknown>;
+}
+
+// PY_RPC marks a Python Worker's generated front (hostd/gen/python.go,
+// ADR-055): its default export forwards an RPC call, to any entrypoint, to
+// the Python worker, which has the entrypoint classes the front can't see.
+const PY_RPC = Symbol.for("tailworks.pyRpc");
+
+/** pyCallCf is the part of a call's sealed cf a Python method sees as self.ctx.cf (no ticket). */
+function pyCallCf(scf: any): Record<string, unknown> {
+  const { tw: _tw, ...rest } = scf ?? {};
+  return rest;
+}
+
+export function bindingDispatcher(T: Record<string, any>, bindings: BindingMap): BindingDispatcher {
+  const target = (ep: string) => {
+    const H = ep ? T[ep] : T.default;
+    if (!H || (typeof H !== "function" && typeof H !== "object")) {
+      throw new TailnetError("service_not_found", ep ? `this workload's main module exports no entrypoint ${ep}` : "this workload has no default export");
+    }
+    let W = wrappedEntrypoints.get(H);
+    if (!W) {
+      W = wrapHandler(H, bindings);
+      wrappedEntrypoints.set(H, W);
+    }
+    return { H, W, name: ep || "default" };
+  };
+  return {
+    async fetch(ctx, env, req) {
+      const ep = String((req as any)?.cf?.tw?.binding?.entrypoint ?? "");
+      if (ep && typeof T.default?.[PY_RPC] === "function" && !(ep in T)) {
+        return new TailnetError("service_not_found", `entrypoint ${ep} of a Python Worker answers RPC calls, not fetch(); bind the default entrypoint for fetch()`).toResponse();
+      }
+      let t;
+      try {
+        t = target(ep);
+      } catch (e) {
+        return (e as TailnetError).toResponse();
+      }
+      if (typeof t.H === "function") {
+        if (typeof t.W.prototype?.fetch !== "function") return new TailnetError("service_not_found", `entrypoint ${t.name} has no fetch() handler`).toResponse();
+        const inst = new t.W(ctx, env);
+        return inst.fetch(req);
+      }
+      if (typeof t.W.fetch !== "function") return new TailnetError("service_not_found", `entrypoint ${t.name} has no fetch() handler`).toResponse();
+      return t.W.fetch(req, env, ctx);
+    },
+    async call(ctx, env, ep, method, args, cf) {
+      const tw: TailnetApiStub | undefined = env?.__TW;
+      const sealed: any = await sealedRequest(tw, { cf });
+      const scf = sealed?.cf ?? {};
+      const py = T.default?.[PY_RPC];
+      if (typeof py === "function") {
+        // A Python Worker: the same refusals, then the call goes to the
+        // Python worker, which checks the entrypoint and method itself.
+        if (typeof method !== "string" || method in Object.prototype || HANDLER_METHODS.includes(method) || method === "constructor") {
+          throw new TypeError(`The RPC receiver does not implement the method "${method}".`);
+        }
+        const ticket = typeof scf?.tw?.ticket === "string" && scf.tw.ticket ? scf.tw.ticket : undefined;
+        const genv = guardEnv(env, bindings, "tailnet", admitter(tw, { ticket }));
+        return await py(genv, ep || "", method, args, pyCallCf(scf));
+      }
+      const t = target(ep);
+      if (typeof t.H !== "function") throw new TypeError(`entrypoint ${t.name} is not a WorkerEntrypoint class; RPC needs one`);
+      const cctx = callCtx(ctx, scf);
+      const inst = new t.W(cctx, env);
+      const ticket = typeof scf?.tw?.ticket === "string" && scf.tw.ticket ? scf.tw.ticket : undefined;
+      if (ticket) {
+        inst.env = guardEnv(env, bindings, "tailnet", admitter(tw, { ticket }));
+        if (tw) define(cctx, createTailnetContext(tw, inst.env, bindings, undefined, ticket));
+      }
+      const f = typeof method === "string" && !(method in Object.prototype) ? inst[method] : undefined;
+      if (typeof f !== "function" || HANDLER_METHODS.includes(method) || method === "constructor") {
+        throw new TypeError(`The RPC receiver does not implement the method "${method}".`);
+      }
+      return await f.apply(inst, args);
+    },
+  };
 }

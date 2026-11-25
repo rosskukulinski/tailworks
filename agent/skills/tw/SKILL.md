@@ -62,7 +62,8 @@ have them, prefer them for inspecting and operating: they are typed,
 authorized per tool by the user's tailnet policy, and audited. A
 `cap_missing` error means the user hasn't granted that tool; show them its
 `snippet` instead of working around it with the CLI. To set it up, the
-user runs `tw mcp --config`.
+user runs `tw mcp --config`: it prints the command or config for each
+agent.
 
 ## Rules for agents
 
@@ -80,8 +81,8 @@ user runs `tw mcp --config`.
 4. **Ask before anything destructive.** None of these has an undo. Run one
    only after the user has said yes to that specific action.
    - `tw kill`, `tw undeploy`, `tw down`, `tw secret rm` and
-     `tw kv key delete` act immediately.
-   - `tw d1 delete`, `tw kv namespace delete`, `tw queues rm`,
+     `tw kv key rm` act immediately.
+   - `tw d1 rm`, `tw kv namespace rm`, `tw queues rm`,
      `tw queues purge`, `tw r2 bucket rm`, `tw tenant rm` and
      `tw host rm` delete data or a tenant's resources. Without a terminal
      they refuse with `confirmation_required`. Tell the user what will be
@@ -94,7 +95,11 @@ user runs `tw mcp --config`.
    the user type or pipe it (see `tw-secrets`).
 6. **The tailnet policy belongs to the user.** When tailworks prints a policy
    snippet (`tagOwners`, `grants`), show it to the user and ask them to add
-   it in the Tailscale admin console. Don't edit the policy yourself.
+   it in the Tailscale admin console. Tailworks writes the policy only
+   after the user answers y to the lines it shows (on a terminal), or with
+   `--apply-policy --yes`. With `--json` nothing asks and nothing is
+   written. Pass `--apply-policy --yes` only after the user agreed to the
+   lines you showed them, and don't edit the policy yourself.
 
 ## More
 

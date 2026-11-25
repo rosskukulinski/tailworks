@@ -20,6 +20,7 @@ import (
 // the next write lands right after the restored head instead of
 // conflicting forever (issue #120).
 func TestPlatformStoreJournalRewound(t *testing.T) {
+	t.Parallel()
 	hostdtest.RegisterProbeStore()
 	s := startSuiteCapsOpts(t, fakemgmt.Config{}, tailcfg.PeerCapMap{nettest.TestCap: []tailcfg.RawMessage{nettest.TestCapValue}}, nil)
 	e := s.e

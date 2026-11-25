@@ -1,0 +1,9 @@
+{
+  // e2e/dataplane R2 fixture (ledger/r2.md): every R2 operation on a small
+  // key space, so the checkers can model each key as a register.
+  "name": "r2",
+  "tailnet": {
+    "tags": ["tag:ttest"],
+    "objects": { "Hold": { "tags": ["tag:ttest"], "egress": "workload" } },
+  },
+}

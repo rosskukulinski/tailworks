@@ -25,13 +25,18 @@ tw deploy --json | jq -r .endpoint.magicDNS
 - A few outputs pass through Go structs without JSON names and so use Go
   field names: `status`'s `workloads[]`, `image push`, and `host vmcheck
   --container`. The schema documents them as they are.
+- `status` has one `$defs/status` for both places it runs. On the host it
+  reports the supervisor, mgmt, the host and its workloads; on a machine
+  set up with `tw link` it has `linked`, `whoami`, `hosts` and each
+  tenant's `deployments` instead. `stateDir` and `healthy` are always
+  there; check for `linked` to tell which set you got.
 
 ## Errors
 
 On failure, stdout is empty and stderr's **last line** is one JSON object:
 
 ```json
-{"error": {"code": "acl_denied", "message": "preflight failed: …", "hint": "add to your tailnet policy:\n  \"tagOwners\": …", "doc_url": "https://github.com/rosskukulinski/tailworks/blob/master/docs/errors.md#acl_denied"}}
+{"error": {"code": "acl_denied", "message": "preflight failed: …", "hint": "add to your tailnet policy (admin console › Access controls):\n  // merge into your policy: …\n  \"tagOwners\": {…", "doc_url": "https://github.com/rosskukulinski/tailworks/blob/master/docs/errors.md#acl_denied"}}
 ```
 
 | Field | Always | |
@@ -48,9 +53,11 @@ The exit code is 1 when a command fails (including a bad flag or a missing
 argument, code `bad_request`) and 2 for an unknown command. With `--json`,
 both are JSON. Key material is redacted from everything tailworks prints.
 
-`tw mcp` (without `--config`) is not a `--json` command: its stdout is the
+`tw mcp` with stdin a pipe is not a `--json` command: its stdout is the
 MCP stdio protocol (newline-delimited JSON-RPC). A refusal from mgmt
 becomes a JSON-RPC error whose `data` is the error object above.
+`tw mcp --json` means `tw mcp --config --json` (as does plain `tw mcp` on a
+terminal, without `--json`).
 
 `tw doctor` is the one command that prints a result *and* fails: its report
 is on stdout, then `doctor_failed` is on stderr if a check failed.
@@ -99,7 +106,7 @@ in this order:
 | `log` | `line`, `source: "image-build"` (output of `docker buildx`, containers only) |
 | `placed` | `deploymentID`, `host`, `placement` |
 | `status` | `deploymentID`, `status`, `node` (each time either changes) |
-| `ready` | `deploymentID`, `host`, `magicDNS`, `url` |
+| `ready` | `deploymentID`, `host`, `magicDNS`, `url`, `images` (container classes: each image's pin, as the result's `images`) |
 | `public_wait`, `public` | `url` (with `--wait-public`) |
 
 A failure ends the stream with the usual `{"error": …}` line instead.
@@ -170,10 +177,49 @@ line (`$defs/logs.line`):
 {"event": "log", "ts": "…", "workload": "hello-mcp", "line": "…"}
 ```
 
-`workload` is set for `tw logs <workload> --console`, `component` for
-`--component mgmt|hostd|supervisor`. From a machine linked with `tw link`,
+`workload` is set for `tw logs <workload> --console` (and for a bare
+`tw logs`, which picks the app in the current directory, else the only
+workload), `component` only for `--component mgmt|hostd|supervisor`. From a machine linked with `tw link`,
 replica lines also carry the `host` they came from. With `-f`, lines keep
 coming until the command is stopped.
+
+## Node budget (`nodes`)
+
+`tw policy`, `tw deploy` and `tw ls` carry the tenant's tailnet nodes in
+`nodes` (schema `$defs/nodeBudget`;
+[limits.md](limits.md#tailnet-node-budget) has the counting rule):
+
+```json
+{"nodes": {
+  "app": {"workload": 1, "public": 0, "fixed": 1, "perObjectClasses": ["Room"], "sharedClasses": ["Counter"]},
+  "tenant": {"total": 14, "workloads": 2, "objects": 11, "pool": 1, "public": 0, "maxObjects": 1000},
+  "capacity": {"hosts": 1, "capacityNodes": 500, "liveNodes": 14},
+  "warnings": []
+}}
+```
+
+- `app` is what the app uses, from its `tailworks.jsonc`: `fixed` nodes at
+  deploy, plus one per object of each class in `perObjectClasses`.
+  `tw ls` has no `app`.
+- `tenant` is the live count now (for `tw deploy`, before the deploy).
+  It is absent if mgmt couldn't be asked; `capacity` is absent unless the
+  caller is an admin.
+- `warnings` is always present. It has a line when `tenant.total` is
+  within 80% of `maxObjects` or of the hosts' node capacity. A warning
+  never fails the command.
+
+`tw doctor` reports the same count in its `node_budget` check, with
+`status: "warn"` near a limit.
+
+## Listings (`tw ls`)
+
+`tw ls --json` lists the live objects (`pending`, `minted`, `assigned`,
+`ready`) and the deployments that aren't stopped; `--all` adds killed
+objects and stopped deployments. `tw ls <workload>` keeps that workload,
+its previews and its replicas (`namespaces[].previewOf`, `replicaOf`).
+At most 5000 objects are listed (`--limit N`, `0` for no ceiling), and
+`truncated` is `true` when more matched. `nodes.tenant.total` is always
+the tenant's whole live count.
 
 ## Confirmations
 

@@ -59,6 +59,7 @@ func TestTypesEnv(t *testing.T) {
 		"  DB: D1Database;\n",
 		"  JOBS: Queue;\n",
 		"  CHECKOUT: Workflow;\n",
+		"  AUTH: Fetcher;\n",
 		"  STRIPE_KEY: string;\n",
 		"  API_TOKEN: string;\n",
 		"  WEBHOOK_SECRET: string;\n",
@@ -67,7 +68,7 @@ func TestTypesEnv(t *testing.T) {
 			t.Errorf("%s lacks %q:\n%s", typesFile, want, got)
 		}
 	}
-	for _, bad := range []string{"AUTH", "STAGE_ONLY", "s3cret", "shop"} {
+	for _, bad := range []string{"STAGE_ONLY", "s3cret", "shop"} {
 		if strings.Contains(got, bad) {
 			t.Errorf("%s has %q:\n%s", typesFile, bad, got)
 		}
@@ -132,6 +133,9 @@ func TestTypesTemplates(t *testing.T) {
 	ents, _ := os.ReadDir(filepath.Join(ct, "templates"))
 	for _, e := range ents {
 		dir := filepath.Join(ct, "templates", e.Name())
+		if _, err := os.Stat(filepath.Join(dir, "src", "entry.py")); err == nil {
+			continue // a Python Worker: no TypeScript, no worker-configuration.d.ts (docs/python.md)
+		}
 		if err := cmdTypes([]string{dir, "--check"}); err != nil {
 			t.Errorf("template %s: %v (run: tw types %s)", e.Name(), err, dir)
 		}
@@ -149,6 +153,7 @@ func TestTypesTemplates(t *testing.T) {
 // than merges with) the global one `tw types` generates, and the generated
 // binding types would go unused (issue #41).
 func TestTemplatesUseGeneratedEnv(t *testing.T) {
+	t.Parallel()
 	ct, err := createTailworksDir()
 	if err != nil {
 		t.Skip("create-tailworks not found:", err)
@@ -175,6 +180,7 @@ func TestTemplatesUseGeneratedEnv(t *testing.T) {
 // them are at VERSION (scripts/npm-versions.mjs; the release publishes
 // them at the tag's version).
 func TestNPMVersions(t *testing.T) {
+	t.Parallel()
 	ct, err := createTailworksDir()
 	if err != nil {
 		t.Skip("create-tailworks not found:", err)

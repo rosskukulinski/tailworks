@@ -9,6 +9,7 @@ import (
 // The node capacity a host advertises by default is derived from its RAM
 // (issue #114): a quarter of it at NodeMemMiB per node, within the bounds.
 func TestDefaultCapacityNodes(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct{ mib, want int }{
 		{0, FallbackCapacityNodes},
 		{-1, FallbackCapacityNodes},
@@ -27,6 +28,7 @@ func TestDefaultCapacityNodes(t *testing.T) {
 
 // New fills an unset CapacityNodes from RAM; an explicit one is kept.
 func TestCapacityNodesDefaultFromRAM(t *testing.T) {
+	t.Parallel()
 	total, _ := memInfo()
 	h, _ := admitHost(t, false, mgmtapi.HostCapacity{})
 	if got, want := h.cfg.CapacityNodes, DefaultCapacityNodes(total); got != want {

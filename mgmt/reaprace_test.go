@@ -13,6 +13,7 @@ import (
 // operator) may kill the same object at once. Exactly one kill must win: one
 // kill audit record per object, and the tombstone keeps the winner's record.
 func TestMM_H09_ConcurrentKillOnce(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	st, _ := OpenStore(ctx, filepath.Join(dir, "m.db"))
@@ -71,6 +72,7 @@ func TestMM_H09_ConcurrentKillOnce(t *testing.T) {
 // reaches an existing throttle (the mint worker re-reads the tenant on every
 // attempt and asks m.throttle for it).
 func TestMM_H15_ThrottleFollowsTenantLimit(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	st, _ := OpenStore(ctx, filepath.Join(dir, "m.db"))
@@ -94,6 +96,7 @@ func TestMM_H15_ThrottleFollowsTenantLimit(t *testing.T) {
 // blip after the state change can't lose the cleanup. The broker here has no
 // API, so the inline delete fails: the intent must still be persisted.
 func TestMM_F21_DeviceDeleteIntentIsAtomic(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	st, _ := OpenStore(ctx, filepath.Join(dir, "m.db"))

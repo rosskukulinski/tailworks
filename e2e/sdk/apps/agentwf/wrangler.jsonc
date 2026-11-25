@@ -1,0 +1,13 @@
+{
+  "name": "agentwf",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "durable_objects": {
+    "bindings": [
+      { "name": "TaskAgent", "class_name": "TaskAgent" },
+      { "name": "InternalTaskAgent", "class_name": "InternalTaskAgent" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TaskAgent", "InternalTaskAgent"] }],
+  "workflows": [{ "name": "task", "binding": "TASK_WORKFLOW", "class_name": "TaskWorkflow" }]
+}

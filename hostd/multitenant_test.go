@@ -32,6 +32,7 @@ import (
 // workerd can't read tenant B's state (Seatbelt, on macOS); killing A's
 // object leaves B's untouched.
 func TestMultiTenant(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("short")
 	}
@@ -340,12 +341,14 @@ func landlockCrossTenant(t *testing.T, ea *hostdtest.Env, a, b hostd.WorkloadSta
 // tenant's deploy fails typed sandbox_unavailable. -insecure-shared-host
 // would allow it.
 func TestSharedHostWithoutSandbox(t *testing.T) {
+	t.Parallel()
 	sharedHost(t, hostdtest.Options{Sandbox: hostd.SandboxNone}, "", "-insecure-shared-host")
 }
 
 // With a sandbox, but a container engine reachable (stubbed), the second
 // tenant is refused too (root-equivalent for hostd itself).
 func TestSharedHostRiskySockets(t *testing.T) {
+	t.Parallel()
 	sharedHost(t, hostdtest.Options{Sandbox: hostd.SandboxAuto,
 		HostSockets: func() procsb.HostSockets { return procsb.HostSockets{Hard: []string{"/var/run/docker.sock"}} }},
 		"", "/var/run/docker.sock")
@@ -359,6 +362,7 @@ var tailscaledOnly = func() procsb.HostSockets {
 // (no AF_UNIX): the host may be shared, and the second tenant's workerd
 // still can't connect to that socket.
 func TestSharedHostTailscaledSandboxed(t *testing.T) {
+	t.Parallel()
 	if sb, _ := hostd.ResolveSandbox(hostd.SandboxAuto); sb != hostd.SandboxLandlock {
 		t.Skip("needs Landlock")
 	}
@@ -367,12 +371,14 @@ func TestSharedHostTailscaledSandboxed(t *testing.T) {
 
 // tailscaled's socket reachable and no sandbox: refused.
 func TestSharedHostTailscaledNoSandbox(t *testing.T) {
+	t.Parallel()
 	sharedHost(t, hostdtest.Options{Sandbox: hostd.SandboxNone, HostSockets: tailscaledOnly}, "", "no process sandbox")
 }
 
 // tailscaled's socket reachable, sandbox on, but tenant A's Node app
 // listens on a unix socket (keeps AF_UNIX): refused, naming the reason.
 func TestSharedHostTailscaledUnixListen(t *testing.T) {
+	t.Parallel()
 	if sb, _ := hostd.ResolveSandbox(hostd.SandboxAuto); sb != hostd.SandboxLandlock {
 		t.Skip("needs Landlock")
 	}
@@ -451,6 +457,7 @@ func sharedHost(t *testing.T, o hostdtest.Options, aListen, mention string) {
 // tailscaled and docker socket paths when they exist (the VM run puts fake
 // listeners there) and a temp listener.
 func TestLandlockHostSockets(t *testing.T) {
+	t.Parallel()
 	if sb, _ := hostd.ResolveSandbox(hostd.SandboxAuto); sb != hostd.SandboxLandlock {
 		t.Skip("no Landlock")
 	}

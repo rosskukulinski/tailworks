@@ -12,6 +12,7 @@ import (
 // `make deps` there; a build_failed for an unresolved @tailworks/* import gets
 // it, other build errors don't.
 func TestSourceCheckoutHints(t *testing.T) {
+	t.Parallel()
 	root := sourceCheckout()
 	wd, _ := os.Getwd()
 	if want, _ := filepath.Abs(filepath.Join(wd, "..", "..")); root != want {

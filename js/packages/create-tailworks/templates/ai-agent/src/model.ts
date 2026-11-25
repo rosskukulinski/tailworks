@@ -1,6 +1,8 @@
 // A scripted stand-in for an LLM (AI SDK `MockLanguageModelV4` from `ai/test`)
-// so this template runs with no provider keys. Step 1 calls the MCP tools it
-// was given; step 2 answers from their results.
+// so this template runs with no provider keys. It ignores the prompt: step 1
+// calls whoami, lookup_order {order: "o1"} and refund {order: "o1", usd: 10}
+// (those the MCP server lists; the grant decides which of them succeed), and
+// step 2 answers with their results. Granted refund, it refunds on every call.
 //
 // Swap in a real provider for production, e.g. an OpenAI-compatible gateway
 // on your tailnet, called from this agent's own node:

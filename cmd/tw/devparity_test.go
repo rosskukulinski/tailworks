@@ -27,6 +27,7 @@ import (
 )
 
 func TestRewriteMapSources(t *testing.T) {
+	t.Parallel()
 	app := filepath.FromSlash("/home/u/app")
 	out := filepath.FromSlash("/tmp/tw-build-1")
 	raw := `{"version":3,"sourceRoot":"","sources":["../../home/u/app/src/index.ts","../../home/u/app/node_modules/hono/dist/index.js","../../opt/tailworks/share/node_modules/@tailworks/tailnet/dist/caller.js","tw-stub:email"],"mappings":"AAAA"}`
@@ -48,6 +49,7 @@ func TestRewriteMapSources(t *testing.T) {
 }
 
 func TestWantSourceMap(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		mode        sourceMapMode
 		upload      any
@@ -74,6 +76,7 @@ func TestWantSourceMap(t *testing.T) {
 }
 
 func TestDevHotkeys(t *testing.T) {
+	t.Parallel()
 	for c, want := range map[byte]devHotkeyAction{'b': hotkeyBrowser, 'B': hotkeyBrowser, 'x': hotkeyQuit, 'q': hotkeyQuit, 'Q': hotkeyQuit, 'd': hotkeyNone, '\n': hotkeyNone} {
 		if got := devHotkey(c); got != want {
 			t.Errorf("devHotkey(%q) = %d, want %d", c, got, want)
@@ -91,6 +94,7 @@ func TestDevHotkeys(t *testing.T) {
 // The inspector proxy forwards to the active workerd and rewrites its /json
 // answers to point at itself; with no workerd it answers 503.
 func TestDevInspectorProxy(t *testing.T) {
+	t.Parallel()
 	var inner string
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -125,8 +129,8 @@ func TestDevInspectorProxy(t *testing.T) {
 	if code != 200 || strings.Contains(body, inner) || !strings.Contains(body, "ws://"+outer+"/tenant") || !strings.Contains(body, "ws="+outer+"/") {
 		t.Fatalf("/json/list: %d %s", code, body)
 	}
-	if _, body := get("/x"); body != "other /x" {
-		t.Fatalf("/x: %s", body)
+	if code, body := get("/x"); code != http.StatusForbidden { // not a target (devinspectorguard.go)
+		t.Fatalf("/x: %d %s", code, body)
 	}
 	if _, _, err := devInspector(mustPort(t, outer), func() string { return "" }); err == nil {
 		t.Fatal("a second proxy on the same port")
@@ -147,19 +151,19 @@ func mustPort(t *testing.T, addr string) int {
 // 127.0.0.1:<port> while the caller stays the dev user, and the inspector
 // lists the app's isolate.
 func TestDevParity(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("short")
 	}
-	wd, err := nettest.WorkerdBinary()
+	_, err := nettest.WorkerdBinary()
 	if err != nil || !hostdtest.HasNode() {
 		t.Skip("needs workerd and node (make deps)")
 	}
-	t.Setenv("TW_WORKERD", wd)
 	bin := cliflow.BuildBinaries(t)
 	work := t.TempDir()
 	app := filepath.Join(work, "hello")
 	e := &cliflow.Env{T: t, BinDir: bin, StateDir: filepath.Join(work, "state"), WorkDir: work}
-	e.MustJSON(nil, "init", app, "--template", "hello", "--keep-tags")
+	e.MustJSON(nil, "init", app, "--template", "hello")
 	os.WriteFile(filepath.Join(app, "src", "boom.ts"), []byte("// helper\nexport function explode(where: string): never {\n  throw new Error(\"boom at \" + where);\n}\n"), 0o644)
 	os.WriteFile(filepath.Join(app, "src", "index.ts"), []byte(`import { getCaller } from "@tailworks/tailnet";
 import { explode } from "./boom";
@@ -260,8 +264,8 @@ export default {
 	}
 	b, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if !strings.Contains(string(b), "ws://127.0.0.1:"+strconv.Itoa(ip)+"/tenant") {
-		t.Fatalf("/json/list: %s", b)
+	if !strings.Contains(string(b), "ws://127.0.0.1:"+strconv.Itoa(ip)+"/tenant") || strings.Contains(string(b), "/platform") {
+		t.Fatalf("/json/list (only the tenant target, issue #335): %s", b)
 	}
 
 	cmd.Process.Signal(syscall.SIGINT)

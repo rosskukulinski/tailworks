@@ -9,7 +9,10 @@ cd my-app && npm install && npx tsc --noEmit
 ```
 
 With the `tw` CLI on your PATH this runs `tw init`; otherwise it copies
-the template. The templates are in [`templates/`](templates/):
+the template and renames it the way `tw init` does: the workload, the npm
+package and the template's `tag:tw-…` tags are named after the directory
+(or `--name`). `--tags` and `--object-tags` are passed to `tw init` and
+need it. The templates are in [`templates/`](templates/):
 
 - `hello`: a Worker that returns its verified caller and does a private fetch.
 - `agent`: a Cloudflare Agents SDK `Agent` (state, `this.sql`, per-object node
@@ -22,7 +25,8 @@ the template. The templates are in [`templates/`](templates/):
   one node per caller) whose tools are a tailworks MCP server's tools over the
   tailnet (`@ai-sdk/mcp` + `@tailworks/mcp` `mcpFetch`); it streams a UI message
   response. It ships with a scripted mock model (`src/model.ts`, no keys);
-  swap in a real provider.
+  swap in a real provider. Its tools need a second app, the `mcp` template
+  deployed as workload `mcp`, and a grant; its README walks through both.
 - `chat-agent`: Cloudflare's [chat agent example](https://developers.cloudflare.com/agents/examples/chat-agent/):
   an `AIChatAgent` (`@cloudflare/ai-chat`) and a chat page at `/`, with a
   server tool, a client tool the browser answers, and a tool that asks for
@@ -41,6 +45,10 @@ the template. The templates are in [`templates/`](templates/):
   that keep increasing across a move to another host, and a copyable client
   (`src/client.ts`: `acquire`, `renew`, `release`, `withLock`). See
   [docs/locks.md](https://github.com/rosskukulinski/tailworks/blob/master/docs/locks.md).
+- `static-site`: wrangler `assets`: the files in `public/` served next to a
+  Worker that answers `/api/*` and checks the caller (`getCaller`) before it
+  serves `/team/`. No build step. See
+  [docs/wrangler.md](https://github.com/rosskukulinski/tailworks/blob/master/docs/wrangler.md#assets).
 - `refund-approval`: a Cloudflare Workflow (`AgentWorkflow`) started by an
   Agent that waits for a person's approval (`waitForApproval`). Tailworks delivers
   the approval only from a tailnet identity holding `github.com/rosskukulinski/tailworks/cap/approve`

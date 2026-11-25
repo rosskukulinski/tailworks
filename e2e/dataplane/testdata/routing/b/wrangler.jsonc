@@ -1,0 +1,8 @@
+{
+  "name": "rt-b",
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-01",
+  "durable_objects": { "bindings": [{ "name": "PIN", "class_name": "Pin" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Pin"] }],
+  "vars": { "VER": "b0" },
+}

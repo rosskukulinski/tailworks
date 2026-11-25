@@ -97,6 +97,9 @@ func (s *SQLStore) PruneAudit(ctx context.Context, chain string, through, batch,
 			chain, cp.Seq, cp.Hash, cp.Pruned, cp.At); err != nil {
 			return err
 		}
+		if _, err := tx.ExecContext(ctx, s.q("DELETE FROM audit_workloads WHERE chain=? AND seq<=?"), chain, through); err != nil {
+			return err
+		}
 		_, err = tx.ExecContext(ctx, s.q("DELETE FROM audit WHERE chain=? AND seq<=?"), chain, through)
 		return err
 	})

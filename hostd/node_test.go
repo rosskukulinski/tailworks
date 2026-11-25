@@ -10,6 +10,7 @@ import (
 )
 
 func TestSignCallerFormat(t *testing.T) {
+	t.Parallel()
 	key := []byte("0123456789abcdef0123456789abcdef")
 	h := signCaller(key, map[string]any{"v": 1, "caller": map[string]any{"nodeId": "n1"}, "iat": 5})
 	parts := strings.Split(h, ".")
@@ -29,6 +30,7 @@ func TestSignCallerFormat(t *testing.T) {
 }
 
 func TestParseProxyAuth(t *testing.T) {
+	t.Parallel()
 	ok := "Basic " + base64.StdEncoding.EncodeToString([]byte("tw:tok:en"))
 	if u, p, good := parseProxyAuth(ok); !good || u != "tw" || p != "tok:en" {
 		t.Fatal(u, p, good)

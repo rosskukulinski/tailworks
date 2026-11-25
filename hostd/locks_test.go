@@ -83,10 +83,10 @@ func (c *lockClientNode) lock(t *testing.T, base, name, op string, body map[stri
 // template's client (withLock) against an external store that checks the
 // token. docs/locks.md cites these subtests.
 func TestLockTemplate(t *testing.T) {
+	t.Parallel()
 	// lockuser (a workload) calls the lock workload over the tailnet on the
-	// same host: a sibling hairpin, refused by default (ADR-019 rule 2).
-	s := startSuiteCapsOpts(t, fakemgmt.Config{}, tailcfg.PeerCapMap{nettest.TestCap: []tailcfg.RawMessage{nettest.TestCapValue}},
-		func(o *hostdtest.Options) { o.AllowSiblingEgress = true })
+	// same host: netd's in-process hop (samehost.go), no hairpin flag.
+	s := startSuiteCapsOpts(t, fakemgmt.Config{}, tailcfg.PeerCapMap{nettest.TestCap: []tailcfg.RawMessage{nettest.TestCapValue}}, nil)
 	e := s.e
 	ctx := context.Background()
 

@@ -64,6 +64,7 @@ func pushImage(t *testing.T, dst oci.Target, repo, tag, imageEnv string) (manife
 // changes nothing that runs; a tenant naming another tenant's image is
 // refused at deploy.
 func TestContainerRegistryPull(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	procs := &sandboxtest.Procs{}
 	// The upstream registry ("docker.io" in production; mgmt mirrors it).

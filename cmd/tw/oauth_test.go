@@ -10,12 +10,13 @@ import (
 	"github.com/rosskukulinski/tailworks/mgmt"
 )
 
-// TestOperatorSnippet: the oauth-mode snippet is exactly what INSTALL.md
-// prints (tag:tw owns tag:tw-mgmt and tag:tw-host; host ⇄ mgmt grants;
+// TestOperatorSnippet: the oauth-mode snippet is exactly what README.md
+// shows (tag:tw owns tag:tw-mgmt and tag:tw-host; host ⇄ mgmt grants;
 // autogroup:admin's admin cap; no nodeAttrs), passes the RT-06 checker with
 // the allowance for autogroup:admin, and merges additively into a
 // policy that already has rules (existing owners kept, nothing removed).
 func TestOperatorSnippet(t *testing.T) {
+	t.Parallel()
 	s := operatorSnippet()
 	wantOwners := map[string][]string{
 		"tag:tw":      {"autogroup:admin"},
@@ -83,15 +84,16 @@ var adminSrcOptions = policy.Options{AllowSrcs: []string{"autogroup:admin"}}
 // client (no removed mode offered); policy_missing_tag_owners carries the
 // exact tagOwners snippet.
 func TestModeChoiceAndTypedErrors(t *testing.T) {
+	t.Parallel()
 	e := mintModeRequired()
 	text := strings.Join(e.Lines, "\n")
 	if e.Code != "mint_mode_required" || !strings.Contains(text, "--oauth-client-file") || !strings.Contains(text, "Auth Keys") || !strings.Contains(text, "tag:tw") ||
 		strings.Contains(text, "--wif") || strings.Contains(text, "TS_API_KEY") {
 		t.Fatalf("mode choice order/content:\n%s", text)
 	}
-	pe := policyMissingTagOwners("why", nil)
+	pe := policyMissingTagOwners("why", nil, nil)
 	fix := strings.Join(pe.Fix, "\n")
-	if pe.Code != "policy_missing_tag_owners" || !strings.Contains(fix, `"tag:tw-mgmt": ["autogroup:admin","tag:tw"]`) || !strings.Contains(fix, `"tag:tw-host": ["autogroup:admin","tag:tw"]`) {
+	if pe.Code != "policy_missing_tag_owners" || !strings.Contains(fix, `"tag:tw-mgmt": ["autogroup:admin", "tag:tw"]`) || !strings.Contains(fix, `"tag:tw-host": ["autogroup:admin", "tag:tw"]`) {
 		t.Fatalf("policy_missing_tag_owners fix:\n%s", fix)
 	}
 }

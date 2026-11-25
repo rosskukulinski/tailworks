@@ -22,7 +22,7 @@ func TestUpMgmtJoinKeyRemoved(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short")
 	}
-	wd, err := nettest.WorkerdBinary()
+	_, err := nettest.WorkerdBinary()
 	if err != nil {
 		t.Skip(err)
 	}
@@ -41,7 +41,6 @@ func TestUpMgmtJoinKeyRemoved(t *testing.T) {
 	keyFile := filepath.Join(work, "oauth.env")
 	writeFakeOAuthFile(t, keyFile)
 	e := &cliflow.Env{T: t, BinDir: bin, StateDir: state, WorkDir: work}
-	t.Setenv("TW_WORKERD", wd)
 	t.Setenv("TW_NO_UPDATE_CHECK", "1")
 	t.Cleanup(func() {
 		if t.Failed() {

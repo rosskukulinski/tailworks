@@ -5,7 +5,7 @@ package mgmt
 // reads from what it applied and refuses writes (store_degraded). Its
 // host reports that here (POST …/stores/{kind}/{name}/status), once when
 // it stops and once when it heals, so mgmt can show it (StoreInfo.Degraded:
-// `tw d1 list`, `tw kv namespace ls`, `tw r2 bucket ls`, `tw status`, the
+// `tw d1 ls`, `tw kv namespace ls`, `tw r2 bucket ls`, `tw status`, the
 // console) and audit it (store_replay_failed). An operator who decides the
 // entry is poison skips it (POST …/repair, `tw d1 repair --skip <seq>`):
 // mgmt deletes that one entry from the journal, so every host's replay

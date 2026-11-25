@@ -10,6 +10,7 @@ import (
 )
 
 func TestMigrationFiles(t *testing.T) {
+	t.Parallel()
 	ms := Migrations()
 	if len(ms) == 0 {
 		t.Fatal("no embedded migrations")
@@ -50,6 +51,7 @@ func openTestStore(t *testing.T) (*SQLStore, string) {
 }
 
 func TestSchemaStatusAfterOpen(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, dsn := openTestStore(t)
 	st, err := s.SchemaStatus(ctx)
@@ -110,6 +112,7 @@ func TestSchemaAheadAndDowngradeGuard(t *testing.T) {
 }
 
 func TestContractMigrationsWaitForOlderReplicas(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, _ := openTestStore(t)
 	defer s.Close()
@@ -142,6 +145,7 @@ func TestContractMigrationsWaitForOlderReplicas(t *testing.T) {
 }
 
 func TestRestoreFence(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, dsn := openTestStore(t)
 	l, err := s.AcquireLease(ctx, "t/w", "h1", time.Minute, time.Now())

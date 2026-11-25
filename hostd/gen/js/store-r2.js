@@ -261,6 +261,16 @@ async function fresh(s) {
   return p;
 }
 
+// notWritten: an index write that failed with e certainly didn't land
+// (a precondition or checksum failure, or the journal refused it), so the
+// blob it would have named can go. Any other failure (mgmt didn't answer,
+// or its answer was lost after the commit) may have landed: keep the blob.
+// An orphan is wasted space; a missing blob breaks the key (#574).
+function notWritten(e) {
+  if (e instanceof R2Err) return true;
+  return /\[(lease_lost|store_conflict|bad_request|unknown_store|store_limit)\]/.test(String(e?.message ?? e));
+}
+
 // blobGC deletes blobs nothing references any more (best effort; an
 // orphan is only wasted space).
 function blobGC(env, waitUntil, bucket, ids) {
@@ -814,7 +824,7 @@ export class R2Backend extends WorkerEntrypoint {
       this.#gc(res.garbage);
       return jsonResponse(rawMeta({ key: m.object, ...row }));
     } catch (e) {
-      this.#gc([blob.id]);
+      if (notWritten(e)) this.#gc([blob.id]);
       throw e;
     }
   }
@@ -855,7 +865,7 @@ export class R2Backend extends WorkerEntrypoint {
       this.#gc(res.garbage);
       return jsonResponse({ etag: part.etag });
     } catch (e) {
-      this.#gc([blob.id]);
+      if (notWritten(e)) this.#gc([blob.id]);
       throw e;
     }
   }

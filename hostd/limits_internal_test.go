@@ -8,6 +8,7 @@ import (
 // TestHeapCapDefaults (#115): 0 takes the default, a negative value turns
 // the cap off, anything else is used as given.
 func TestHeapCapDefaults(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct{ cfg, want int }{{0, DefaultWorkerdHeapMiB}, {-1, 0}, {256, 256}} {
 		h := &Host{cfg: Config{WorkerdHeapMiB: c.cfg}}
 		if got := h.workerdHeapMiB(); got != c.want {
@@ -23,6 +24,7 @@ func TestHeapCapDefaults(t *testing.T) {
 // of its own arguments, unless it already sets one in node.args or
 // NODE_OPTIONS (the app's own choice wins) or the cap is off.
 func TestNodeHeapArgs(t *testing.T) {
+	t.Parallel()
 	main := []string{"--import", "/i/secrets.mjs", "server.js"}
 	if got := nodeHeapArgs(main, nil, 2048); !slices.Equal(got, append([]string{"--max-old-space-size=2048"}, main...)) {
 		t.Fatalf("default: %q", got)

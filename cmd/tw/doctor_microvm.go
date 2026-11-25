@@ -24,6 +24,9 @@ func doctorMicroVM(s *state) (string, string, string) {
 	if _, err := os.Stat("/dev/kvm"); err != nil {
 		return "warn", "no /dev/kvm: microvm deployments are refused here (tier_unavailable)", "run on a host with KVM (bare metal, or a VM with nested virtualization)"
 	}
+	if in, npm := npmSelf(); npm { // npm_install.go
+		return "warn", "the npm package (" + in.Package + ") has no microVM guest: microvm deployments are refused here (tier_unavailable)", "install the release tarball for the microVM tier: scripts/get.sh (docs/INSTALL.md)"
+	}
 	share := filepath.Join(filepath.Dir(exeDir()), "share", "tailworks", "vm")
 	for _, a := range []string{"vmlinux", "rootfs.ext4"} {
 		if !isFile(filepath.Join(share, a)) {

@@ -24,6 +24,10 @@ func (c *offsetClock) advance(d time.Duration)                { c.off.Add(int64(
 // deploy's secret grant came before any heartbeat had renewed it, got
 // lease_lost, and the deployment stayed failed (seen in e2e-tw-upgrade
 // after a rollback restored a store older than the TTL).
+//
+// Not parallel: with heartbeats off, h1 is live only for HostLeaseTTL after
+// it registers, so the first deploy must land within that window, which a
+// CPU shared with the parallel tests can miss (no_host "h1: not live").
 func TestRedeployAfterLeaseExpired(t *testing.T) {
 	clk := &offsetClock{}
 	s := startSuiteCapsOpts(t, fakemgmt.Config{}, tailcfg.PeerCapMap{nettest.TestCap: []tailcfg.RawMessage{nettest.TestCapValue}},

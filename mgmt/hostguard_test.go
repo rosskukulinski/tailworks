@@ -10,6 +10,7 @@ import (
 )
 
 func TestMgmtHostNames(t *testing.T) {
+	t.Parallel()
 	self := SelfInfo{DNSName: "tw-mgmt-1.t.ts.net.", Tailnet: "t.ts.net"}
 	got := NewHostAllowlist(MgmtHostNames(self, "tw-mgmt", "svc:tw-api")...).Names()
 	want := []string{"tw-api", "tw-api.t.ts.net", "tw-mgmt", "tw-mgmt-1", "tw-mgmt-1.t.ts.net", "tw-mgmt.t.ts.net"}
@@ -19,6 +20,7 @@ func TestMgmtHostNames(t *testing.T) {
 }
 
 func TestHostAllowlistAllowed(t *testing.T) {
+	t.Parallel()
 	a := NewHostAllowlist(MgmtHostNames(SelfInfo{DNSName: "tw-mgmt.t.ts.net", Tailnet: "t.ts.net"}, "tw-mgmt", "")...)
 	for host, want := range map[string]bool{
 		"tw-mgmt.t.ts.net":                  true,
@@ -54,6 +56,7 @@ func TestHostAllowlistAllowed(t *testing.T) {
 // them) is refused with 421 misdirected_request for reads and mutations
 // alike, before WhoIs; mgmt's real names and IPs keep working.
 func TestHostGuardRebinding(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	self := SelfInfo{DNSName: "tw-mgmt.t.ts.net", Tailnet: "t.ts.net", IP: "100.64.0.9", NodeID: "nSELF"}
 	srv := &Server{M: e.m, Self: self, Version: "test-hostguard", Listeners: []string{"tsnet:80"}}
@@ -107,6 +110,7 @@ func TestHostGuardRebinding(t *testing.T) {
 // mounted without TailnetHandler) can't vouch for itself with a matching
 // Origin.
 func TestBrowserGuardOriginAllowlist(t *testing.T) {
+	t.Parallel()
 	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
 	g := browserGuard(NewHostAllowlist("tw-mgmt.t.ts.net", "tw-mgmt"), ok)
 	post := func(host, origin string) int {

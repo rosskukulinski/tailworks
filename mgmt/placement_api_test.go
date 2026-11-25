@@ -12,6 +12,7 @@ import (
 // moves the lease at epoch+1, the stateful-move guard, and tier
 // eligibility.
 func TestAPIPlacement(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	c := e.c
 	var tn struct{ TenantID string }
@@ -25,6 +26,7 @@ func TestAPIPlacement(t *testing.T) {
 		hosts[h.id] = e.asHost(h.id)
 		hosts[h.id].ok("PUT", "/v1/hosts/"+h.id, map[string]any{"capacityNodes": h.cap, "tiers": h.tiers}, nil)
 	}
+	keepHostsLive(t, e, "h1", "h2", "h3")
 	stateless := func(extra string) []byte {
 		return makeBundle(t, map[string]string{"tailworks.jsonc": `{` + extra + ` "tailnet": {"tags": ["tag:w"], "connects": ["tag:db"]}}`, "dist/index.js": "export default {}"})
 	}

@@ -9,9 +9,9 @@ import (
 	"github.com/rosskukulinski/tailworks/mgmt"
 )
 
-// TestCLIR2: bucket create / ls / rm on the stores API, and object ls
-// folding the bucket's journal (puts and deletes by key, as the platform's
-// R2 kind writes them) into the live keys.
+// TestCLIR2: bucket create / ls / rm on the stores API, and object ls (mgmt
+// folds the bucket's journal: puts and deletes by key, as the platform's
+// R2 kind writes them, into the live keys).
 func TestCLIR2(t *testing.T) {
 	e := newPubEnv(t)
 	e.setPolicy(`{}`)

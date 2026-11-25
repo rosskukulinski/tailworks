@@ -116,7 +116,7 @@ Thrown in the Worker · platform. **When:** app code sent an event of type `appr
 403 · mgmt, hostd, netd. **When:** a spawn names a child tag not owned by the parent's tags, the parent is unknown (404) or dead (410), or an object tried to kill something that is not itself or a descendant. **Fix:** fix the `tagOwners` so the parent's tag owns the child's; kill through an ancestor or the CLI.
 
 ### deploy_crashloop
-500 · cli. **When:** `tw deploy` was waiting for the deployment and its workerd, after it had answered its health check once, kept exiting: the deployment is `crashloop`. The host keeps restarting it with exponential backoff (200 ms doubling to 5 min) and never gives up; it reports `active` again once a restart answers. The detail lines are the attempt count and workerd's last log lines. **Fix:** `tw logs <workload>`; fix the Worker and deploy again. See [observability.md](observability.md#crash-loops).
+500 · cli. **When:** `tw deploy`, `tw promote` or `tw rollback` was waiting for the deployment and its workerd, after it had answered its health check once, kept exiting: the deployment is `crashloop`. The host keeps restarting it with exponential backoff (200 ms doubling to 5 min) and never gives up; it reports `active` again once a restart answers. The detail lines are the attempt count and workerd's last log lines. **Fix:** `tw logs <workload>`; fix the Worker and deploy again. See [observability.md](observability.md#crash-loops).
 
 ### deploy_failed
 500 · cli. **When:** the host could not start the workload (bad bundle or config, or workerd or node exited before it ever answered its health check); the host does not retry it. `tw dev` prints workerd's output. **Fix:** read the detail lines; `tw logs <workload>` on the host.

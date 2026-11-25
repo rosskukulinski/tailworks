@@ -196,29 +196,9 @@ func cmdPromote(args []string) error {
 		})
 		return nil
 	}
-	var v mgmt.DeploymentView
-	last := ""
-	for {
-		if err := mc.Do(ctx, "GET", "/v1/deployments/"+dv.DeploymentID, nil, &v); err != nil {
-			return err
-		}
-		if st := v.Status + "/" + v.Endpoint.Status; st != last {
-			ev.emit("status", map[string]any{"deploymentID": dv.DeploymentID, "status": v.Status, "node": v.Endpoint.Status})
-			last = st
-		}
-		if v.Status == "failed" {
-			return fail("deploy_failed", "the host could not start the promoted "+workload, strings.Split(v.Error, "\n")...).withFix("tw logs " + workload)
-		}
-		if v.Status == "active" && v.Endpoint.Status == "ready" && v.Endpoint.MagicDNS != "" {
-			break
-		}
-		if v.Endpoint.Status == "failed" || v.Endpoint.Status == "killed" {
-			return workloadNodeFailed(workload, v.Endpoint.Status) // workloadnode.go
-		}
-		if time.Since(ds) > *wait {
-			return fail("identity_pending", fmt.Sprintf("%s not ready after %v (status %s, node %s)", workload, *wait, v.Status, v.Endpoint.Status)).withFix("tw status", "tw logs "+workload)
-		}
-		time.Sleep(100 * time.Millisecond)
+	v, _, err := readyWait{mc: mc, ev: ev, id: dv.DeploymentID, workload: workload, what: "the promoted " + workload, since: ds, wait: *wait}.run(ctx) // deployready.go
+	if err != nil {
+		return err
 	}
 	if err := waitReplicas(ctx, mc, mgmt.DeployResponse{DeploymentID: dv.DeploymentID, Host: dv.Host, Replicas: dv.Replicas}, ds, *wait); err != nil {
 		return err

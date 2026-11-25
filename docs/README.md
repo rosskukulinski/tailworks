@@ -49,8 +49,11 @@ design records (`design/`) don't; read them here on GitHub.
   demos and patterns go with their guides: `refund-approval`
   ([approvals](approvals.md)), `lock` ([locks](locks.md)), `node-workflow`
   ([the Node.js tier](node-tier.md)), `python` ([Python Workers](python.md)),
-  and `ai-agent` (an AI SDK agent whose tools need the `mcp` template deployed
-  as workload `mcp`; [its README](../js/packages/create-tailworks/templates/ai-agent/README.md)).
+  `ai-agent` (an AI SDK agent whose tools need the `mcp` template deployed
+  as workload `mcp`; [its README](../js/packages/create-tailworks/templates/ai-agent/README.md)),
+  `chat-agent` (Cloudflare's `AIChatAgent` chat example, with a chat page)
+  and `pi-agent` (Cloudflare's Pi harness example); both use an LLM gateway
+  on your tailnet, such as Aperture, when you point them at it.
   Each has a README.md: what it shows, how to run it, what to change.
 - [The launch demo](demo.md): `scripts/demo.sh` deploys an MCP server and an
   agent, shows a tool call allowed, then denied by one grant, then the agent

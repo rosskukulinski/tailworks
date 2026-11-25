@@ -47,6 +47,16 @@ var initTemplates = []initTemplate{
 		Guide:   "its README.md",
 	},
 	{
+		Name:    "chat-agent",
+		Purpose: "Cloudflare's AIChatAgent chat example, with a chat page (mock model, or an LLM gateway)",
+		Guide:   "its README.md",
+	},
+	{
+		Name:    "pi-agent",
+		Purpose: "Cloudflare's Pi harness (PiHarness) in a Durable Object (mock model, or an LLM gateway)",
+		Guide:   "its README.md",
+	},
+	{
 		Name:    "refund-approval",
 		Purpose: "a Workflow that waits for a person's approval",
 		Guide:   "docs/approvals.md",

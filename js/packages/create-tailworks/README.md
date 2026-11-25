@@ -27,6 +27,19 @@ need it. The templates are in [`templates/`](templates/):
   response. It ships with a scripted mock model (`src/model.ts`, no keys);
   swap in a real provider. Its tools need a second app, the `mcp` template
   deployed as workload `mcp`, and a grant; its README walks through both.
+- `chat-agent`: Cloudflare's [chat agent example](https://developers.cloudflare.com/agents/examples/chat-agent/):
+  an `AIChatAgent` (`@cloudflare/ai-chat`) and a chat page at `/`, with a
+  server tool, a client tool the browser answers, and a tool that asks for
+  approval. One chat per caller, each its own node. The model is
+  [Aperture](https://tailscale.com/docs/aperture/what-is-aperture) (or any
+  OpenAI-compatible gateway on your tailnet) when `vars.LLM_URL` is set,
+  else a scripted mock.
+- `pi-agent`: Cloudflare's [Pi harness](https://developers.cloudflare.com/agents/harnesses/pi/)
+  (`PiHarness` from `agents/harness/pi`): Pi Durable in a Durable Object,
+  its transcript, tool calls and recovery in the object's SQLite, with a
+  `word_count` tool. One assistant per caller. The model is Aperture (or
+  any OpenAI-compatible gateway) when `vars.LLM_URL` is set, else a
+  scripted mock.
 - `lock`: a lease-based lock and leader-election service: one Durable
   Object per lock name, holders recorded by tailnet identity, fencing tokens
   that keep increasing across a move to another host, and a copyable client

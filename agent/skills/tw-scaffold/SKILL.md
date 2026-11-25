@@ -15,6 +15,8 @@ the template closest to what the user asked for:
 | `mcp` | a stateless MCP server; each tool is allowed or denied by the caller's tailnet grant | `/mcp` |
 | `static-site` | wrangler `assets`: the files in `public/` served next to a Worker that answers `/api/*` and checks the caller before serving `/team/` | `/` |
 | `ai-agent` | a Vercel AI SDK agent (one per caller) that calls MCP tools over the tailnet; ships a scripted stand-in model, no LLM key; needs the `mcp` template deployed as workload `mcp` plus a cap grant (its README) | `/` |
+| `chat-agent` | Cloudflare's chat agent example: an `AIChatAgent` (one chat per caller) with a chat page, a server tool, a browser tool and an approval tool; a scripted model unless `vars.LLM_URL` points at an OpenAI-compatible gateway on the tailnet (its README) | `/` |
+| `pi-agent` | Cloudflare's Pi harness example: `PiHarness` in a Durable Object (one assistant per caller), with a `word_count` tool; a scripted model unless `vars.LLM_URL` points at an OpenAI-compatible gateway on the tailnet (its README) | `/?prompt=…` |
 | `node-workflow` | a Vercel Workflow on tailworks' Node.js process tier (needs Node.js 24+ and `npm install`) | `/` |
 
 <!-- tw-eval: scaffold -->

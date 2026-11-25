@@ -1,7 +1,7 @@
 {
   "name": "create-tailworks",
   "version": "0.5.0",
-  "description": "Scaffold (templates hello, agent, mcp, ai-agent, lock, static-site, refund-approval, node-workflow) and bundle tailworks apps",
+  "description": "Scaffold (templates hello, agent, mcp, ai-agent, chat-agent, pi-agent, lock, static-site, refund-approval, node-workflow) and bundle tailworks apps",
   "keywords": [
     "tw",
     "tailscale",

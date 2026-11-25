@@ -66,3 +66,33 @@ Final, after merging origin/master (4ffbb469; #277, merged since, only changes c
 
 - `make lint`, `make test`, `make templates-typecheck` (9 templates), `make test-sdk`: all ok.
 - Static assets support split out to issue #278.
+
+## 2026-11-25: merged origin/master, fixed CI
+
+CI (2026-11-24) failed in every Node job at `npm ci`: the lockfile was
+written by npm 11, which leaves out the optional `@emnapi/core` /
+`@emnapi/runtime` peers that CI's npm 10 requires. `package-lock.json` is
+now regenerated with npm 10.9.9 (CI's); `npm ci` passes under npm 10 and 11.
+
+Merge resolution: master moved the template list into `cmd/tw/templates.go`
+(four starting points in help, the rest under `tw init --list`), so
+chat-agent and pi-agent are two rows in that table (demos) instead of
+edits to the usage and help lines. Both templates now pin
+`@tailworks/tailnet ^0.5.0` and workers-types `5.20261121.1`, like the
+others. COMPAT.md keeps master's upstream-examples rows; the
+`AIChatAgent` "not tested" row is replaced by the template-tested rows.
+The `tw-scaffold` skill lists both templates.
+
+Tests (merged tree):
+
+- `make lint`: ok.
+- `make test` (offloaded to mbp): ok.
+- `make templates-typecheck`: all 11 templates ok (`tw types --check` ok; the
+  committed worker-configuration.d.ts files were already current).
+- `make test-sdk`: ok.
+- `make npm-cli-test`: ok.
+- `make demo-test`: PASS.
+- `go test ./cmd/tw -run 'TestTemplateTests|TestCreateTailworksRenamesLikeInit|TestInitTemplatesTable|TestInitList|TestHelp'`: ok, chat-agent and pi-agent included.
+- Not run: `make e2e-compat` (real tailnet, writes policy; the suite's
+  projects pin their own deps and its upstream examples already use
+  agents 0.34.0).

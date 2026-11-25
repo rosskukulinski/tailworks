@@ -48,6 +48,28 @@ func TestAppTags(t *testing.T) {
 	}
 }
 
+// TestAppTagsRenamesOnce: a tag that one rename produces is never fed to
+// another. Here the workload's new tag (tag:tw-wl-a) is class B's old tag,
+// so a per-tag pass in the wrong order would turn the workload's tag into
+// class B's new one.
+func TestAppTagsRenamesOnce(t *testing.T) {
+	t.Parallel()
+	in := `{"name":"t","tailnet":{"tags":["tag:tw-wl-b"],"objects":{"B":{"tags":["tag:tw-wl-a"]}}}}`
+	want := `{"name":"t","tailnet":{"tags":["tag:tw-wl-a"],"objects":{"B":{"tags":["tag:tw-a-b"]}}}}`
+	for range 20 { // map order varies per call
+		out, ren, err := appTags([]byte(in), "a")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(out) != want {
+			t.Fatalf("got  %s\nwant %s", out, want)
+		}
+		if len(ren) != 2 {
+			t.Fatalf("renamed %v, want 2 tags", ren)
+		}
+	}
+}
+
 func TestClassLabel(t *testing.T) {
 	t.Parallel()
 	for in, want := range map[string]string{"SupportAgent": "support-agent", "MCPServer": "mcpserver", "budget": "budget", "AiAgent": "ai-agent"} {

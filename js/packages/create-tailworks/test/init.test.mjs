@@ -23,6 +23,7 @@ function create(...args) {
 
 test("workloadLabel matches tw init's", () => {
   assert.equal(workloadLabel("My_App--2-"), "my-app-2");
+  assert.equal(workloadLabel("\u0130stanbul_App"), "istanbul-app"); // Go lowercases \u0130 to i
   assert.equal(workloadLabel("a".repeat(39) + "-bc"), "a".repeat(39));
 });
 

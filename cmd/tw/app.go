@@ -554,38 +554,11 @@ func cmdDeploy(args []string) error {
 		})
 		return nil
 	}
-	var v mgmt.DeploymentView
-	activeAt := time.Duration(0)
-	lastStatus := ""
-	for {
-		if err := mc.Do(ctx, "GET", "/v1/deployments/"+dr.DeploymentID, nil, &v); err != nil {
-			return err
-		}
-		if st := v.Status + "/" + v.Endpoint.Status; st != lastStatus {
-			ev.emit("status", map[string]any{"deploymentID": dr.DeploymentID, "status": v.Status, "node": v.Endpoint.Status})
-			lastStatus = st
-		}
-		if v.Status == "failed" {
-			return fail("deploy_failed", "the host could not start "+a.Name, strings.Split(v.Error, "\n")...).withFix("tw logs " + a.Name)
-		}
-		if v.Status == "crashloop" { // it served, then kept exiting (hostd/restart.go)
-			return fail("deploy_crashloop", a.Name+" started, then its workerd kept exiting; the host keeps restarting it with backoff", strings.Split(v.Error, "\n")...).withFix("tw logs " + a.Name)
-		}
-		if v.Status == "active" && activeAt == 0 {
-			activeAt = time.Since(ds)
-			res.Timings["active"] = ms(activeAt)
-		}
-		if v.Status == "active" && v.Endpoint.Status == "ready" && v.Endpoint.MagicDNS != "" {
-			break
-		}
-		if v.Endpoint.Status == "failed" || v.Endpoint.Status == "killed" {
-			return workloadNodeFailed(a.Name, v.Endpoint.Status) // workloadnode.go
-		}
-		if time.Since(ds) > *wait {
-			return fail("identity_pending", fmt.Sprintf("%s not ready after %v (status %s, node %s)", a.Name, *wait, v.Status, v.Endpoint.Status)).withFix("tw status", "tw logs "+a.Name)
-		}
-		time.Sleep(100 * time.Millisecond)
+	v, activeAt, err := readyWait{mc: mc, ev: ev, id: dr.DeploymentID, workload: a.Name, what: a.Name, since: ds, wait: *wait}.run(ctx) // deployready.go
+	if err != nil {
+		return err
 	}
+	res.Timings["active"] = ms(activeAt)
 	if err := waitReplicas(ctx, mc, dr, ds, *wait); err != nil {
 		return err
 	}

@@ -1088,6 +1088,53 @@ function traceGate(obj, info) {
   });
 }
 
+// js/packages/tailnet/src/facetns.ts
+var BY_NAME = "tw objects must be addressed by name (getByName/idFromName)";
+var FacetId = class _FacetId {
+  name;
+  constructor(name) {
+    this.name = name;
+  }
+  // Not workerd's hex id (only the platform can derive that); unique per
+  // class, as the name is.
+  toString() {
+    return this.name;
+  }
+  equals(other) {
+    return other instanceof _FacetId && other.name === this.name;
+  }
+};
+function facetNamespace(ns) {
+  return Object.freeze({
+    getByName(name) {
+      return ns.getByName(String(name));
+    },
+    idFromName(name) {
+      return new FacetId(String(name));
+    },
+    idFromString(_s) {
+      throw new TailnetError("bad_request", `idFromString: ${BY_NAME}`);
+    },
+    newUniqueId(_opts) {
+      throw new TailnetError("bad_request", `newUniqueId: ${BY_NAME}; newUniqueId() is not supported yet`);
+    },
+    get(id, _opts) {
+      const n = id?.name;
+      if (!(id instanceof FacetId) || typeof n !== "string" || !n) throw new TailnetError("bad_request", `get: ${BY_NAME}`);
+      return ns.getByName(n);
+    },
+    jurisdiction(_j) {
+      throw new Error("Jurisdiction restrictions are not implemented in workerd.");
+    }
+  });
+}
+function facetNamespaces(env, bindings) {
+  if (!env || typeof env !== "object") return env;
+  const out = { ...env };
+  for (const k of Object.keys(bindings)) if (env[k]) out[k] = facetNamespace(env[k]);
+  return out;
+}
+
 // js/packages/tailnet/src/runtime.ts
 installFetchPropagation();
 function spanFlusher(tw, ctx, as) {
@@ -1156,6 +1203,11 @@ function createTailnetContext(tw, env, bindings, self, ticket) {
   };
   const tn = {
     fetch: tfetch,
+    // forward is no longer part of TailnetContext: signed on-behalf-of
+    // assertions (RFC §4.6) are not built, so it was only fetch with the
+    // request's headers copied. Kept, unlisted, for one minor release so
+    // deployed apps that call it keep working; use
+    // ctx.tailnet.fetch(new Request(url, request)) instead.
     forward(request, to, init) {
       const hasBody = request.method !== "GET" && request.method !== "HEAD";
       return tfetch(new Request(String(to), { method: request.method, headers: request.headers, body: hasBody ? request.body : void 0, ...init }));
@@ -1295,7 +1347,7 @@ function wrapFacetClass(C, name, bindings, opts = {}) {
     [name]: class extends C {
       constructor(ctx, env) {
         const tw = env?.__TW;
-        const e = guardEnv(env, bindings, "tailnet", admitter(tw, {}));
+        const e = guardEnv(facetNamespaces(env, bindings), bindings, "tailnet", admitter(tw, {}));
         for (const k of Object.keys(opts.workflows ?? {})) if (e?.[k]) e[k] = workflowClient(e[k]);
         define(ctx, createTailnetContext(tw, e, bindings));
         installAlarmShim(ctx, tw);
@@ -1751,6 +1803,11 @@ function callCtx(ctx, cf) {
     }
   });
 }
+var PY_RPC = /* @__PURE__ */ Symbol.for("tailworks.pyRpc");
+function pyCallCf(scf) {
+  const { tw: _tw, ...rest } = scf ?? {};
+  return rest;
+}
 function bindingDispatcher(T, bindings) {
   const target = (ep) => {
     const H = ep ? T[ep] : T.default;
@@ -1767,6 +1824,9 @@ function bindingDispatcher(T, bindings) {
   return {
     async fetch(ctx, env, req) {
       const ep = String(req?.cf?.tw?.binding?.entrypoint ?? "");
+      if (ep && typeof T.default?.[PY_RPC] === "function" && !(ep in T)) {
+        return new TailnetError("service_not_found", `entrypoint ${ep} of a Python Worker answers RPC calls, not fetch(); bind the default entrypoint for fetch()`).toResponse();
+      }
       let t;
       try {
         t = target(ep);
@@ -1785,6 +1845,15 @@ function bindingDispatcher(T, bindings) {
       const tw = env?.__TW;
       const sealed = await sealedRequest(tw, { cf });
       const scf = sealed?.cf ?? {};
+      const py = T.default?.[PY_RPC];
+      if (typeof py === "function") {
+        if (typeof method !== "string" || method in Object.prototype || HANDLER_METHODS.includes(method) || method === "constructor") {
+          throw new TypeError(`The RPC receiver does not implement the method "${method}".`);
+        }
+        const ticket2 = typeof scf?.tw?.ticket === "string" && scf.tw.ticket ? scf.tw.ticket : void 0;
+        const genv = guardEnv(env, bindings, "tailnet", admitter(tw, { ticket: ticket2 }));
+        return await py(genv, ep || "", method, args, pyCallCf(scf));
+      }
       const t = target(ep);
       if (typeof t.H !== "function") throw new TypeError(`entrypoint ${t.name} is not a WorkerEntrypoint class; RPC needs one`);
       const cctx = callCtx(ctx, scf);

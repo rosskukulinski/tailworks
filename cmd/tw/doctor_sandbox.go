@@ -30,9 +30,8 @@ func doctorSandbox(s *state) (string, string, string) {
 	case sb == hostd.SandboxLandlock:
 		return doctorLandlock(s)
 	case runtime.GOOS == "linux":
-		_, err := procsb.ABI()
-		return "warn", fmt.Sprintf("NO PROCESS SANDBOX: Landlock is unavailable on this kernel (%v). Process-tier workerd and Node apps of all tenants share one uid and are kept apart by 0700 dirs only, so tw-hostd refuses a second tenant's process-tier deployments (unless started with -insecure-shared-host)", err),
-			"use a kernel with Landlock (5.13+, CONFIG_SECURITY_LANDLOCK=y, \"landlock\" in the lsm= boot parameter; Ubuntu 22.04+, Debian 12+, Fedora have it), or deploy with tier \"microvm\""
+		detail, fix := noLandlock() // up_preflight.go
+		return "warn", detail, fix
 	case sb != hostd.SandboxSeatbelt:
 		return "skip", "no process sandbox on " + runtime.GOOS + ": process-tier workerd and Node apps of all tenants share one uid and are kept apart by 0700 dirs only",
 			"for isolation between tenants, deploy with tier \"microvm\" on Linux"

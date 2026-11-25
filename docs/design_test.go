@@ -8,10 +8,10 @@ import (
 )
 
 // TestADRIndex: every row of docs/design/adr/README.md links an ADR file
-// that exists, every numbered ADR file has a row, rows are in number order,
-// and, in CI, no ADR file still carries a slug instead of a number
-// (AGENTS.md rule 5: a slug is only for a branch, so the PR that merges it
-// numbers it).
+// that exists, every numbered ADR file has a row, and rows are in number
+// order. An un-numbered draft (`<slug>.md`, AGENTS.md rule 5) needs no row,
+// only a first line naming it `# ADR-<slug>`, so a design PR can pass CI
+// before the draft gets its number.
 func TestADRIndex(t *testing.T) {
 	const dir = "design/adr/"
 	b, err := os.ReadFile(dir + "README.md")
@@ -20,6 +20,7 @@ func TestADRIndex(t *testing.T) {
 	}
 	row := regexp.MustCompile(`(?m)^\| \[([^\]]+)\]\(([^)]+)\) \|`)
 	numbered := regexp.MustCompile(`^(\d{3})-[a-z0-9-]+\.md$`)
+	draft := regexp.MustCompile(`^[a-z][a-z0-9-]*\.md$`)
 	rows := map[string]bool{}
 	last := ""
 	for _, m := range row.FindAllStringSubmatch(string(b), -1) {
@@ -50,13 +51,17 @@ func TestADRIndex(t *testing.T) {
 			continue
 		}
 		if !numbered.MatchString(n) {
-			// A slug draft is fine on a branch; the PR that merges it
-			// to master numbers it, and CI (CI=true) enforces that.
-			report := t.Logf
-			if os.Getenv("CI") != "" {
-				report = t.Errorf
+			if !draft.MatchString(n) {
+				t.Errorf("%s%s: name an ADR NNN-<slug>.md, or <slug>.md while it's a draft", dir, n)
+				continue
 			}
-			report("%s%s has no number: number it in the PR that merges it to master (AGENTS.md rule 5)", dir, n)
+			h, err := os.ReadFile(dir + n)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := "# ADR-" + strings.TrimSuffix(n, ".md"); !strings.HasPrefix(string(h), want) {
+				t.Errorf("%s%s: first line should start %q", dir, n, want)
+			}
 			continue
 		}
 		if !rows[n] {

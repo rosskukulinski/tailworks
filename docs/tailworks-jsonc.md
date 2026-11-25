@@ -15,7 +15,8 @@ A tailworks app has a `tailworks.jsonc` next to its wrangler config (`wrangler.j
 `tailworks.jsonc` is JSONC: comments and trailing commas are fine.
 
 A project with only a wrangler config deploys too. Then tailworks uses defaults:
-the workload node is tagged `tag:tw-wl-<workload>`, and every Durable
+the workload node is tagged `tag:tw-wl-<workload>` (the same default as a
+`tailworks.jsonc` without `tailnet.tags`), and every Durable
 Object class is internal (`"node": false`). `tw deploy` says when it does
 this ([wrangler.md](wrangler.md#without-a-twjsonc)).
 
@@ -50,28 +51,29 @@ schema. `tw init` writes this line for you:
 | key | type | default | what it does |
 |---|---|---|---|
 | `$schema` | string | | the schema, for your editor; tailworks ignores it |
-| `name` | string | wrangler `name`, then the directory name | the workload name, a DNS label. `tw deploy --name` overrides it |
-| `runtime` | `"workerd"` \| `"node"` | `"workerd"` | `"node"` runs a Node.js app in the Node process tier ([node-tier.md](node-tier.md)); then there is no `wrangler.jsonc` |
+| `name` | string | wrangler `name`, then the directory name | the workload name, a DNS label. `tw deploy --name` overrides it. Leave it out when the wrangler config has a `name` (the templates do); when both set one and they differ, this one wins and `tw` says so |
+| `runtime` | `"workerd"` \| `"node"` | `"workerd"` | `"node"` runs a Node.js app on the Node runtime ([node-tier.md](node-tier.md)); then there is no `wrangler.jsonc` |
 | `main` | string | | `runtime: "node"` only: the entry file, e.g. `"src/server.ts"` |
 | `node` | object | | `runtime: "node"` only: `env` (string map), `listen`, `health`, `args` ([node-tier.md](node-tier.md)) |
 | `tier` | `"process"` \| `"microvm"` | the tenant's tier | `"microvm"` runs the workload in a Firecracker VM, on a Linux host with KVM ([INSTALL.md](INSTALL.md#linux-the-microvm-tier-firecracker-kvm)) |
 | `replicas` | integer ≥ 1 | 1 | run a stateless workload on this many hosts ([services.md](services.md)) |
 | `placement` | object | | which host runs the workload; [below](#placement) |
 | `public` | object | | paths reachable from the public internet over Funnel; [below](#public) |
-| `containers` | array or object | | container classes ([containers.md](containers.md)); `tw deploy` also writes image pins here |
+| `containers` | array or object | | container classes ([containers.md](containers.md)): wrangler's array form, or per-class image refs you pin; mgmt records the digests it resolves in the deployment |
 | `tailnet` | object | | the workload's tailnet identity; [below](#tailnet) |
 
 ## `tailnet`
 
 | key | type | what it does |
 |---|---|---|
-| `tags` | `["tag:…"]` | **Required.** Tags of the workload's own node. Your policy must let `tag:tw` own them; `tw policy` (and `tw deploy`'s preflight) prints the snippet if it doesn't, and `tw policy --apply` writes it ([below](#tags-and-tw-init)) |
+| `tags` | `["tag:…"]` | Tags of the workload's own node. Default (filled in by `tw deploy` and `tw dev`): `["tag:tw-wl-<workload>"]`, so a minimal `tailworks.jsonc` is `{}`. An empty `[]` is an error. Your policy must let `tag:tw` own them; `tw policy` (and `tw deploy`'s preflight) prints the snippet if it doesn't, and `tw policy --apply` writes it ([below](#tags-and-tw-init)) |
 | `connects` | `["tag:…" or name]` | what the workload calls. `tw deploy` preflights these grants, and smart placement measures paths to them. Add the TCP port a socket dials (`"tag:db:5432"`) and the preflight checks the grant for that port instead of `tcp:80` |
 | `service` | `true` or `"svc:<name>"` | a Tailscale Service: a stable name and VIP in front of the workload ([services.md](services.md)) |
+| `https` | boolean | also serve the workload on `https://<name>.<tailnet>.ts.net` with its ts.net certificate, so `request.url` is `https://` for requests that arrive that way; [below](#tailnethttps) |
 | `egress.internet` | `true`, `false` or `[host, "*.suffix", IP, CIDR]`, each with an optional `:port` | internet egress for Worker code and containers; [below](#tailnetegressinternet) |
 | `egress.via` | `"exit-node"` | require a host whose internet egress leaves through a tailnet exit node; [below](#tailnetegressvia) |
-| `spawn.maxLive` | integer | the most live sub-agents (`ctx.tailnet.spawn`) |
-| `spawn.maxDepth` | integer | the deepest spawn chain |
+| `spawn.maxLive` | integer | the most live sub-agents (`ctx.tailnet.spawn`) under one root object. Default and ceiling 64: a deployment may only lower it; a larger value is lowered to 64, and 0 or absent means 64 ([limits.md](limits.md#durable-objects)) |
+| `spawn.maxDepth` | integer | the deepest spawn chain. Default and ceiling 3: a deployment may only lower it; a larger value is lowered to 3, and 0 or absent means 3 |
 | `objects` | map of class → [object](#tailnetobjectsclass) | the Durable Object classes that get a tailnet node per instance |
 
 ### `tailnet.egress.internet`
@@ -169,34 +171,84 @@ sees the names. Absent (the default): whatever the host offers.
 - `tw dev` has no exit node: it runs the workload on your machine's
   network and prints a note.
 
+### `tailnet.https`
+
+`true` also serves the workload on
+`https://<name>.<tailnet>.ts.net`, port 443, with the workload node's own
+ts.net certificate, for code that needs an HTTPS origin: an OAuth
+server's resource URL (`@cloudflare/workers-oauth-provider`), `Secure`
+cookies, redirect URIs. A request that arrives that way reaches the Worker
+with an `https://` `request.url` (as on Cloudflare) and
+`X-Forwarded-Proto: https`; a Node app gets the header
+([issue #360](https://github.com/rosskukulinski/tailworks/issues/360)).
+
+```jsonc
+{ "tailnet": { "tags": ["tag:tw-wl-mcp"], "https": true } }
+```
+
+- **`http://` keeps working** on port 80, unchanged and not redirected:
+  `ctx.tailnet.fetch`, service bindings and other workloads call it, and a
+  redirect would turn their `POST`s into `GET`s. A request on port 80 still
+  has an `http://` `request.url`, so give clients the `https://` URL
+  (`tw deploy` prints it).
+- Callers need a grant to the workload's tags on **`tcp:443`** as well as
+  `tcp:80`. With `tailnet.https` on, the caller grant `tw deploy` and
+  `tw policy` print, and the one `tw policy --apply` (or
+  `--apply-policy`) writes for a new app, covers both ports. A grant you
+  wrote yourself, or one tailworks wrote before you turned `https` on,
+  needs `"tcp:443"` added to its `ip`.
+- The tailnet must issue HTTPS certificates (admin console, DNS page:
+  MagicDNS and HTTPS Certificates). Without them the deploy fails with
+  [`tailnet_https_unavailable`](errors.md#tailnet_https_unavailable) and
+  the deployment that was active keeps serving. Headscale issues no ts.net
+  certificates, so it can't serve `tailnet.https`
+  ([headscale.md](headscale.md)).
+- A new name's first certificate takes 30 to 100 seconds to issue. The host
+  requests it as soon as the listener opens, but the first `https://` call
+  right after the first deploy can wait for it.
+- Only the workload node: an object's own node (`tailnet.objects`) and a
+  Tailscale Service name (`tailnet.service`) stay `http://`. Public routes
+  are HTTPS already (Funnel).
+- `tw dev` serves the app on its local `http://` URL only and prints a note.
+- It needs hosts that offer the `tailnet-https` feature
+  ([upgrading.md](upgrading.md)).
+
 ### `tailnet.objects.<Class>`
 
 `<Class>` is a class name from `wrangler.jsonc` `durable_objects.bindings`.
-A class listed here with no matching binding is an error.
+A class listed here with no matching binding is an error. A class that
+isn't listed is internal, as with `"node": false`: a plain Durable Object
+with no node of its own.
 
 | key | type | default | what it does |
 |---|---|---|---|
 | `tags` | `["tag:…"]` | | tags of each instance's own node |
-| `agent` | boolean | `false` | the class is an Agents SDK `Agent` |
 | `ttl` | string, e.g. `"10m"` | | lifetime from creation: then the object (and its sub-agents) is killed. The default for `spawn()`, which can set its own |
-| `node` | boolean | `true` | `false`: an internal class with no tailnet node (implies `"egress": "workload"`) |
-| `egress` | `"object"` \| `"workload"` | `"object"` | whose node outbound `fetch()` leaves from ([egress-modes.md](egress-modes.md)). Changing it later empties the class's storage |
+| `node` | boolean | `true` | `false`: an internal class with no tailnet node. Its outbound `fetch()` leaves as the workload node, so it needs no `egress` |
+| `egress` | `"object"` \| `"workload"` | `"object"` (`"workload"` with `"node": false`) | whose node outbound `fetch()` leaves from, for a class with its own node ([egress-modes.md](egress-modes.md)). Changing it later empties the class's storage |
 | `fence` | `"never"` | | instances tolerate running on two hosts at once, so mgmt can move the workload off a dead host without `--force-takeover` |
 | `public.create` | boolean | `false` | public requests may create new objects of this class ([public-ingress.md](public-ingress.md)) |
 | `public.maxObjects` | integer | | required with `create`: the most objects public requests may create |
 
+An older `"agent": true` here is accepted and ignored: an Agents SDK class
+needs no flag.
+
 ## `placement`
 
 How mgmt picks a host when there is more than one
-([INSTALL.md](INSTALL.md#where-a-workload-runs-placement-multi-host)).
+([hosts.md](hosts.md#where-a-workload-runs-placement-multi-host)).
 
 | key | type | default | what it does |
 |---|---|---|---|
 | `mode` | `"smart"` \| `"off"` | `"smart"` when there are targets | `"off"` places by free capacity only |
 | `targets` | `[tag or name]` | `tailnet.connects` | the peers to place close to |
-| `aggregate` | `"worst"` \| `"sum"` | `"worst"` | how several targets combine |
-| `host`, `hostname` | string | | Cloudflare's placement hints: one target |
-| `region` | string | | accepted for Cloudflare compatibility and ignored |
+
+Advanced: `aggregate` (`"worst"`, the default, or `"sum"`) is how several
+targets combine. Cloudflare's placement hints `host`, `hostname` and
+`region` still work here but the schema marks them deprecated: `host` and
+`hostname` are a one-element `targets`, and `region` is ignored. Without a
+`placement` here, the wrangler config's `placement` is read instead, hints
+and all.
 
 ## `public`
 
@@ -216,8 +268,11 @@ tailnet-only.
 `tag:tw-wl-<workload>` for the workload node, and
 `tag:tw-<workload>-<class>` for each class (`SupportAgent` becomes
 `support-agent`). Two apps made from the same template then don't share
-tags, so they don't share grants either. `--keep-tags` keeps the template's
-tag names.
+tags, so they don't share grants either. Templates whose workload needs
+nothing else (`hello`, `static-site`, `python`) leave `tailnet.tags` out:
+it defaults to `tag:tw-wl-<workload>`. To use tags you already own
+instead, `--tags` sets the workload's tags (adding `tailnet.tags` when the
+template has none) and `--object-tags` sets the classes' ([below](#reusing-existing-tags)).
 
 Each new tag needs a `tagOwners` entry in your tailnet policy. `tw deploy`
 checks this first and prints the lines to add:
@@ -316,8 +371,9 @@ tw policy    # nothing to add when the policy already owns and grants these tags
 - `--object-tags tag:a,tag:b` sets the tags of every Durable Object class
   that has its own node. `--object-tags <Class>=tag:a,tag:b` sets one class,
   and wins over the form without a class. Repeat the flag for more classes.
-- Tags you don't set are still named after the app (or kept, with
-  `--keep-tags`).
+- `--tags` adds `tailnet.tags` when the template leaves it out (`hello`,
+  `static-site`, `python`).
+- Tags you don't set are still named after the app.
 
 `tw init` checks the tags before it writes anything: they must be valid
 tags, can't be one of tailworks' own tags

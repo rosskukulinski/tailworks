@@ -68,3 +68,4 @@ has no row below.
 | [052](052-tcp-egress.md) | Raw TCP egress: `connect()` handlers on the platform's egress entrypoints, CONNECT tunnels to hostd authenticated in band, dialled with netd's `DialEgress` | 2026-11-23 | Accepted |
 | [053](053-service-bindings.md) | Service bindings are tailnet calls from the calling node, resolved by mgmt; same-host calls take netd's in-process hop | 2026-11-23 | Accepted |
 | [054](054-exit-node-egress.md) | A host can send all internet egress through a tailnet exit node, via its own node; `tailnet.egress.via: "exit-node"` lets a workload require it | 2026-11-23 | Accepted |
+| [055](055-python-workers.md) | Python Workers run in a Python worker of their own behind a generated JavaScript front; Pyodide bundles are pinned, fetched once per host and read-only to the sandbox | 2026-11-24 | Accepted |

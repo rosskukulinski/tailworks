@@ -46,6 +46,10 @@ const (
 	// ServiceBindings is wrangler "services" (ADR-053). An
 	// older hostd leaves env.<binding> undefined.
 	ServiceBindings = "service-bindings"
+	// TailnetHTTPS is tailworks.jsonc tailnet.https: the workload node
+	// also serves :443 with its ts.net certificate (issue
+	// #360). An older hostd ignores the key and serves http:// only.
+	TailnetHTTPS = "tailnet-https"
 	// Telemetry is OTLP export, request records and /metrics (ADR observability).
 	Telemetry = "telemetry"
 	// WorkerInternet is tailnet.egress.internet's boolean form (true or
@@ -65,6 +69,7 @@ func Host() []string {
 		InternetPorts,
 		Queues,
 		ServiceBindings,
+		TailnetHTTPS,
 		Telemetry,
 		WorkerInternet,
 		Workflows,
@@ -100,6 +105,9 @@ func Required(app *bundle.App) []string {
 	}
 	if app.EgressVia == bundle.ViaExitNode {
 		out = append(out, InternetExitNode)
+	}
+	if app.TailnetHTTPS {
+		out = append(out, TailnetHTTPS)
 	}
 	if len(compatflags.Filter(app.CompatFlags)) > 0 {
 		out = append(out, ExperimentalFlags)

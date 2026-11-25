@@ -1,9 +1,11 @@
 package schema
 
 import (
+	"encoding/json"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -66,6 +68,17 @@ func TestCheckTw(t *testing.T) {
 		{"service name", `{"tailnet": {"service": "svc:api"}}`, nil},
 		{"internet off", `{"tailnet": {"egress": {"internet": false}}}`, nil},
 		{"internet on", `{"tailnet": {"egress": {"internet": true}}}`, nil},
+		{"via exit-node", `{"tailnet": {"egress": {"via": "exit-node"}}}`, nil},
+		{"via bad", `{"tailnet": {"egress": {"via": "exitnode"}}}`,
+			[]string{`tailnet.egress.via: "exitnode" is not one of "exit-node" (did you mean "exit-node"?)`}},
+		// docs/tailworks-jsonc.md#tailnetegressvia, verbatim.
+		{"via doc example", `{
+  "tailnet": {
+    "tags": ["tag:tw-wl-billing"],
+    "egress": { "internet": ["api.stripe.com"], "via": "exit-node" }
+  }
+}`, nil},
+		{"deprecated placement hints still pass", `{"placement": {"host": "db", "hostname": "db.example", "region": "aws:us-east-1"}}`, nil},
 		{"internet bad", `{"tailnet": {"egress": {"internet": "api.example.com"}}}`, []string{`tailnet.egress.internet: is string, want`}},
 		{"misspelt objects", `{"tailnet": {"tags": ["tag:a"], "objcts": {}}}`,
 			[]string{`tailnet.objcts: unknown key (did you mean "objects"?)`}},
@@ -105,5 +118,32 @@ func TestCheckTw(t *testing.T) {
 func TestSyntaxError(t *testing.T) {
 	if _, err := CheckTw([]byte(`{"tailnet": `)); err == nil {
 		t.Fatal("want a syntax error")
+	}
+}
+
+func TestUnlisted(t *testing.T) {
+	type cfg struct {
+		Name    string `json:"name"`
+		Bogus   int    `json:"bogus"`
+		Tailnet struct {
+			Egress struct {
+				Via   string `json:"via"`
+				Proxy string `json:"proxy"`
+			} `json:"egress"`
+			Objects map[string]struct {
+				TTL  string `json:"ttl"`
+				Idle string `json:"idle"`
+			} `json:"objects"`
+		} `json:"tailnet"`
+		Public *struct {
+			Limits *struct {
+				RPS float64 `json:"rps,omitempty"`
+			} `json:"limits"`
+		} `json:"public"`
+		Raw json.RawMessage `json:"containers"`
+	}
+	got := strings.Join(Unlisted(reflect.TypeFor[cfg]()), " ")
+	if want := "bogus tailnet.egress.proxy tailnet.objects.*.idle"; got != want {
+		t.Fatalf("Unlisted = %q, want %q", got, want)
 	}
 }

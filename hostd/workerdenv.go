@@ -1,6 +1,10 @@
 package hostd
 
-import "os"
+import (
+	"os"
+
+	"github.com/rosskukulinski/tailworks/internal/wallclock"
+)
 
 // WorkerdEnv is the environment a process-tier workerd runs with (#336).
 // It is built from nothing, as the Node tier's is (spawnNode in node.go),
@@ -33,5 +37,7 @@ func WorkerdEnv() []string {
 			env = append(env, k+"="+v)
 		}
 	}
-	return env
+	// A test build's skewed clock (internal/wallclock); nothing otherwise.
+	wenv, _ := wallclock.Workerd()
+	return append(env, wenv...)
 }

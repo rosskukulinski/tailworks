@@ -25,7 +25,12 @@
 //     its backup), which runs again with the data;
 //
 //  5. upgrades to a good N+1: a backup is taken, tw restarts on N+1, the
-//     health gate passes, and the data is there.
+//     health gate passes, and the data is there;
+//
+//  6. restarts N+1 (tw down, tw up);
+//
+//  7. rolls back to N with tw upgrade rollback (binaries only: no contract
+//     migration ran), and the data is there.
 //
 // Run it with `make e2e-tw-upgrade`.
 package twupgrade
@@ -190,6 +195,8 @@ type upgradeResult struct {
 	Backup     string
 	RolledBack bool
 	Health     string
+
+	AgentSkills string // issue #490
 }
 
 func TestTwUpgradeSingleMachine(t *testing.T) {
@@ -242,7 +249,19 @@ func TestTwUpgradeSingleMachine(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := &machine{t: t, prefix: prefix, app: app}
+	// A home of its own, with a skill an older tw agent setup wrote: the
+	// good upgrade refreshes it (issue #490), and the real home isn't
+	// touched.
+	home := filepath.Join(work, "home")
+	skill := filepath.Join(home, ".claude", "skills", "tw", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skill), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(skill, []byte("<!-- tw agent skills 0.0.1 -->\nold\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	m.env = append(os.Environ(),
+		"HOME="+home,
 		"TW_RELEASE_SIGNERS="+signers,
 		"TW_WORKERD="+wd,
 		"TW_CREATE_TAILWORKS="+filepath.Join(root, "js", "packages", "create-tailworks"),
@@ -303,7 +322,8 @@ func TestTwUpgradeSingleMachine(t *testing.T) {
 	// The plan changes nothing.
 	var plan upgradeResult
 	m.mustJSON(&plan, "upgrade", "--from", relGood, "--plan")
-	if plan.Plan.From != oldV || plan.Plan.To != newV || len(plan.Plan.Steps) != 5 || plan.Upgraded || plan.Backup != "" {
+	if plan.Plan.From != oldV || plan.Plan.To != newV || len(plan.Plan.Steps) != 6 || plan.Upgraded || plan.Backup != "" ||
+		!strings.Contains(plan.Plan.Steps[5], "agent skills") {
 		t.Fatalf("plan: %+v", plan)
 	}
 
@@ -368,8 +388,14 @@ func TestTwUpgradeSingleMachine(t *testing.T) {
 	st := time.Now()
 	var res upgradeResult
 	m.mustJSON(&res, "upgrade", "--from", relGood, "--yes", "--health-timeout", "3m")
-	if !res.Upgraded || res.Health != "ok" || res.RolledBack {
+	if !res.Upgraded || res.Health != "ok" || res.RolledBack || !strings.Contains(res.AgentSkills, newV) {
 		t.Fatalf("upgrade to the good N+1: %+v", res)
+	}
+	if b, _ := os.ReadFile(skill); !strings.Contains(string(b), "<!-- tw agent skills "+newV) {
+		t.Fatalf("the agent skill wasn't refreshed by the new tw: %q", b)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude", "skills", "tw-deploy")); err == nil {
+		t.Fatal("the refresh created a skill tw hadn't written")
 	}
 	if bs := m.backups(); len(bs) != 3 || !slices.Contains(bs, filepath.Base(res.Backup)) || !strings.HasSuffix(res.Backup, "-"+oldV) {
 		t.Fatalf("backups %v, result says %q", bs, res.Backup)
@@ -402,6 +428,32 @@ func TestTwUpgradeSingleMachine(t *testing.T) {
 	m.must("down")
 	m.must("up", "--yes")
 	m.checkWorkerInternetOff("after tw down and tw up")
+
+	// 7. tw upgrade rollback (issue #486) puts N back by hand. No contract
+	// migration ran between N and N+1, so the store stays.
+	st = time.Now()
+	var rb struct {
+		From, To, Mode, SafetyBackup, Health string
+	}
+	m.mustJSON(&rb, "upgrade", "rollback", "--yes")
+	if rb.From != newV || rb.To != oldV || rb.Mode != "binary" || rb.Health != "ok" || !strings.HasSuffix(rb.SafetyBackup, "-before-rollback") {
+		t.Fatalf("tw upgrade rollback: %+v", rb)
+	}
+	if _, err := os.Stat(filepath.Join(rb.SafetyBackup, "mgmt", "mgmt.db")); err != nil {
+		t.Fatalf("the state before the rollback wasn't kept: %v", err)
+	}
+	if v, pv := m.read("VERSION"), m.read("VERSION.prev"); v != oldV || pv != newV {
+		t.Fatalf("after tw upgrade rollback VERSION %s, VERSION.prev %s", v, pv)
+	}
+	if v := m.installedVersion(); v != oldV {
+		t.Fatalf("installed tw is %s after tw upgrade rollback", v)
+	}
+	if v := m.runningVersion(); v != oldV {
+		t.Fatalf("running tw up is %s after tw upgrade rollback", v)
+	}
+	m.checkData("after tw upgrade rollback")
+	m.checkWorkerInternetOff("after tw upgrade rollback")
+	t.Logf("✓ tw upgrade rollback %s → %s in %v", newV, oldV, time.Since(st).Round(time.Second))
 }
 
 // checkWorkerInternetOff asserts tw up's --worker-internet=off survived:

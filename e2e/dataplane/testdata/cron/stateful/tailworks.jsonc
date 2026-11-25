@@ -1,0 +1,14 @@
+{
+  // e2e/dataplane cron loop (#419). Alm is a plain DO (workerd's own
+  // alarms); FAlm and the Sch agent are facets, whose alarms tailworks
+  // delegates to the Host DO.
+  "name": "cronobj",
+  "tailnet": {
+    "tags": ["tag:ttest"],
+    "objects": {
+      "Alm": { "tags": ["tag:ttest"], "egress": "workload" },
+      "FAlm": { "tags": ["tag:ttest"] },
+      "Sch": { "tags": ["tag:ttest"] },
+    },
+  },
+}

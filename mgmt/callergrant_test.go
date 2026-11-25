@@ -80,8 +80,8 @@ func TestCallerGrantRule(t *testing.T) {
 		{name: "tag:tw", pol: `{}`, tags: []string{"tag:tw"}, keep: newAppSnippet("tag:tw"), manual: "isn't an app tag"},
 		{name: "the public tag", pol: base, tags: []string{PublicTag}, keep: newAppSnippet(PublicTag), manual: "isn't an app tag"},
 		{name: "the tag isn't being added", pol: base, tags: []string{appTag}, keep: policy.Snippet{}, manual: "isn't being added"},
-		{name: "Headscale has no autogroup sources", pol: base, tags: []string{appTag}, keep: newAppSnippet(appTag),
-			opts: policy.Options{Headscale: true}, manual: "callers:"},
+		{name: "Headscale accepts autogroup:member", pol: base, tags: []string{appTag}, keep: newAppSnippet(appTag),
+			opts: policy.Options{Headscale: true}, want: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var pol *Policy
@@ -122,16 +122,9 @@ func TestCallerGrantRule(t *testing.T) {
 // source outside tag:tw* is never kept, whatever it targets.
 func TestCallerGrantBundleSourcesStillRefused(t *testing.T) {
 	for _, src := range []string{"autogroup:member", "*", "autogroup:tagged", "group:eng", "alice@example.com", "tag:db"} {
-		pf := PreflightResult{
-			MissingTagOwners: []string{appTag},
-			TagOwnersSnippet: `"tagOwners": {"tag:tw-wl-app": ["autogroup:admin", "tag:tw"]}`,
-			Missing: []PreflightMissing{{Src: src, Dst: appTag,
-				Snippet: `{ "src": ["` + src + `"], "dst": ["tag:tw-wl-app"], "ip": ["tcp:80"] }`}},
-		}
-		keep, manual, err := preflightSnippet(pf, policy.Options{}, func(string) bool { return false })
-		if err != nil {
-			t.Fatal(err)
-		}
+		pf := PreflightResult{MissingTagOwners: []string{appTag}, Missing: []PreflightMissing{missingGrant(src, appTag, "tcp:80")}}
+		pf.setSnippets(Tenant{})
+		keep, manual := preflightSnippet(pf, policy.Options{}, func(string) bool { return false })
 		if len(keep.Grants) != 0 || len(manual) != 1 || !strings.Contains(manual[0], "not written") {
 			t.Fatalf("a bundle's grant from %s was kept: %v (manual %v)", src, keep.Grants, manual)
 		}
@@ -166,7 +159,7 @@ func TestPolicyApplyCallerGrant(t *testing.T) {
 	tn := v1Tenant(t, e, "t.ts.net", nil)
 	path := "/v1/tenants/" + tn + "/workloads/app/policy"
 	body := map[string]any{"bundle": policyApp(t, `[]`)}
-	const grant = `{"dst":["tag:tw-wl-app"],"ip":["tcp:80"],"src":["autogroup:member"]}`
+	const grant = `{ "src": ["autogroup:member"], "dst": ["tag:tw-wl-app"], "ip": ["tcp:80"] }`
 
 	var plan PolicyApplyResult
 	e.c.ok("POST", path+"?dryRun=true", body, &plan)

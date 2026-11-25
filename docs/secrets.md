@@ -18,6 +18,7 @@ The design and the threat model are in
 cd my-agent                         # the app: the workload is its name, as for tw deploy
 tw secret put LLM_API_KEY          # hidden prompt on a terminal
 printf %s "$KEY" | tw secret put LLM_API_KEY   # or from a pipe (one trailing newline is dropped)
+tw secret bulk .dev.vars           # several at once, from a dotenv or JSON file
 tw secret ls                       # names, last update and who set them; never values
 tw secret rm LLM_API_KEY
 tw deploy                          # secrets take effect on the next deploy
@@ -39,10 +40,11 @@ export default {
 | Command | What it does |
 |---|---|
 | `tw secret put <NAME>` | Creates or replaces a secret. It reads the value from stdin: a hidden prompt on a terminal, or everything piped in, less one trailing newline. A value given on the command line is refused and never echoed. |
+| `tw secret bulk [<file>]` | Creates or replaces several secrets, like `wrangler secret bulk`. The file is dotenv (`NAME=value` lines, as in `.dev.vars`) or a JSON object of strings (`{"NAME": "value"}`); a first character of `{` means JSON. Without a file (or with `-`) it reads piped stdin. See [below](#tw-secret-bulk). |
 | `tw secret ls` | Lists the secret names with their last update time and actor. No command or API ever returns a value. |
 | `tw secret rm <NAME>` | Deletes a secret. |
 
-All three take these flags:
+All four take these flags:
 
 - `--workload <w>`: defaults to the app in the current directory, named the
   way `tw deploy` names it.
@@ -66,6 +68,36 @@ Durable Object binding.
 
 **Limits** are Cloudflare's: 128 secrets per workload and 5 KiB per value
 (UTF-8 text).
+
+### tw secret bulk
+
+```sh
+tw secret bulk .dev.vars                 # dotenv: NAME=value lines
+tw secret bulk secrets.json              # JSON: {"NAME": "value", …}
+op inject -i secrets.env.tpl | tw secret bulk   # piped stdin (no file, or -)
+```
+
+- **Values never go on the command line.** An argument containing `=` is
+  refused (and not echoed), and so is a terminal on stdin with no file:
+  give a file, or pipe the secrets in.
+- **Everything is checked before anything is set:** the syntax, every
+  name, each value's size, a name given twice, and the workload's total
+  after the run (at most 128). A refusal names the line and the secret
+  name, never a value, and nothing is set.
+- The secrets are then set one at a time, in the input's order, each
+  through the same API call as `tw secret put` (audited as `secret_put`
+  with the name and the actor). If one fails, the run stops and the error
+  lists the names **set**, the one that **failed**, and those **not
+  attempted**, and `tw` exits non-zero. Run it again after fixing the
+  cause: setting a secret to the same value is harmless.
+- **It only adds and replaces.** A secret that isn't in the input is kept;
+  remove it with `tw secret rm <NAME>`. (`tw dev` is different: it makes
+  the dev workload's secrets exactly `.dev.vars`.)
+- `--json` prints `{"workload", "tenantID", "set", "failed",
+  "notAttempted"}`, names only.
+- Dotenv syntax is the one `tw dev` reads: `#` comments, an optional
+  `export `, `"double quoted"` values with `\n` escapes that may span
+  lines, `'single quoted'` literal values.
 
 ## When changes take effect
 
@@ -112,6 +144,13 @@ The format:
 
 The templates' `.gitignore` lists `.dev.vars`.
 
+To have [`tw types`](wrangler.md#types-tw-types) declare a secret's name
+on every machine, commit a `.dev.vars.example` with the same names and
+placeholder values only, never real secrets, or list the names under the
+wrangler config's `secrets.required`. `tw types` reads names only from
+these local files, not from mgmt; `tw secret ls --json` lists the secrets
+a deployed workload has.
+
 ## Where values live
 
 - **At rest:** mgmt's custody, one sealed entry per workload
@@ -139,6 +178,26 @@ The templates' `.gitignore` lists `.dev.vars`.
 - **Never logged or audited.** The audit records `secret_put`,
   `secret_delete` and `secret_release` carry names only.
 
+## Tests
+
+The guarantees above are checked under faults by the data-plane chaos
+loop's deploys scenarios (`make e2e-dataplane-deploys`, nightly;
+`e2e/dataplane/LOOP.md` "Deploys"): concurrent deploys, rollbacks, previews
+and `tw secret put`/`rm` through three mgmt replicas on Postgres, while
+hosts, replicas and their database links fail. Its invariant V4 checks
+that:
+
+- a deployment runs with the secrets the workload had when it was
+  deployed, or newer, never a value overwritten or deleted before that;
+- a rollback gets the workload's current secrets, not the old bundle's;
+- a preview gets the workload's secrets, at its own lease, and never one
+  set on its own name;
+- values are released only to the host holding that epoch's lease;
+- no value appears in any process log, audit record, or mgmt's database.
+
+Concurrent writes of one workload's secrets through several mgmt replicas
+are serialised (#578): `TestMM_H24_SecretWritesAcrossReplicas`.
+
 ## Not supported yet
 
 - **The microVM tier.** A `"tier": "microvm"` deployment of a workload that
@@ -147,6 +206,6 @@ The templates' `.gitignore` lists `.dev.vars`.
   the VM's run directory, outside the instance directory. Deploy such
   workloads with `"tier": "process"` for now, or keep the secret out of
   the workload.
-- `wrangler secret bulk`, secret versions and gradual deployments, and the
+- Secret versions and gradual deployments, and the
   Secrets Store binding (`secrets_store_secrets`).
 - Restarting a running workload when a secret changes. Redeploy instead.

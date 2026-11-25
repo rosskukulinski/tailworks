@@ -232,6 +232,9 @@ func wranglerKeyNote(k string, v any, builder string) string {
 		if builder == "wrangler" || (builder == builderPrebuilt && k != "build") {
 			return "" // nobundle.go packs a pre-built no_bundle Worker as wrangler does
 		}
+		if builder == "esbuild" && k == "build" {
+			return "" // buildcmd.go runs build.command before the built-in esbuild
+		}
 		return "needs wrangler's bundler; ignored by tailworks' built-in esbuild (use tw deploy --wrangler)"
 	case "upload_source_maps":
 		if builder == "wrangler" {
@@ -256,9 +259,13 @@ func wranglerKeyNote(k string, v any, builder string) string {
 		}
 		return bindingHint + "ignored"
 	// limits.md#wrangler-limits-ignored
-	case "observability", "logpush", "limits", "usage_model", "send_metrics", "keep_vars", "dev",
-		"compliance_region", "first_party_worker", "legacy_env", "python_modules":
+	case "dev":
+		return devWranglerNote(v) // dev_port.go: tw dev honours dev.port
+	case "observability", "logpush", "limits", "usage_model", "send_metrics", "keep_vars",
+		"compliance_region", "first_party_worker", "legacy_env":
 		return "ignored by tailworks"
+	case "python_modules":
+		return "ignored: tw deploy ships python_modules/ whole, less __pycache__ and *.pyc (docs/python.md#modules-and-files)"
 	case "secrets":
 		return "" // secrets.required: names `tw types` declares (deploy doesn't check them)
 	case "node_compat":
@@ -307,6 +314,7 @@ func wranglerWarnings(file string, cfg map[string]any, builder string) []string 
 			out = append(out, fmt.Sprintf("%s: %s: %s", file, k, n))
 		}
 	}
+	out = append(out, containerKeyWarnings(file, cfg)...) // containerbuild.go
 	if dos, ok := cfg["durable_objects"].(map[string]any); ok {
 		bs, _ := dos["bindings"].([]any)
 		for _, b := range bs {
@@ -365,26 +373,11 @@ func esbuildWranglerOptions(w map[string]any, o *esbundle.Options) error {
 }
 
 // defaultTwConfig is the tailworks.jsonc used when an app has only a wrangler
-// config: the workload node tagged tag:tw-wl-<name>, and every Durable
-// Object class internal ("node": false, as on Cloudflare: reachable through
-// its binding, with no tailnet node of its own).
-func defaultTwConfig(name string, w map[string]any) []byte {
-	objects := map[string]any{}
-	if dos, ok := w["durable_objects"].(map[string]any); ok {
-		bs, _ := dos["bindings"].([]any)
-		for _, b := range bs {
-			if m, ok := b.(map[string]any); ok {
-				if c, _ := m["class_name"].(string); c != "" {
-					objects[c] = map[string]any{"node": false}
-				}
-			}
-		}
-	}
-	tn := map[string]any{"tags": []string{"tag:tw-wl-" + name}}
-	if len(objects) > 0 {
-		tn["objects"] = objects
-	}
-	b, _ := json.MarshalIndent(map[string]any{"name": name, "tailnet": tn}, "", "  ")
+// config: the workload node tagged tag:tw-wl-<name>. Every Durable Object
+// class is made internal ("node": false) after, as for any tailworks.jsonc
+// that leaves it out of tailnet.objects (defaultInternalClasses).
+func defaultTwConfig(name string) []byte {
+	b, _ := json.MarshalIndent(map[string]any{"name": name, "tailnet": map[string]any{"tags": []string{"tag:tw-wl-" + name}}}, "", "  ")
 	return b
 }
 

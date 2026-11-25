@@ -1,5 +1,8 @@
-// tw-netd runs one tenant's object nodes on this host: ingress to a workerd
-// socket, the attributed egress proxy, and a local control socket.
+// tw-netd is the netd test harness: it runs one tenant's object nodes as a
+// standalone process (ingress to a workerd socket, the attributed egress
+// proxy, and a local control socket) for e2e/local. It is not shipped in
+// release tarballs; tw-hostd links netd as a library and runs one registry
+// per tenant in its own process.
 //
 //	tw-netd -control-url URL -state-dir DIR -run-dir DIR \
 //	  [-authkey-file F | -mint-oauth-client-file F -tailnet T -tags tag:x] \

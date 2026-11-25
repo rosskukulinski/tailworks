@@ -36,7 +36,7 @@ copy_example "$V0_EXAMPLES_COMMIT" "$OUT/v0min"
 copy_example "$V101_COMMIT" "$OUT/v1min"
 cp -R "$ROOT/e2e/container/apps/raw10" "$OUT/raw10"
 
-# Pins (what tw deploy writes after building ./Dockerfile). The 0.x app
+# Per-class image pins (the refs the images were prebuilt as). The 0.x app
 # runs its Sandbox class in facet mode (the default); the 1.0 example in
 # plain-DO mode, so both modes run the SDKs.
 cat >"$OUT/v0min/tailworks.jsonc" <<'EOF'

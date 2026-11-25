@@ -112,10 +112,12 @@ func TestTeamsTagOwnership(t *testing.T) {
 
 func TestTeamsPublicSnippet(t *testing.T) {
 	t.Parallel()
-	if s := publicFunnelSnippet(Tenant{}); s != PublicFunnelSnippet {
+	const want = `"tagOwners": { "tag:tw-public": ["autogroup:admin", "tag:tw"] },
+"nodeAttrs": [ { "target": ["tag:tw-public"], "attr": ["funnel"] } ]`
+	if s := publicPart(Tenant{}).Inline(); s != want {
 		t.Fatalf("default: %s", s)
 	}
-	if s := publicFunnelSnippet(Tenant{OwnerTag: "tag:tw-t-a"}); !strings.Contains(s, `"tag:tw-public": ["autogroup:admin", "tag:tw", "tag:tw-t-a"]`) {
+	if s := publicPart(Tenant{OwnerTag: "tag:tw-t-a"}).Inline(); !strings.Contains(s, `"tag:tw-public": ["autogroup:admin", "tag:tw", "tag:tw-t-a"]`) {
 		t.Fatalf("owner tag: %s", s)
 	}
 	if !prefixesClash("a", "a-b") || prefixesClash("a", "ab") || !prefixesClash("x", "x") {

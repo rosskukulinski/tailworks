@@ -185,7 +185,7 @@ func (m *Mgmt) checkTenantTags(ctx context.Context, t Tenant, tags []string, pol
 	for _, tag := range tags {
 		if why := tagOwnerProblem(pol, t, tag, others); why != "" {
 			e := errf(400, "tag_not_owned", "%s", why)
-			e.Snippet = fmt.Sprintf(`"tagOwners": { %q: %s }`, tag, tagOwnersFor(t))
+			e.Snippet = tagOwnersPart(t, tag).Inline() // preflightsnippet.go
 			e.Missing = map[string]any{"tag": tag, "owner": t.Owner()}
 			return e
 		}
@@ -211,15 +211,6 @@ func tagOwnerProblem(pol *Policy, t Tenant, tag string, others []string) string 
 		return fmt.Sprintf("%s is not owned by %s, tenant %s's owner tag, so its OAuth client can't mint it", tag, t.Owner(), t.ID)
 	}
 	return ""
-}
-
-// publicFunnelSnippet is PublicFunnelSnippet with t's owner tag among
-// tag:tw-public's owners, so t's OAuth client can mint public nodes.
-func publicFunnelSnippet(t Tenant) string {
-	if t.OwnerTag == "" {
-		return PublicFunnelSnippet
-	}
-	return strings.Replace(PublicFunnelSnippet, `"tag:tw"]`, `"tag:tw", "`+t.OwnerTag+`"]`, 1)
 }
 
 // checkDeployTeam is Deploy's team check: the workload name against other

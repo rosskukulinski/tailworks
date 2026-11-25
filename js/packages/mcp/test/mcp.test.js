@@ -38,7 +38,11 @@ test("cap_missing is a typed JSON error with what the caller has", () => {
   const none = getCaller(mkReq(undefined));
   assert.throws(() => authorizeTool(none, CAP, { tool: "x" }), (e) => parse(e).code === "cap_missing");
   const grouped = getCaller(mkReq([{ tools: ["refund"], groups: { refund: ["group:support"] } }]));
-  assert.throws(() => authorizeTool(grouped, CAP, { tool: "refund" }), (e) => /group:support/.test(parse(e).message));
+  // On-behalf-of is not built, so no caller is in a group: a groups grant
+  // denies (fail closed); another grant without groups still allows.
+  assert.throws(() => authorizeTool(grouped, CAP, { tool: "refund" }), (e) => /group:support/.test(parse(e).message) && parse(e).chain === undefined);
+  const both = getCaller(mkReq([{ tools: ["refund"], groups: { refund: ["group:support"] } }, { tools: ["refund"], limits: { refund: { maxUsd: 5 } } }]));
+  assert.equal(authorizeTool(both, CAP, { tool: "refund", usd: 5 }).limits.maxUsd, 5);
 });
 
 test("withTailnet exposes caller() per request and rejects unverified requests", async () => {

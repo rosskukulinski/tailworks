@@ -209,6 +209,7 @@ const (
 	queueAsProducer queueRole = iota
 	queueAsConsumer
 	queueAsEither
+	queueAsReleaser // a consumer handing back a claim, possibly from an older epoch (queuestalerelease.go)
 )
 
 // authorizeQueue fences a host caller to its workload's lease and checks
@@ -233,7 +234,11 @@ func (m *Mgmt) authorizeQueue(ctx context.Context, tenantID, name string, c Queu
 	if c.Epoch == nil {
 		return nil, errf(400, "bad_request", "a host must give the epoch of the lease it holds")
 	}
-	if err := m.fenceStore(ctx, tenantID, c.Workload, c.HostID, c.Epoch, "queue/"+name); err != nil {
+	fence := m.fenceStore
+	if role == queueAsReleaser {
+		fence = m.fenceStaleRelease
+	}
+	if err := fence(ctx, tenantID, c.Workload, c.HostID, c.Epoch, "queue/"+name); err != nil {
 		return nil, err
 	}
 	decl, err := m.workloadQueues(ctx, tenantID, c.Workload)
@@ -247,10 +252,10 @@ func (m *Mgmt) authorizeQueue(ctx context.Context, tenantID, name string, c Queu
 	switch {
 	case role == queueAsProducer && p != nil, role == queueAsEither && (p != nil || k != nil):
 		return k, nil
-	case role == queueAsConsumer && k != nil:
+	case (role == queueAsConsumer || role == queueAsReleaser) && k != nil:
 		return k, nil
 	}
-	what := map[queueRole]string{queueAsProducer: "a producer binding of", queueAsConsumer: "a consumer of", queueAsEither: "a producer binding or consumer of"}[role]
+	what := map[queueRole]string{queueAsProducer: "a producer binding of", queueAsConsumer: "a consumer of", queueAsEither: "a producer binding or consumer of", queueAsReleaser: "a consumer of"}[role]
 	m.audit(ctx, AuditRecord{TenantID: tenantID, Kind: "deny", Code: "forbidden"},
 		map[string]any{"host": c.HostID, "workload": c.Workload, "queue": name, "want": what})
 	return nil, errf(403, "forbidden", "workload %s does not declare %s queue %s (wrangler.jsonc queues; redeploy to change)", c.Workload, what, name)
@@ -707,6 +712,10 @@ func (m *Mgmt) PullQueue(ctx context.Context, tenantID, name string, c QueueCall
 			wakeQueue(queueWakeKey(tenantID, dlq.Name))
 		}
 		if len(rows) > 0 {
+			if ctx.Err() != nil { // the caller left while the claim committed (queueclaimgone.go)
+				m.releaseUndelivered(tenantID, name, claimLeases(rows))
+				return res, nil
+			}
 			for _, r := range rows {
 				body, err := openQueueBody(key, q.Incarnation, r.ID, r.Body)
 				if err != nil {
@@ -741,7 +750,7 @@ func (m *Mgmt) AckQueue(ctx context.Context, tenantID, name string, c QueueCalle
 	if err != nil {
 		return QueueAckResult{}, err
 	}
-	k, err := m.authorizeQueue(ctx, tenantID, name, c, queueAsConsumer)
+	k, err := m.authorizeQueue(ctx, tenantID, name, c, ackRole(a))
 	if err != nil {
 		return QueueAckResult{}, err
 	}
@@ -935,7 +944,7 @@ func (a *v1api) PullQueueMessages(w http.ResponseWriter, r *http.Request, id v1.
 		writeErr(w, r, err)
 		return
 	}
-	writeJSON(w, 200, res)
+	a.s.M.writePulled(w, id, queue, res) // queueclaimgone.go
 }
 
 func (a *v1api) AckQueueMessages(w http.ResponseWriter, r *http.Request, id v1.TenantID, queue v1.QueueName, params v1.AckQueueMessagesParams) {

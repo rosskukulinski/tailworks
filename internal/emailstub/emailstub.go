@@ -1,10 +1,14 @@
 // Package emailstub holds the one stub of Cloudflare's email API that
-// tailworks ships (email is not supported, docs/COMPAT.md "Email"). Importing
-// `cloudflare:email` works; constructing an EmailMessage throws.
+// tailworks ships (email is not supported, docs/COMPAT.md "Email"), and the
+// bundler's refusal of the app's own imports (refuse.go). Where the stub
+// applies, importing `cloudflare:email` works; constructing an EmailMessage
+// throws.
 //
-// Two places use it:
-//   - the built-in bundler (internal/esbundle) resolves `cloudflare:email` to
-//     ClassJS, as js/packages/create-tailworks/lib/build.mjs does;
+// Two places use the stub:
+//   - the built-in bundler (internal/esbundle) resolves a dependency's
+//     import of `cloudflare:email` to ClassJS, as
+//     js/packages/create-tailworks/lib/build.mjs does, and refuses the
+//     app's own import (refuse.go);
 //   - the generated workerd config (hostd/gen, email.go) provides
 //     InternalModuleJS as the internal module `cloudflare-internal:email`
 //     that stock workerd's own `cloudflare:email` imports, and ClassJS as

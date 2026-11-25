@@ -40,6 +40,7 @@ import (
 	"github.com/rosskukulinski/tailworks/hostd/r2"
 	"github.com/rosskukulinski/tailworks/hostd/sandbox"
 	"github.com/rosskukulinski/tailworks/internal/procsb"
+	"github.com/rosskukulinski/tailworks/netd"
 	"tailscale.com/tsnet"
 )
 
@@ -98,6 +99,15 @@ type Config struct {
 	// (netd.Config.PublicListen). Tests only: testcontrol issues no
 	// certificates, so they inject a listener of *ipn.FunnelConn.
 	PublicListen func(srv *tsnet.Server) (net.Listener, error)
+
+	// TailnetHTTPSCert overrides the certificate of a workload node's
+	// tailnet HTTPS listener (netd.Config.HTTPSCert). Tests only.
+	TailnetHTTPSCert netd.HTTPSCertFunc
+	// TailnetHTTPSOff ignores tailworks.jsonc tailnet.https: the workload
+	// is served on http:// only (tw dev, whose local control issues no
+	// certificates). Never set it on a host that serves tenants.
+	TailnetHTTPSOff bool
+
 	// VM boots microVM sandboxes (hostd/vm: Firecracker on Linux + KVM).
 	// Nil means this host offers the process tier only: a microvm
 	// deployment is refused (tier_unavailable), never downgraded.
@@ -113,6 +123,13 @@ type Config struct {
 	// 127.0.0.1 port (inspector.go). It gives full control of the isolate:
 	// never on a host serving tenants.
 	WorkerdInspector bool
+
+	// PyodideDir holds the pinned Pyodide bundles Python Workers run on
+	// (pyodide.go; default <DataDir>/pyodide). Missing ones are fetched
+	// from PyodideURL ("" = workerd's own source) on the first Python
+	// deployment; workerd only reads them.
+	PyodideDir string
+	PyodideURL string
 
 	// Capacity sets the capacity vector's VM dimensions (nil: measured; see
 	// capacity.go). Its nodes are always CapacityNodes; without a microVM
@@ -131,9 +148,6 @@ type Config struct {
 	// (default: mgmt's /v1/container-reservations through Mgmt; tests: a
 	// fake).
 	ContainerQuota ContainerQuota
-	// DefaultTier applies when neither the deployment (tailworks.jsonc "tier")
-	// nor the tenant names one. Default "process".
-	DefaultTier string
 	// VMDebug enables guest diagnostics (connectivity probes; tests).
 	VMDebug bool
 	// VMVolumeMiB sizes new DO volumes (microVM tier; sparse; default 1024).
@@ -199,6 +213,11 @@ type Config struct {
 	Containers sandbox.ContainerBackend
 	// Images converts and caches container images (hostd/image).
 	Images *image.Store
+
+	// ContainersOff is why tw-hostd offers no containers when it doesn't
+	// (found once at startup; tw doctor and tw up show it, containersoff.go).
+	ContainersOff string
+
 	// ContainerCapacity optionally bounds this host's running containers
 	// further, on top of the capacity vector (Capacity) they share with
 	// microVM DO instances (0 = no extra bound).
@@ -318,6 +337,13 @@ type Host struct {
 	lastHB     time.Time
 	fenced     bool
 
+	// children: workerd/Node process groups this hostd started, so the
+	// next run can reap any a crash left behind (childreap.go, #432).
+	children *childLedger
+
+	// cronLasts: each workload's last cron minute, kept across restarts (cronlast.go, #594).
+	cronLasts *cronLastStore
+
 	// consume: queue consumers' context, cancelled on self-fence (queuefence.go).
 	consume consumeGate
 
@@ -432,9 +458,6 @@ func New(cfg Config) (*Host, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.New(slog.DiscardHandler)
 	}
-	if cfg.DefaultTier == "microvm" && cfg.VM == nil && !cfg.ForceProcessTier {
-		return nil, errors.New("hostd: default tier microvm needs a microVM backend (Linux + KVM + tw-vmhelper: `sudo tw host setup --microvm`); without one, use -default-tier process")
-	}
 	sb, err := ResolveSandbox(cfg.Sandbox)
 	if err != nil {
 		return nil, err
@@ -467,6 +490,8 @@ func New(cfg Config) (*Host, error) {
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		return nil, err
 	}
+	h.children = openChildLedger(cfg.DataDir, h.log) // childreap.go: before anything is spawned
+	h.cronLasts = openCronLast(cfg.DataDir, h.log)
 	h.pubCreates = newPublicCreates(h.publicCreatesPath())
 	h.admits = map[string]time.Time{}
 	os.Chmod(cfg.DataDir, 0o700)
@@ -490,6 +515,7 @@ func New(cfg Config) (*Host, error) {
 	if err := h.audit.openSpill(filepath.Join(cfg.DataDir, "audit-spill.jsonl"), h.log); err != nil {
 		return nil, err
 	}
+	h.audit.loadResume(filepath.Join(cfg.DataDir, auditHeadFile), h.log)
 	if err := h.loadObjects(); err != nil {
 		return nil, err
 	}
@@ -582,7 +608,11 @@ func (h *Host) register(ctx context.Context) error {
 		// local-dev: the unix push socket.
 		req.PushURL = "unix://" + h.pushSock
 	}
-	return h.mgmt.Register(ctx, req)
+	reg, err := h.mgmt.RegisterHost(ctx, req)
+	if err == nil && h.audit.resume(reg.AuditHead, h.log) { // auditresume.go
+		h.log.Info("audit chain continued from mgmt's head", "head", reg.AuditHead)
+	}
+	return err
 }
 
 // tiers lists what this host offers: the process tier always, the microVM
@@ -634,6 +664,9 @@ func (h *Host) Close() error {
 	cl.lap("nodes")
 	h.tel.close()
 	h.flushAudit(context.Background())
+	if err := h.audit.saveHead(filepath.Join(h.cfg.DataDir, auditHeadFile)); err != nil { // auditresume.go
+		h.log.Warn("audit: saving the chain head failed; the next start begins a new chain segment", "err", err)
+	}
 	h.saveObjects()
 	if h.runDirOwned {
 		os.RemoveAll(h.cfg.RunDir)
@@ -669,6 +702,9 @@ func (h *Host) tick() {
 	defer h.maintainPools()
 	ctx, cancel := context.WithTimeout(h.ctx, 10*time.Second)
 	defer cancel()
+	// Freshness counts from when the heartbeat left, not when its answer came
+	// back: an answer that waited out a stall says nothing about now (#501).
+	sent := time.Now()
 	if err := h.heartbeat(ctx); err != nil {
 		if h.ctx.Err() != nil {
 			return
@@ -691,7 +727,7 @@ func (h *Host) tick() {
 		return
 	}
 	h.mu.Lock()
-	h.lastHB, h.fenced = time.Now(), false
+	h.lastHB, h.fenced = sent, false
 	h.mu.Unlock()
 	if err := h.syncAssignments(ctx); err != nil && h.ctx.Err() == nil {
 		h.log.Warn("assignment sync failed", "err", err)

@@ -20,7 +20,7 @@ func npmUpgradeErr(in npminstall.Install) *cliErr {
 		return e.withFix("tw down, then npx tailworks@latest up …   (npx runs the newest release)",
 			"or install it for good: "+npminstall.UpgradeCommand)
 	}
-	return e.withFix("tw down && "+npminstall.UpgradeCommand+" && tw up   (tw backup first: npm has no rollback)",
+	return e.withFix(installInfo{Channel: channelNPM}.upgradeCommand("")+"   (npm has no rollback: tw backup keeps a way back)",
 		"in a project that installed it: npm install tailworks@latest there")
 }
 
@@ -36,35 +36,25 @@ func npmServiceErr() error {
 			"or tw up --service=false   (runs in the background until you log out or tw down)")
 }
 
-// npmUpgradeCommand is version --check's upgrade hint for an npm install,
-// or "".
-func npmUpgradeCommand() string {
-	in, ok := npmSelf()
-	if !ok {
-		return ""
-	}
-	if in.NPX {
-		return "npx tailworks@latest …"
-	}
-	return npminstall.UpgradeCommand
-}
-
 // doctorInstall is the "install" check: how this tailworks was installed,
-// and what that means for upgrades and the microVM tier.
+// what that means for the microVM tier, and the one command that upgrades
+// it (installChannel, install_channel.go).
 func doctorInstall() (string, string, string) {
-	if in, ok := npmSelf(); ok {
+	ch := installChannel()
+	up := "; upgrade: " + ch.upgradeCommand("")
+	switch ch.Channel {
+	case channelNPM, channelNPX:
+		in := ch.NPM
 		d := "npm package " + in.Package + " " + in.Version + " (" + in.Kind() + ") in " + in.Dir +
-			"; upgrade with npm, not tw upgrade; the npm package has no microVM guest (process tier only: the microVM tier needs the release tarball, scripts/get.sh)"
+			"; npm owns it, so tw upgrade doesn't replace it; the npm package has no microVM guest (process tier only: the microVM tier needs the release tarball, scripts/get.sh)" + up
 		if in.NPX {
 			return "info", d + "; npx's cache can be cleared at any time, so tw up runs without a login service", "for a login service: " + npminstall.UpgradeCommand
 		}
 		return "ok", d, ""
+	case channelPrefix:
+		return "ok", "release tarball (install.sh) in " + ch.Prefix + up, ""
+	case channelSource:
+		return "info", "a source checkout (" + ch.Root + ")" + up, ""
 	}
-	if p := installPrefixOf(); p != "" {
-		return "ok", "release tarball (install.sh) in " + p + "; tw upgrade upgrades it", ""
-	}
-	if root := sourceCheckout(); root != "" {
-		return "info", "a source checkout (" + root + "): make build", ""
-	}
-	return "info", "tw runs from " + exeDir() + " (not an install.sh prefix or npm package): tw upgrade can't replace it", ""
+	return "info", "tw runs from " + exeDir() + " (not an install.sh prefix or npm package): tw upgrade can't replace it" + up, ""
 }

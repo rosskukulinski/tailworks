@@ -20,7 +20,7 @@ make e2e-compat-prepare                            # fetch + install + build onl
 make e2e-compat-dev                                # the upstream SDK examples under tw dev: no tailnet, no credentials
 ```
 
-It needs `npm` 11 or later (Node 24: with npm 10 the `ag-webmcp-react`
+The Python examples that need packages need [`uv`](https://docs.astral.sh/uv/) on `PATH`: their build step is the README's `uv run pywrangler sync`, which vendors them into `python_modules/` (it downloads a Python and the packages). It needs `npm` 11 or later (Node 24: with npm 10 the `ag-webmcp-react`
 example's dependencies don't install) and the tailnet-1 key file
 (`make e2e-compat` skips without it). `TW_COMPAT_PAR` deploys that many projects at once (default 3).
 The results go to `e2e/real/results/compat-<time>-<run>.json` (one record
@@ -41,7 +41,7 @@ warnings, workarounds). The run's log ends with the matrix as a table.
 | `c3-scheduled` | workers-sdk C3 `scheduled/ts` | cron `* * * * *` + internet fetch | cron, fetch | pass |
 | `c3-queues` | workers-sdk C3 `queues/ts` | queue producer + consumer | queues, queue-consumers | pass |
 | `c3-workflows` | workers-sdk C3 `hello-world-workflows/ts` | Workflow: step.do, waitForEvent | workflows | pass |
-| `c3-python` | workers-sdk C3 `hello-world/py` | Python Worker | python | refused |
+| `c3-python` | workers-sdk C3 `hello-world/py` | Python Worker (Pyodide) | python | pass |
 | `hello-world-do` | templates `hello-world-do-template` | Durable Object + SQLite | do-storage, do-rpc | pass |
 | `nodejs-http-server` | templates `nodejs-http-server-template` | `node:http` server via `httpServerHandler` | nodejs-compat | pass |
 | `d1-template` | templates `d1-template` | D1 + migrations | d1, d1-migrations | pass |
@@ -65,6 +65,9 @@ warnings, workarounds). The run's log ends with the matrix as a table.
 | `mcp-server`, `mcp-agent`, `ag-*` | agents `examples/` | [the upstream SDK examples](#the-upstream-sdk-examples-issue-325) | agents-sdk, mcp, … | see COMPAT.md |
 | `mcph-*` | vercel/mcp-handler `examples/` | the same | mcp | see COMPAT.md |
 | `ai-*` | vercel/ai `examples/` | the same | vercel-ai | see COMPAT.md |
+| `py-query-d1` | python-workers-examples `query-d1` | Python Worker on D1, seeded with `tw d1 execute --file db_init.sql` (deployed run only) | python, d1 | pass |
+| `py-fastapi-todo`, `py-flask-todo` | python-workers-examples `fastapi-todo`, `flask-todo` | Todo-Backend on D1 (FastAPI, Flask), packages vendored by `uv run pywrangler sync`, seeded with `tw d1 execute` (deployed run only) | python, d1 | pass |
+| `py-*` | cloudflare/python-workers-examples | [the Python examples](#the-python-workers-examples-issue-292) | python, … | see COMPAT.md |
 
 "refused": `tw deploy` must refuse it with an error that names the
 surface. "fails": it deploys, and its probe must fail (a binding tailworks
@@ -130,9 +133,13 @@ Responses API calls with a scripted stream. That is listed as a change.
 
 1. **Fixed ([#354](https://github.com/rosskukulinski/tailworks/issues/354)): a pre-built Worker that imports `cloudflare:email` couldn't start.**
    The Agents playground does, for its email demos. It starts now, and 8
-   of the probe's 9 demo families pass; `SupervisorAgent.createChild`
-   (agent-to-agent Durable Object RPC) fails with `Could not serialize
-   object of type "RpcPromise"`, not yet narrowed down.
+   of the probe's 9 demo families pass. The ninth,
+   `SupervisorAgent.createChild` (agent-to-agent Durable Object RPC),
+   failed with `Could not serialize object of type "RpcPromise"` until
+   [#391](https://github.com/rosskukulinski/tailworks/issues/391): inside
+   an object, `env.X` had only `getByName`, so `getAgentByName`'s
+   `env.X.get(env.X.idFromName(name))` passed a pending RPC result to
+   `get()`. All 9 pass now.
 2. **Open ([#355](https://github.com/rosskukulinski/tailworks/issues/355)): agents reached through the imported env are not created.**
    `cross-domain` and `mcp-elicitation` pass
    `import { env } from "cloudflare:workers"` to the Agents SDK and get
@@ -146,15 +153,44 @@ Responses API calls with a scripted stream. That is listed as a change.
    The Agent's class wasn't in `tailnet.objects`, so mgmt refused its node,
    and the Workflow was refused the Agent. The `workflows` example now
    passes deployed too.
-5. **Open ([#360](https://github.com/rosskukulinski/tailworks/issues/360)): no HTTPS origin on the tailnet.**
-   workers-oauth-provider refuses an `http://` resource URL, so
-   `mcp-worker-authenticated` passes under `tw dev` (loopback) and can't be
-   configured for a tailnet URL.
+5. **Fixed ([#360](https://github.com/rosskukulinski/tailworks/issues/360)): no HTTPS origin on the tailnet.**
+   workers-oauth-provider refuses an `http://` resource URL. With
+   `"tailnet": {"https": true}` the workload is also served on its
+   `https://` tailnet URL, and the deployed run of
+   `mcp-worker-authenticated` sets that (`Project.TailnetHTTPS`) and calls
+   it there. It passes under `tw dev` (loopback); the deployed run hasn't
+   been recorded since.
 6. Upstream quirks: `@hono/node-server` replaces the global `Request` and
    `Response`, which no Workers runtime survives (stock `wrangler dev`
    fails the same way), so the Hono example's `serve()` is aliased to a
    shim. The `workflows` example throws after each step 9 times in 10 on
    purpose, so its approval step isn't reached.
+
+### The second pass (2026-11-24)
+
+`upstream_more.go` adds the 9 `examples/next/*` examples that declare no
+Cloudflare-only binding and the AI SDK's `fastify`, `nest` and `mcp`
+(its `http` and `sse` servers). Under `tw dev` all 9 `next/` examples
+pass, and the `mcp` `http` server passes with the same entry the other Node
+servers get. Two of the `next/` examples first failed on tailworks gaps,
+fixed since:
+
+1. **Fixed ([#395](https://github.com/rosskukulinski/tailworks/issues/395)): a Durable Object that called `ctx.abort()` was never recreated.**
+   `next/lifecycle`'s `/restart` aborts its object; every later request to
+   it failed with the abort reason.
+2. **Fixed ([#391](https://github.com/rosskukulinski/tailworks/issues/391)): `RpcPromise` couldn't be serialized.**
+   `next/routing`'s hub (`RoutedAgents.get()`, then a call on the chat's
+   stub) failed like the playground's `createChild`.
+3. Not tailworks: Fastify never registers its server with the node:http
+   bridge (and doesn't start under stock `wrangler dev`); Nest `require()`s
+   optional packages a bundler can't resolve (stock `wrangler dev` fails the
+   same way); the `mcp` `sse` server writes to one request's response while
+   handling another, which no Worker can (stock `wrangler dev` cancels it
+   the same way).
+
+The Agents SDK examples that need Workers AI stay not run: tailworks
+ignores the `ai` binding, so a scripted `env.AI` would have to be wired
+into each example (its config, or a wrapper around each agent class).
 
 ## What "unmodified" means
 
@@ -213,10 +249,11 @@ additions and clean up by ID. The only policy entries the run may add are:
 
 ```jsonc
 "tagOwners": { "tag:tw-wl-compat": ["autogroup:admin", "tag:tw"] },
-"grants":    [{ "src": ["tag:ttest"], "dst": ["tag:tw-wl-compat"], "ip": ["tcp:80"] }]
+"grants":    [{ "src": ["tag:ttest"], "dst": ["tag:tw-wl-compat"], "ip": ["tcp:80", "tcp:443"] }]
 ```
 
-If anything else is missing, the run refuses to write the policy. Every
+`tcp:443` is for the projects deployed with `tailnet.https`
+(`ag-mcp-worker-auth`). If anything else is missing, the run refuses to write the policy. Every
 node it creates is named `ttest-compat-<run>-*` / `tw-compat-<run>-*`; the
 cleanup deletes them by ID and fails the run if any are left.
 
@@ -236,3 +273,21 @@ builds, and `TW_COMPAT_ONLY=<id> make e2e-compat` runs it. A gap is an
 entry with an `Expect` (`ExpectRefused` or `ExpectProbeFail`) and the
 COMPAT.md row it belongs to. The suite promises at least 20 projects that
 are expected to pass, and `Validate` enforces that.
+
+## The Python Workers examples (issue #292)
+
+`python.go` adds every example in
+[cloudflare/python-workers-examples](https://github.com/cloudflare/python-workers-examples)
+in the same way (`Section` `python-workers`, published in
+[COMPAT.md](../../docs/COMPAT.md#upstream-examples-python-workers)). The ones
+that need no vendored package run unmodified; the ones tailworks refuses
+(crons, Workflows, assets, an un-vendored `workers` SDK) must be refused with
+the message COMPAT.md names; the rest are in `pythonNotRun()` with the reason.
+The examples that need packages build with `uv run pywrangler sync` (their
+README's step). `py-query-d1`, `py-fastapi-todo` and `py-flask-todo` need
+their database seeded after the deploy (`d1 execute --file db_init.sql`), so
+only the deployed run (`make e2e-compat`) runs them. Examples whose only
+post-deploy step is `d1 migrations apply` run under `tw dev` too, which
+applies migrations itself. The first Python project of a run fetches the
+pinned Pyodide bundles once into the per-user cache (`internal/pyodide`).
+

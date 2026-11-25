@@ -41,6 +41,7 @@ import (
 	"github.com/rosskukulinski/tailworks/hostd/gen"
 	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
 	"github.com/rosskukulinski/tailworks/internal/queuecfg"
+	"github.com/rosskukulinski/tailworks/internal/wallclock"
 	"github.com/rosskukulinski/tailworks/netd"
 )
 
@@ -518,7 +519,7 @@ func (h *Host) invokeQueue(ctx context.Context, w *workload, k queueRunKey, batc
 	trace := newTraceID()
 	blob, _ := json.Marshal(map[string]any{
 		// The ticket lets queue() create objects through its guarded env.
-		"tw":      map[string]any{"kind": "queue", "queue": k.queue, "workload": w.name, "ticket": gen.CreateTicket(inst.macKey(), trace, time.Now())},
+		"tw":      map[string]any{"kind": "queue", "queue": k.queue, "workload": w.name, "ticket": gen.CreateTicket(inst.macKey(), trace, wallclock.Now())},
 		"traceId": trace,
 	})
 	req, _ := http.NewRequestWithContext(ctx, "POST", "http://platform/_tw/queue", strings.NewReader(string(body)))

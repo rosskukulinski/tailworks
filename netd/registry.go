@@ -85,6 +85,10 @@ type Config struct {
 	// ReadyTimeout bounds how long egress waits for a pending object before
 	// failing with identity_pending. Default 30 s.
 	ReadyTimeout time.Duration
+
+	// EgressGate, if set, is asked before each egress once the node is up
+	// (egressgate.go, issue #331); an error refuses it.
+	EgressGate func(ctx context.Context, objectID, stableNodeID string) error
 	// Ephemeral and Tags are defaults for objects that don't override them.
 	Ephemeral bool
 	Tags      []string
@@ -120,6 +124,12 @@ type Config struct {
 	// ListenFunnel(":443", FunnelOnly()). Tests inject a listener whose
 	// conns are *ipn.FunnelConn (testcontrol issues no certificates).
 	PublicListen func(srv *tsnet.Server) (net.Listener, error)
+
+	// HTTPSCert supplies the certificate of a node's tailnet HTTPS
+	// listener (tailnethttps.go). Nil: the node's own ts.net certificate
+	// from its LocalAPI, refused when the tailnet issues none. Tests
+	// inject a self-signed one (testcontrol issues no certificates).
+	HTTPSCert HTTPSCertFunc
 	// OnPublicRequest is called after each public request (audit, D7).
 	OnPublicRequest func(PublicRequestRecord)
 	// OnPublicRejected is called at most once per PublicRejectWindow per
@@ -140,6 +150,10 @@ type ObjectOptions struct {
 	Ephemeral *bool
 	// Public makes this a public (Funnel) node: see public.go.
 	Public *PublicOptions
+
+	// HTTPS also serves the node's ingress on :443 with its ts.net
+	// certificate once it is ready (tailnethttps.go, SetTailnetHTTPS).
+	HTTPS bool
 }
 
 // Registry holds every object node for one tenant on this host.
@@ -285,6 +299,9 @@ type Object struct {
 
 	// tomb ends a kill's tombstone once (tombstone_end.go).
 	tomb tombstoneEnd
+
+	// https is the tailnet HTTPS listener on :443 (tailnethttps.go).
+	https httpsState
 }
 
 // ObjectInfo is a snapshot of an object, safe to serialize.
@@ -367,6 +384,7 @@ func (r *Registry) Create(id string, opts ObjectOptions) (*Object, error) {
 	if opts.Public != nil {
 		o.pub = newPublicState(*opts.Public)
 	}
+	o.https.want = opts.HTTPS && opts.Public == nil // tailnethttps.go
 	if o.hostname == "" {
 		o.hostname = r.cfg.Hostname(id)
 	}
@@ -631,6 +649,7 @@ func (o *Object) start(ctx context.Context) error {
 		close(o.ready)
 	} else {
 		go hs.Serve(o.ln)
+		o.openHTTPSIfWanted() // tailnethttps.go
 	}
 	go svcHS.Serve(svcLn)
 	go hopHS.Serve(hopLn)
@@ -796,6 +815,7 @@ func (o *Object) teardown() {
 	o.closePublic()
 	o.stopPublicFlusher()
 	o.stopCertPrefetch()
+	o.stopHTTPS() // tailnethttps.go
 	o.mu.Lock()
 	srv, hs, tr, ts, shs := o.srv, o.httpSrv, o.tr, o.tombSrv, o.svcHTTP
 	hop := o.hopHTTP

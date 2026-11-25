@@ -34,6 +34,15 @@ const STATUS = {
 function isPublic(req) {
   return req?.cf?.tailscale?.requester?.kind === "public";
 }
+// httpsRequest is req with an https:// URL (tailnet.https). A port that is
+// http's default drops out with the scheme change (443 is https's).
+function httpsRequest(req) {
+  const u = new URL(req.url);
+  if (u.protocol !== "http:") return req;
+  u.protocol = "https:";
+  if (u.port === "80") u.port = "";
+  return new Request(u, req);
+}
 function errBody(code, message, extra = {}) {
   return { code, message, doc_url: DOC + code, ...extra };
 }
@@ -168,7 +177,8 @@ export default {
       if (t.kind !== "workload") return errResponse("public_request", "a public request may only reach its workload's entry point");
       const p = new URL(req.url).pathname;
       if (p === "/_tw" || p.startsWith("/_tw/")) return errResponse("not_public", "/_tw is never public");
-      return env.TENANT.fetch(req);
+      // Funnel terminated TLS: the Worker sees the https:// URL (#360).
+      return env.TENANT.fetch(t.https === true ? httpsRequest(req) : req);
     }
     switch (t.kind) {
       case "admin":
@@ -195,6 +205,10 @@ export default {
         // A service binding call to a named entrypoint or an RPC method
         // (hostd admitted it: cf.tw.binding; tw-svc.js).
         if (t.binding) return bindingCallee(req, env, t);
+        // tailnet.https: the request reached the workload node on :443
+        // (hostd sets cf.tw.https only then), so the Worker sees the
+        // https:// URL it was called at, as on Cloudflare.
+        if (t.https === true) req = httpsRequest(req);
         // /_tw/o/<Class>/<name>/... on the workload node reaches an object
         // before (or instead of) its own node.
         const u = new URL(req.url);
@@ -260,11 +274,11 @@ function hostEnsure(h, cls) {
 function hostFacet(h, cls) {
   // Every path to tenant code ends here: a killed object runs none (#211).
   if (h.__killed) throw new Error("[killed] object " + cls + "/" + h.ctx.id.name + " was killed: " + h.__killed);
-  if (!h.__f) {
+  if (!h.__w) {
     const name = h.ctx.id.name;
     if (!name) throw new Error("[bad_request] tw objects must be addressed by name (getByName/idFromName); newUniqueId() is not supported yet");
     const exp = h.ctx.exports;
-    const w = h.env.LOADER.get(CFG.deploymentID + ":" + cls + ":" + name, () => {
+    h.__w = h.env.LOADER.get(CFG.deploymentID + ":" + cls + ":" + name, () => {
       const env = { ...CFG.vars };
       for (const b of CFG.bindings) env[b.name] = exp.NsProxy({ props: { class: b.class } });
       for (const w of CFG.workflows ?? []) env[w.binding] = exp.WorkflowGate({ props: { workflow: w.name } });
@@ -286,9 +300,13 @@ function hostFacet(h, cls) {
         env,
       };
     });
-    h.__f = h.ctx.facets.get("app", () => ({ class: w.getDurableObjectClass(cls) }));
   }
-  return h.__f;
+  // The facet stub is not kept between calls: once the facet calls
+  // ctx.abort() its stub fails with the abort reason for good, and only a
+  // fresh get() starts a new instance, as Cloudflare resets an aborted
+  // object for its next request (#395). get() of a running facet returns it.
+  const w = h.__w;
+  return h.ctx.facets.get("app", () => ({ class: w.getDurableObjectClass(cls) }));
 }
 
 // hostCap is the capability the platform passes to a Host's internal entry
@@ -309,7 +327,7 @@ function makeHost(cls) {
   const H = class extends DurableObject {
     constructor(ctx, env) {
       super(ctx, env);
-      this.__f = null;
+      this.__w = null; // the facet's Dynamic Worker (hostFacet)
       this.__ensured = null;
       this.__actingFor = ""; // own property: the Proxy would answer unknown names with an RPC forwarder
       this.__killed = ctx.storage.kv.get("__tw_killed") ?? null;
@@ -399,7 +417,6 @@ function makeHost(cls) {
       } catch {
         /* not running */
       }
-      this.__f = null;
       return true;
     }
   };

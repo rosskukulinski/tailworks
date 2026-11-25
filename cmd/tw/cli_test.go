@@ -264,12 +264,16 @@ func TestCLILink(t *testing.T) {
 	if up.MgmtIP == "" || up.MgmtNode == "" || up.MintMode != "oauth" {
 		t.Fatalf("tw up with a mgmt node: %+v", up)
 	}
-	if _, se, _, err := host.Tw("up", "--api-key-file", keyFile, "--yes", "--control-url", ctl.URL); err == nil || !strings.Contains(se, "mint_mode_removed") {
+	if _, se, _, err := host.Tw("up", "--control", "tailscale", "--api-key-file", keyFile, "--yes", "--control-url", ctl.URL); err == nil || !strings.Contains(se, "mint_mode_removed") {
 		t.Fatalf("tw up --api-key-file (Tailscale) should be mint_mode_removed: %v %s", err, se)
 	}
 	// A second tw up (supervisor running) must not touch the node.
 	host.MustJSON(nil, "up", "--oauth-client-file", keyFile, "--tailnet", "ttest.ts.net", "--yes", "--ephemeral", "--control-url", ctl.URL,
 		"--tsapi-url", api.URL, "--hostname-prefix", "tw-l-", "--mgmt-hostname", "tw-mgmt")
+	// tw status names the saved --ephemeral (#456); nothing unsafe is saved.
+	if st := checkStatus(t, host, "› saved       --ephemeral"); st["unsafeFlags"] == nil || len(st["unsafeFlags"].([]any)) != 0 {
+		t.Fatalf("host status unsafeFlags: %v", st["unsafeFlags"])
+	}
 
 	// The developer box: linked through its own tsnet node (test transport;
 	// the product path is the machine's Tailscale). No HTTPS on testcontrol.
@@ -277,7 +281,7 @@ func TestCLILink(t *testing.T) {
 	// Auto-discovery resolves `tw-mgmt` through this machine's MagicDNS;
 	// a developer Mac may run a real tw-mgmt there, so point it at a name
 	// that can't resolve (the test never talks to the machine's tailnet).
-	t.Setenv("TW_LINK_DISCOVER_NAME", "tw-mgmt-hermetic.invalid")
+	t.Setenv("TW_TEST_LINK_NAME", "tw-mgmt-hermetic.invalid")
 	if _, se, _, err := dev.Tw("link"); err == nil || !strings.Contains(se, "mgmt_not_found") {
 		t.Fatalf("link auto-discovery without MagicDNS should fail mgmt_not_found: %v %s", err, se)
 	}
@@ -299,7 +303,7 @@ func TestCLILink(t *testing.T) {
 	}
 	// Remote deploy (bundled locally, uploaded), ls with deployedBy, kill, audit.
 	agentDir := filepath.Join(work, "agent")
-	dev.MustJSON(nil, "init", agentDir, "--template", "agent", "--keep-tags")
+	dev.MustJSON(nil, cliflow.InitArgs(agentDir, "agent")...)
 	var dep struct {
 		DeploymentID string
 		Endpoint     struct{ Node, MagicDNS string }
@@ -316,6 +320,10 @@ func TestCLILink(t *testing.T) {
 	dev.MustJSON(&ls, "ls")
 	if len(ls.Deployments) != 1 || ls.Deployments[0].DeployedBy != lk.Actor || !strings.Contains(ls.Deployments[0].DeployedBy, "ttest-dev") && !strings.Contains(ls.Deployments[0].DeployedBy, "@") {
 		t.Fatalf("remote ls deployedBy: %+v (actor %q)", ls.Deployments, lk.Actor)
+	}
+	// Linked tw status: a count per tenant, and the same $defs/status (#455).
+	if st := checkStatus(t, dev, "1 deployment (tw ls)"); st["stateDir"] == "" || st["linked"] == nil {
+		t.Fatalf("linked status: stateDir %v linked %v", st["stateDir"], st["linked"])
 	}
 	// The workload's log, read by mgmt from the host over the push channel.
 	if _, se, _, err := dev.Tw("logs", ls.Deployments[0].Workload, "-n", "5"); err != nil {
@@ -385,7 +393,7 @@ func TestDevOnce(t *testing.T) {
 	bin := cliflow.BuildBinaries(t)
 	work := t.TempDir()
 	e := &cliflow.Env{T: t, BinDir: bin, StateDir: filepath.Join(work, "state"), WorkDir: work}
-	e.MustJSON(nil, "init", filepath.Join(work, "hello"), "--template", "hello", "--keep-tags")
+	e.MustJSON(nil, "init", filepath.Join(work, "hello"), "--template", "hello")
 	var r struct {
 		Smoke struct {
 			Status float64 `json:"status"`
@@ -499,6 +507,7 @@ func TestDoctor(t *testing.T) {
 	want := map[string]string{"binaries": "ok", "workerd": "ok", "bundler": "ok", "tw_home_writable": "ok",
 		"state_dir_writable": "ok", "mint_mode": "skip", "transport": "skip", "api_key": "skip", "https_certs": "skip", "sandbox": "skip", "host_sockets": "skip", "worker_internet": "skip", "node_egress": "skip", "system_tailscaled_not_used": "ok",
 		"store_sizes": "skip",
+		"containers":  "skip",
 		"node_budget": "skip",
 		"install":     "info", // a test build: not an install.sh prefix or npm package (npm_install_test.go covers those)
 	}
@@ -641,7 +650,7 @@ func TestCLIOAuth(t *testing.T) {
 	minted := fts.n
 	fts.mu.Unlock()
 	_, se, _, err := e.Tw(up...)
-	if err == nil || !strings.Contains(se, "policy_missing_tag_owners") || !strings.Contains(se, `"tag:tw-mgmt": ["autogroup:admin","tag:tw"]`) {
+	if err == nil || !strings.Contains(se, "policy_missing_tag_owners") || !strings.Contains(se, `"tag:tw-mgmt": ["autogroup:admin", "tag:tw"]`) {
 		t.Fatalf("policy without tag:tw owners: %v %s", err, se)
 	}
 	upApplyPolicyRefusals(t, e, up, func() (int, int) { // up_policyapply_ext_test.go

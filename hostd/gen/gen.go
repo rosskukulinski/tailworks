@@ -166,6 +166,10 @@ func Generate(app *bundle.App, o Options) (*Result, error) {
 		return os.WriteFile(p, b, 0o600)
 	}
 
+	py := app // python.go: a Python Worker runs in tenant-py; app becomes its JavaScript front
+	if app.Python {
+		app = pythonFront(app)
+	}
 	classes := app.ClassNames()
 	var facets, plains []string
 	for _, c := range classes {
@@ -359,6 +363,10 @@ func Generate(app *bundle.App, o Options) (*Result, error) {
 	if err := writeAssets(app, write); err != nil { // assets.go
 		return nil, err
 	}
+	pyWorker, err := writePython(py, o.Workload, write) // python.go
+	if err != nil {
+		return nil, err
+	}
 
 	// config.capnp
 	var c strings.Builder
@@ -367,6 +375,7 @@ func Generate(app *bundle.App, o Options) (*Result, error) {
 	c.WriteString("    (name = \"platform\", worker = .platform),\n    (name = \"tenant\", worker = .tenant),\n    (name = \"deny\", worker = .deny),\n")
 	c.WriteString(workflowsService(app))
 	c.WriteString(assetsServices(app, o))
+	c.WriteString(pythonService(py)) // python.go
 	addrIngress, addrObj, addrWL, addrAPI, doPath := "unix:"+res.Sockets.Ingress, "unix:"+res.Sockets.EgressObj, "unix:"+res.Sockets.EgressWL, "unix:"+res.Sockets.HostAPI, o.DOStorage
 	if g := o.Guest; g != nil {
 		addrIngress, addrObj, addrWL, addrAPI, doPath = g.Ingress, g.EgressObj, g.EgressWL, g.HostAPI, g.DOStorage
@@ -499,9 +508,11 @@ func Generate(app *bundle.App, o Options) (*Result, error) {
 	c.WriteString(queueTenantBindings(app))
 	c.WriteString(serviceTenantBindings(app)) // services.go
 	c.WriteString(assetsTenantBindings(app))
+	c.WriteString(pythonFrontBinding(py)) // python.go
 	c.WriteString("  ],\n  globalOutbound = (name = \"platform\", entrypoint = \"WorkloadEgress\"),\n" + tailsLine + ");\n\n")
 	c.WriteString(workflowsWorker(app))
 	c.WriteString(assetsWorker(app))
+	c.WriteString(pyWorker) // python.go
 	c.WriteString("const deny :Workerd.Worker = (\n  compatibilityDate = \"2026-04-01\",\n  modules = [ (name = \"deny.js\", esModule = embed \"deny.js\") ],\n);\n")
 	if err := write("config.capnp", []byte(c.String())); err != nil {
 		return nil, err

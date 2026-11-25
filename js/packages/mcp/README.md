@@ -18,5 +18,14 @@ export { TwBudget } from "@tailworks/mcp/budget-do";
   the `TwBudget` Durable Object.
 - `mcpFetch(ctx)`: a `fetch` for MCP clients that leaves from this node's
   tailnet identity.
+- `withTailnet(handler, { publicOAuth: { resource, authorizationServers, verify } })`:
+  also serve public (Funnel) requests that carry an OAuth bearer token for
+  `resource`, for hosted assistants such as claude.ai and ChatGPT. It serves
+  the protected resource metadata and the `401` challenge; tools see the
+  caller through `requester()` (`kind: "public"`, the token's `subject`),
+  while `caller()` and `authorizeTool()` keep refusing public requests.
+  `introspectionVerifier({ endpoint })` checks tokens with RFC 7662
+  (tsidp's `/introspect`). Recipe:
+  [docs/mcp-public.md](https://github.com/rosskukulinski/tailworks/blob/master/docs/mcp-public.md).
 
 `tw init my-mcp --template mcp` creates a working server.

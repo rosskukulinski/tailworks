@@ -1,0 +1,11 @@
+{
+  "name": "rt-a",
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-01",
+  "services": [{ "binding": "B", "service": "rt-b" }],
+  // A Durable Object makes the workload stateful, so its host fences it
+  // (heartbeat loss, lease revoked): what N1 checks.
+  "durable_objects": { "bindings": [{ "name": "PIN", "class_name": "Pin" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Pin"] }],
+  "vars": { "VER": "a0", "REC": "http://rec.invalid" },
+}

@@ -1,0 +1,12 @@
+{
+  // e2e/dataplane deploys fixture (issue #421): a stateful workload (one
+  // Durable Object class, so the lease fences) that reports which bundle,
+  // epoch and secret values serve each request.
+  "name": "dpd",
+  "tailnet": {
+    "tags": ["tag:ttest"],
+    "objects": {
+      "Info": { "tags": ["tag:ttest"], "egress": "workload" },
+    },
+  },
+}

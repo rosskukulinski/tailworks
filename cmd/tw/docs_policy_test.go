@@ -2,68 +2,117 @@ package main
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/tailscale/hujson"
+
+	"github.com/rosskukulinski/tailworks/internal/policy"
 )
 
-// The policy snippets in README.md and docs/INSTALL.md are what admins copy
-// into their tailnet policy, so they must say exactly what tw up checks:
-// operatorSnippet. They drifted once (tag:tw-issuer in the OAuth one).
-// The README also has the one line to paste before tw up --apply-policy
-// writes the rest (issue #320): tag:tw alone, as operatorSnippet has it.
+// The policy snippets in the docs are what admins copy into their tailnet
+// policy, so they must say exactly what the code writes and checks. They
+// drifted once (tag:tw-issuer in the OAuth one). Each doc below names the
+// snippets it carries and how many times; a jsonc or hujson block with a
+// "tagOwners" key is matched to one of them by its set of tagOwners keys
+// and must equal it (tagOwners, grants and nodeAttrs). Blocks whose key set
+// matches none of a doc's snippets (an app's own tags, for example) aren't
+// checked here.
 func TestDocPolicySnippetsMatchCode(t *testing.T) {
 	t.Parallel()
-	block := regexp.MustCompile("(?s)```jsonc\n(.*?)```")
-	n, first := 0, 0
-	for _, f := range []string{"../../README.md", "../../docs/INSTALL.md"} {
-		b, err := os.ReadFile(f)
+	// The README also has the one line to paste before tw up --apply-policy
+	// writes the rest (issue #320): tag:tw alone, as operatorSnippet has it.
+	twOnly := policy.Snippet{TagOwners: map[string][]string{"tag:tw": operatorSnippet().TagOwners["tag:tw"]}}
+	type want struct {
+		name string
+		s    policy.Snippet
+		n    int
+	}
+	for _, tc := range []struct {
+		file  string
+		wants []want
+	}{
+		{"../../README.md", []want{{"operatorSnippet", operatorSnippet(), 1}, {"the tag:tw line", twOnly, 1}}},
+		// INSTALL.md links the README's snippet; a copy here must match too.
+		{"../../docs/INSTALL.md", []want{{"operatorSnippet", operatorSnippet(), 0}, {"the tag:tw line", twOnly, 0}}},
+		{"../../docs/headscale.md", []want{{"policy.Headscale(baseSnippet())", headscaleSnippet(), 1}}},
+		{"../../docs/public-ingress.md", []want{{"policy.PublicSnippet", policy.PublicSnippet(), 1}}},
+	} {
+		b, err := os.ReadFile(tc.file)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, m := range block.FindAllSubmatch(b, -1) {
-			body := string(m[1])
-			if !strings.Contains(body, `"tagOwners"`) {
-				continue
-			}
-			n++
+		got := map[string]int{}
+		for _, body := range docPolicyBlocks(b) {
 			std, err := hujson.Standardize([]byte("{" + body + "}"))
 			if err != nil {
-				t.Errorf("%s: snippet doesn't parse: %v\n%s", f, err, body)
+				t.Errorf("%s: snippet doesn't parse: %v\n%s", tc.file, err, body)
 				continue
 			}
-			var got struct {
-				TagOwners map[string][]string `json:"tagOwners"`
-				Grants    []any               `json:"grants"`
-				NodeAttrs []any               `json:"nodeAttrs"`
-			}
-			if err := json.Unmarshal(std, &got); err != nil {
-				t.Fatal(err)
-			}
-			want, which := operatorSnippet(), "operatorSnippet"
-			if len(got.TagOwners) == 1 && len(got.Grants) == 0 && reflect.DeepEqual(got.TagOwners["tag:tw"], want.TagOwners["tag:tw"]) {
-				n, first = n-1, first+1
+			var doc policy.Snippet
+			if err := json.Unmarshal(std, &doc); err != nil {
+				t.Errorf("%s: snippet: %v\n%s", tc.file, err, body)
 				continue
 			}
-			if len(got.NodeAttrs) > 0 {
-				t.Errorf("%s: snippet has nodeAttrs %v; the operator snippet has none (mgmt never uses Funnel)", f, got.NodeAttrs)
+			i := slices.IndexFunc(tc.wants, func(w want) bool { return sameKeys(w.s.TagOwners, doc.TagOwners) })
+			if i < 0 {
+				continue
 			}
-			if !reflect.DeepEqual(got.TagOwners, want.TagOwners) {
-				t.Errorf("%s: tagOwners = %v, want %s's %v", f, got.TagOwners, which, want.TagOwners)
+			w := tc.wants[i]
+			got[w.name]++
+			if !reflect.DeepEqual(doc.TagOwners, w.s.TagOwners) {
+				t.Errorf("%s: tagOwners = %v, want %s's %v", tc.file, doc.TagOwners, w.name, w.s.TagOwners)
 			}
-			wb, _ := json.Marshal(want.Grants)
-			var wg []any
-			json.Unmarshal(wb, &wg)
-			if !reflect.DeepEqual(got.Grants, wg) {
-				t.Errorf("%s: grants = %v, want %s's %v", f, got.Grants, which, wg)
+			if a, b := normJSON(t, doc.Grants), normJSON(t, w.s.Grants); !reflect.DeepEqual(a, b) {
+				t.Errorf("%s: grants = %v, want %s's %v", tc.file, a, w.name, b)
+			}
+			if a, b := normJSON(t, doc.NodeAttrs), normJSON(t, w.s.NodeAttrs); !reflect.DeepEqual(a, b) {
+				t.Errorf("%s: nodeAttrs = %v, want %s's %v", tc.file, a, w.name, b)
+			}
+		}
+		for _, w := range tc.wants {
+			if got[w.name] != w.n {
+				t.Errorf("%s: found %d copies of %s, want %d (update this test if you add or remove one)", tc.file, got[w.name], w.name, w.n)
 			}
 		}
 	}
-	if n != 2 || first != 1 {
-		t.Errorf("found %d policy snippets and %d tag:tw-only ones in README.md + INSTALL.md, want 2 and 1 (update this test if you add one)", n, first)
+}
+
+// docPolicyBlocks returns the bodies of the jsonc and hujson code blocks in
+// a Markdown doc that have a "tagOwners" key.
+func docPolicyBlocks(md []byte) []string {
+	var out []string
+	for _, m := range regexp.MustCompile("(?s)```(?:jsonc|hujson)\n(.*?)```").FindAllSubmatch(md, -1) {
+		if body := string(m[1]); strings.Contains(body, `"tagOwners"`) {
+			out = append(out, body)
+		}
 	}
+	return out
+}
+
+func sameKeys(a, b map[string][]string) bool {
+	return slices.Equal(slices.Sorted(maps.Keys(a)), slices.Sorted(maps.Keys(b)))
+}
+
+// normJSON round-trips v through JSON, so a snippet built in Go and one
+// parsed from a doc compare equal; nil and empty both become nil.
+func normJSON(t *testing.T, v any) any {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out any
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatal(err)
+	}
+	if a, ok := out.([]any); ok && len(a) == 0 {
+		return nil
+	}
+	return out
 }

@@ -115,6 +115,18 @@ export class Probe extends DurableObject {
         }
         return Response.json({ objectId: child.objectId, name: child.name, before, after: child.state(), reply: await child.stub.hello("parent") });
       }
+      case "/spawn-call": {
+        // Spawn a child and have it call ?url at once, without waiting for
+        // it to be ready: its first egress races its ready report (#331).
+        let child;
+        try {
+          child = await tailnet(this.ctx).spawn(this.env.PROBE, { name: q("name"), caps: JSON.parse(q("caps")), ttl: "10m" });
+        } catch (e) {
+          return Response.json({ spawn: e.code ?? String(e), message: e.message }, { status: 298 });
+        }
+        const r = await child.stub.fetch(new Request("http://child/tegress?url=" + encodeURIComponent(q("url"))));
+        return new Response(await r.text(), { status: r.status });
+      }
       case "/audit": {
         // RT-02: tenant code tries to write a platform-looking "allow"
         // record that frames a human and re-points the trace.

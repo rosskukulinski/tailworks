@@ -1,16 +1,16 @@
 {
   "$schema": "https://raw.githubusercontent.com/rosskukulinski/tailworks/master/schema/tailworks.schema.json",
-  "name": "agent",
   "tailnet": {
     "tags": ["tag:tw-wl-agent"],
     "objects": {
       // each instance gets its own node; egress leaves from it (facet mode)
-      "SupportAgent": { "tags": ["tag:tw-agent-support"], "agent": true },
-      "LookupAgent":  { "tags": ["tag:tw-agent-support-sub"], "agent": true, "ttl": "10m" }
+      "SupportAgent": { "tags": ["tag:tw-agent-support"] },
+      "LookupAgent":  { "tags": ["tag:tw-agent-support-sub"], "ttl": "10m" }
       // schedule()/scheduleEvery() work in this (facet) mode: alarms are
       // delegated to the host DO. "egress": "workload" (plain-DO mode) is
       // only needed if egress may leave as the workload node.
-    },
-    "spawn": { "maxLive": 64, "maxDepth": 3 }
+    }
+    // "spawn": { "maxLive": 64, "maxDepth": 3 } is the default and the
+    // ceiling: set it only to lower the sub-agent budget.
   }
 }

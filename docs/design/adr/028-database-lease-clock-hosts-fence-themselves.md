@@ -34,7 +34,8 @@ about the host side.
      heartbeat has succeeded for `FenceAfter`, measured on the monotonic
      clock, and redeploys them on reconnect.
    - **Stateless Workers and `fence: never` classes keep serving** through
-     mgmt and store outages.
+     mgmt and store outages. Their platform stores (KV, D1, R2) answer
+     reads from the host's copy and refuse writes meanwhile (ADR-044 §8).
    - **Timings:** `FenceAfter` = 30 s, `NamespaceLeaseTTL` = 45 s,
      heartbeat every 3 s. The fence must stay below the lease minus a
      margin, so a host has stopped serving before its lease can be taken

@@ -151,7 +151,6 @@ func (h *Host) routeBinding(w http.ResponseWriter, r *http.Request, inst *instan
 		writeAPIError(w, asAPIError(err))
 		return w, false
 	}
-	h.awaitReported(r.Context(), o)
 	host := strings.TrimSuffix(t.MagicDNS, ".")
 	u := *r.URL
 	u.Scheme, u.Host = "http", host
@@ -229,26 +228,4 @@ func (h *Host) bindingIngress(w http.ResponseWriter, r *http.Request, o *object,
 	}
 	route["binding"] = map[string]any{"entrypoint": ep, "rpc": rpc}
 	return true
-}
-
-// awaitReported waits (bounded) until mgmt knows the calling object's node
-// (readyCh closes after the ready report), so the callee's certificate
-// lookup finds it: a named entrypoint or RPC call is only admitted from a
-// node with a certificate. netd lets a node send as soon as it has joined,
-// which is a little earlier.
-func (h *Host) awaitReported(ctx context.Context, o *object) {
-	h.mu.Lock()
-	ch := o.readyCh
-	h.mu.Unlock()
-	if ch == nil {
-		return
-	}
-	// limits.md#binding-ready-wait
-	t := time.NewTimer(15 * time.Second) // the ready report's own timeout (objects.go)
-	defer t.Stop()
-	select {
-	case <-ch:
-	case <-t.C:
-	case <-ctx.Done():
-	}
 }

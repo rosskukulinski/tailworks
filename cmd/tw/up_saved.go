@@ -15,7 +15,9 @@ import (
 // with state_conflict (issue #111).
 //
 // --workerd is not kept: the pinned workerd comes from the install (or
-// $TW_WORKERD), so an upgrade picks up the new release's.
+// $TW_WORKERD), so an upgrade picks up the new release's. The host timing
+// and push port are no longer flags (up_tuning.go): tw.json's values are
+// used as saved.
 func keepSavedUpFlags(fs *flag.FlagSet, c Config) {
 	given := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
@@ -34,18 +36,12 @@ func keepSavedUpFlags(fs *flag.FlagSet, c Config) {
 	keep("allow-sibling-egress", strconv.FormatBool(c.AllowSiblingEgress))
 	keep("local-dev", strconv.FormatBool(c.LocalDev))
 	keep("port-mapping", strconv.FormatBool(c.PortMapping))
-	keep("heartbeat", c.Heartbeat)
-	keep("kill-tombstone", c.KillTombstone)
-	keep("device-delete-delay", c.DeviceDeleteDelay)
 	keep("db", c.DB)
 	keep("db-file", c.DBFile)
 	keep("custody", c.Custody)
 	keep("setec-url", c.SetecURL)
 	keepSavedRetention(keep, c) // up_retention.go
 	keep("worker-internet", c.WorkerInternet)
-	if c.PushPort != 0 {
-		keep("push-port", strconv.Itoa(c.PushPort))
-	}
 	if c.WarmKeys != nil {
 		keep("warm-keys", strconv.Itoa(*c.WarmKeys))
 	}

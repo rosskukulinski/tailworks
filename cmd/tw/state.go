@@ -108,6 +108,12 @@ type Config struct {
 	// (tw-hostd -worker-internet); empty = direct.
 	WorkerInternet string `json:"workerInternet,omitempty"`
 
+	// InstallPrefix is the install.sh prefix of the tw that last ran
+	// `tw up` here (upgrade_prefix.go; issue #532), rewritten by every
+	// tw up: empty for npm, dev builds and checkouts. tw upgrade trusts it
+	// only while it is still an install prefix.
+	InstallPrefix string `json:"installPrefix,omitempty"`
+
 	// Tenants are the tenants added with `tw tenant add` (the operator
 	// tenant above is the default for every command).
 	Tenants []TenantRef `json:"tenants,omitempty"`

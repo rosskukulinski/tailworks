@@ -61,10 +61,13 @@ func TestPolicyApplyService(t *testing.T) {
 func TestServiceApproverNarrow(t *testing.T) {
 	t.Parallel()
 	defined := func(string) bool { return true }
-	pf := func(snip string) PreflightResult {
-		return PreflightResult{Service: "svc:support", ServiceUnapproved: true, ServiceSnippet: snip, workloadTags: []string{"tag:tw-wl-support"}}
+	approvers := func(svc map[string][]string) *policy.Snippet {
+		return &policy.Snippet{AutoApprovers: policy.AutoApprovers{Services: svc}}
 	}
-	ok := `"autoApprovers": { "services": { "svc:support": ["tag:tw-wl-support"] } }`
+	pf := func(snip *policy.Snippet) PreflightResult {
+		return PreflightResult{Service: "svc:support", ServiceUnapproved: true, ServiceSnippet: snip.Inline(), Snippet: snip, workloadTags: []string{"tag:tw-wl-support"}}
+	}
+	ok := approvers(map[string][]string{"svc:support": {"tag:tw-wl-support"}})
 	cases := map[string]struct {
 		pf   PreflightResult
 		o    policy.Options
@@ -72,19 +75,16 @@ func TestServiceApproverNarrow(t *testing.T) {
 		want string // "" = written
 	}{
 		"own":           {pf(ok), policy.Options{}, defined, ""},
-		"tag:tw":        {pf(`"autoApprovers": { "services": { "svc:support": ["tag:tw"] } }`), policy.Options{}, defined, "isn't one of the workload's tags"},
-		"other service": {pf(`"autoApprovers": { "services": { "svc:other": ["tag:tw-wl-support"] } }`), policy.Options{}, defined, "isn't for svc:support alone"},
-		"two services":  {pf(`"autoApprovers": { "services": { "svc:support": ["tag:tw-wl-support"], "svc:x": ["tag:tw-wl-support"] } }`), policy.Options{}, defined, "isn't for svc:support alone"},
+		"tag:tw":        {pf(approvers(map[string][]string{"svc:support": {"tag:tw"}})), policy.Options{}, defined, "isn't one of the workload's tags"},
+		"other service": {pf(approvers(map[string][]string{"svc:other": {"tag:tw-wl-support"}})), policy.Options{}, defined, "isn't for svc:support alone"},
+		"two services":  {pf(approvers(map[string][]string{"svc:support": {"tag:tw-wl-support"}, "svc:x": {"tag:tw-wl-support"}})), policy.Options{}, defined, "isn't for svc:support alone"},
 		"undefined tag": {pf(ok), policy.Options{}, func(string) bool { return false }, "has no tagOwners entry"},
 		"headscale":     {pf(ok), policy.Options{Headscale: true}, defined, "Headscale"},
-		"no tags":       {PreflightResult{Service: "svc:support", ServiceUnapproved: true, ServiceSnippet: ok}, policy.Options{}, defined, "isn't one of the workload's tags"},
+		"no tags":       {PreflightResult{Service: "svc:support", ServiceUnapproved: true, ServiceSnippet: ok.Inline(), Snippet: ok}, policy.Options{}, defined, "isn't one of the workload's tags"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			snip, manual, err := preflightSnippet(tc.pf, tc.o, tc.def)
-			if err != nil {
-				t.Fatal(err)
-			}
+			snip, manual := preflightSnippet(tc.pf, tc.o, tc.def)
 			if tc.want == "" {
 				if len(manual) != 0 || snip.AutoApprovers.Services["svc:support"] == nil {
 					t.Fatalf("not written: %+v %q", snip, manual)

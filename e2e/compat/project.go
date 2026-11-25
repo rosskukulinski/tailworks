@@ -18,12 +18,13 @@ import (
 // Repos the suite takes projects from, with their licenses. Sources are
 // fetched at run time (CacheDir), never vendored.
 var Repos = map[string]string{
-	"cloudflare/templates":   "MIT",
-	"cloudflare/workers-sdk": "Apache-2.0 OR MIT",
-	"cloudflare/agents":      "MIT",
-	"cloudflare/ai":          "MIT",
-	"vercel/ai":              "Apache-2.0",
-	"vercel/mcp-handler":     "Apache-2.0",
+	"cloudflare/templates":               "MIT",
+	"cloudflare/workers-sdk":             "Apache-2.0 OR MIT",
+	"cloudflare/agents":                  "MIT",
+	"cloudflare/ai":                      "MIT",
+	"cloudflare/python-workers-examples": "Apache-2.0",
+	"vercel/ai":                          "Apache-2.0",
+	"vercel/mcp-handler":                 "Apache-2.0",
 }
 
 // Install says how a project's npm dependencies are installed.
@@ -131,6 +132,24 @@ type Project struct {
 	// the deployed run: the example behaves differently on a real host
 	// than under tw dev.
 	ExpectDeployed Expect
+
+	// Companions are projects deployed before this one, each under its own
+	// ID: the Workers its `services` bindings name, in an example made of
+	// several Workers. They are prepared like a project, never probed or
+	// published on their own. `tw dev` runs one Worker, so the dev run
+	// doesn't start them (set ExpectDev).
+	Companions []*Project
+
+	// ExpectDev, when its Kind isn't ExpectPass, replaces Expect in the
+	// `tw dev` run (a multi-Worker example: tw dev has no binding to
+	// another workload).
+	ExpectDev Expect
+
+	// TailnetHTTPS sets tailworks.jsonc tailnet.https in the overlay
+	// (#360): the deployed run calls the workload at
+	// https://<magicDNS> and gives an OriginVar that origin. tw dev
+	// ignores it (loopback http://). List it in Changes too.
+	TailnetHTTPS bool
 }
 
 // ExpectIn is what the suite expects of p in a run mode ("dev" or
@@ -138,6 +157,9 @@ type Project struct {
 func (p *Project) ExpectIn(mode string) Expect {
 	if mode == "deployed" && p.ExpectDeployed.Kind != ExpectPass {
 		return p.ExpectDeployed
+	}
+	if mode == "dev" && p.ExpectDev.Kind != ExpectPass {
+		return p.ExpectDev
 	}
 	return p.Expect
 }
@@ -171,7 +193,7 @@ func Validate(ps []*Project, anchors map[string]bool) error {
 		if p.What == "" || len(p.Exercises) == 0 {
 			bad("needs What and Exercises")
 		}
-		for _, a := range append(append([]string{}, p.Exercises...), p.Expect.Compat, p.ExpectDeployed.Compat) {
+		for _, a := range append(append([]string{}, p.Exercises...), p.Expect.Compat, p.ExpectDeployed.Compat, p.ExpectDev.Compat) {
 			if a != "" && anchors != nil && !anchors[a] {
 				bad("COMPAT.md has no anchor %q", a)
 			}

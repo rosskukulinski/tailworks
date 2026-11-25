@@ -163,7 +163,7 @@ func TestDevParity(t *testing.T) {
 	work := t.TempDir()
 	app := filepath.Join(work, "hello")
 	e := &cliflow.Env{T: t, BinDir: bin, StateDir: filepath.Join(work, "state"), WorkDir: work}
-	e.MustJSON(nil, "init", app, "--template", "hello", "--keep-tags")
+	e.MustJSON(nil, "init", app, "--template", "hello")
 	os.WriteFile(filepath.Join(app, "src", "boom.ts"), []byte("// helper\nexport function explode(where: string): never {\n  throw new Error(\"boom at \" + where);\n}\n"), 0o644)
 	os.WriteFile(filepath.Join(app, "src", "index.ts"), []byte(`import { getCaller } from "@tailworks/tailnet";
 import { explode } from "./boom";

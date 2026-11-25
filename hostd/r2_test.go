@@ -504,7 +504,9 @@ func TestR2IndexSurvivesMove(t *testing.T) {
 	defer fake.Close()
 	s := startSuiteCapsOpts(t, fakemgmt.Config{}, tailcfg.PeerCapMap{nettest.TestCap: []tailcfg.RawMessage{nettest.TestCapValue}}, func(o *hostdtest.Options) {
 		o.R2 = fake.Backend("")
-		o.FenceAfter, o.HeartbeatEvery = time.Second, 100*time.Millisecond
+		// 5 s, not 1 s: ordinary calls must not trip the stall fence on a loaded
+		// runner (#556 gates stateful ingress on heartbeat freshness; #591).
+		o.FenceAfter, o.HeartbeatEvery = 5*time.Second, 100*time.Millisecond
 	})
 	e := s.e
 	dep := e.Deploy(hostdtest.Fixture("r2probe"), "r2probe", nil)
@@ -525,7 +527,7 @@ func TestR2IndexSurvivesMove(t *testing.T) {
 
 	ws := workloadStatus(t, e, "r2probe")
 	e.FM.SetHeartbeatsDown(true)
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for workloadStatus(t, e, "r2probe").PID != 0 {
 		if time.Now().After(deadline) {
 			t.Fatal("workload not fenced")

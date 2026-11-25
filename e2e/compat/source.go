@@ -204,7 +204,11 @@ func writeOverlay(p *Project, dir, tag string) error {
 	if p.Expect.Kind == ExpectRefused && p.NoOverlay {
 		return nil
 	}
-	o := map[string]any{"name": p.ID, "tailnet": map[string]any{"tags": []string{tag}}}
+	tn := map[string]any{"tags": []string{tag}}
+	if p.TailnetHTTPS {
+		tn["https"] = true
+	}
+	o := map[string]any{"name": p.ID, "tailnet": tn}
 	b, _ := json.MarshalIndent(o, "", "  ")
 	hdr := "// Written by e2e/compat (the compatibility suite): the workload's name and tag.\n"
 	return os.WriteFile(filepath.Join(dir, "tailworks.jsonc"), append([]byte(hdr), b...), 0o644)

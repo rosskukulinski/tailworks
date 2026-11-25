@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -18,7 +19,18 @@ import (
 // run several mgmt replicas. Run with tailworks stopped: a write during the
 // copy would land in file custody only. File custody is left as it was.
 
-const custodyUsage = "custody migrate --to setec --setec-url <url> [--dry-run]"
+const custodyUsage = "custody migrate --setec-url <url> [--dry-run]"
+
+// custodyMigrateCmd is the exact command that moves the install in dir to
+// the setec at setecURL (issue #444): what tw up's custody refusal and
+// already_running print. --state-dir is named unless dir is the default.
+func custodyMigrateCmd(setecURL, dir string) string {
+	cmd := "tw custody migrate --setec-url " + setecURL
+	if !isDefaultStateDir(dir, "") && os.Getenv("TW_STATE_DIR") == "" { // up_defaults.go
+		cmd += " --state-dir " + dir
+	}
+	return cmd
+}
 
 type custodyMigrateResult struct {
 	mgmt.CustodyMigration
@@ -30,22 +42,24 @@ type custodyMigrateResult struct {
 
 func cmdCustody(args []string) error {
 	f := newFlags("custody")
-	to := f.String("to", "", "migrate: the custody to move to (setec)")
-	setecURL := f.String("setec-url", "", "migrate --to setec: the setec server URL (what tw up --setec-url would take)")
+	// --to: setec is the only target, so the flag says nothing (issue
+	// #444). Still accepted (setec only) so earlier scripts keep working.
+	to := f.String("to", "", "deprecated: setec is the only target; leave it out")
+	setecURL := f.String("setec-url", "", "migrate: the setec server URL to move file custody to (what tw up --setec-url would take)")
 	dryRun := f.Bool("dry-run", false, "migrate: map every entry and check setec, but write nothing")
 	pos, err := f.parse(args)
 	if err != nil {
 		return err
 	}
 	if len(pos) != 1 || pos[0] != "migrate" {
-		return fail("bad_request", "tw custody takes the migrate subcommand", "usage: tw "+custodyUsage)
+		return needsSubcommand("custody")
 	}
-	if *to != "setec" {
-		return fail("bad_request", "tw custody migrate moves file custody to setec: give --to setec", "usage: tw "+custodyUsage)
+	if *to != "" && *to != "setec" {
+		return fail("bad_request", "tw custody migrate moves file custody to setec only; leave --to out", "usage: tw "+custodyUsage)
 	}
 	u, err := url.Parse(*setecURL)
 	if *setecURL == "" || err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
-		return fail("bad_request", "--to setec needs --setec-url <http(s)://…>", "usage: tw "+custodyUsage)
+		return fail("bad_request", "tw custody migrate needs --setec-url <http(s)://…>", "usage: tw "+custodyUsage)
 	}
 	s, err := openState(*f.stateDir)
 	if err != nil {
@@ -62,7 +76,7 @@ func cmdCustody(args []string) error {
 	}
 	if _, act := serviceOf(s); act || s.supervisorAlive() {
 		return fail("already_running", "tailworks is running from "+s.Dir+"; moving custody needs it stopped, so no secret is written during the copy").
-			withFix("tw down", "tw custody migrate --to setec --setec-url "+*setecURL, "tw up")
+			withFix("tw down", custodyMigrateCmd(*setecURL, s.Dir), "tw up")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()

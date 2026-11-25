@@ -12,7 +12,6 @@ import (
 
 	"github.com/rosskukulinski/tailworks/internal/policy"
 	v1 "github.com/rosskukulinski/tailworks/mgmt/api/v1"
-	"github.com/tailscale/hujson"
 )
 
 // tw policy --apply / tw deploy --apply-policy (issue #116): mgmt adds what
@@ -42,6 +41,11 @@ type PolicyApplyResult struct {
 	// CallerGrant: the grant in Added that lets every user of the tailnet
 	// call the app (callergrant.go); "" when Added has none.
 	CallerGrant string `json:"callerGrant,omitempty"`
+
+	// CanWrite (dryRun with Added non-empty): the control plane accepted
+	// the merged policy, so the write would go through (Tailscale refuses
+	// a client without Policy File write). tw deploy asks only then (#481).
+	CanWrite *bool `json:"canWrite,omitempty"`
 
 	OldETag string `json:"oldETag,omitempty"`
 	NewETag string `json:"newETag,omitempty"`
@@ -91,14 +95,11 @@ func (m *Mgmt) ApplyWorkloadPolicy(ctx context.Context, tenantID, workload strin
 	} else {
 		pol = nil
 	}
-	snip, manual, err := preflightSnippet(pf, popts, defined)
-	if err != nil {
-		return res, err
-	}
+	snip, manual := preflightSnippet(pf, popts, defined)
 	// The caller grant (callergrant.go) is mgmt's own, added after the
 	// bundle's entries passed Check without its relaxation.
 	if cfg, cerr := BundleConfig(r.Bundle); len(r.Bundle) > 0 && cerr == nil {
-		cg, why := callerGrant(cfg.Tailnet.Tags, snip, pol, popts)
+		cg, why := callerGrantPorts(cfg.Tailnet.Tags, CallerPorts(cfg.Tailnet.HTTPS), snip, pol, popts) // callergrant_https.go
 		if why != "" {
 			manual = append(manual, why)
 		}
@@ -108,13 +109,17 @@ func (m *Mgmt) ApplyWorkloadPolicy(ctx context.Context, tenantID, workload strin
 				return res, errf(500, "internal", "the policy snippet has a grant from outside tag:tw* that isn't the caller grant")
 			}
 			popts = callerGrantOptions(popts)
-			cb, _ := json.Marshal(cg)
-			res.CallerGrant = string(cb)
+			res.CallerGrant = policy.EntryHuJSON(cg)
 		}
 	}
 	res.Manual = manual
 	res.Added = snip.HuJSON()
-	if dryRun || snip.Empty() {
+	if snip.Empty() {
+		return res, nil
+	}
+	if dryRun {
+		can := m.policyWritable(ctx, t, snip, popts) // policyapply_canwrite.go
+		res.CanWrite = &can
 		return res, nil
 	}
 	fail := func(e *Error) (PolicyApplyResult, error) {
@@ -149,46 +154,19 @@ func (m *Mgmt) ApplyWorkloadPolicy(ctx context.Context, tenantID, workload strin
 	return res, nil
 }
 
-// preflightSnippet turns a preflight's missing parts into the snippet
-// tailworks may write, parsed from the preflight's own snippets. Entries
-// policy.Check refuses, and what Snippet can't express (a team tenant's
-// ownership problems), are returned as manual lines instead, as are grants
-// to a tag the policy doesn't define (defined): the control plane rejects
-// the whole policy for one of those. A Service's autoApprovers entry is
-// written only for the workload's own tags (serviceApprover).
-func preflightSnippet(pf PreflightResult, o policy.Options, defined func(tag string) bool) (policy.Snippet, []string, error) {
+// preflightSnippet is the part of a preflight's typed Snippet tailworks
+// may write. Entries policy.Check refuses, and what Snippet can't express
+// (a team tenant's ownership problems), are returned as manual lines
+// instead, as are grants to a tag the policy doesn't define (defined): the
+// control plane rejects the whole policy for one of those. A Service's
+// autoApprovers entry is written only for the workload's own tags
+// (serviceApprover).
+func preflightSnippet(pf PreflightResult, o policy.Options, defined func(tag string) bool) (policy.Snippet, []string) {
 	var s policy.Snippet
+	if pf.Snippet != nil {
+		s = *pf.Snippet
+	}
 	var manual []string
-	add := func(part string) error {
-		var p policy.Snippet
-		if err := parseHuJSONObject(part, &p); err != nil {
-			return errf(500, "internal", "preflight snippet %q: %v", part, err)
-		}
-		for t, owners := range p.TagOwners {
-			if s.TagOwners == nil {
-				s.TagOwners = map[string][]string{}
-			}
-			s.TagOwners[t] = owners
-		}
-		s.Grants = append(s.Grants, p.Grants...)
-		s.NodeAttrs = append(s.NodeAttrs, p.NodeAttrs...)
-		return nil
-	}
-	if pf.TagOwnersSnippet != "" && (len(pf.MissingTagOwners) > 0 || len(pf.UndefinedConnects) > 0) {
-		if err := add(pf.TagOwnersSnippet); err != nil {
-			return s, nil, err
-		}
-	}
-	for _, g := range pf.MissingGrants() {
-		if err := add(`"grants": [` + g.Snippet + `]`); err != nil {
-			return s, nil, err
-		}
-	}
-	if len(pf.MissingNodeAttrs) > 0 && pf.NodeAttrsSnippet != "" {
-		if err := add(pf.NodeAttrsSnippet); err != nil {
-			return s, nil, err
-		}
-	}
 	// Keep only what Check admits, one entry at a time.
 	var keep policy.Snippet
 	tags := make([]string, 0, len(s.TagOwners))
@@ -226,11 +204,8 @@ func preflightSnippet(pf PreflightResult, o policy.Options, defined func(tag str
 		}
 		keep.NodeAttrs = append(keep.NodeAttrs, n)
 	}
-	if pf.ServiceUnapproved && pf.ServiceSnippet != "" {
-		a, why, err := serviceApprover(pf, keep, o, defined)
-		if err != nil {
-			return s, nil, err
-		}
+	if pf.ServiceUnapproved && len(s.AutoApprovers.Services) > 0 {
+		a, why := serviceApprover(pf, s.AutoApprovers, keep, o, defined)
 		if why != "" {
 			manual = append(manual, "autoApprovers.services "+pf.Service+": not written: "+why+"; add it yourself: "+pf.ServiceSnippet)
 		} else {
@@ -238,45 +213,43 @@ func preflightSnippet(pf PreflightResult, o policy.Options, defined func(tag str
 		}
 	}
 	manual = append(manual, pf.TagOwnerProblems...)
-	return keep, manual, nil
+	return keep, manual
 }
 
 // serviceApprover is the autoApprovers.services entry for the workload's
-// Service (issue #295), parsed from the preflight's snippet. It is written
+// Service (issue #295), a, from the preflight's snippet. It is written
 // only as narrow as it gets: one key, the workload's own svc: name, and
 // approvers among the tags the workload node is deployed with, each
 // defined in tagOwners (the control plane rejects an undefined tag) and
 // passing policy.Check. Otherwise why says what stops it.
-func serviceApprover(pf PreflightResult, keep policy.Snippet, o policy.Options, defined func(string) bool) (a policy.AutoApprovers, why string, err error) {
-	var p policy.Snippet
-	if err := parseHuJSONObject(pf.ServiceSnippet, &p); err != nil {
-		return a, "", errf(500, "internal", "preflight snippet %q: %v", pf.ServiceSnippet, err)
-	}
-	a = p.AutoApprovers
+func serviceApprover(pf PreflightResult, a policy.AutoApprovers, keep policy.Snippet, o policy.Options, defined func(string) bool) (policy.AutoApprovers, string) {
 	who, ok := a.Services[pf.Service]
 	if len(a.Services) != 1 || !ok {
-		return a, fmt.Sprintf("the entry isn't for %s alone", pf.Service), nil
+		return a, fmt.Sprintf("the entry isn't for %s alone", pf.Service)
 	}
 	for _, tag := range who {
 		if !slices.Contains(pf.workloadTags, tag) {
-			return a, fmt.Sprintf("%s isn't one of the workload's tags", tag), nil
+			return a, fmt.Sprintf("%s isn't one of the workload's tags", tag)
 		}
 		if _, ok := keep.TagOwners[tag]; !ok && !defined(tag) {
-			return a, fmt.Sprintf("%s has no tagOwners entry", tag), nil
+			return a, fmt.Sprintf("%s has no tagOwners entry", tag)
 		}
 	}
 	if err := policy.Check(policy.Snippet{AutoApprovers: a}, o); err != nil {
-		return a, strings.TrimPrefix(err.Error(), "policy snippet: "), nil
+		return a, strings.TrimPrefix(err.Error(), "policy snippet: ")
 	}
-	return a, "", nil
+	return a, ""
 }
 
 // undefinedDst is the first dst tag of g that neither the policy nor the
 // snippet's tagOwners defines ("" if none).
 func undefinedDst(g map[string]any, s policy.Snippet, defined func(string) bool) string {
-	dst, _ := g["dst"].([]any)
-	for _, d := range dst {
-		tag, _ := d.(string)
+	var e struct {
+		Dst []string `json:"dst"`
+	}
+	b, _ := json.Marshal(g)
+	_ = json.Unmarshal(b, &e)
+	for _, tag := range e.Dst {
 		if !strings.HasPrefix(tag, "tag:") {
 			continue
 		}
@@ -286,16 +259,6 @@ func undefinedDst(g map[string]any, s policy.Snippet, defined func(string) bool)
 		return tag
 	}
 	return ""
-}
-
-// parseHuJSONObject parses a policy fragment (`"key": value, ...`) as the
-// object it is part of.
-func parseHuJSONObject(part string, v any) error {
-	std, err := hujson.Standardize([]byte("{" + part + "}"))
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(std, v)
 }
 
 // checkReason is policy.Check's refusal without its "policy snippet: grant

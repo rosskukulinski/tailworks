@@ -1,8 +1,6 @@
 {
-  "$schema": "https://raw.githubusercontent.com/rosskukulinski/tailworks/master/schema/tailworks.schema.json",
-  "name": "static-site",
-  "tailnet": {
-    // the workload node's tags (your policy must let tag:tw own them)
-    "tags": ["tag:tw-wl-static-site"]
-  }
+  "$schema": "https://raw.githubusercontent.com/rosskukulinski/tailworks/master/schema/tailworks.schema.json"
+  // "tailnet": { "tags": [...] } (the workload node's) defaults to
+  // ["tag:tw-wl-<workload>"]; your policy must let tag:tw own it
+  // (tw policy prints the line)
 }

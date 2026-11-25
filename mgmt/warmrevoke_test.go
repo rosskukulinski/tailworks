@@ -35,8 +35,13 @@ func TestWarmKeysRevokedOnCloseInParallel(t *testing.T) {
 			t.Errorf("warm key %s not revoked", id)
 		}
 	}
-	if budget := n * delay / 2; took > budget {
-		t.Fatalf("Close took %v revoking %d keys (%v each), budget %v: revoked one by one?", took, n, delay, budget)
+	// Concurrency, not Close's wall-clock time: Close also flushes deletes,
+	// unregisters the replica and waits for the loops, which a loaded CI
+	// runner can stretch past any fixed budget (#417). One by one would
+	// never have two DELETEs in flight; each takes delay, so parallel
+	// revocation reaches warmRevokeParallel.
+	if peak := e.ts.keyDeletesPeak.Load(); peak < 2 {
+		t.Fatalf("Close revoked %d keys with at most %d DELETE in flight: revoked one by one?", n, peak)
 	}
-	t.Logf("Close revoked %d keys (%v per DELETE) in %v", n, delay, took.Round(time.Millisecond))
+	t.Logf("Close revoked %d keys (%v per DELETE, at most %d at once) in %v", n, delay, e.ts.keyDeletesPeak.Load(), took.Round(time.Millisecond))
 }

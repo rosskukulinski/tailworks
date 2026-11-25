@@ -60,15 +60,15 @@ func run() error {
 	}
 	home, _ := os.UserHomeDir()
 	var (
-		mgmtAddr   = flag.String("mgmt", "", "tw-mgmt address: http(s)://tw-mgmt.<tailnet> over this host's node (default), or unix:///path with -local-dev")
+		mgmtAddr   = flag.String("mgmt", "", "tw-mgmt address: http(s)://tw-mgmt.<tailnet> over this host's node (default: the join file's, else the one saved at the join), or unix:///path with -local-dev")
 		localDev   = flag.Bool("local-dev", false, "talk to mgmt over its unix socket with the per-host token instead of this host's own tailnet node (tw dev, hermetic tests)")
 		tsDir      = flag.String("tsnet-dir", "", "state of this host's own tailnet node (default <data-dir>/tsnet)")
-		tsControl  = flag.String("tsnet-control-url", "", "operator tailnet control URL for this host's node (required unless -local-dev)")
+		tsControl  = flag.String("tsnet-control-url", "", "operator tailnet control URL for this host's node (default: the join file's, else the one saved at the join, else Tailscale's for a node that hasn't joined yet)")
 		tsKeyTags  = flag.Bool("tsnet-key-tags-only", false, "the host's node advertises no tags; its join key carries tag:tw-host (required on Headscale, ADR-015)")
-		joinFile   = flag.String("join-token-file", "", "TS_AUTHKEY=… file with the single-use join key mgmt minted (tw host add / tw up); waited for when the node has no state yet. Deleted after use")
+		joinFile   = flag.String("join-token-file", "", "the join file tw host add wrote: the single-use join key (TS_AUTHKEY=…), the registration secret, and the host ID, mgmt URL and control URL (flags win; kept beside the node state after the join); waited for when the node has no state yet. Deleted after use")
 		pushPort   = flag.Int("push-port", hostdrun.DefaultPushPort, "port on this host's node where mgmt pushes kills and assignment changes")
 		metricsPrt = flag.Int("metrics-port", obs.DefaultMetricsPort, "port on this host's node serving GET /metrics (Prometheus; who may scrape is a tailnet policy grant); 0 = off")
-		hostID     = flag.String("host-id", "", "this host's ID (default: hostname)")
+		hostID     = flag.String("host-id", "", "this host's ID (default: the join file's, else the one saved at the join, else hostname)")
 		dataDir    = flag.String("data-dir", filepath.Join(home, ".tailworks", "hostd"), "node state, DO storage, objects.json")
 		runDir     = flag.String("run-dir", "", "sockets and generated configs (short path; default a new /tmp dir)")
 		workerd    = flag.String("workerd", "", "workerd binary (default: $TW_WORKERD, ~/.tailworks/bin/workerd, or PATH)")
@@ -81,7 +81,6 @@ func run() error {
 		tombstone  = flag.Duration("kill-tombstone", 10*time.Second, "keep killed nodes RST-ing new connections this long")
 		logLevel   = flag.String("log-level", "info", "debug|info|warn|error")
 		tsnetLogs  = flag.Bool("tsnet-logs", false, "forward tsnet logs at debug level")
-		tier       = flag.String("default-tier", "process", "tier for deployments and tenants that name none: process | microvm")
 		vmKernel   = flag.String("vm-kernel", hostdrun.VMAsset(home, "vmlinux"), "microVM tier: guest kernel (Firecracker on Linux, Virtualization.framework on macOS)")
 		vmRootfs   = flag.String("vm-rootfs", hostdrun.VMAsset(home, "rootfs.ext4"), "microVM tier: guest image from guest/build-image.sh")
 		vmHelper   = flag.String("vm-helper", helperapi.DefaultSocket, "microVM tier: tw-vmhelper socket (sudo tw host setup --microvm)")
@@ -99,6 +98,7 @@ func run() error {
 		vmPool     = flag.Int("vm-pool", 0, "microVM tier: warm pool size (pre-booted VMs without tenant code; single use; Durable Object VMs only, containers cold-boot): 0 = auto (≤ 2, within the huge-page reservation), -1 = off")
 		sandboxF   = flag.String("sandbox", "auto", "process-tier workerd/Node sandbox: auto (seatbelt on macOS, landlock on Linux) | seatbelt | seatbelt-legacy (macOS: the previous files-only profile, kept for one release) | landlock | none")
 		insecureSH = flag.Bool("insecure-shared-host", false, "without a process sandbox, still run process-tier workloads of more than one tenant (tenants are NOT isolated from each other)")
+		pyodideDir = flag.String("pyodide-dir", "", "Python Workers: the pinned Pyodide bundles workerd reads, read-only (default <data-dir>/pyodide; fetched on the first Python deployment, or copied there on an offline host: docs/python.md#offline-hosts)")
 		allowExp   = flag.Bool("allow-experimental-flags", false, "let deployments set compatibility flags workerd marks experimental (unsafe_module, rtti_api, precise_timers, …; refused by default, docs/COMPAT.md#experimental-flags); advertised to placement as the experimental-flags feature")
 		sbDeny     = flag.String("sandbox-deny", "", "comma-separated extra paths no workerd may read, write or connect to (tw up: its state and run dirs)")
 		nodeBin    = flag.String("node", "", "Node process tier (runtime \"node\"): node binary (default: $TW_NODE, or node on PATH)")
@@ -108,6 +108,7 @@ func run() error {
 		pathEvery  = flag.Duration("path-every", hostd.DefaultPathEvery, "smart placement: measure and report tailnet paths to assignments' placement targets this often (negative disables)")
 		reqMaxAge  = flag.Duration("request-log-max-age", 0, "also drop request records (tw logs --source requests) older than this, e.g. 168h; 0 = keep them until the size rotation does (the default)")
 		queueVis   = flag.Duration("queue-visibility", hostd.DefaultQueueVisibility, "queues: how long a claimed batch stays hidden in mgmt (extended while queue() runs); bounds how soon a crashed consumer's batch is delivered again")
+		pubTestDir = flag.String("test-public-listen-dir", "", "with -local-dev (hermetic tests): serve public nodes on loopback instead of Funnel, writing each listener's address to <dir>/<node>.addr")
 		siblings   = flag.Bool("allow-sibling-egress", false, "dial other objects hosted here over WireGuard (a hairpin) instead of netd's in-process hop (tests)")
 		ctrOff     = flag.Bool("no-containers", false, "don't offer containers (ctx.container) even with a microVM backend")
 		ctrKernel  = flag.String("vm-container-kernel", "", "containers: guest kernel with erofs (guest/build-kernel.sh; default -vm-kernel)")
@@ -115,7 +116,7 @@ func run() error {
 		ctrImages  = flag.String("container-image-dir", "", "containers: dir of image tarballs with an images.json index (tests and hosts without a registry; deployments with pinned images pull from mgmt's registry instead)")
 		ctrPublic  = flag.String("container-public-images", "", "containers: comma-separated image refs cached once for all tenants (public bases; -container-image-dir only: pinned images take their scope from the pin)")
 		ctrImgMB   = flag.Int64("container-image-max-mib", image.DefaultMaxImageBytes>>20, "containers: cap on one image's uncompressed layers while converting it (also 128 layers, 1 Mi entries); an image over it fails to convert")
-		ctrCacheMB = flag.Int64("container-image-cache-max-mib", 0, "containers: cap on the converted image cache; past it the least recently used images not in use are removed (0 = no cap)")
+		ctrCacheMB = flag.Int64("container-image-cache-max-mib", hostdrun.DefaultImageCacheMiB, "containers: cap on the converted image cache; past it the least recently used images not in use are removed (images in use stay, even past it; 0 = no cap)")
 		ctrIdle    = flag.Duration("container-idle", hostd.DefaultContainerIdle, "containers: default inactivity timeout (setInactivityTimeout overrides, ≤ 6 h)")
 		ctrMaxLife = flag.Duration("container-max-lifetime", hostd.DefaultContainerMaxLife, "containers: hard max lifetime of a container")
 		ctrGrace   = flag.Duration("container-stop-grace", hostd.DefaultContainerGrace, "containers: cap on destroy()'s SIGTERM → SIGKILL grace")
@@ -132,6 +133,7 @@ func run() error {
 	nodeHeap := flag.Int("node-heap-mib", hostd.DefaultNodeHeapMiB, "Node tier: the app's --max-old-space-size in MiB, unless node.args or NODE_OPTIONS set one (-1 = no cap)")
 	var r2f r2.Flags // R2 bucket blob backend (ADR-036)
 	r2f.Register(flag.CommandLine)
+	defaultTier := hostdDeprecatedFlags(flag.CommandLine) // deprecated.go
 	flag.Parse()
 	r2b, err := r2f.Open(*dataDir, os.Getenv)
 	if err != nil {
@@ -142,12 +144,15 @@ func run() error {
 		return err
 	}
 	log := slog.New(netd.NewRedactingHandler(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: lvl})))
+	if err := hostdCheckDefaultTier(*defaultTier, log); err != nil {
+		return err
+	}
 	o := hostdrun.Options{MgmtAddr: *mgmtAddr, LocalDev: *localDev, MgmtTokenFile: *tokenFile,
 		TSNetDir: *tsDir, TSNetControlURL: *tsControl, TSNetKeyTagsOnly: *tsKeyTags, JoinTokenFile: *joinFile, PushPort: *pushPort, PortMapping: *portMap,
 		MetricsPort: *metricsPrt,
 		HostID:      *hostID, DataDir: *dataDir, RunDir: *runDir, Workerd: *workerd,
 		Heartbeat: *hb, FenceAfter: *fenceAfter, Ephemeral: *ephemeral, HostnamePrefix: *prefix, ControlURL: *controlURL, CapacityNodes: *capacity,
-		KillTombstone: *tombstone, TSNetLogs: *tsnetLogs, PoolNodes: *poolNodes, PathEvery: *pathEvery, DefaultTier: *tier,
+		KillTombstone: *tombstone, TSNetLogs: *tsnetLogs, PoolNodes: *poolNodes, PathEvery: *pathEvery,
 		QueueVisibility: *queueVis,
 		VM: hostdrun.VMOptions{Kernel: *vmKernel, Rootfs: *vmRootfs, Firecracker: *vmFC, Jailer: *vmJailer, Helper: *vmHelper,
 			MemMiB: *vmMem, VCPUs: *vmCPUs, VolumeMiB: *vmVolMiB, HugePages: *vmHuge, ContainerKernel: *ctrKernel, VzVMM: *vzVMM, Rosetta: *vmRosetta,
@@ -163,6 +168,8 @@ func run() error {
 	o.RequestLogMaxAge = *reqMaxAge // hostd/telemetry_retention.go
 	o.WorkerdHeapMiB, o.NodeHeapMiB = *wdHeap, *nodeHeap
 	o.AllowExperimentalFlags = *allowExp // hostd/gen/compatflags.go (#337)
+	o.PyodideDir = *pyodideDir           // hostd/pyodide.go
+	o.TestPublicListenDir = *pubTestDir  // internal/hostdrun/testfunnel.go
 	restart := make(chan struct{}, 1)
 	if *selfUpg {
 		o.SelfUpgrade, o.InstallPrefix = true, *instPrefix
@@ -236,15 +243,27 @@ func installPrefix() string {
 func runJoin(args []string) error {
 	home, _ := os.UserHomeDir()
 	fs := flag.NewFlagSet("tw-hostd join", flag.ContinueOnError)
-	hostID := fs.String("host-id", "", "this host's ID (default: hostname)")
+	hostID := fs.String("host-id", "", "this host's ID (default: the token file's TW_HOST_ID, else hostname)")
 	dataDir := fs.String("data-dir", filepath.Join(home, ".tailworks", "hostd"), "hostd state (the node state goes to <data-dir>/tsnet)")
 	tsDir := fs.String("tsnet-dir", "", "node state dir (default <data-dir>/tsnet)")
-	control := fs.String("control-url", "https://controlplane.tailscale.com", "operator tailnet control URL")
+	control := fs.String("control-url", "https://controlplane.tailscale.com", "operator tailnet control URL (default: the join file's TW_TSNET_CONTROL_URL, else Tailscale's)")
 	tokenFile := fs.String("token-file", "", "TS_AUTHKEY=… file with the join key (tw host add --json > …)")
 	token := fs.String("token", "", "the join key itself (prefer --token-file; argv is visible to other users)")
 	keyTags := fs.Bool("key-tags-only", false, "advertise no tags; the join key carries tag:tw-host (required on Headscale, ADR-015)")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	// #488: the join file names the host ID, control URL and key-tags-only
+	// (a flag still wins); they are kept beside the node state after the join.
+	js := hostdrun.ReadJoinSettings(*tokenFile)
+	controlGiven := false
+	fs.Visit(func(f *flag.Flag) { controlGiven = controlGiven || f.Name == "control-url" })
+	if !controlGiven && js.ControlURL != "" {
+		*control = js.ControlURL
+	}
+	*keyTags = *keyTags || js.KeyTagsOnly
+	if *hostID == "" {
+		*hostID = js.HostID
 	}
 	if *hostID == "" {
 		h, _ := os.Hostname()
@@ -283,8 +302,11 @@ func runJoin(args []string) error {
 		// M1: keep the registration secret for the first registration;
 		// the join key itself is single use.
 		hostdrun.PersistRegistrationSecret(*tokenFile, *tsDir)
+		if err := hostdrun.SaveJoinSettings(*tsDir, hostdrun.JoinSettings{HostID: *hostID, MgmtURL: js.MgmtURL, ControlURL: *control, KeyTagsOnly: *keyTags}); err != nil {
+			fmt.Fprintf(os.Stderr, "tw-hostd join: could not save the join settings beside the node state: %v (pass -host-id, -mgmt and -tsnet-control-url to tw-hostd)\n", err)
+		}
 		os.Remove(*tokenFile)
 	}
-	fmt.Printf("joined as %s (%s); node state in %s. Start tw-hostd without a key now.\n", strings.TrimSuffix(st.Self.DNSName, "."), st.TailscaleIPs, *tsDir)
+	fmt.Printf("joined as %s (%s); node state in %s. Start tw-hostd without a key now (it reads the saved settings; -mgmt if the join file named none).\n", strings.TrimSuffix(st.Self.DNSName, "."), st.TailscaleIPs, *tsDir)
 	return nil
 }

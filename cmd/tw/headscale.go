@@ -48,7 +48,7 @@ func checkControlProfile(profile, controlURL, cmd string) error {
 	if controlURL == prodControl || err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
 		return fail("bad_request", cmd+" --control=headscale needs --control-url <your Headscale server_url>",
 			"the Headscale profile mints through the server's REST API (/api/v1), served on the same URL as its control protocol").
-			withFix("tw " + cmd + " --control=headscale --control-url https://headscale.example.net --api-key-file <file with " + headscale.APIKeyEnv + "=…> …")
+			withFix("tw " + cmd + " --control-url https://headscale.example.net --api-key-file <file with " + headscale.APIKeyEnv + "=…> …")
 	}
 	return nil
 }
@@ -103,8 +103,8 @@ const headscaleProfileNote = "Headscale profile (ADR-015): no Tailscale Services
 // headscaleKeyFile resolves --api-key-file for the Headscale profile.
 func headscaleKeyFile(keyFile string) (string, error) {
 	if keyFile == "" {
-		return "", fail("bad_request", "--control=headscale needs --api-key-file (a 0600 file with "+headscale.APIKeyEnv+"=…)").
-			withFix("headscale apikeys create --expiration 90d   then write " + headscale.APIKeyEnv + "=<key> to a 0600 file")
+		return "", fail("bad_request", "the Headscale profile needs --api-key-file (a 0600 file with "+headscale.APIKeyEnv+"=…)").
+			withFix("headscale apikeys create --expiration 90d   then write " + headscale.APIKeyEnv + "=<key> to a 0600 file (tw up, on the default state dir, reads ~/.config/tailworks/headscale.env without the flag)")
 	}
 	abs, _ := filepath.Abs(keyFile)
 	return abs, nil
@@ -144,7 +144,7 @@ func doctorHeadscaleKey(s *state, kf string) (string, string, string) {
 // it shows the profile's snippet, asks (or takes --yes) and writes it
 // (checked by the server first); without,
 // it stops before anything is minted and prints the snippet.
-func headscaleUpPolicy(ctx context.Context, api policy.API, f *flags, pol []byte, apply, yes bool, out io.Writer) ([]byte, bool, error) {
+func headscaleUpPolicy(ctx context.Context, api policy.API, f *flags, pol []byte, mode policyWriteMode, yes bool, out io.Writer) ([]byte, bool, error) {
 	snip, popts := profileSnippet(controlHeadscale)
 	miss, err := policy.Missing(pol, snip)
 	if err != nil {
@@ -153,13 +153,14 @@ func headscaleUpPolicy(ctx context.Context, api policy.API, f *flags, pol []byte
 	if miss.Empty() {
 		return pol, false, nil
 	}
-	if !apply {
+	write, err := bootstrapPolicyGate(ctx, api, f, mode, yes, "tw up", controlHeadscale, pol, snip, popts, miss, out) // policy_ask.go
+	if err != nil {
+		return pol, false, err
+	}
+	if !write {
 		return pol, false, fail("policy_missing_tag_owners", "the Headscale policy does not define tailworks' tags, and Headscale refuses to register a node with undefined tags",
 			"nothing was minted").withFix(append([]string{"re-run with --apply-policy (needs policy.mode: database), or add to " + policyHome(controlHeadscale) + ":"},
 			snippetLines(miss)...)...)
-	}
-	if err := confirmBootstrapWrite(f, yes, "tw up --apply-policy", controlHeadscale, miss, out); err != nil { // up_policyapply.go
-		return pol, false, err
 	}
 	ar, err := policy.ApplyWith(ctx, api, snip, popts)
 	if err != nil {

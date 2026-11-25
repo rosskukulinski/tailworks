@@ -2,13 +2,15 @@ package main
 
 // Workers KV (ADR-037), CLI side, like `wrangler kv`:
 //
-//	tw kv namespace create|list|delete [NAME]
-//	tw kv key put <KEY> [VALUE] | get <KEY> | delete <KEY> | list [--prefix P]
+//	tw kv namespace create|ls|rm [NAME]
+//	tw kv key put <KEY> [VALUE] | get <KEY> | rm <KEY> | ls [--prefix P]
 //
-// A namespace belongs to a workload (default: the app in the current
-// directory). Key commands name it with --namespace NAME, or with --binding
-// BINDING, looked up in the app's wrangler config kv_namespaces as a deploy
-// would. Everything goes to mgmt's /v1 API: the namespace is a platform
+// (wrangler's list and delete work too: normalizeVerb.) A namespace
+// belongs to a workload (default: the app in the current directory). Key
+// commands name it with --namespace: its name, or its binding in the
+// app's wrangler config kv_namespaces, as a deploy would resolve it
+// (storename.go); without it, the app's only kv_namespaces entry.
+// Everything goes to mgmt's /v1 API: the namespace is a platform
 // store of kind "kv", and key writes are journal appends a running
 // workload sees on its next sync (within 60 s).
 
@@ -47,76 +49,125 @@ type kvResult struct {
 	Value      *mgmt.KVValue     `json:"value,omitempty"`
 }
 
+// kvUsageLine is tw kv's usage line (the commands table's).
+const kvUsageLine = "kv namespace create <NAME> | kv namespace ls | kv namespace rm <NAME> [--yes] | kv key put <KEY> [VALUE] [--namespace N] [--path FILE] [--ttl S] [--expiration T] [--metadata JSON] | kv key get <KEY> [--namespace N] | kv key rm <KEY> [--namespace N] | kv key ls [--namespace N] [--prefix P]   [--workload <workload>] [--tenant <tailnet>]"
+
 func kvUsage() string { return "usage: tw " + usageOf("kv") }
 
+// kvVerbs are tw kv's commands and how many arguments each takes (key
+// put: one or two, checked in cmdKV).
+var kvVerbs = map[string]int{
+	"key get":          1,
+	"key ls":           0,
+	"key put":          1,
+	"key rm":           1,
+	"namespace create": 1,
+	"namespace ls":     0,
+	"namespace rm":     1,
+}
+
+// kvOpts are tw kv's flags. A verb registers only its own (kvFlags); the
+// others keep their zero value.
+type kvOpts struct {
+	tenant, workload *string
+
+	// key commands
+	namespace, binding *string
+
+	// key ls
+	prefix *string
+
+	// key put
+	path, metadata  *string
+	ttl, expiration *int64
+
+	// namespace rm
+	yes *bool
+}
+
+// kvFlags registers verb's flags ("key put"; anyVerb: every verb's) on f.
+func kvFlags(f *flags, verb string) *kvOpts {
+	o := &kvOpts{namespace: new(string), binding: new(string), prefix: new(string), path: new(string), metadata: new(string),
+		ttl: new(int64), expiration: new(int64), yes: new(bool)}
+	o.tenant = tenantFlag(f)
+	o.workload = f.String("workload", "", "workload whose namespaces these are (default: the app in the current directory)")
+	if onVerb(verb, "key put", "key get", "key rm", "key ls") {
+		o.namespace = f.String("namespace", "", "the namespace: its name (a kv_namespaces id) or its binding in the app's wrangler config (default: the app's only kv_namespaces entry)")
+		o.binding = f.String("binding", "", "same as --namespace (wrangler's spelling)")
+	}
+	if onVerb(verb, "key ls") {
+		o.prefix = f.String("prefix", "", "only keys starting with this")
+	}
+	if onVerb(verb, "key put") {
+		o.path = f.String("path", "", "read the value from this file")
+		o.ttl = f.Int64("ttl", 0, "expire after this many seconds (≥ 60)")
+		o.expiration = f.Int64("expiration", 0, "expire at this Unix time (≥ 60 s ahead)")
+		o.metadata = f.String("metadata", "", "metadata (JSON, ≤ 1024 bytes)")
+	}
+	if onVerb(verb, "namespace rm") {
+		o.yes = yesFlag(f)
+	}
+	return o
+}
+
 func cmdKV(args []string) error {
+	verb, args, complete := scanVerb(args, func(f *flags) { kvFlags(f, anyVerb) }, func(string) int { return 2 })
+	if _, ok := kvVerbs[verb]; complete && !ok {
+		return fail("bad_request", fmt.Sprintf("unknown command %q", verb), kvUsage())
+	}
+	if !complete && verb != "" {
+		return needsSubcommand("kv")
+	}
 	f := newFlags("kv")
-	tenantF := tenantFlag(f)
-	workloadF := f.String("workload", "", "workload whose namespaces these are (default: the app in the current directory)")
-	nsF := f.String("namespace", "", "key commands: the namespace's name (its kv_namespaces id)")
-	bindingF := f.String("binding", "", "key commands: the namespace bound as this binding in the app's wrangler.jsonc")
-	prefixF := f.String("prefix", "", "key list: only keys starting with this")
-	pathF := f.String("path", "", "key put: read the value from this file")
-	ttlF := f.Int64("ttl", 0, "key put: expire after this many seconds (≥ 60)")
-	expF := f.Int64("expiration", 0, "key put: expire at this Unix time (≥ 60 s ahead)")
-	metaF := f.String("metadata", "", "key put: metadata (JSON, ≤ 1024 bytes)")
-	yes := yesFlag(f)
-	pos, err := f.parse(args)
+	o := kvFlags(f, verb)
+	rest, err := f.parse(args)
 	if err != nil {
 		return err
 	}
-	if len(pos) < 2 {
-		return fail("bad_request", "tw kv needs a command: namespace create|list|delete, key put|get|delete|list", kvUsage())
+	if !complete {
+		return needsSubcommand("kv")
 	}
-	group, verb, rest := pos[0], pos[1], pos[2:]
-	switch verb {
-	case "ls":
-		verb = "list"
-	case "rm":
-		verb = "delete"
-	}
-	need := func(n int, what string) error {
-		if len(rest) != n {
-			return fail("bad_request", "tw kv "+group+" "+verb+" "+what, kvUsage())
+	group, _, _ := strings.Cut(verb, " ")
+	switch n := kvVerbs[verb]; {
+	case verb == "key put":
+		if len(rest) < 1 || len(rest) > 2 || (len(rest) == 2 && *o.path != "") {
+			return fail("bad_request", "tw kv key put needs the KEY and the value: an argument, --path FILE, or stdin", kvUsage())
 		}
-		return nil
-	}
-	switch group + " " + verb {
-	case "namespace create", "namespace delete":
-		err = need(1, "needs the namespace's NAME")
-	case "namespace list", "key list":
-		err = need(0, "takes no arguments")
-	case "key get", "key delete":
-		err = need(1, "needs the KEY")
-	case "key put":
-		if len(rest) < 1 || len(rest) > 2 || (len(rest) == 2 && *pathF != "") {
-			err = fail("bad_request", "tw kv key put needs the KEY and the value: an argument, --path FILE, or stdin", kvUsage())
-		}
+	case len(rest) == n:
+	case n == 0:
+		return fail("bad_request", "tw kv "+verb+" takes no arguments", kvUsage())
+	case group == "key":
+		return fail("bad_request", "tw kv "+verb+" needs the KEY", kvUsage())
 	default:
-		err = fail("bad_request", fmt.Sprintf("unknown command %q", group+" "+verb), kvUsage())
+		return fail("bad_request", "tw kv "+verb+" needs the namespace's NAME", kvUsage())
 	}
-	if err != nil {
-		return err
-	}
-	if group+" "+verb == "namespace delete" {
-		cmdline := "tw kv namespace delete " + rest[0]
-		if *workloadF != "" {
-			cmdline += " --workload " + *workloadF
+	if verb == "namespace rm" {
+		cmdline := "tw kv namespace rm " + rest[0]
+		if *o.workload != "" {
+			cmdline += " --workload " + *o.workload
 		}
-		if err := confirmDestroy(f, *yes, "deleting namespace "+rest[0]+" deletes every key in it", rest[0], cmdline); err != nil {
+		if err := confirmDestroy(f, *o.yes, "deleting namespace "+rest[0]+" deletes every key in it", rest[0], cmdline); err != nil {
 			return err
 		}
 	}
 
-	// The workload, and for key commands the namespace.
-	workload := *workloadF
+	// The workload (default: the app in the current directory), and for
+	// key commands the namespace, which that app's kv_namespaces can name.
+	workload := *o.workload
 	var a *app
-	if workload == "" || *bindingF != "" {
-		if a, err = loadApp(".", ""); err != nil {
-			return fail("bad_request", "no app in the current directory to take the workload (or --binding) from").
-				withFix("cd <app dir> && tw kv …", "tw kv … --workload <workload> --namespace <name>")
+	if workload == "" || group == "key" {
+		var appErr error
+		if a, appErr = loadApp(".", ""); appErr != nil {
+			a = nil
 		}
 		if workload == "" {
+			if a == nil {
+				extra := ""
+				if group == "key" {
+					extra = " --namespace <NAME>"
+				}
+				return appWorkloadErr(".", "kv "+verb, appErr, extra) // appworkload.go
+			}
 			workload = a.Name
 		}
 	}
@@ -128,7 +179,7 @@ func cmdKV(args []string) error {
 	case group == "namespace" && len(rest) == 1:
 		ns = rest[0]
 	case group == "key":
-		if ns, err = kvNamespaceOf(a, *nsF, *bindingF); err != nil {
+		if ns, err = kvNamespaceOf(a, workload, *o.namespace, *o.binding); err != nil {
 			return err
 		}
 	}
@@ -143,8 +194,8 @@ func cmdKV(args []string) error {
 		}
 	}
 	var put mgmt.KVPut
-	if group+" "+verb == "key put" {
-		if put, err = kvPutBody(rest, *pathF, *ttlF, *expF, *metaF); err != nil {
+	if verb == "key put" {
+		if put, err = kvPutBody(rest, *o.path, *o.ttl, *o.expiration, *o.metadata); err != nil {
 			return err
 		}
 	}
@@ -156,7 +207,7 @@ func cmdKV(args []string) error {
 	if err := s.requireUp(); err != nil {
 		return err
 	}
-	tn, err := s.tenant(*tenantF)
+	tn, err := s.tenant(*o.tenant)
 	if err != nil {
 		return err
 	}
@@ -169,7 +220,7 @@ func cmdKV(args []string) error {
 	mc := s.mgmt()
 	hdr := map[string]string{"Tw-Actor": actor()}
 
-	switch group + " " + verb {
+	switch verb {
 	case "namespace create":
 		var st mgmt.StoreInfo
 		created := mc.Do(ctx, "GET", nsPath, nil, &st) != nil
@@ -187,7 +238,7 @@ func cmdKV(args []string) error {
 			fmt.Printf("✓ KV namespace %s %s for workload %s (tenant %s)\n", ns, verb, workload, tn.Tailnet)
 			fmt.Printf("  bind it in wrangler.jsonc: \"kv_namespaces\": [{ \"binding\": \"MY_KV\", \"id\": %q }]\n", ns)
 		})
-	case "namespace list":
+	case "namespace ls":
 		items, err := listAll[mgmt.StoreInfo](ctx, mc, stores+"?kind=kv", 0)
 		if err != nil {
 			return err
@@ -205,7 +256,7 @@ func cmdKV(args []string) error {
 				printStoreDegraded(st.Degraded, storeFix(st))
 			}
 		})
-	case "namespace delete":
+	case "namespace rm":
 		if err := mc.DoHeaders(ctx, "DELETE", nsPath, nil, nil, hdr); err != nil {
 			return err
 		}
@@ -236,19 +287,19 @@ func cmdKV(args []string) error {
 		}
 		_, err := kvOutput().Write(v.Value)
 		return err
-	case "key delete":
+	case "key rm":
 		if err := mc.DoHeaders(ctx, "DELETE", valPath, nil, nil, hdr); err != nil {
 			return err
 		}
 		res.Deleted = key
 		emit(f, res, func() { fmt.Printf("✓ deleted %q from KV namespace %s of workload %s\n", key, ns, workload) })
-	case "key list":
+	case "key ls":
 		keys := []mgmt.KVKey{}
 		res.Keys = &keys
 		cursor := ""
 		for {
 			var p mgmt.KVKeyPage
-			q := url.Values{"prefix": {*prefixF}, "cursor": {cursor}}
+			q := url.Values{"prefix": {*o.prefix}, "cursor": {cursor}}
 			if err := mc.Do(ctx, "GET", nsPath+"/keys?"+q.Encode(), nil, &p); err != nil {
 				return err
 			}
@@ -280,32 +331,37 @@ func cmdKV(args []string) error {
 	return nil
 }
 
-// kvNamespaceOf resolves a key command's namespace: --namespace, or
-// --binding looked up in the app's kv_namespaces (id, else the binding).
-func kvNamespaceOf(a *app, ns, binding string) (string, error) {
+// kvNamespaceOf resolves a key command's namespace (issue #458):
+// --namespace (or --binding, the same), a name or a binding of the app in
+// the current directory (storeName); without either, the app's only
+// kv_namespaces entry, when the workload is that app's. a is that app (nil
+// without one).
+func kvNamespaceOf(a *app, workload, ns, binding string) (string, error) {
 	switch {
-	case ns != "" && binding != "":
-		return "", fail("bad_request", "give --namespace or --binding, not both", kvUsage())
-	case ns != "":
-		return ns, nil
-	case binding == "":
-		return "", fail("bad_request", "key commands need the namespace: --binding <BINDING> (from wrangler.jsonc) or --namespace <NAME>", kvUsage())
+	case ns != "" && binding != "" && ns != binding:
+		return "", fail("bad_request", "--namespace and --binding name different namespaces: give one", kvUsage())
+	case ns == "":
+		ns = binding
 	}
-	list, _ := a.Wrangler["kv_namespaces"].([]any)
-	var bound []string
-	for _, e := range list {
-		m, _ := e.(map[string]any)
-		b, _ := m["binding"].(string)
-		bound = append(bound, b)
-		if b != binding {
-			continue
-		}
-		if id, _ := m["id"].(string); id != "" {
-			return id, nil
-		}
-		return b, nil
+	bs, err := appStores(a, "kv")
+	if err != nil {
+		return "", err
 	}
-	return "", fail("bad_request", fmt.Sprintf("%s has no kv_namespaces binding %q (it has: %s)", orAny(a.WranglerFile, "the wrangler config"), binding, strings.Join(bound, ", ")))
+	if ns != "" {
+		return storeName(bs, ns), nil
+	}
+	// No namespace named: the app's, and only for the app's own workload,
+	// so a key rm --workload <other> never picks this app's namespace.
+	if a == nil || workload != a.Name {
+		return "", fail("bad_request", "key commands for workload "+workload+" need the namespace: --namespace <NAME>", kvUsage())
+	}
+	switch len(bs) {
+	case 1:
+		return bs[0].Name, nil
+	case 0:
+		return "", fail("bad_request", "the app has no kv_namespaces: pass --namespace <NAME>", kvUsage())
+	}
+	return "", fail("bad_request", fmt.Sprintf("the app has %d kv_namespaces (%s): pass --namespace <NAME|BINDING>", len(bs), bindingList(bs)), kvUsage())
 }
 
 func kvPutBody(rest []string, path string, ttl, exp int64, meta string) (mgmt.KVPut, error) {

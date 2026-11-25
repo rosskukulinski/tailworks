@@ -22,7 +22,8 @@ Tailscale Inc.
 ## Quick start
 
 You need macOS 14+ on Apple silicon or Linux (arm64/amd64, glibc ≥ 2.35),
-and admin rights on a Tailscale tailnet. No Go.
+and admin rights on a Tailscale tailnet. No Go. Windows isn't supported,
+not even for the `tw` CLI alone.
 [Prerequisites](docs/INSTALL.md#prerequisites) has the details; Headscale works too
 ([docs/headscale.md](docs/headscale.md)).
 
@@ -65,8 +66,8 @@ In the admin console, open **Access controls** and add one line to
 ```
 
 The tag has to exist before step 3 can give it to the OAuth client. This
-is the only line you paste: `tw up --apply-policy` (step 4) and `tw deploy
---apply-policy` (step 5) write the rest, after showing you the lines.
+is the only line you paste: `tw up` (step 4) and `tw deploy` (step 5)
+offer to write the rest, after showing you the lines.
 
 <details>
 <summary>Or paste all of it now, if you'd rather not let tailworks write your policy</summary>
@@ -105,7 +106,7 @@ next step (it is shown only once).
 ### 4. Start tailworks
 
 ```sh
-tw up --apply-policy
+tw up
 ```
 
 Paste the Client Secret when asked. `tw up` saves it to
@@ -113,16 +114,20 @@ Paste the Client Secret when asked. `tw up` saves it to
 `tagOwners` and grants it will add to your policy and asks before writing
 them, joins your tailnet as `tw-mgmt`, and installs a service so tailworks
 starts at login. It prints the admin console URL:
-`http://tw-mgmt.<tailnet>.ts.net/ui/`.
+`http://tw-mgmt.<tailnet>.ts.net/ui/`. The bare `http://tw-mgmt.<tailnet>.ts.net`
+redirects a browser there, and `tw link` and `tw whoami` print it on other
+machines.
 
-If you pasted the whole snippet in step 2, or chose **Policy File › Read**,
-run plain `tw up`: it prints any lines still missing.
+Answer `n` (or chose **Policy File › Read**, which never asks) and `tw up`
+prints the lines still missing for you to paste. Without a terminal it
+only prints them; scripts write with `tw up --apply-policy --yes`, and
+`--apply-policy=false` never asks.
 
 ### 5. Deploy an app
 
 ```sh
 tw init hello && cd hello
-tw deploy --apply-policy
+tw deploy
 ```
 
 `tw deploy` shows the lines this app needs in your policy, asks, writes
@@ -170,10 +175,11 @@ same way: [docs/wrangler.md#pages](docs/wrangler.md#pages).
 
 - Try it locally first, with no tailnet: `tw dev` serves an app on
   `127.0.0.1:8787`.
-- Other templates: `tw init <dir> --template agent` (also `mcp`, `ai-agent`,
-  `lock`, `static-site`, `refund-approval`, `node-workflow`). Each Durable
-  Object instance gets its own tailnet node. `ai-agent` needs a deployed
-  `mcp` for its tools; its README walks through both.
+- Other starting points: `tw init <dir> --template agent` (also `mcp` and
+  `static-site`). Each Durable Object instance gets its own tailnet node.
+  `tw init --list` shows every template, with the demos and patterns:
+  [approvals](docs/approvals.md), [locks](docs/locks.md), the
+  [Node.js tier](docs/node-tier.md), [Python Workers](docs/python.md).
 - An existing Workers project: [docs/wrangler.md](docs/wrangler.md).
 - More machines: `tw host add`. A separate laptop: `tw link`.
 
@@ -183,7 +189,10 @@ same way: [docs/wrangler.md#pages](docs/wrangler.md#pages).
 tw agent setup    # installs skills for Claude Code, Codex, Cursor, Gemini CLI, OpenCode
 ```
 
-Then ask your agent to "build me an MCP server and run it on tw". Every
+Then register tailworks' MCP server with your agent: `tw mcp --config`
+prints the command for each one (`claude mcp add -s user tw -- tw mcp`).
+
+Ask your agent to "build me an MCP server and run it on tw". Every
 command takes `--json`. Details: [docs/agents.md](docs/agents.md).
 
 ## What you should know before you run this
@@ -219,12 +228,12 @@ and the tests behind each row: [docs/COMPAT.md](docs/COMPAT.md).
 |---|---|---|---|
 | Runtime | [`fetch` handler, outbound `fetch()`](docs/COMPAT.md#fetch) | ⚠️ | outbound reaches tailnet peers from the workload's (or object's) own node, and public internet hosts from the host's network (on by default; `tailnet.egress.internet: false` turns it off, [call an internet API](docs/recipes.md#call-an-internet-api)) |
 | Runtime | [WebSockets](docs/COMPAT.md#websockets) | ✅ | |
-| Runtime | [TCP sockets (`connect()`)](docs/COMPAT.md#connect) | ⚠️ | to tailnet peers and the internet with the object's identity; no `secureTransport` TLS |
+| Runtime | [TCP sockets (`connect()`)](docs/COMPAT.md#connect) | ⚠️ | to tailnet peers and the internet with the object's identity; no `secureTransport` TLS; `ctx.tailnet.connect()` not in plain-DO objects |
 | Runtime | [WebAssembly](docs/COMPAT.md#wasm) | ✅ | |
 | Runtime | [`nodejs_compat`](docs/COMPAT.md#nodejs-compat) | ✅ | |
-| Runtime | [Python Workers](docs/COMPAT.md#python) | ❌ | Python runs in containers |
+| Runtime | [Python Workers](docs/COMPAT.md#python) | ⚠️ | Pyodide, as on Cloudflare; Python Durable Objects have no node of their own; no Python Workflows yet ([docs/python.md](docs/python.md)) |
 | Runtime | [Node.js apps (`runtime: "node"`)](docs/COMPAT.md#node-runtime) | ✅ | tw-only |
-| Durable Objects | [One tailnet node per object](docs/COMPAT.md#do-identity) | ✅ | tw-only: own name, tags, grants, egress |
+| Durable Objects | [One tailnet node per object](docs/COMPAT.md#do-identity) | ✅ | tw-only: own name, tags, grants, egress; objects need a name (no `newUniqueId()` in facet mode) |
 | Durable Objects | [Storage (KV API, SQLite)](docs/COMPAT.md#do-storage) | ✅ | one host, no replication |
 | Durable Objects | [Alarms](docs/COMPAT.md#alarms) | ✅ | |
 | Durable Objects | [Hibernation](docs/COMPAT.md#hibernation) | ✅ | |
@@ -232,7 +241,7 @@ and the tests behind each row: [docs/COMPAT.md](docs/COMPAT.md).
 | Durable Objects | [RPC](docs/COMPAT.md#do-rpc) | ⚠️ | no cross-Worker `script_name` |
 | Durable Objects | [Facets, `subAgent()`](docs/COMPAT.md#facets) | ❌ | use `ctx.tailnet.spawn` |
 | Bindings | [KV](docs/COMPAT.md#kv) | ⚠️ | per workload; values ≤ 2 MiB |
-| Bindings | [R2](docs/COMPAT.md#r2) | ⚠️ | bytes on the host's disk or an S3-compatible service |
+| Bindings | [R2](docs/COMPAT.md#r2) | ⚠️ | bytes on the host's disk or an S3-compatible service; no `tw r2 object get`/`put` yet |
 | Bindings | [R2 multipart upload](docs/COMPAT.md#r2-multipart) | ⚠️ | unfinished uploads are kept |
 | Bindings | [D1](docs/COMPAT.md#d1) | ⚠️ | one workload's database; survives host moves |
 | Bindings | [D1 sessions](docs/COMPAT.md#d1-sessions) | ⚠️ | bookmarks are journal positions |
@@ -257,7 +266,7 @@ and the tests behind each row: [docs/COMPAT.md](docs/COMPAT.md).
 | Platform | [Workflow approvals by tailnet identity](docs/COMPAT.md#approvals) | ✅ | tw-only: `tw approve`, decided under `github.com/rosskukulinski/tailworks/cap/approve` grants |
 | Platform | [Placement](docs/COMPAT.md#placement) | ⚠️ | at deploy, by tailnet path; never moves on its own |
 | Platform | [Public routes](docs/COMPAT.md#public-routes) | ⚠️ | opt-in paths over Funnel; tailnet-only by default |
-| Platform | [Containers, Sandbox SDK](docs/COMPAT.md#containers) | ⚠️ | one microVM per container |
+| Platform | [Containers, Sandbox SDK](docs/COMPAT.md#containers) | ⚠️ | one microVM per container; no snapshots or `exposePort` preview URLs yet |
 | Platform | [Logs and tail](docs/COMPAT.md#logs) | ⚠️ | `tw logs`: a structured line per request; no Tail Workers |
 | Platform | [Metrics](docs/COMPAT.md#metrics) | ⚠️ | Prometheus `/metrics` on the tailnet, and OTLP; no CPU time |
 | Platform | [Tracing (`traceparent`)](docs/COMPAT.md#traces) | ⚠️ | across DO calls and egress; not DO RPC |

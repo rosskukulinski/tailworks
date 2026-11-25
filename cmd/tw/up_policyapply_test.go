@@ -121,7 +121,7 @@ func (e *upApplyEnv) run(t *testing.T, terminal bool, input string, args ...stri
 	}
 	needed := policy.Snippet{TagOwners: map[string][]string{mgmt.MgmtTag: {"tag:tw"}}}
 	var b bytes.Buffer
-	after, applied, err := upApplyPolicy(ctx, e.c, f, before, true, needed, *yes, &b)
+	after, applied, err := upApplyPolicy(ctx, e.c, f, before, true, needed, policyApplyFlag, *yes, &b)
 	return string(after), applied, b.String(), err
 }
 
@@ -168,8 +168,8 @@ func TestUpApplyPolicyApplied(t *testing.T) {
 	if err != nil || !applied {
 		t.Fatalf("--apply-policy --yes: applied=%v err=%v\n%s", applied, err, out)
 	}
-	for _, want := range []string{`+ "tagOwners": {`, `+   "tag:tw-mgmt": ["autogroup:admin","tag:tw"],`, `+   "tag:tw-host": ["autogroup:admin","tag:tw"],`,
-		`"dst":["tag:tw-host"]`, mgmt.AdminCap, "✓ policy   applied"} {
+	for _, want := range []string{`+ "tagOwners": {`, `+   "tag:tw-mgmt": ["autogroup:admin", "tag:tw"],`, `+   "tag:tw-host": ["autogroup:admin", "tag:tw"],`,
+		`"dst": ["tag:tw-host"]`, mgmt.AdminCap, "✓ policy   applied"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
@@ -239,7 +239,7 @@ func TestUpApplyPolicyNoWriteScope(t *testing.T) {
 		if !strings.Contains(out, "not applied: the OAuth client lacks the Policy File › Write scope") {
 			t.Errorf("403 on %s: no note on why it wasn't applied:\n%s", deny, out)
 		}
-		if txt := cliText(err); !strings.Contains(txt, `"tag:tw-mgmt": ["autogroup:admin","tag:tw"]`) || !strings.Contains(txt, "no Policy File › Write scope") {
+		if txt := cliText(err); !strings.Contains(txt, `"tag:tw-mgmt": ["autogroup:admin", "tag:tw"]`) || !strings.Contains(txt, "no Policy File › Write scope") {
 			t.Errorf("403 on %s: the error lacks the snippet or the reason:\n%s", deny, txt)
 		}
 		if now, writes, _ := e.now(); writes != 0 || now != freshPolicy {
@@ -267,11 +267,11 @@ func TestUpApplyPolicyNoWriteScope(t *testing.T) {
 	// snippet is printed.
 	var b bytes.Buffer
 	f := newFlags("up")
-	pol, applied, err := upApplyPolicy(context.Background(), e.c, f, nil, false, policy.Snippet{}, true, &b)
+	pol, applied, err := upApplyPolicy(context.Background(), e.c, f, nil, false, policy.Snippet{}, policyApplyFlag, true, &b)
 	if err != nil || applied || pol != nil {
 		t.Fatalf("unreadable policy: applied=%v err=%v", applied, err)
 	}
-	for _, want := range []string{"not applied", "Policy File › Write", `"tag:tw-host": ["autogroup:admin","tag:tw"]`, mgmt.AdminCap} {
+	for _, want := range []string{"not applied", "Policy File › Write", `"tag:tw-host": ["autogroup:admin", "tag:tw"]`, mgmt.AdminCap} {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("unreadable policy: output lacks %q:\n%s", want, b.String())
 		}
@@ -375,7 +375,7 @@ func TestHeadscaleUpPolicyConfirm(t *testing.T) {
 		confirmIsTerminal = func() bool { return terminal }
 		confirmIn = strings.NewReader(input)
 		var b bytes.Buffer
-		after, applied, err := headscaleUpPolicy(context.Background(), e.c, newFlags("up"), []byte(pol), true, yes, &b)
+		after, applied, err := headscaleUpPolicy(context.Background(), e.c, newFlags("up"), []byte(pol), policyApplyFlag, yes, &b)
 		return string(after), applied, b.String(), err
 	}
 	for name, c := range map[string]struct {
@@ -432,7 +432,7 @@ func TestTagOwnersFixPasteSafe(t *testing.T) {
 	t.Parallel()
 	pol := []byte(`{"tagOwners": {"tag:tw": ["group:ops"], "tag:tw-host": ["group:ops"]}}`)
 	fix := strings.Join(policyMissingTagOwners("why", nil, pol).Fix, "\n")
-	for _, want := range []string{`existing "tagOwners" section`, `"tag:tw-mgmt": ["autogroup:admin","tag:tw"],`, `"tag:tw-host": ["group:ops","tag:tw"],`} {
+	for _, want := range []string{`existing "tagOwners" section`, `"tag:tw-mgmt": ["autogroup:admin", "tag:tw"],`, `"tag:tw-host": ["group:ops", "tag:tw"],`} {
 		if !strings.Contains(fix, want) {
 			t.Errorf("fix lacks %q:\n%s", want, fix)
 		}

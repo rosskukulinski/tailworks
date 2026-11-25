@@ -167,6 +167,7 @@ func (o *Object) serveIngress(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	stripIdentityHeaders(req.Header)
+	markTLS(req) // tailnethttps.go: arrived on :443
 	var blob CFBlob
 	blob.Tailscale.Caller = CallerFromWhoIs(who)
 	o.reg.applyCert(req.Context(), &blob.Tailscale.Caller)

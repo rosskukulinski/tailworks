@@ -262,6 +262,7 @@ func (m *ctrManager) start(ctx context.Context, inst *instance, k ctrKey, cc *co
 	}
 	release := func() { slot.Release(context.WithoutCancel(ctx)) }
 	var img *image.Image
+	var unhold func() // held before GC runs, so it never evicts this image
 	if len(cc.Pins) > 0 {
 		// Pinned at deploy (ADR-032 D3): only this arch's pin of this ref,
 		// pulled by digest from tailworks' registry. Nothing else is fetched.
@@ -271,15 +272,14 @@ func (m *ctrManager) start(ctx context.Context, inst *instance, k ctrKey, cc *co
 			return fail(ctrError("image_unavailable", "image %q of class %s has no pin for linux/%s (deploy pinned %s); redeploy so mgmt pins it for this host's arch",
 				ref, k.class, m.images.HostArch(), pinArches(cc.Pins, ref)))
 		}
-		img, err = m.images.GetPinned(ctx, k.tenant, *p)
+		img, unhold, err = m.images.GetPinnedHeld(ctx, k.tenant, *p)
 	} else {
-		img, err = m.images.Get(ctx, k.tenant, ref)
+		img, unhold, err = m.images.GetHeld(ctx, k.tenant, ref)
 	}
 	if err != nil {
 		release()
 		return fail(ctrError("image_unavailable", "%v", err))
 	}
-	unhold := m.images.Hold(img.Path)
 	release = func(slotRelease func()) func() {
 		return func() { unhold(); slotRelease() }
 	}(release)

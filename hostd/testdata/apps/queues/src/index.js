@@ -7,7 +7,8 @@
 //   fail           retry() every time (max_retries 1: then the DLQ)
 //   throw-once     throw on attempt 1 (the whole batch is retried)
 //   hang-once      hang on attempt 1 (the test kills workerd)
-//   slow-once      take 4 s on attempt 1 (the test stalls hostd's heartbeat)
+//   slow-once      take 8 s the first time it arrives (the test stalls
+//                  hostd's heartbeat); a redelivery, still attempt 1, is quick
 //   ack-explicit   msg.ack(), then throw (the ack holds)
 import { DurableObject } from "cloudflare:workers";
 
@@ -33,6 +34,9 @@ export class Box extends DurableObject {
     }
   }
 }
+
+// The slow-once messages this isolate has started (by message id).
+const slowSeen = new Set();
 
 function describe(body) {
   if (typeof body === "string") return "text:" + body;
@@ -118,7 +122,14 @@ export default {
           if (m.attempts === 1) hang = true;
           break;
         case "slow-once":
-          if (m.attempts === 1) slow = true;
+          // Not "on attempt 1": the cancelled run is handed back uncounted,
+          // so the redelivery is attempt 1 too. Slow again, it could be
+          // cancelled again by any stale moment of a loaded host's lease,
+          // over and over (#392).
+          if (!slowSeen.has(m.id)) {
+            slowSeen.add(m.id);
+            slow = true;
+          }
           break;
         case "ack-explicit":
           m.ack();
@@ -129,7 +140,7 @@ export default {
     }
     // A slow run records only when done, like a handler whose work came
     // before its log line: cancelled mid-way, it leaves no record.
-    if (slow) await new Promise((r) => setTimeout(r, 4_000));
+    if (slow) await new Promise((r) => setTimeout(r, 8_000));
     await env.LOG.getByName("log").add(recs);
     if (hang) await new Promise((r) => setTimeout(r, 120_000));
     if (throwIt) throw new Error("boom from queue()");

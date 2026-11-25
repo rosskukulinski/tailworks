@@ -16,15 +16,17 @@ import (
 //   - no nodeAttrs: tailworks' only one is funnel, which Headscale doesn't
 //     support, and Headscale's nodeAttrs take no app caps;
 //   - no autogroup:admin, as an owner ("invalid owner format") or a source:
-//     tagOwners are users, groups or tags.
+//     tagOwners are users, groups or tags. autogroup:member is a valid
+//     grant source (Headscale >= 0.27; tailworks requires 0.29), so the
+//     caller grant (mgmt's CallerSrc) is kept; other autogroups are not.
 //
 // Caps travel in grants' app field, which Headscale accepts.
 
 // Headscale adapts s to the Headscale profile: autogroup:admin is dropped
 // from every tagOwners list, so tailworks' tags are owned by tag:tw and tag:tw
 // itself has no owners (only the API key mints it; nobody can tag their
-// own device with it). Grants from autogroup:admin and all nodeAttrs are
-// dropped. The result passes Check with Options{Headscale: true}.
+// own device with it). Grants from an autogroup other than
+// autogroup:member, and all nodeAttrs, are dropped. The result passes Check with Options{Headscale: true}.
 func Headscale(s Snippet) Snippet {
 	out := Snippet{TagOwners: map[string][]string{}}
 	for t, owners := range s.TagOwners {
@@ -43,12 +45,22 @@ func Headscale(s Snippet) Snippet {
 		out.TagOwners[t] = keep
 	}
 	for _, g := range s.Grants {
-		if slices.ContainsFunc(strs(g["src"]), func(x string) bool { return strings.HasPrefix(x, "autogroup:") }) {
+		if slices.ContainsFunc(strs(g["src"]), headscaleBadSrc) {
 			continue
 		}
 		out.Grants = append(out.Grants, maps.Clone(g))
 	}
 	return out
+}
+
+// headscaleMemberSrc is the one autogroup Headscale accepts as a grant
+// source in the profile: every user of the tailnet.
+const headscaleMemberSrc = "autogroup:member"
+
+// headscaleBadSrc reports whether Headscale's profile refuses x as a grant
+// source: every autogroup but autogroup:member.
+func headscaleBadSrc(x string) bool {
+	return strings.HasPrefix(x, "autogroup:") && x != headscaleMemberSrc
 }
 
 // checkHeadscale rejects what Headscale's parser would.
@@ -68,7 +80,7 @@ func checkHeadscale(s Snippet) error {
 	}
 	for i, g := range s.Grants {
 		for _, x := range strs(g["src"]) {
-			if strings.HasPrefix(x, "autogroup:") {
+			if headscaleBadSrc(x) {
 				return fmt.Errorf("policy snippet: grant %d: the Headscale profile has no %s source", i, x)
 			}
 		}

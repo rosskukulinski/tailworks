@@ -39,7 +39,13 @@ func serveWhoisTCP(t *testing.T, n *nettest.Node, port string) {
 			}
 			go func(c net.Conn) {
 				defer c.Close()
-				who, err := whoisNode(context.Background(), n, c.RemoteAddr().String())
+				// A netstack conn reset before we got here has no remote
+				// address: RemoteAddr returns nil (#411).
+				ra := c.RemoteAddr()
+				if ra == nil {
+					return
+				}
+				who, err := whoisNode(context.Background(), n, ra.String())
 				if err != nil {
 					io.WriteString(c, "whois failed: "+err.Error()+"\n")
 					return

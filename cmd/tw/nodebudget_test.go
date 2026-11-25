@@ -214,13 +214,14 @@ export default { fetch() { return new Response("ok"); } };`), 0o644)
 	if err != nil || !strings.Contains(out, "NODES  4 live nodes: 1 workload, 2 objects, 1 pool (maxObjects 1000)") {
 		t.Fatalf("tw ls: %v\n%s", err, out)
 	}
-	// --limit bounds the objects listed, never the count.
+	// --limit bounds the objects listed (and says so), never the count.
 	out, err = e.call(t, cmdLs, "--limit", "1", "--json")
 	var lr struct {
-		Objects []mgmt.Object `json:"objects"`
-		Nodes   *nodeBudget   `json:"nodes"`
+		Objects   []mgmt.Object `json:"objects"`
+		Nodes     *nodeBudget   `json:"nodes"`
+		Truncated bool          `json:"truncated"`
 	}
-	if err != nil || json.Unmarshal([]byte(out), &lr) != nil || lr.Nodes == nil || lr.Nodes.Tenant == nil || lr.Nodes.Tenant.Total != 4 || lr.Nodes.Tenant.Objects != 2 || len(lr.Objects) > 1 || lr.Nodes.App != nil {
+	if err != nil || json.Unmarshal([]byte(out), &lr) != nil || lr.Nodes == nil || lr.Nodes.Tenant == nil || lr.Nodes.Tenant.Total != 4 || lr.Nodes.Tenant.Objects != 2 || len(lr.Objects) != 1 || !lr.Truncated || lr.Nodes.App != nil {
 		t.Fatalf("tw ls --limit 1 --json: %v\n%s", err, out)
 	}
 

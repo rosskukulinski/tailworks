@@ -51,6 +51,9 @@ test("ctx.tailnet.spawn resolves the binding's class and passes self", async () 
   assert.deepEqual(log[0], ["spawn", { class: "LookupAgent", name: "x", caps: { a: 1 }, ttl: undefined, principal: undefined, as: { class: "Plain", name: "p1" } }]);
   await assert.rejects(tn.spawn({}, { name: "y" }), (e) => e.code === "bad_request");
   await assert.rejects(tn.kill(), (e) => isTailnetError(e) && e.code === "killed");
+  // forward left the TailnetContext type but stays, unlisted, for apps
+  // deployed against the old SDK (one minor release).
+  assert.equal(typeof tn.forward, "function");
 });
 
 test("ctx.tailnet.fetch throws typed errors for tw-error responses", async () => {

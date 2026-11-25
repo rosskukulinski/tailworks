@@ -90,4 +90,8 @@ func TestUpStoreFlags(t *testing.T) {
 	if err := sf.apply(d); err == nil || asCLIErr(err).Code != "state_conflict" {
 		t.Fatalf("file → setec with secrets: %v", err)
 	}
+	// The fix is the exact command, with the URL given (issue #444).
+	if fix := strings.Join(asCLIErr(sf.apply(d)).Fix, "\n"); !strings.Contains(fix, "tw custody migrate --setec-url https://s --state-dir "+d.Dir) || strings.Contains(fix, "--to") {
+		t.Fatalf("file → setec fix: %s", fix)
+	}
 }

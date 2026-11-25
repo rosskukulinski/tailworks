@@ -51,10 +51,16 @@ const CompatTag = "tag:tw-wl-compat"
 var allowedTailnets = map[string]bool{"tail7906d5.ts.net": true}
 
 // Policy is the OAuth scenario's policy plus the compat tag and its grant.
+// The grant includes tcp:443 for the TailnetHTTPS projects (#360): without
+// it the client's connections to a workload's :443 listener are dropped
+// and the probe times out (#614), as `tw deploy` prints for any app with
+// tailnet.https (mgmt.CallerPorts).
 func Policy() policy.Snippet {
 	s := cliflow.Policy()
 	s.TagOwners[CompatTag] = []string{"autogroup:admin", "tag:tw"}
-	s.Grants = append(s.Grants, map[string]any{"src": []string{cliflow.TestTag}, "dst": []string{CompatTag}, "ip": []string{"tcp:80"}})
+	s.Grants = append(s.Grants, map[string]any{"src": []string{cliflow.TestTag}, "dst": []string{CompatTag}, "ip": []string{"tcp:80", "tcp:443"}})
+	// A Worker calls its Companions over service bindings (a tailnet call).
+	s.Grants = append(s.Grants, map[string]any{"src": []string{CompatTag}, "dst": []string{CompatTag}, "ip": []string{"tcp:80"}})
 	return s
 }
 
@@ -347,6 +353,9 @@ func runProject(t *testing.T, pr *Prepared, tw twFunc, client *nettest.Node) Res
 	if pr.Err != nil {
 		return fail("prepare: %v", pr.Err)
 	}
+	if err := deployCompanions(p, tw); err != nil { // companions_test.go
+		return fail("%v", err)
+	}
 	for name, v := range p.Secrets {
 		if _, se, _, err := tw(pr.DeployDir, v, "secret", "put", name, "--workload", p.ID); err != nil {
 			return fail("tw secret put %s: %v %s", name, err, se)
@@ -402,7 +411,7 @@ func runProject(t *testing.T, pr *Prepared, tw twFunc, client *nettest.Node) Res
 	ip := cliflow.PeerIP(t, client, dep.Endpoint.MagicDNS, 90*time.Second)
 	if p.OriginVar != "" {
 		// The README's "set it to your deployed URL and deploy again".
-		if err := setOriginVar(p, pr.Root, p.OriginVar, "http://"+ip+"/mcp"); err != nil {
+		if err := setOriginVar(p, pr.Root, p.OriginVar, deployedBase(p, ip, dep.Endpoint.MagicDNS)+"/mcp"); err != nil { // tailnethttps.go
 			return fail("%v", err)
 		}
 		so, se, _, err := tw("", "", args...)
@@ -416,11 +425,19 @@ func runProject(t *testing.T, pr *Prepared, tw twFunc, client *nettest.Node) Res
 			return fail("tw deploy (with %s set): %v\n%s", p.OriginVar, err, tail(se, 3000))
 		}
 	}
-	run := &Run{P: p, Base: "http://" + ip, HC: client.HTTPClient(60 * time.Second),
+	var certStep []string
+	if p.TailnetHTTPS {
+		d, err := waitTailnetCert(context.Background(), client.Dial, ip, dep.Endpoint.MagicDNS) // tailnethttps.go
+		if err != nil {
+			return fail("%v", err)
+		}
+		certStep = []string{fmt.Sprintf("https: certificate ready after %s", d.Round(time.Second))}
+	}
+	run := &Run{P: p, Base: deployedBase(p, ip, dep.Endpoint.MagicDNS), HC: deployedClient(client.Dial, ip, 60*time.Second),
 		Tw: func(args ...string) (string, string, error) {
 			so, se, _, err := tw("", "", args...)
 			return so, se, err
-		}}
+		}, Steps: certStep}
 	t0 := time.Now()
 	perr := p.Probe(run)
 	r.ProbeMS, r.Steps = time.Since(t0).Milliseconds(), run.Steps

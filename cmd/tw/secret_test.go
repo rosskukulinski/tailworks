@@ -158,7 +158,7 @@ func TestCLISecretNoApp(t *testing.T) {
 
 func TestParseDotenv(t *testing.T) {
 	t.Parallel()
-	got, err := parseDotenv("# comment\n\nA=1\nexport B = two words # trailing\nC=\"line1\\nline2 \\\"q\\\"\"\nD='lit\\n $x'\nE=\"multi\nline\"\nF=\nG=a=b\r\n")
+	got, err := parseDotenv(DevVarsFile, "# comment\n\nA=1\nexport B = two words # trailing\nC=\"line1\\nline2 \\\"q\\\"\"\nD='lit\\n $x'\nE=\"multi\nline\"\nF=\nG=a=b\r\n")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestParseDotenv(t *testing.T) {
 		}
 	}
 	for _, bad := range []string{"NOEQUALS", "TW_X=1", "1A=x", `A="open`, "A='open"} {
-		_, err := parseDotenv(bad + "\n")
+		_, err := parseDotenv(DevVarsFile, bad+"\n")
 		if err == nil {
 			t.Errorf("%q accepted", bad)
 		} else if strings.Contains(err.Error(), "open") {

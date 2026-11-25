@@ -65,6 +65,11 @@ type fakeTS struct {
 	// keyDeleteDelay (ns) is each key DELETE's latency, outside mu
 	// (warmrevoke_test.go).
 	keyDeleteDelay atomic.Int64
+
+	// keyDeletesInFlight and keyDeletesPeak count concurrent key DELETEs
+	// (warmrevoke_test.go).
+	keyDeletesInFlight atomic.Int64
+	keyDeletesPeak     atomic.Int64
 }
 
 type fakeOAuthClient struct {
@@ -93,7 +98,11 @@ func newFakeTS(t *testing.T) *fakeTS {
 
 func (f *fakeTS) serve(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "DELETE" && strings.Contains(r.URL.Path, "/keys/") {
+		n := f.keyDeletesInFlight.Add(1)
+		for p := f.keyDeletesPeak.Load(); n > p && !f.keyDeletesPeak.CompareAndSwap(p, n); p = f.keyDeletesPeak.Load() {
+		}
 		time.Sleep(time.Duration(f.keyDeleteDelay.Load()))
+		f.keyDeletesInFlight.Add(-1)
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -954,6 +963,11 @@ func TestTailnetAuth(t *testing.T) {
 	e.c.ok("POST", "/v1/hosts", map[string]any{"hostID": "h2", "tenantID": tn.TenantID}, &hj2)
 	if len(hj1.RegistrationSecret) < 40 || hj1.RegistrationSecret == hj2.RegistrationSecret {
 		t.Fatalf("registration secrets: %q %q", hj1.RegistrationSecret, hj2.RegistrationSecret)
+	}
+	// #488: over the tailnet the answer names mgmt's URL for the join file
+	// (keyTagsOnly only on Headscale).
+	if c, b := call("100.64.0.3:1", "POST", "/v1/hosts", `{"hostID":"h-joinurl","tenantID":"`+tn.TenantID+`"}`); c != 201 || b["mgmtURL"] != "http://tw-mgmt.t.ts.net" || b["keyTagsOnly"] != nil {
+		t.Fatalf("host join over the tailnet: %d %v", c, b)
 	}
 	reg := func(secret string) string {
 		b := map[string]any{"capacityNodes": 1, "tiers": []string{"process"}}

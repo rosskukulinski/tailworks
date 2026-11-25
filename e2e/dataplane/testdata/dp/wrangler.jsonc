@@ -1,0 +1,23 @@
+{
+  "name": "dp",
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-01",
+  "durable_objects": {
+    "bindings": [
+      { "name": "LOCK", "class_name": "Lock" },
+      { "name": "PULSE", "class_name": "Pulse" },
+      { "name": "REG", "class_name": "Reg" },
+    ],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Lock", "Pulse", "Reg"] }],
+  "kv_namespaces": [{ "binding": "KV", "id": "dp-kv" }],
+  "d1_databases": [{ "binding": "DB", "database_name": "dp-db", "database_id": "00000000-0000-4000-8000-0000000000dd" }],
+  "queues": {
+    "producers": [{ "binding": "JOBS", "queue": "jobs" }],
+    "consumers": [
+      { "queue": "jobs", "max_batch_size": 10, "max_batch_timeout": 1, "max_retries": 3, "dead_letter_queue": "jobs-dlq", "retry_delay": 1 },
+      { "queue": "jobs-dlq", "max_batch_size": 10, "max_batch_timeout": 1, "max_retries": 3 },
+    ],
+  },
+  "vars": { "DEFAULT_TTL_MS": "10000", "MAX_TTL_MS": "10000", "REC": "http://rec.invalid" },
+}

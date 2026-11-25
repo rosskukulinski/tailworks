@@ -88,7 +88,10 @@ func TestD1(t *testing.T) {
 
 // testD1 is TestD1 against backend (realmgmt_test.go).
 func testD1(t *testing.T, backend string) {
-	const fenceAfter = time.Second
+	// Long enough that ordinary queries never trip the stall fence on a
+	// loaded runner (#556 gates stateful ingress on heartbeat freshness:
+	// #591, #595); RecoveredFromJournal only waits a little longer for it.
+	const fenceAfter = 5 * time.Second
 	s := startSuiteCapsOpts(t, fakemgmt.Config{}, tailcfg.PeerCapMap{nettest.TestCap: []tailcfg.RawMessage{nettest.TestCapValue}}, onBackend(backend, func(o *hostdtest.Options) {
 		o.FenceAfter, o.HeartbeatEvery = fenceAfter, 100*time.Millisecond
 	}))
@@ -423,7 +426,7 @@ func testD1(t *testing.T, backend string) {
 			t.Fatal("no DO storage dir in status")
 		}
 		e.Hooks.SetHeartbeatsDown(true)
-		deadline := time.Now().Add(10 * time.Second)
+		deadline := time.Now().Add(fenceAfter + 15*time.Second)
 		for workloadStatus(t, e, "d1app").PID != 0 {
 			if time.Now().After(deadline) {
 				t.Fatalf("workload not fenced: %+v", workloadStatus(t, e, "d1app"))

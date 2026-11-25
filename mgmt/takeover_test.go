@@ -79,11 +79,11 @@ func TestMM_F4_GuardedTakeover(t *testing.T) {
 				m.Heartbeat(ctx, "h2", 0, nil)
 				// Pre-existing and safe: a live holder keeps its lease, so a
 				// pinned move is refused with lease_held, and the message says
-				// how to move it (drain), not "wait for the lease".
+				// how to move it (--replace, or tw host drain), not "wait for the lease".
 				_, err := deploy("h2", false)
 				var e *Error
-				if !errors.As(err, &e) || e.Code != "lease_held" || !strings.Contains(e.Message, "live") || !strings.Contains(e.Message, "tw host rm h1 --drain") {
-					t.Fatalf("pinned move away from a live holder: want lease_held explaining the drain, got %v", err)
+				if !errors.As(err, &e) || e.Code != "lease_held" || !strings.Contains(e.Message, "live") || !strings.Contains(e.Message, "--replace") || !strings.Contains(e.Message, "tw host drain h1") || !strings.Contains(e.Message, "tw host rm h1 --force") {
+					t.Fatalf("pinned move away from a live holder: want lease_held pointing at --replace and tw host drain, got %v", err)
 				}
 				return
 			}

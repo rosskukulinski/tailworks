@@ -20,7 +20,7 @@ func TestPolicySnippetDefinesConnectsTag(t *testing.T) {
 		TagOwnersSnippet:  `"tagOwners": { "tag:tw-wl-mcp": ["autogroup:admin", "tag:tw"] }`,
 		Missing:           []mgmt.PreflightMissing{{Src: "tag:tw-wl-app", Dst: "tag:tw-wl-mcp", Snippet: `{ "src": ["tag:tw-wl-app"], "dst": ["tag:tw-wl-mcp"], "ip": ["tcp:80"] }`}},
 	}
-	if s := policySnippet(pf, "", ""); !strings.Contains(s, `"tag:tw-wl-mcp": ["autogroup:admin", "tag:tw"]`) {
+	if s := policySnippet(pf, nil, nil); !strings.Contains(s, `"tag:tw-wl-mcp": ["autogroup:admin", "tag:tw"]`) {
 		t.Fatalf("snippet:\n%s", s)
 	}
 	if fix := strings.Join(preflightFailure(pf).Fix, "\n"); !strings.Contains(fix, `"tag:tw-wl-mcp": ["autogroup:admin", "tag:tw"]`) {
@@ -36,7 +36,7 @@ func TestPolicySnippetMergesSrcs(t *testing.T) {
 		{Src: "tag:tw-ai-agent-ai-agent", Dst: "tag:tw-wl-mcp", Snippet: `{ "src": ["tag:tw-ai-agent-ai-agent"], "dst": ["tag:tw-wl-mcp"], "ip": ["tcp:80"] }`},
 		{Src: "tag:tw-wl-ai-agent", Dst: "tag:tw-wl-mcp", Snippet: `{ "src": ["tag:tw-wl-ai-agent"], "dst": ["tag:tw-wl-mcp"], "ip": ["tcp:80"] }`},
 	}}
-	s := policySnippet(pf, "", "")
+	s := policySnippet(pf, nil, nil)
 	want := `{ "src": ["tag:tw-ai-agent-ai-agent", "tag:tw-wl-ai-agent"], "dst": ["tag:tw-wl-mcp"], "ip": ["tcp:80"] }`
 	if !strings.Contains(s, want) || strings.Count(s, `"dst"`) != 1 {
 		t.Fatalf("snippet:\n%s", s)

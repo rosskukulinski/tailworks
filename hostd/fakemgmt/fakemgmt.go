@@ -119,10 +119,20 @@ type Server struct {
 	// storesDown: the store journal answers 503 (storesdown.go).
 	storesDown bool
 
+	// loseAppendAnswers: appends that commit and then answer 503, as if
+	// the answer were lost (storelose.go).
+	loseAppendAnswers int
+
+	// storeReadHold: hosts' journal reads hang (storeshold.go).
+	storeReadHold storeReadHold
+
 	// readyCalls: object ID -> ready PATCHes (readycalls.go).
 	readyCalls map[string]int
 	// leaseLostReady: the next N ready PATCHes fail with lease_lost (readycalls.go).
 	leaseLostReady int
+
+	// readyFault: every ready PATCH is answered late, or 503 (SetReadyFault).
+	readyFault ReadyFault
 
 	// Queues (queues.go): tenant|queue -> queue.
 	queues map[string]*fakeQueue
@@ -464,6 +474,9 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	h.RegisterRequest, h.lastSeen = req.RegisterRequest, time.Now()
 	v := s.hostView(h)
+	if recs := s.audit["host:"+req.HostID]; len(recs) > 0 {
+		v["auditHead"] = recs[len(recs)-1].Hash // like mgmt (#377)
+	}
 	s.mu.Unlock()
 	writeJSON(w, status, v)
 }
@@ -651,7 +664,7 @@ func (s *Server) deploy(w http.ResponseWriter, r *http.Request) {
 		if tags == nil {
 			tags = []string{}
 		}
-		nss = append(nss, mgmtapi.NamespaceSpec{Class: c, Tags: tags, Agent: cl.Agent})
+		nss = append(nss, mgmtapi.NamespaceSpec{Class: c, Tags: tags})
 	}
 	if app.Public != nil {
 		nss = append(nss, mgmtapi.NamespaceSpec{Class: publicspec.Namespace, Tags: []string{publicspec.Tag}})
@@ -1267,6 +1280,9 @@ func (s *Server) credential(w http.ResponseWriter, r *http.Request) {
 // ready is PATCH /v1/objects/{id} {"status":"ready", …} (the host's
 // merge patch; the admin's {ttl} is not modelled by the fake).
 func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
+	if s.readyFaulted(w) { // readycalls.go
+		return
+	}
 	var req struct {
 		Status string `json:"status"`
 		mgmtapi.ReadyRequest

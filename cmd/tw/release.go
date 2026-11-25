@@ -14,61 +14,33 @@ import (
 	"time"
 
 	"github.com/rosskukulinski/tailworks/internal/catalog"
-	"github.com/rosskukulinski/tailworks/mgmt"
 )
 
-// tw release (ADR-041 §8): tw-mgmt's release catalog.
-//
-//	tw release ls
-//	tw release import <tarball>…   (SHA256SUMS next to them)
+// tw release is the old spelling of tw upgrade releases and tw upgrade
+// import (issue #486), kept hidden for one release. releaseImport,
+// tarballCatalog and putArtifact are tw upgrade import's (upgrade_import.go).
 
 const releaseUsage = "release ls | release import <tw-<v>-<os>-<arch>.tar.gz>…"
 
 func cmdRelease(args []string) error {
-	f := newFlags("release")
-	pos, err := f.parse(args)
-	if err != nil {
-		return err
-	}
-	if len(pos) == 0 {
-		return fail("bad_request", "usage: tw "+releaseUsage)
-	}
-	s, err := openState(*f.stateDir)
-	if err != nil {
-		return err
-	}
-	switch pos[0] {
-	case "ls", "list":
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		var cat struct {
-			Current string              `json:"current"`
-			Items   []mgmt.ReleaseEntry `json:"items"`
+	sub := ""
+	for i, a := range args {
+		if !strings.HasPrefix(a, "-") {
+			sub, args = normalizeVerb(a), append(append([]string{}, args[:i]...), args[i+1:]...)
+			break
 		}
-		if err := s.mgmt().DoHeaders(ctx, "GET", "/v1/releases", nil, &cat, map[string]string{"Tw-Actor": actor()}); err != nil {
-			return err
-		}
-		emit(f, cat, func() {
-			fmt.Printf("tw-mgmt runs %s\n", cat.Current)
-			for _, e := range cat.Items {
-				extra := ""
-				if len(e.ContractMigrations) > 0 {
-					extra += " · contract migrations"
-				}
-				if len(e.Artifacts) > 0 {
-					extra += " · " + fmt.Sprint(len(e.Artifacts)) + " artifacts"
-				}
-				fmt.Printf("  %-10s %s  %s · workerd %s%s\n", e.Version, e.Date, e.Source, e.Workerd, extra)
-			}
-		})
-		return nil
+	}
+	switch sub {
+	case "ls":
+		upgradeDeprecated(args, "tw release ls", "tw upgrade releases")
+		return cmdUpgradeReleases(args)
 	case "import":
-		if len(pos) < 2 {
-			return fail("bad_request", "tw release import needs at least one release tarball", "usage: tw "+releaseUsage)
-		}
-		return releaseImport(f, s, pos[1:])
+		upgradeDeprecated(args, "tw release import", "tw upgrade import")
+		return cmdUpgradeImport(args)
+	case "":
+		return fail("bad_request", "tw release is now tw upgrade releases and tw upgrade import", "usage: tw "+upgradeUsage)
 	}
-	return fail("bad_request", fmt.Sprintf("unknown release subcommand %q", pos[0]), "usage: tw "+releaseUsage)
+	return fail("bad_request", fmt.Sprintf("unknown release subcommand %q (tw release is now tw upgrade releases and tw upgrade import)", sub), "usage: tw "+upgradeUsage)
 }
 
 type importResult struct {

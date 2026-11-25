@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"reflect"
 	"slices"
 	"sort"
@@ -34,49 +33,6 @@ type Snippet struct {
 // Empty reports whether the snippet adds nothing.
 func (s Snippet) Empty() bool {
 	return len(s.TagOwners) == 0 && len(s.Grants) == 0 && len(s.NodeAttrs) == 0 && len(s.AutoApprovers.Services) == 0
-}
-
-// HuJSON renders the snippet for humans ("add to your policy").
-func (s Snippet) HuJSON() string {
-	var b strings.Builder
-	if len(s.TagOwners) > 0 {
-		b.WriteString("\"tagOwners\": {\n")
-		tags := make([]string, 0, len(s.TagOwners))
-		for t := range s.TagOwners {
-			tags = append(tags, t)
-		}
-		sort.Strings(tags)
-		for _, t := range tags {
-			ob, _ := json.Marshal(s.TagOwners[t])
-			fmt.Fprintf(&b, "  %q: %s,\n", t, ob)
-		}
-		b.WriteString("},\n")
-	}
-	if len(s.Grants) > 0 {
-		b.WriteString("\"grants\": [\n")
-		for _, g := range s.Grants {
-			gb, _ := json.Marshal(g)
-			fmt.Fprintf(&b, "  %s,\n", gb)
-		}
-		b.WriteString("],\n")
-	}
-	if len(s.NodeAttrs) > 0 {
-		b.WriteString("\"nodeAttrs\": [\n")
-		for _, n := range s.NodeAttrs {
-			nb, _ := json.Marshal(n)
-			fmt.Fprintf(&b, "  %s,\n", nb)
-		}
-		b.WriteString("],\n")
-	}
-	if len(s.AutoApprovers.Services) > 0 {
-		b.WriteString("\"autoApprovers\": {\n  \"services\": {\n")
-		for _, name := range slices.Sorted(maps.Keys(s.AutoApprovers.Services)) {
-			ab, _ := json.Marshal(s.AutoApprovers.Services[name])
-			fmt.Fprintf(&b, "    %q: %s,\n", name, ab)
-		}
-		b.WriteString("  },\n},\n")
-	}
-	return b.String()
 }
 
 type doc struct {

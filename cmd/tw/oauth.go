@@ -24,16 +24,25 @@ import (
 // login and no Funnel or HTTPS requirement: the OAuth client mints mgmt's own node key (tag:tw-mgmt), the host's node key
 // (tag:tw-host) and every object's key, all tags tag:tw owns.
 
-const consoleOAuthURL = "https://login.tailscale.com/admin/settings/oauth"
+const (
+	consoleACLURL   = "https://login.tailscale.com/admin/acls/file"
+	consoleOAuthURL = "https://login.tailscale.com/admin/settings/oauth"
+)
 
-// oauthConsoleSteps are the admin-console steps to create the client.
+// oauthConsoleSteps are the admin-console steps to create the client
+// (issue #442), shared by the first-run prompt (promptOAuthSecret) and
+// mint_mode_required: each caller appends how the secret reaches tw. No
+// browser is opened: tw up often runs over SSH on a headless machine.
 func oauthConsoleSteps() []string {
 	return []string{
-		"1. Policy (admin console › Access controls): tag:tw must own tag:tw-mgmt and tag:tw-host (snippet below)",
-		"2. Admin console › Settings › Trust credentials › Credential › OAuth (" + consoleOAuthURL + ")",
-		"3. Scopes: Auth Keys › Write (required). When it asks for a tag, pick tag:tw",
-		"   recommended: Devices › Core › Write (tag tag:tw), Policy File › Write (tw up --apply-policy then writes the snippet below, after tag:tw; Read: paste it), Services › Write",
-		"4. tw up, and paste the Client Secret when asked (saved to ~/.config/tailworks/oauth.env, 0600)",
+		"1. Access controls (" + consoleACLURL + "): inside the existing \"tagOwners\" section, add",
+		"       \"tag:tw\": [\"autogroup:admin\"],",
+		"   the one line tw can't write (the console only offers existing tags for the client); tw up --apply-policy writes the rest after showing it, or tw up prints what is missing",
+		"2. Settings › Trust credentials › Credential › OAuth (" + consoleOAuthURL + ")",
+		"3. Scopes (they can't be changed on an existing client, so pick them now):",
+		"     Auth Keys › Write, tag tag:tw (required)",
+		"     Policy File › Write lets tw up --apply-policy write the policy; Read: you paste it yourself",
+		"     optional: Devices › Core › Write, tag tag:tw (tw kill deletes the device); Services › Write (apps that use a Tailscale Service)",
 	}
 }
 
@@ -53,11 +62,7 @@ func tagOwnersPart() policy.Snippet {
 // section, it would be a second key and the policy would not parse
 // (issue #389).
 func snippetLines(s policy.Snippet) []string {
-	out := []string{"    // merge into your policy: put each entry inside the existing section of the same name (don't add a second one)"}
-	for _, l := range strings.Split(strings.TrimSpace(s.HuJSON()), "\n") {
-		out = append(out, "    "+l)
-	}
-	return out
+	return pasteLines(s, nil, "    ") // policysnippet.go
 }
 
 // policyMissingTagOwners is the typed error for "the control plane refused
@@ -100,8 +105,7 @@ func tagOwnersFix(pol []byte) []string {
 			}
 			owners = append(slices.Clone(cur), policy.TwTagPrefix)
 		}
-		b, _ := json.Marshal(owners)
-		lines = append(lines, fmt.Sprintf("    %q: %s,", tag, b))
+		lines = append(lines, fmt.Sprintf("    %q: %s,", tag, policy.ListHuJSON(owners)))
 	}
 	return lines
 }
@@ -116,9 +120,10 @@ func mintModeRequired() *cliErr {
 	for _, s := range oauthConsoleSteps() {
 		lines = append(lines, "  "+s)
 	}
-	lines = append(lines, "no terminal? put TS_OAUTH_CLIENT_SECRET=tskey-client-… in ~/.config/tailworks/oauth.env, or pass tw up --oauth-client-file <file>",
+	lines = append(lines, "  4. run tw up on a terminal and paste the Client Secret when asked (saved to ~/.config/tailworks/oauth.env, 0600)",
+		"     no terminal? put TS_OAUTH_CLIENT_SECRET=tskey-client-… in ~/.config/tailworks/oauth.env, or pass tw up --oauth-client-file <file>",
 		"",
-		"Headscale instead of Tailscale: tw up --control=headscale --control-url <server_url> --tailnet <base_domain> --api-key-file <file with HEADSCALE_API_KEY=…>",
+		"Headscale instead of Tailscale: tw up --control-url <server_url> --tailnet <base_domain> (the API key in ~/.config/tailworks/headscale.env, or --api-key-file <file with HEADSCALE_API_KEY=…>)",
 		"",
 		"policy:")
 	lines = append(lines, snippetLines(operatorSnippet())...)
@@ -149,15 +154,24 @@ func oauthPreflight(ctx context.Context, api *tsapi.Client, src *tsapi.OAuthSour
 		fmt.Fprintf(out, "› policy   the OAuth client can't read the policy (%s); tag ownership is checked by the first mint instead\n", firstLine(netd.Redact(perr.Error())))
 		return tailnet, nil, false, nil
 	}
+	return tailnet, p, true, oauthNeededCheck(p, true, needed)
+}
+
+// oauthNeededCheck is tw up's hard stop when the policy it could read
+// (readable) lacks the tag ownership needed for this layout.
+func oauthNeededCheck(p []byte, readable bool, needed policy.Snippet) error {
+	if !readable {
+		return nil
+	}
 	miss, merr := policy.Missing(p, needed)
 	if merr != nil {
-		return tailnet, p, true, fail("bad_request", "can't parse the tailnet policy", merr.Error())
+		return fail("bad_request", "can't parse the tailnet policy", merr.Error())
 	}
 	if !miss.Empty() {
-		return tailnet, p, true, policyMissingTagOwners("the policy (read with the OAuth client) lacks tag:tw as an owner of: "+strings.Join(slices.Sorted(maps.Keys(miss.TagOwners)), ", "), nil, p).
+		return policyMissingTagOwners("the policy (read with the OAuth client) lacks tag:tw as an owner of: "+strings.Join(slices.Sorted(maps.Keys(miss.TagOwners)), ", "), nil, p).
 			withFix("or let tw write it: tw up --apply-policy (needs an OAuth client with the Policy File › Write scope)")
 	}
-	return tailnet, p, true, nil
+	return nil
 }
 
 // mintNodeKey mints a single-use, pre-authorized node key for tailworks' own

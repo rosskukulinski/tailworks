@@ -151,9 +151,16 @@ func TestQueuesSendPullAck(t *testing.T) {
 // max_retries the message goes to the dead-letter queue, from a failed
 // delivery or from a lease that expired (a consumer crash); a consumer
 // without a DLQ drops it.
+//
+// Delays and leases run on a step clock (the store's, which every queue
+// decision reads), so "not due yet" holds however slow the machine is
+// (#392: on a loaded runner the pull right after a 1 s delay found the
+// message already due).
 func TestQueuesDelayRetriesDLQ(t *testing.T) {
 	t.Parallel()
 	q := newQueueEnv(t)
+	clk := &stepClock{now: time.Now()}
+	q.e.store.SetClock(clk)
 	h1 := q.e.asHost("h1")
 	send := func(queue, body string, delay int) string {
 		t.Helper()
@@ -172,10 +179,24 @@ func TestQueuesDelayRetriesDLQ(t *testing.T) {
 	if info.Delayed != 1 {
 		t.Fatalf("delayed: %+v", info)
 	}
-	st := time.Now()
-	r := q.pull(h1, "jobs", q.epoch, map[string]any{"waitMs": 5000})
-	if len(r.Messages) != 1 || time.Since(st) < 500*time.Millisecond {
-		t.Fatalf("delayed message: %+v after %v", r, time.Since(st))
+	// A claim already waiting gets it once it is due: a delay that runs
+	// out wakes nothing, the claim's once-a-second re-check finds it.
+	got := make(chan QueuePullResult, 1)
+	go func() {
+		var r QueuePullResult
+		h1.do("POST", q.path("jobs", "/messages/pull", q.epoch), map[string]any{"waitMs": 15000}, &r)
+		got <- r
+	}()
+	time.Sleep(200 * time.Millisecond)
+	clk.advance(time.Second)
+	var r QueuePullResult
+	select {
+	case r = <-got:
+	case <-time.After(20 * time.Second):
+		t.Fatal("a waiting claim did not get the delayed message once it was due")
+	}
+	if len(r.Messages) != 1 {
+		t.Fatalf("delayed message: %+v", r)
 	}
 
 	// Retries: max_retries 1 is two deliveries; the second failure goes to
@@ -206,7 +227,8 @@ func TestQueuesDelayRetriesDLQ(t *testing.T) {
 	if r2 := q.pull(h1, "jobs", q.epoch, nil); len(r2.Messages) != 0 {
 		t.Fatalf("retry delay ignored: %+v", r2)
 	}
-	if r2 := q.pull(h1, "jobs", q.epoch, map[string]any{"waitMs": 5000}); len(r2.Messages) != 1 || r2.Messages[0].Attempts != 2 {
+	clk.advance(time.Second)
+	if r2 := q.pull(h1, "jobs", q.epoch, nil); len(r2.Messages) != 1 || r2.Messages[0].Attempts != 2 {
 		t.Fatalf("after the retry delay: %+v", r2)
 	} else {
 		h1.ok("POST", q.path("jobs", "/messages/ack", q.epoch), map[string]any{"acks": []string{r2.Messages[0].LeaseID}}, &ar)
@@ -217,12 +239,15 @@ func TestQueuesDelayRetriesDLQ(t *testing.T) {
 	// claim instead of a third delivery.
 	id := send("jobs", "crashy", 0)
 	for i := 1; i <= 2; i++ {
-		r = q.pull(h1, "jobs", q.epoch, map[string]any{"visibilityTimeoutMs": 1000, "waitMs": 3000})
+		r = q.pull(h1, "jobs", q.epoch, map[string]any{"visibilityTimeoutMs": 1000})
 		if len(r.Messages) != 1 || r.Messages[0].ID != id || r.Messages[0].Attempts != int64(i) {
 			t.Fatalf("delivery %d after a crash: %+v", i, r)
 		}
+		if r2 := q.pull(h1, "jobs", q.epoch, nil); len(r2.Messages) != 0 {
+			t.Fatalf("delivery %d: delivered again while its lease holds: %+v", i, r2)
+		}
+		clk.advance(1100 * time.Millisecond) // the consumer crashed: its lease expires
 	}
-	time.Sleep(1100 * time.Millisecond)
 	r = q.pull(h1, "jobs", q.epoch, nil)
 	if len(r.Messages) != 0 || r.DeadLettered != 1 {
 		t.Fatalf("expired past max_retries: %+v", r)

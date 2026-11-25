@@ -111,6 +111,7 @@ func (h *Host) ensureTenant(ctx context.Context, id string) (*tenant, error) {
 		Hostname:      func(oid string) string { return oid },
 		OnRejected:    func(nid string) { h.onNodeRejected(id, nid) }, // noderejected.go (#200)
 		ReadyTimeout:  h.cfg.ReadyTimeout,
+		EgressGate:    h.egressGate(id), // egressgate.go (#331)
 		JoinParallel:  h.cfg.JoinParallel,
 		Logger:        h.log.With("tenant", id),
 		TSNetLogs:     h.cfg.TSNetLogs,
@@ -118,6 +119,9 @@ func (h *Host) ensureTenant(ctx context.Context, id string) (*tenant, error) {
 		PublicListen:     h.cfg.PublicListen,
 		OnPublicRequest:  h.onPublicRequest,
 		OnPublicRejected: h.onPublicRejected,
+
+		// Tailnet HTTPS (tailnethttps.go).
+		HTTPSCert: h.cfg.TailnetHTTPSCert,
 	})
 	if err != nil {
 		return nil, err

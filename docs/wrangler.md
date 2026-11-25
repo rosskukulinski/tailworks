@@ -116,7 +116,10 @@ the way `wrangler --env staging` does:
 
 So `staging` and production are two workloads with two tailnet nodes. If
 `tailworks.jsonc` exists, it is shared by every environment. It has no `env`
-section, so both get the same tags and grants.
+section, so tags it lists are the same in both, and so are their grants. An
+omitted `tailnet.tags` follows the workload name (`tag:tw-wl-<workload>`),
+so then each environment gets its own tag (`tag:tw-wl-shop-staging`), and
+`tw policy` prints its `tagOwners` line.
 
 Secrets belong to a workload, so give an environment's secrets its name:
 `tw secret put API_KEY --workload shop-staging`. Run in the app
@@ -133,7 +136,7 @@ A project that has only a wrangler config gets these defaults:
   "name": "<workload>",
   "tailnet": {
     "tags": ["tag:tw-wl-<workload>"],
-    // every durable_objects class:
+    // every durable_objects class (as for any class a tailworks.jsonc leaves out):
     "objects": { "<Class>": { "node": false } }
   }
 }
@@ -161,13 +164,33 @@ wrangler names them.
 |---|---|---|---|
 | what runs | esbuild 0.28.2, linked into `tw` | `wrangler deploy --dry-run --outdir <tmp> --config <file> --env=<env>` in the app directory. Nothing is sent to Cloudflare | nothing: tailworks packs a directory you built with `wrangler deploy --dry-run --outdir <dir>` |
 | needs Node.js | no | yes, and wrangler (`node_modules/.bin/wrangler`, then `PATH`; `$TW_WRANGLER` overrides) | no (at deploy time) |
-| use it for | most projects | custom builds, or to get exactly wrangler's output | CI that already runs wrangler, or a pinned wrangler version |
+| use it for | most projects, including a [custom build](#custom-builds) | to get exactly wrangler's output, or the `rules` / `no_bundle` settings below | CI that already runs wrangler, or a pinned wrangler version |
 
 For `--from-wrangler-out`, tailworks finds the entry by `main`'s name
 (`src/index.ts` becomes `index.js`). It leaves out `README.md` and source
 maps. Each other module gets its type from your `rules` and wrangler's
 default rules, matched on its file name, and otherwise from its extension.
 Tailworks doesn't check that the directory is up to date with your sources.
+
+<a id="custom-builds"></a>A config with a custom build
+(`"build": {"command": "…"}`) runs that command before the built-in esbuild
+bundles, as wrangler does: in a shell (`sh -c`; `cmd /c` on Windows), in
+`build.cwd` (default: the config's directory), with every
+`node_modules/.bin` from there up first on `PATH`, as under `npm run`.
+`tw deploy` and `tw policy` print what ran and stream its output on stderr:
+
+```
+› build      esbuild src/client/index.tsx --bundle --splitting --format=esm --platform=browser --outdir=public/dist
+```
+
+If it exits non-zero, nothing is deployed (`build_command_failed`).
+`tw dev` runs it once at start, then again only when a file under
+`build.watch_dir` (default `./src`, as wrangler) changes; what the build
+writes (often under `assets.directory`) doesn't count as an edit, so it
+can't trigger another reload. It is your project's own command, run on
+your machine, as `npm run build` would be. `--wrangler` leaves it to
+wrangler, and a [Pages project](#pages), a [pre-built](#no-bundle)
+`no_bundle` Worker and a `runtime: "node"` app don't run it.
 
 <a id="no-bundle"></a>A config with `"no_bundle": true` and `rules` of type
 ESModule whose globs are only `**/*.js` and `**/*.mjs` (what the
@@ -193,7 +216,7 @@ Measured with `e2e/wrangler/testdata/toml-app` and wrangler 4.60.0
 | custom `rules` of type Text, Data or CompiledWasm (with `fallthrough`) | ✅ | ✅ | e.g. `**/*.md` as Text. The host types each module from `tw-bundle.json` `modules` |
 | `no_bundle` with ESModule `rules` for only `**/*.js` / `**/*.mjs` (pre-built, e.g. Vite plugin output), with `find_additional_modules`, `base_dir` | ✅ packed as they are ([pre-built](#no-bundle)) | ✅ | |
 | other `rules` of type ESModule / CommonJS, `no_bundle`, `find_additional_modules`, `base_dir`, `preserve_file_names` | ❌ warned | ✅ ES modules | tailworks ships ES modules only; a `.cjs` module in wrangler's output is an error |
-| `build` (custom build command) | ❌ warned | ✅ | |
+| `build` (custom build command) | ✅ runs `build.command` first ([custom builds](#custom-builds)) | ✅ | not for a Pages project or a pre-built `no_bundle` Worker (warned) |
 | `minify`, `keep_names`, `jsx_factory`, `jsx_fragment`, `tsconfig` | ✅ mapped to esbuild options | ✅ | mapped, but not measured end to end |
 | `nodejs_compat` | ✅ bare built-ins become `node:*`; workerd provides them | ✅ plus wrangler's unenv polyfills | toml-app's entry: 1.0 KB built-in, 21 KB wrangler. Both pass the same checks (`node:buffer`) |
 | `node_compat` (legacy) | ❌ warned | ❌ wrangler 4 rejects it | use `compatibility_flags = ["nodejs_compat"]` |
@@ -204,6 +227,16 @@ Measured with `e2e/wrangler/testdata/toml-app` and wrangler 4.60.0
 `create-tailworks`'s `build.mjs` (the npm bundler) still reads only
 `wrangler.jsonc` and has none of these settings. `tw deploy` does not
 use it.
+
+## <a id="python"></a>Python Workers
+
+A config whose `main` is a `.py` module, with `"python_workers"` in
+`compatibility_flags`, is a Python Worker. It isn't bundled: `tw deploy`
+ships the files under `main`'s directory and the vendored `python_modules/`,
+as pywrangler does, and hostd runs them in Pyodide. `--wrangler` and
+`--from-wrangler-out` don't apply (they bundle JavaScript). Vendor packages
+with `uv run pywrangler sync` before `tw deploy`. Everything else, and what
+isn't supported yet: [python.md](python.md).
 
 ## Settings tailworks ignores
 
@@ -224,7 +257,9 @@ before anything else. Nothing is ignored silently:
 | `routes`, `route`, `workers_dev`, `preview_urls`, `account_id`, `zone_id` | ignored: the workload is reached at its MagicDNS name. Public routes are `tailworks.jsonc` `public` ([public-ingress.md](public-ingress.md)) |
 | `ai`, `browser`, `vectorize`, `hyperdrive`, `analytics_engine_datasets`, `send_email`, `dispatch_namespaces`, `mtls_certificates`, `images`, `pipelines`, `ratelimits`, `secrets_store_secrets`, `version_metadata`, `worker_loaders`, `vpc_services`, `media`, `tail_consumers`, `logfwdr`, `unsafe` | no such binding on tailworks; the warning names each `env.X` that will be undefined. A section tailworks supports as a [platform store](design/adr/044-platform-stores.md) (`kv_namespaces`, [Workers KV](kv.md); `r2_buckets`, [R2](r2.md); `d1_databases`, [D1](d1.md)) or as [service bindings](#service-bindings) (`services`) is not warned about |
 | `site` | not supported (Workers Sites; use `assets`) |
-| `observability`, `logpush`, `limits`, `usage_model`, `keep_vars`, `send_metrics`, `dev`, … | ignored by tailworks |
+| `dev` other than `dev.port` (`ip`, `local_protocol`, `host`, …) | ignored by tailworks: `tw dev` serves plain HTTP on 127.0.0.1 only. `dev.port` is `tw dev`'s port, as in `wrangler dev` |
+| `observability`, `logpush`, `limits`, `usage_model`, `keep_vars`, `send_metrics`, … | ignored by tailworks |
+| `python_modules` (its `exclude` globs) | ignored: `tw deploy` ships `python_modules/` whole, less `__pycache__` and `*.pyc` ([python.md](python.md#modules-and-files)) |
 | a `durable_objects` binding with `script_name` | not supported (the deploy fails) |
 | anything else | unknown key, ignored |
 
@@ -334,7 +369,8 @@ the stand-in Worker.
 
 `tw dev` serves the same way and reloads when a file in `directory`
 changes, even when it is `dist/`. Build your client (for example
-`npm run build`) before `tw deploy`; tailworks doesn't run the build.
+`npm run build`) before `tw deploy`, or set the wrangler config's
+`build.command` and tailworks runs it first ([custom builds](#custom-builds)).
 
 Differences from Cloudflare:
 
@@ -507,6 +543,8 @@ const n = await env.ADMIN.countUsers();       // RPC to the Admin entrypoint
   stubs, streams, `Request`, `Response`) is refused with
   [`rpc_not_forwardable`](errors.md#rpc_not_forwardable); send a body
   with `fetch()` instead. A thrown error keeps its name and message.
+- **The target can be a Python Worker**: RPC reaches its `Default` or
+  named `WorkerEntrypoint` class's methods ([python.md](python.md#rpc-from-other-workers)).
 - **Errors:** a target that isn't deployed in the tenant, or an
   `entrypoint` it doesn't export, is
   [`service_not_found`](errors.md#service_not_found); a killed one is
@@ -515,6 +553,14 @@ const n = await env.ADMIN.countUsers();       // RPC to the Admin entrypoint
   promise pipelining, a request and response streaming at the same time
   (each streams on its own), and, in `tw dev`, a binding to another
   workload.
+- **When the target moves**, calls follow it: the target is resolved
+  again at most 5 s after its last lookup (sooner when its old node is
+  gone), plus the time to reach a new node. While a takeover is waiting
+  for the old host's lease to run out, calls fail or wait. Once the target
+  is undeployed (or killed), calls stop reaching it within those 5 s. The
+  caller the target sees is the calling copy's own node, across moves of
+  either side. The data-plane chaos loop checks all of this under faults
+  (`e2e/dataplane:TestRouting`, scenario `bindings`).
 
 `tw types` types each binding as `Fetcher`.
 
@@ -531,7 +577,7 @@ config and `tailworks.jsonc`.
 | `kv_namespaces`, `r2_buckets`, `d1_databases` | `KVNamespace`, `R2Bucket`, `D1Database` |
 | `queues.producers` | `Queue` |
 | `workflows` | `Workflow` |
-| secret names: `.dev.vars`, `.dev.vars.example`, `secrets.required`, and with `--remote` the workload's secrets in mgmt (`tw secret ls`) | `string` |
+| secret names: `.dev.vars`, `.dev.vars.example`, `secrets.required` | `string` |
 
 Bindings tailworks doesn't support are left out, because on tailworks they are
 undefined. `--env <name>` types that environment. A `"runtime": "node"` app
@@ -542,8 +588,13 @@ Every `tw init` template ships the file along with a `tsconfig.json`
 (`@cloudflare/workers-types` plus `@tailworks/tailnet`, which declares
 `ctx.tailnet`), so `npm install && npx tsc --noEmit` passes. The templates
 use that global `Env` and don't declare their own: in an ES module a local
-`interface Env` would hide the generated one. Run
-`tw types` again after you change the config. In CI, run
+`interface Env` would hide the generated one. `tw dev` keeps the file
+current: on start and on each reload it rewrites a
+`worker-configuration.d.ts` that `tw types` wrote when the config has
+changed. It never creates the file, and it leaves alone a hand-written
+one or one typed for an `--env`. It does nothing under `tw dev --env`, `--wrangler`,
+`--from-wrangler-out` or `--once`. Otherwise, run `tw types` again after
+you change the config. In CI, run
 `tw types --check`: it writes nothing and fails with
 [`types_stale`](errors.md#types_stale) if the file is missing or out of date.
 `.dev.vars` isn't committed, so for `--check` to see the same secrets on

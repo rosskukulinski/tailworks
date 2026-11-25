@@ -29,12 +29,12 @@
 <section>
   <div class="sect-head"><div>
     <h2>Namespaces <span class="count">{{len .Dep.Namespaces}}</span></h2>
-    <p class="hint">The kinds of node this workload can create, and the tags each one gets.</p>
+    <p class="hint">The classes of node this workload can create, and the tags each one gets.</p>
   </div></div>
   <div class="tbl">
   <table>
-    <thead><tr><th>Kind</th><th>Tags</th><th>Agent</th><th>Time to live</th></tr></thead>
-    <tbody>{{range .Dep.Namespaces}}<tr><td class="mono">{{.Class}}</td><td class="mono">{{join .Tags}}</td><td>{{if .Agent}}yes{{else}}—{{end}}</td><td class="mono">{{or .TTL "—"}}</td></tr>{{else}}<tr><td colspan="4" class="empty">None</td></tr>{{end}}</tbody>
+    <thead><tr><th>Class</th><th>Tags</th><th>Time to live</th></tr></thead>
+    <tbody>{{range .Dep.Namespaces}}<tr><td class="mono">{{.Class}}</td><td class="mono">{{join .Tags}}</td><td class="mono">{{or .TTL "—"}}</td></tr>{{else}}<tr><td colspan="3" class="empty">None</td></tr>{{end}}</tbody>
   </table>
   </div>
 </section>

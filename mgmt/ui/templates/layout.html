@@ -11,7 +11,7 @@
 <header class="top">
   <a class="brand" href="/ui/">tw</a>
   <nav>
-    {{if or .Who.Admin (not .Who.Kind) .Who.TenantGrants}}<a href="/ui/"{{if eq .Path "/ui/"}} class="cur"{{end}}>Overview</a>
+    {{if or .Who.Admin .Who.TenantGrants}}<a href="/ui/"{{if eq .Path "/ui/"}} class="cur"{{end}}>Overview</a>
     <a href="/ui/objects"{{if eq .Path "/ui/objects"}} class="cur"{{end}}>Objects</a>
     <a href="/ui/audit"{{if eq .Path "/ui/audit"}} class="cur"{{end}}>Audit log</a>{{end}}
     <a href="/ui/approvals"{{if eq .Path "/ui/approvals"}} class="cur"{{end}}>Approvals</a>
@@ -54,7 +54,7 @@
 </tr>{{end}}
 {{end}}
 
-{{define "objhead"}}<tr><th>Node</th><th>Kind / name</th><th>Status</th><th>Address</th><th>Tags</th><th>Time to live</th><th>Node ID</th><th>Acting for</th><th>Created</th></tr>{{end}}
+{{define "objhead"}}<tr><th>Node</th><th>Class / name</th><th>Status</th><th>Address</th><th>Tags</th><th>Time to live</th><th>Node ID</th><th>Acting for</th><th>Created</th></tr>{{end}}
 
 {{define "auditrows"}}{{/* . is {Records, Names} */}}
 {{range .Records}}<tr>

@@ -77,6 +77,9 @@ func (r *Registry) EgressHandler() http.Handler {
 		}
 		rctx, cancel := context.WithTimeout(req.Context(), r.cfg.ReadyTimeout)
 		err := o.Ready(rctx)
+		if err == nil {
+			err = r.gateEgress(rctx, o) // egressgate.go (#331)
+		}
 		cancel()
 		if err != nil {
 			e, _ := AsError(err)
@@ -107,6 +110,9 @@ func (r *Registry) DialEgress(ctx context.Context, id, hostport string) (net.Con
 	}
 	rctx, cancel := context.WithTimeout(ctx, r.cfg.ReadyTimeout)
 	err := o.Ready(rctx)
+	if err == nil {
+		err = r.gateEgress(rctx, o) // egressgate.go (#331)
+	}
 	cancel()
 	if err != nil {
 		e, _ := AsError(err)

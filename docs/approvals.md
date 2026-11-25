@@ -36,6 +36,44 @@ object modes): `create`, `createBatch`, `get`, and on an instance `status`,
   `run()` runs again from the start: completed steps return their stored
   results without running again, and waits keep their deadlines. A failed
   step retries from that step.
+- A move doesn't take instances along (see [Moves](#moves)).
+
+### Under faults
+
+The data-plane chaos loop (`e2e/dataplane:TestDataplaneWorkflows`,
+nightly in `make e2e-dataplane`) runs instances through steps, a sleep, an
+event wait and an approval while it kills hostd and workerd, crashes hostd
+alone, stalls the host, cuts it off from mgmt, restarts mgmt and redeploys.
+Measured there:
+
+| Guarantee | Result |
+|---|---|
+| A completed step's stored result comes back on every replay and is never recomputed; no step's side effect happens after the step completed (W1) | held: 0 violations over 655 completed steps and 275 replays of `run()` in one run |
+| A step that throws retries from itself, not from the start (W1) | held for every planned failure |
+| A sleep ends no earlier than its deadline and no later than the deadline plus the time a fault kept the instance down (+10 s); an event or approval wait ends after its send (W2) | held; the longest was 12.4 s after the deadline, inside a 13 s stall |
+| One `approval_requested` per wait, one decision per approval, and the Workflow sees the accepted decision and its verified approver (W3) | held after [#561](https://github.com/rosskukulinski/tailworks/issues/561). A hostd crash can lose the last few seconds of audit records, `approval_requested` included (the chain shows the gap); the wait itself stays listed |
+| Every instance ends `complete`, `errored` or `terminated`, or is visibly gone after a move (W5) | held |
+
+### Moves
+
+An instance's state is in the workload's Durable Object storage on the
+host that held the lease when it ran, and [that storage doesn't
+move](locks.md). So when the workload moves (`tw deploy --replace
+--force-takeover`, or a takeover of a failed host):
+
+- **In-flight instances are gone from the new copy.** `get(id)` and
+  `sendEvent` throw `instance.not_found`. None of them runs on the new
+  host, and none acts on the old host after it is fenced
+  (`e2e/dataplane:TestDataplaneWorkflows`, scenario `workflows-move`, W4).
+  Create them again on the new copy if they must finish.
+- **Their approvals stay listed** in `tw approvals` (on the old host) and
+  can't be decided: `tw approve` answers `approval_not_pending`.
+- **A move back resumes them.** If the workload later returns to a host
+  it ran on before, that host's old storage is used again: its instances
+  replay from their stored steps, late sleeps end at once, and they wait
+  for their events and approvals as before. Whether a move back should
+  start empty instead is
+  [#565](https://github.com/rosskukulinski/tailworks/issues/565).
 - Not supported: `script_name` (another Worker's Workflow; call that
   workload over the tailnet) and `schedules` (use `triggers.crons` and
   create the instance in `scheduled()`). Both are refused at deploy.
@@ -130,6 +168,11 @@ amount, and the on-call bot may only reject:
 
 A refused decision is `403 cap_missing`, naming what was missing and the
 grant to add (`snippet`); the instance keeps waiting.
+
+An approval is decided once. The first decision tailworks accepts is the
+one delivered; any other, including one sent at the same moment by
+another approver, gets `409 approval_not_pending`
+(`hostd:TestDecideApprovalOnce`).
 
 The Workflow can add its own rules on top, on tailworks' verified identity. The
 template refuses an approval by the person who asked for the refund:

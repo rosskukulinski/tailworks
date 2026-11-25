@@ -74,7 +74,11 @@ test("fake ctx.tailnet: spawn, kill, audit, self, fetch", async () => {
   assert.equal(t.killed[0].reason, "done");
   await ctx.tailnet.audit([{ event: "x" }]);
   assert.deepEqual(t.audits, [{ event: "x" }]);
-  assert.equal((await ctx.tailnet.self()).epoch, 7);
+  const me = await ctx.tailnet.self();
+  assert.equal(me.epoch, 7);
+  assert.equal(me.workload, "test-workload");
+  assert.equal(me.deploymentId, "test-deployment");
+  assert.equal(ctx.tailnet.forward, undefined);
   assert.deepEqual(await (await ctx.tailnet.fetch("http://db/items")).json(), { ok: true });
   await assert.rejects(ctx.tailnet.fetch("http://elsewhere/"), (e) => e.code === "peer_not_visible");
   assert.equal(t.fetches.length, 2);

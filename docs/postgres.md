@@ -145,8 +145,8 @@ secret's name, on one machine. Several mgmt replicas need setec instead.
 
 ```sh
 tw down
-tw custody migrate --to setec --setec-url https://secrets.<tailnet>.ts.net --dry-run
-tw custody migrate --to setec --setec-url https://secrets.<tailnet>.ts.net
+tw custody migrate --setec-url https://secrets.<tailnet>.ts.net --dry-run
+tw custody migrate --setec-url https://secrets.<tailnet>.ts.net
 tw up
 ```
 

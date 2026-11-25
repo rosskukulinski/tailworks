@@ -177,12 +177,20 @@ func TestUpgradePreviousToCandidate(t *testing.T) {
 	os.MkdirAll(filepath.Join(app, "src"), 0o755)
 	os.WriteFile(filepath.Join(app, "tailworks.jsonc"), []byte(`{"name": "counter", "tailnet": {"tags": ["tag:ttest"], "objects": {"Counter": {"tags": ["tag:ttest"]}}}}`), 0o644)
 	os.WriteFile(filepath.Join(app, "wrangler.jsonc"), []byte(`{"name": "counter", "main": "src/index.js", "compatibility_date": "2026-04-01",
-  "durable_objects": {"bindings": [{"name": "COUNTER", "class_name": "Counter"}]}}`), 0o644)
+  "durable_objects": {"bindings": [{"name": "COUNTER", "class_name": "Counter"}, {"name": "TALLY", "class_name": "Tally"}]}}`), 0o644)
 	os.WriteFile(filepath.Join(app, "src", "index.js"), []byte(`import { DurableObject } from "cloudflare:workers";
 export class Counter extends DurableObject {
   async fetch() { const n = ((await this.ctx.storage.get("n")) ?? 0) + 1; await this.ctx.storage.put("n", n); return Response.json({ count: n }); }
 }
-export default { async fetch(req, env) { return env.COUNTER.getByName("c").fetch(new Request("http://counter/")); } };`), 0o644)
+export class Tally extends Counter {}
+export default { async fetch(req, env) {
+  const ns = new URL(req.url).pathname === "/tally" ? env.TALLY : env.COUNTER;
+  return ns.getByName("c").fetch(new Request("http://counter/"));
+} };`), 0o644)
+	// Tally is not in tailnet.objects. Packed by hostdtest.Build, as by a
+	// tw before #492, it has no "node": false, so hostd runs it as a
+	// nodeless facet (storage under Host_Tally); a hostd upgrade must keep
+	// that storage (only a redeploy with a newer tw makes it a plain DO).
 	files, err := hostdtest.Build(app, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -196,12 +204,12 @@ export default { async fetch(req, env) { return env.COUNTER.getByName("c").fetch
 	d = e.waitActive(d.DeploymentID, 90*time.Second)
 	node := d.Endpoint.Node
 	host := d.Endpoint.MagicDNS
-	bump := func(want int) {
+	bumpAt := func(path string, want int) {
 		t.Helper()
 		var got struct{ Count int }
 		last := ""
 		for i := 0; ; i++ {
-			resp, err := hc.Get("http://" + host + "/")
+			resp, err := hc.Get("http://" + host + path)
 			if err == nil {
 				b, _ := io.ReadAll(resp.Body)
 				resp.Body.Close()
@@ -214,13 +222,18 @@ export default { async fetch(req, env) { return env.COUNTER.getByName("c").fetch
 			}
 			if i > 100 {
 				e.dumpLogs()
-				t.Fatalf("GET %s: %s", host, last)
+				t.Fatalf("GET %s%s: %s", host, path, last)
 			}
 			time.Sleep(200 * time.Millisecond)
 		}
 		if got.Count != want {
-			t.Fatalf("count %d, want %d (Durable Object storage lost?)", got.Count, want)
+			t.Fatalf("GET %s: count %d, want %d (Durable Object storage lost?)", path, got.Count, want)
 		}
+	}
+	bump := func(want int) {
+		t.Helper()
+		bumpAt("/", want)
+		bumpAt("/tally", want) // the unlisted class
 	}
 	bump(1)
 	bump(2)

@@ -1,0 +1,12 @@
+{
+  "name": "dpd",
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-01",
+  "durable_objects": {
+    "bindings": [{ "name": "INFO", "class_name": "Info" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Info"] }],
+  // BUILD is set per bundle by the test (b1, b2, …), so every bundle has its
+  // own SHA-256 and every answer names the bundle that served it.
+  "vars": { "BUILD": "b0" },
+}

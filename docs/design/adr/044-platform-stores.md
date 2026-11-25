@@ -131,10 +131,29 @@ Drafted as `ADR-platform-stores`.
    it needs a grant model; the KV ADR covers that.
 
 8. **Failure modes.** If mgmt (or the path to it) is down, writes fail with
-   `store_unavailable`. Reads keep answering from the local copy if this
-   object has caught up on this host before (fail static, like Workers
-   during an mgmt outage, ADR-028), and fail if it never has (a new host
-   has nothing true to serve).
+   `store_unavailable`: a write is acknowledged only once it is in mgmt's
+   journal (RPO 0). Reads are bounded (#38):
+   - A read that wants fresher data than the object's last sync waits at
+     most 2 s (`READ_WAIT_MS`, `hostd/gen/js/store.js`) for the catch-up,
+     then answers from the local copy if this object has caught up on
+     this host before (fail static).
+   - Once a catch-up has failed or outlasted that wait, the journal counts
+     as unreachable: reads answer from the local copy without waiting, and
+     the object starts one catch-up in the background at most every 5 s
+     (`STALE_RETRY_MS`). The first one that succeeds ends this.
+   - Concurrent catch-ups coalesce into one. hostd gives up on a journal
+     read after 10 s (`storeReadTimeout`, `hostd/stores.go`), which bounds
+     how long a stuck catch-up holds the writes queued behind it.
+   - Reads fail if the object has never caught up on this host (a new
+     host has nothing true to serve), if they ask for the journal
+     explicitly (a D1 `first-primary` session, or a bookmark ahead of the
+     local copy), or on `lease_lost`.
+
+   Serving the local copy lasts only while the workload runs. A host stops
+   every workload with a fenceable Durable Object class after `FenceAfter`
+   (30 s) without a successful heartbeat (ADR-028 §3), and its stores stop
+   with it; a mgmt database outage fails the heartbeat too. Only a workload
+   with no such class keeps serving store reads through a longer outage.
 
 9. **Limits.** At most 2 MiB per entry, 4 MiB and 128 entries per append,
    1 KiB per `ckey`, and 1 GiB of kept data per store (`400

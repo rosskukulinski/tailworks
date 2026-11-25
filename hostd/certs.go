@@ -34,11 +34,19 @@ type certEntry struct {
 	expires time.Time
 }
 
-// certCacheTTL bounds how long a verified certificate (or a "not an
-// object" answer) is reused before mgmt is asked again. A kill revokes
-// the node itself (RST + device delete), so the cache only delays
-// seeing a re-issued certificate.
+// certCacheTTL bounds how long a verified certificate is reused before
+// mgmt is asked again. A kill revokes the node itself (RST + device
+// delete), so the cache only delays seeing a re-issued certificate.
 const certCacheTTL = 60 * time.Second
+
+// certNoCertTTL bounds how long a "not an object" answer is reused. It is
+// short (issue #331): a node whose ready report mgmt has not recorded yet
+// looks like a non-object, and for as long as that answer is cached its
+// caps are not narrowed by its certificate's lim. Its own host holds its
+// egress until the report (egressgate.go); this bounds the window should
+// anything still send first.
+// limits.md#cert-no-cert-ttl
+const certNoCertTTL = 2 * time.Second
 
 func newCertSource(h *Host, tenantID string, pubB64 string) (*certSource, error) {
 	pub, err := base64.StdEncoding.DecodeString(pubB64)
@@ -89,7 +97,11 @@ func (c *certSource) put(id string, obj *netd.CallerObject, now time.Time) {
 	if len(c.cache) > 10000 {
 		c.cache = map[string]certEntry{}
 	}
-	c.cache[id] = certEntry{obj: obj, expires: now.Add(certCacheTTL)}
+	ttl := certCacheTTL
+	if obj == nil {
+		ttl = certNoCertTTL
+	}
+	c.cache[id] = certEntry{obj: obj, expires: now.Add(ttl)}
 }
 
 // forget drops a cached entry (a kill pushed to this host).

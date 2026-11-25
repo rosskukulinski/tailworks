@@ -43,24 +43,41 @@ func confirmPolicyWrite(f *flags, yes bool, cmdline string) error {
 // app's bundle needs. It returns the result (Changed false when there was
 // nothing tailworks could write).
 func applyAppPolicy(ctx context.Context, mc *mgmtapi.Client, f *flags, tenantID, workload string, tb []byte, yes bool, cmdline string) (*mgmt.PolicyApplyResult, error) {
-	path := "/v1/tenants/" + url.PathEscape(tenantID) + "/workloads/" + url.PathEscape(workload) + "/policy"
-	body := map[string]any{"bundle": tb}
-	var plan mgmt.PolicyApplyResult
-	if err := mc.Do(ctx, "POST", path+"?dryRun=true", body, &plan); err != nil {
-		return nil, policyApplyErr(err)
+	plan, err := planAppPolicy(ctx, mc, tenantID, workload, tb)
+	if err != nil {
+		return nil, err
 	}
 	if !*f.json {
-		printPolicyAdditions(plan)
+		printPolicyAdditions(*plan)
 	}
 	if strings.TrimSpace(plan.Added) == "" {
-		return &plan, nil
+		return plan, nil
 	}
 	if err := confirmPolicyWrite(f, yes, cmdline); err != nil {
-		return &plan, err
+		return plan, err
 	}
+	return writeAppPolicy(ctx, mc, f, tenantID, workload, tb, plan)
+}
+
+// appPolicyPath is the workload's policy endpoint.
+func appPolicyPath(tenantID, workload string) string {
+	return "/v1/tenants/" + url.PathEscape(tenantID) + "/workloads/" + url.PathEscape(workload) + "/policy"
+}
+
+// planAppPolicy asks mgmt what it would add (dryRun).
+func planAppPolicy(ctx context.Context, mc *mgmtapi.Client, tenantID, workload string, tb []byte) (*mgmt.PolicyApplyResult, error) {
+	var plan mgmt.PolicyApplyResult
+	if err := mc.Do(ctx, "POST", appPolicyPath(tenantID, workload)+"?dryRun=true", map[string]any{"bundle": tb}, &plan); err != nil {
+		return nil, policyApplyErr(err)
+	}
+	return &plan, nil
+}
+
+// writeAppPolicy writes what plan showed (after the confirmation).
+func writeAppPolicy(ctx context.Context, mc *mgmtapi.Client, f *flags, tenantID, workload string, tb []byte, plan *mgmt.PolicyApplyResult) (*mgmt.PolicyApplyResult, error) {
 	var res mgmt.PolicyApplyResult
-	if err := mc.Do(ctx, "POST", path, body, &res); err != nil {
-		return &plan, policyApplyErr(err)
+	if err := mc.Do(ctx, "POST", appPolicyPath(tenantID, workload), map[string]any{"bundle": tb}, &res); err != nil {
+		return plan, policyApplyErr(err)
 	}
 	if !*f.json {
 		if res.Changed {
@@ -93,11 +110,12 @@ func policyApplyStep(ctx context.Context, s *state, f *flags, a *app, tn TenantR
 	}
 	res.Applied, res.Preflight = ar, ar.Preflight
 	res.OK = res.Preflight.OK
+	caller := callerGrantEntry(a.Cfg.Tailnet.Tags, a.Cfg.Tailnet.HTTPS)
 	if ar.Changed && ar.CallerGrant != "" {
-		res.CallerGrant = "" // written: not in what is left to paste
+		res.CallerGrant, caller = "", nil // written: not in what is left to paste
 	}
 	res.ServiceCallerGrant = serviceCallerGrant(res.Preflight.Service)
-	res.Snippet = policySnippet(res.Preflight, res.CallerGrant, res.ServiceCallerGrant)
+	res.Snippet = policySnippet(res.Preflight, caller, serviceCallerGrantEntry(res.Preflight.Service))
 	return nil
 }
 

@@ -1,0 +1,15 @@
+{
+  "name": "python",
+  "main": "src/entry.py",
+  // 2026-04-01 has the `workers` SDK built in; from 2026-04-21 vendor it
+  // with `uv run pywrangler sync` (docs/python.md#packages)
+  "compatibility_date": "2026-04-01",
+  "compatibility_flags": ["python_workers"],
+  "vars": {
+    "GREETING": "hello"
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "COUNTER", "class_name": "Counter" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Counter"] }]
+}

@@ -21,7 +21,7 @@ import (
 // (mgmt custody, every tenant's node keys and DO storage), its sockets and
 // the OAuth client file.
 func (s *state) sandboxDenyList() []string {
-	deny := []string{filepath.Join(s.Dir, "mgmt"), filepath.Join(s.Dir, "hostd"), s.logDir(), s.configPath(), filepath.Join(s.Dir, "tenants"), s.runDir()}
+	deny := []string{filepath.Join(s.Dir, "mgmt"), filepath.Join(s.Dir, "hostd"), s.logDir(), s.configPath(), s.runDir()}
 	if s.Cfg.OAuthClientFile != "" {
 		deny = append(deny, s.Cfg.OAuthClientFile) // the OAuth client secret (also denied via the tenant list)
 	}

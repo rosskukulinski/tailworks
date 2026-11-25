@@ -30,9 +30,8 @@ In `tailworks.jsonc`:
     // path patterns: "/x" (exact), "/x/*" (/x and below), "/*" (everything)
     "routes": ["/webhooks/*", "/oauth/callback"],
     // routes that may upgrade to WebSocket/SSE (default: none)
-    "upgrade": [],
-    // optional: override the defaults (up to the ceilings below)
-    "limits": { "rps": 50, "ipRps": 10, "maxBodyBytes": 1048576 }
+    "upgrade": []
+    // optional: "limits" overrides the defaults, up to the ceilings (Limits, below)
   },
   "tailnet": {
     "objects": {
@@ -118,10 +117,12 @@ is shared by every tenant on a tailnet. mgmt gives each name one owner:
   and without a trailing dot. Give every tenant on one tailnet the same
   tailnet name (its MagicDNS suffix): two tenants that name the same tailnet
   differently can't see each other's claims.
-- **Releasing.** `GET /v1/tenants/{id}/public-names` lists a tenant's names.
-  `DELETE /v1/tenants/{id}/public-names/{name}` releases one once nothing
-  serves it (else `409 public_name_in_use`). Deleting a tenant releases all
-  of its names. Claims and releases are audited (`public_name_claim`,
+- **Releasing.** `tw expose names` lists the tenant's names.
+  `tw expose release <name>` releases one once nothing serves it (else
+  `409 public_name_in_use`: undeploy the workload, or remove `"public"` and
+  redeploy, first). After a release any tenant on the tailnet can deploy
+  public routes under the name. A team tenant's names carry its prefix,
+  as its URLs do. Deleting a tenant releases all of its names. Claims and releases are audited (`public_name_claim`,
   `public_name_release`), and a refusal is a `deny` record with code
   `public_name_owned` whose detail names the owner.
 - **Upgrading.** Names served before ownership existed have no claim yet.
@@ -155,7 +156,13 @@ export default {
   `Forwarded`, `X-Real-IP`.
 - **Client IP:** netd sets `CF-Connecting-IP` and `X-Forwarded-For` (one
   value) to the client address Funnel reports, and `X-Forwarded-Proto:
-  https`. There is no geo data: `request.cf.country`, `colo`, `latitude`
+  https`.
+- **`request.url` is `https://`**, the URL the client called
+  (`https://<workload>.<tailnet>.ts.net/…`), as on Cloudflare. Before
+  [#360](https://github.com/rosskukulinski/tailworks/issues/360) a public
+  request's `request.url` was `http://` with `X-Forwarded-Proto: https`.
+  Tailnet requests keep `http://` unless the app sets
+  [`tailnet.https`](tailworks-jsonc.md#tailnethttps). There is no geo data: `request.cf.country`, `colo`, `latitude`
   and the other geo fields are absent ([wrangler.md](wrangler.md#requestcf)).
 
 ## Objects and spawn amplification
@@ -210,6 +217,11 @@ netd enforces these on the public listener. Each is overridable in
 | `maxConnsPerIp` (per client address) | 32 | 1024 | connection closed |
 | `upgradeLifetimeSeconds` | 3600 | 86400 | upgraded connection closed |
 
+`burst` and `ipBurst` are spike sizes; sustained traffic is admitted at
+`rps` and `ipRps`. When you raise `rps` (or `ipRps`) and leave its burst
+unset, the burst is two seconds' worth of the rate, never below the
+default and never above the ceiling: `"rps": 200` gets a burst of 400.
+
 Upgrades on a route not listed in `upgrade` get `403 upgrade_not_allowed`.
 
 Connections:
@@ -242,6 +254,8 @@ Errors your own code returns are passed through unchanged.
 ```sh
 tw expose off <workload>    # close the public listener now; survives redeploys
 tw expose on  <workload>
+tw expose names             # the public names this tenant owns
+tw expose release <name>    # give one up, once nothing serves it
 ```
 
 - **`off`:** closes the Funnel listener and resets in-flight public
@@ -274,6 +288,24 @@ tw expose on  <workload>
   The operator's change is recorded on mgmt's chain and the listener
   change on the host's.
 
+## Under faults
+
+The data-plane chaos loop (`e2e/dataplane:TestRouting`, scenarios
+`public` and `routing`) drives netd's public listener directly while it
+moves the workload, takes it over from a stalled or cut-off host, restarts
+hosts and mgmt, and changes the route list under load:
+
+- **Only the lease holder answers.** A public request is never answered
+  by a copy whose lease has moved on, and every public request reaches
+  the Worker, which sees a public requester.
+- **Route changes.** A path that isn't listed never reaches your code: a
+  redeploy that removes a route takes effect when the new deployment is
+  active, and the loop checks a 10 s bound. A tailnet-only path over the
+  public listener is always `404 not_public`.
+- **Availability.** While a host is stalled or cut off, the public URL
+  fails until the takeover (about 45 s, docs/locks.md). The loop reports
+  each path's availability in and out of fault windows.
+
 ## Checking it
 
 `tw doctor` shows:
@@ -289,6 +321,9 @@ tw expose on  <workload>
 
 - **Signing in tailnet users on public routes (tsidp).** tsidp refuses
   `/authorize` over Funnel and refuses tagged nodes. A later ADR covers it.
+  An OAuth client whose user signs in from a tailnet device (a hosted
+  assistant's MCP connector) works today:
+  [mcp-public.md](mcp-public.md).
 - **Others:** custom domains (Funnel serves `*.ts.net` only), a
   bring-your-own front door (Caddy, Cloudflare Tunnel), GeoIP, the Node
   process tier (`"runtime": "node"`), and inbound email or cron triggers.

@@ -41,12 +41,17 @@ or add hosts before you move the operator tenant to an owner tag.
 
 ## 2. Add the team's tenant
 
-With an OAuth client scoped to the team's own owner tag:
+With an OAuth client scoped to the team's own owner tag (the console only
+offers tags already in `tagOwners`, so `tag:tw-t-payments` is there by then):
 
 ```sh
 tw tenant add example.ts.net --oauth-client-file payments-oauth.env \
-  --owner-tag tag:tw-t-payments --name-prefix pay --apply-policy   # shows the lines and asks; --yes skips the question
+  --owner-tag tag:tw-t-payments --name-prefix pay
 ```
+
+`tw tenant add` writes nothing to a Tailscale tailnet's policy: it checks
+the owner tag is in `tagOwners` (when the client can read the policy) and
+prints the line to add if not. It never adds owners to an existing tag.
 
 - `--owner-tag` must differ from every other tenant's on the tailnet, and
   can't be one of tailworks' own tags (`tag:tw`, `tag:tw-mgmt`, `tag:tw-host`,

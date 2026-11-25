@@ -10,8 +10,8 @@ import (
 	"github.com/rosskukulinski/tailworks/mgmt"
 )
 
-// TestOperatorSnippet: the oauth-mode snippet is exactly what INSTALL.md
-// prints (tag:tw owns tag:tw-mgmt and tag:tw-host; host ⇄ mgmt grants;
+// TestOperatorSnippet: the oauth-mode snippet is exactly what README.md
+// shows (tag:tw owns tag:tw-mgmt and tag:tw-host; host ⇄ mgmt grants;
 // autogroup:admin's admin cap; no nodeAttrs), passes the RT-06 checker with
 // the allowance for autogroup:admin, and merges additively into a
 // policy that already has rules (existing owners kept, nothing removed).
@@ -93,7 +93,7 @@ func TestModeChoiceAndTypedErrors(t *testing.T) {
 	}
 	pe := policyMissingTagOwners("why", nil, nil)
 	fix := strings.Join(pe.Fix, "\n")
-	if pe.Code != "policy_missing_tag_owners" || !strings.Contains(fix, `"tag:tw-mgmt": ["autogroup:admin","tag:tw"]`) || !strings.Contains(fix, `"tag:tw-host": ["autogroup:admin","tag:tw"]`) {
+	if pe.Code != "policy_missing_tag_owners" || !strings.Contains(fix, `"tag:tw-mgmt": ["autogroup:admin", "tag:tw"]`) || !strings.Contains(fix, `"tag:tw-host": ["autogroup:admin", "tag:tw"]`) {
 		t.Fatalf("policy_missing_tag_owners fix:\n%s", fix)
 	}
 }

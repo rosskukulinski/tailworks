@@ -146,7 +146,7 @@ func populatedAPI() *fakeAPI {
 	f.routes["GET /v1/objects/obj_root"] = root
 	f.routes["GET /v1/objects/obj_kid"] = kid
 	f.routes["GET /v1/objects/obj_dead"] = &apiError{Status: 410, Code: "killed", Message: "object obj_dead was killed (test kill)", Tombstone: tomb}
-	f.routes["GET /v1/objects/obj_root/certificate"] = map[string]any{"stableNodeID": "nROOTSTABLE0001", "status": "ready", "cert": "c", "payload": map[string]any{"exp": 1}, "oboPublicKey": "pk"}
+	f.routes["GET /v1/certificates/nROOTSTABLE0001"] = map[string]any{"stableNodeID": "nROOTSTABLE0001", "status": "ready", "cert": "c", "payload": map[string]any{"exp": 1}, "oboPublicKey": "pk"}
 	f.routes["GET /v1/audit"] = map[string]any{"items": audit, "nextCursor": "c2", "chains": chains, "verified": true}
 	f.routes["GET /v1/audit/verification"] = map[string]any{"ok": false, "chains": []any{map[string]any{"chain": "mgmt", "ok": false, "records": 6, "brokenAt": 4, "error": "hash mismatch"}}, "verifiedAt": now}
 	f.routes["GET /v1/tenants/tn_1/workloads/w/logs"] = workloadLogs(now) // logs_test.go
@@ -167,7 +167,7 @@ func get(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
 var pages = []string{
 	"/ui/",
 	"/ui/objects",
-	"/ui/objects?tenant=tn_1&workload=w&status=ready&tag=a&caller=ross&page=2",
+	"/ui/objects?tenant=tn_1&workload=w&status=ready&tag=a&human=ross&page=2",
 	"/ui/approvals",
 	"/ui/approvals?tenant=tn_1&all=1",
 	"/ui/audit?tenant=tn_1&kind=kill&workload=w&cursor=c1",
@@ -247,7 +247,7 @@ func TestPagesRenderPopulated(t *testing.T) {
 	}
 	// Object page: lineage, caps, cert, and the kill form (confirm, then POST to the UI).
 	ob := get(t, h, "/ui/objects/obj_kid").Body.String()
-	for _, want := range []string{`href="/ui/objects/obj_root"`, "(this object)", `data-confirm="Kill kid-def (obj_kid)?`, `action="/ui/objects/obj_kid/kill"`, `name="cascade"`, `name="reason"`} {
+	for _, want := range []string{`href="/ui/objects/obj_root"`, "(this object)", `data-confirm="Kill kid-def (obj_kid)?`, `action="/ui/objects/obj_kid/kill"`, `name="cascade" value="true" checked`, `name="reason"`} {
 		if !strings.Contains(ob, want) {
 			t.Errorf("object page lacks %q", want)
 		}
@@ -280,7 +280,7 @@ func TestPagesRenderPopulated(t *testing.T) {
 	}
 	// Audit page: filters echo back, paging link carries them, chains shown.
 	ab := get(t, h, "/ui/audit?object=obj_root&limit=5").Body.String()
-	for _, want := range []string{`value="obj_root"`, "cursor=c2", "object=obj_root", "limit=5", "signature ok", "~tenant_note"} {
+	for _, want := range []string{`value="obj_root"`, "cursor=c2", "object=obj_root", "limit=5", "BROKEN at 4 (hash mismatch)", "~tenant_note"} {
 		if !strings.Contains(ab, want) {
 			t.Errorf("audit page lacks %q", want)
 		}

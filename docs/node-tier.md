@@ -1,9 +1,9 @@
-# The Node process tier (opt-in, `"runtime": "node"`)
+# The Node runtime (opt-in, `"runtime": "node"`)
 
 ADR-022: some agent SDKs need a real Node.js (`node:vm`, child processes,
 native modules) and cannot run in workerd. Tailworks runs those as **one supervised
 `node` process per deployment with one tailnet identity** (the workload
-node). There are no per-object nodes in this tier. A Node process costs
+node). There are no per-object nodes in this runtime. A Node process costs
 ~70 MB (plain app) to ~320 MB (Vercel Workflow + AI SDK) of RSS, against a
 few MB per workerd isolate, so it suits a few long-lived services per tenant,
 not one per object.
@@ -15,8 +15,8 @@ not one per object.
   "runtime": "node",
   "main": "src/server.ts",          // bundled to dist/server.mjs by create-tailworks build-node
   "node": {
-    "health": "/healthz",           // any HTTP answer = up (default "/")
-    "listen": "tcp",                // tcp: PORT on 127.0.0.1 (default) | unix: TW_SOCKET
+    "health": "/healthz",           // optional: any HTTP answer on "/" (the default) already counts as up
+    "listen": "tcp",                // tcp: PORT on 127.0.0.1 (default) | unix: TW_SOCKET, keeps AF_UNIX (see "Linux sandbox limits")
     "env": { "LOG_LEVEL": "info" }, // TW_* is reserved
     "args": ["--enable-source-maps"]
   },
@@ -141,8 +141,8 @@ whose caps were narrowed by its node certificate (RT-01).
 
 hostd makes the state visible and refuses the dangerous combination:
 - `tw status` and `GET /v1/status` show `egress unenforced` for every
-  Node-tier workload on such a host; `tw doctor` warns (`node_egress`);
-- a Node-tier deployment on a host **without any process sandbox** that
+  Node-runtime workload on such a host; `tw doctor` warns (`node_egress`);
+- a Node-runtime deployment on a host **without any process sandbox** that
   serves other tenants fails with `egress_unenforced` (and the general
   shared-host rule, `sandbox_unavailable`, applies to every process-tier
   workload there) unless the operator starts the host with
@@ -216,7 +216,7 @@ sandbox (`-sandbox none`) the app binds its port itself, as before.
   Durable runtimes such as Workflow's local World and SQLite files assume one
   process per data dir, so blue/green overlap is not used here.
 
-## Vercel Workflow on the Node tier
+## Vercel Workflow on the Node runtime
 
 The `node-workflow` template is a plain `node:http` server with a durable
 `"use workflow"` function (`workflows/support.ts`). In that function:
@@ -249,7 +249,7 @@ The `node-workflow` template is a plain `node:http` server with a durable
 
 ## Compatibility (M9)
 
-| Thing | Version | Status on the Node tier |
+| Thing | Version | Status on the Node runtime |
 |---|---|---|
 | Node.js | 25.1 (macOS), 24.x (Lima) | ✅ (needs ≥ 24 for `NODE_USE_ENV_PROXY`) |
 | `workflow` (Vercel Workflow SDK) | 5.6.1 | ✅ `"use workflow"`, steps, `sleep`, `createHook`/`resumeHook`, kill/resume |

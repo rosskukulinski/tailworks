@@ -178,6 +178,10 @@ func writeErr(w http.ResponseWriter, r *http.Request, err error) {
 		w.Header().Set("Retry-After", strconv.Itoa(e.RetryAfter))
 	}
 	w.Header().Set("Tw-Error", e.Code)
+	if htmlErrPage(r) { // a browser on /, /ui: errors_html.go
+		writeErrHTML(w, &e)
+		return
+	}
 	writeJSON(w, e.Status, e)
 }
 

@@ -87,7 +87,7 @@ func run() error {
 		bundleKeep  = flag.Int("bundle-retention", mgmt.DefaultBundleRetention, "bundles kept per workload for tw rollback (older deployments keep their record and hash, not the bundle); 0 = the default, -1 = keep every bundle")
 		auditMaxAge = flag.Duration("audit-max-age", 0, "audit retention: delete audit records older than this (e.g. 2160h), keeping a checkpoint so the rest still verify; 0 = keep every record (the default)")
 		auditMaxRec = flag.Int64("audit-max-records", 0, "audit retention: keep only the newest N records of each chain (with a checkpoint, as -audit-max-age); 0 = keep every record (the default)")
-		aliasFile   = flag.String("image-aliases", "", "JSON file [{from, to, arch}] replacing the default image alias map (cloudflare/sandbox → tw.local arm64 rebuilds)")
+		aliasFile   = flag.String("image-aliases", "", "JSON file [{from, to, arch, source}] replacing the default image alias map (cloudflare/sandbox → tw.local arm64 rebuilds; source: a digest-pinned image that fills a missing target)")
 	)
 	// Management API limits for tailnet callers (mgmt/ratelimit.go).
 	apiRPS := flag.Float64("api-rps", mgmt.DefaultAPIRPS, "per tailnet caller (WhoIs node; not hosts): sustained mgmt API requests per second, burst twice that; over it is 429 rate_limited (-1 = off)")

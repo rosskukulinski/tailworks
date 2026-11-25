@@ -3,7 +3,8 @@
 // js/packages/create-tailworks/lib/build.mjs (same options, same plugin), so a
 // release install can `tw deploy` with no Node.js and no esbuild binary:
 // workerd conditions, Node builtins mapped to node:* (needs nodejs_compat),
-// cloudflare:* and node:* external, cloudflare:email stubbed. Beyond
+// cloudflare:* and node:* external, cloudflare:email stubbed for
+// dependencies and refused for the app's own code (email.go). Beyond
 // build.mjs it honours wrangler's build settings (define, alias, rules:
 // rules.go), so a wrangler.toml project bundles as wrangler would.
 package esbundle
@@ -113,10 +114,9 @@ func BuildApp(o Options) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	email := &emailImports{dir: dir} // email.go
 	tw := api.Plugin{Name: "tw", Setup: func(b api.PluginBuild) {
-		b.OnResolve(api.OnResolveOptions{Filter: `^cloudflare:email$`}, func(a api.OnResolveArgs) (api.OnResolveResult, error) {
-			return api.OnResolveResult{Path: "email", Namespace: "tw-stub"}, nil
-		})
+		b.OnResolve(api.OnResolveOptions{Filter: `^cloudflare:email$`}, email.resolve)
 		b.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: "tw-stub"}, func(a api.OnLoadArgs) (api.OnLoadResult, error) {
 			s := emailstub.ClassJS
 			return api.OnLoadResult{Contents: &s, Loader: api.LoaderJS}, nil
@@ -160,6 +160,9 @@ func BuildApp(o Options) (*Result, error) {
 		Sourcemap:         sourceMapMode(o),
 		SourcesContent:    sourcesContentMode(o),
 	})
+	if err := email.err(); err != nil {
+		return nil, err
+	}
 	if len(r.Errors) > 0 {
 		msgs := api.FormatMessages(r.Errors, api.FormatMessagesOptions{Kind: api.ErrorMessage})
 		return nil, fmt.Errorf("esbuild: %d error(s)\n%s", len(r.Errors), strings.TrimSpace(strings.Join(msgs, "")))

@@ -1,0 +1,7 @@
+{
+  "name": "wf",
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-01",
+  "workflows": [{ "name": "chaos", "binding": "WF", "class_name": "Chaos" }],
+  "vars": { "REC": "http://rec.invalid", "VERSION": "1" },
+}

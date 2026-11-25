@@ -154,7 +154,7 @@ func TestRemoteLogs(t *testing.T) {
 	}{
 		{[]string{"--component", "mgmt"}, "remote_unsupported"},
 		{[]string{"web", "--component", "hostd"}, "remote_unsupported"},
-		{nil, "remote_unsupported"},
+		{nil, "bad_request"}, // no app here and no deployed workload: never a daemon's log
 		{[]string{"web", "-n", "10001"}, "bad_request"},
 		{[]string{"web", "--console", "--errors"}, "bad_request"},
 		{[]string{"web", "--status", "6xx"}, "bad_request"},

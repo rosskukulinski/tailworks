@@ -13,6 +13,7 @@ the recipe says what you'll see instead.
 - [A Durable Object per user, authorized by `getCaller`](#a-durable-object-per-user-authorized-by-getcaller)
 - [Choose which classes get their own node](#choose-which-classes-get-their-own-node)
 - [A public webhook with signature verification](#a-public-webhook-with-signature-verification)
+- [Use your MCP server from claude.ai or ChatGPT](mcp-public.md): one public `/mcp` with OAuth from tsidp (its own page)
 - [A cron job that writes to KV](#a-cron-job-that-writes-to-kv)
 
 The templates (`tw init <dir> --template <name>`) are longer examples;
@@ -594,8 +595,8 @@ curl 'http://127.0.0.1:8787/__scheduled?cron=*/15+*+*+*+*'   # {"outcome":"ok","
 curl http://127.0.0.1:8787/                                  # {"last":{"cron":"*/15 * * * *","at":"…"},"runs":["run:…"]}
 ```
 
-Deployed, the host runs it every 15 minutes; `tw kv key list --binding RUNS`
-shows the keys. The namespace (named `RUNS`, after the binding) is created
-by the first write. The cron syntax, missed runs and retries are in
+Deployed, the host runs it every 15 minutes; `tw kv key ls` in the app's
+directory shows the keys (of its only namespace). The namespace (named
+`RUNS`, after the binding) is created by the first write. The cron syntax, missed runs and retries are in
 [cron-triggers.md](cron-triggers.md); KV's consistency and limits in
 [kv.md](kv.md).

@@ -5,7 +5,6 @@
   "name": "node-workflow",
   "runtime": "node",
   "main": "src/server.ts",
-  "node": { "health": "/healthz" },
   "tailnet": {
     "tags": ["tag:tw-wl-node-workflow"],
     // the tailworks MCP server this workflow's agent calls (deploy the mcp template)

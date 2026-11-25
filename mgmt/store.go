@@ -192,6 +192,11 @@ type ObjectFilter struct {
 	Status       []string
 	HasParent    bool
 	Page         Page
+
+	// Tag selects objects carrying this tag (exact "tag:<name>"); ActingFor
+	// those whose actingFor is this principal (GET /v1/objects?tag=&human=).
+	Tag       string
+	ActingFor string
 }
 
 // DeploymentFilter selects deployments; empty fields match everything.
@@ -218,4 +223,8 @@ type AuditFilter struct {
 	// Desc lists newest first (GET /v1/audit?order=desc); Page.After is
 	// then an upper bound.
 	Desc bool
+
+	// Workload selects records about this workload (the audit_workloads
+	// table, sqlstore_auditworkload.go).
+	Workload string
 }

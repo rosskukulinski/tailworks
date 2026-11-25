@@ -153,82 +153,7 @@ func chainString(principal string, lin []mgmt.Object) string {
 	return strings.Join(parts, " → ")
 }
 
-// ---- ls ----
-
-func cmdLs(args []string) error {
-	f := newFlags("ls")
-	all := f.Bool("all", false, "include killed objects, and fetch every page")
-	limit := f.Int("limit", 200, "at most this many objects (pages of ≤500 are followed up to it; --all lifts the cap)")
-	tenantF := tenantFlag(f)
-	if _, err := f.parse(args); err != nil {
-		return err
-	}
-	s, err := openState(*f.stateDir)
-	if err != nil {
-		return err
-	}
-	if err := s.requireUp(); err != nil {
-		return err
-	}
-	tn, err := s.tenant(*tenantF)
-	if err != nil {
-		return err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	deps, err := listAll[mgmt.DeploymentView](ctx, s.mgmt(), "/v1/deployments?latest=true&tenant="+url.QueryEscape(tn.TenantID), 0)
-	if err != nil {
-		return err
-	}
-	max := *limit
-	if *all {
-		max = 0
-	}
-	objs, err := s.objectsOfN(ctx, tn.TenantID, max)
-	if err != nil {
-		return err
-	}
-	shown := []mgmt.Object{}
-	for _, o := range objs {
-		if *all || o.Live() {
-			shown = append(shown, o)
-		}
-	}
-	sort.Slice(shown, func(i, j int) bool { return shown[i].CreatedAt < shown[j].CreatedAt })
-	nodes := s.nodeBudgetOf(ctx, tn, nil, false) // nodebudget.go: every live node, whatever --limit
-	emit(f, map[string]any{"tenant": tn.Tailnet, "tenantID": tn.TenantID, "deployments": deps, "objects": shown, "nodes": nodes}, func() {
-		fmt.Printf("TENANT %s (%s)\n", tn.Tailnet, tn.TenantID)
-		printLsNodes(nodes) // nodebudget.go
-		fmt.Println("DEPLOYMENTS")
-		for _, d := range deps {
-			by := ""
-			if d.DeployedBy != "" {
-				by = "  by " + tsafe(d.DeployedBy)
-			}
-			fmt.Printf("  %-12s %-22s %-8s %-10s http://%s/%s\n", tsafe(d.Workload), tsafe(d.DeploymentID), tsafe(d.Host), tsafe(d.Status), tsafe(d.Endpoint.MagicDNS), by)
-			if d.Placement != nil && d.Placement.Summary != "" {
-				fmt.Printf("  %-12s placement: %s\n", "", tsafe(d.Placement.Summary))
-			}
-			if d.Error != "" {
-				fmt.Printf("  %-12s error: %s\n", "", tsafe(deployErrorLine(d.Workload, d.Error))) // lserror.go
-			}
-		}
-		fmt.Println("OBJECTS")
-		fmt.Printf("  %-36s %-34s %-8s %-30s %s\n", "NODE", "CLASS/NAME", "STATUS", "TAGS", "PARENT")
-		by := map[string]mgmt.Object{}
-		for _, o := range objs {
-			by[o.ID] = o
-		}
-		for _, o := range shown {
-			parent := ""
-			if p, ok := by[o.ParentID]; ok {
-				parent = nodeName(p)
-			}
-			fmt.Printf("  %-36s %-34s %-8s %-30s %s\n", tsafe(nodeName(o)), tsafe(displayNS(o)), tsafe(o.Status), tsafe(strings.Join(o.Tags, ",")), tsafe(parent))
-		}
-	})
-	return nil
-}
+// ---- ls ---- (ls.go)
 
 // ---- kill ----
 
@@ -242,7 +167,7 @@ type killResult struct {
 
 func cmdKill(args []string) error {
 	f := newFlags("kill")
-	cascade := f.Bool("cascade", false, "also kill every descendant (sub-agents)")
+	cascade := f.Bool("cascade", true, "also kill every descendant (sub-agents); --cascade=false leaves them to the reaper")
 	reason := f.String("reason", "", "why (recorded in audit)")
 	tenantF := tenantFlag(f)
 	pos, err := f.parse(args)
@@ -286,10 +211,7 @@ func cmdKill(args []string) error {
 	}
 	ks := time.Now()
 	var kr mgmt.KillResult
-	q := url.Values{"reason": {r}}
-	if *cascade {
-		q.Set("cascade", "true")
-	}
+	q := url.Values{"reason": {r}, "cascade": {fmt.Sprint(*cascade)}}
 	if err := s.mgmt().DoHeaders(ctx, "DELETE", "/v1/objects/"+o.ID+"?"+q.Encode(), nil,
 		&kr, map[string]string{"Tw-Actor": actor()}); err != nil {
 		return err
@@ -417,6 +339,9 @@ type auditResult struct {
 	Lines    []auditLine        `json:"records"`
 	Verified bool               `json:"verified"`
 	Chains   []mgmt.ChainStatus `json:"chains"`
+
+	// Truncated: the bare listing stopped at -n; older records exist.
+	Truncated bool `json:"truncated,omitempty"`
 }
 
 func cmdAudit(args []string) error {
@@ -424,6 +349,8 @@ func cmdAudit(args []string) error {
 	human := f.String("human", "", "records acting for this principal (login or caller node)")
 	trace := f.String("trace", "", "records of one trace")
 	all := f.Bool("all", false, "every record of the tenant")
+	// limits.md#audit-n
+	n := f.Int("n", 50, "bare tw audit: the newest records (an object, --human, --trace and --all are always complete)")
 	tenantF := tenantFlag(f)
 	pos, err := f.parse(args)
 	if err != nil {
@@ -436,8 +363,9 @@ func cmdAudit(args []string) error {
 	if err := s.requireUp(); err != nil {
 		return err
 	}
-	if len(pos) != 1 && *human == "" && *trace == "" && !*all {
-		return fail("bad_request", "tw audit needs an object, --human, --trace or --all", "usage: tw "+usageOf("audit"))
+	recent := len(pos) == 0 && *human == "" && *trace == "" && !*all // the newest -n records
+	if len(pos) > 1 || recent && *n < 1 {
+		return fail("bad_request", "tw audit takes one object, --human, --trace, --all, or nothing for the newest -n (≥ 1) records", "usage: tw "+usageOf("audit"))
 	}
 	tn, err := s.tenant(*tenantF)
 	if err != nil {
@@ -456,9 +384,10 @@ func cmdAudit(args []string) error {
 	res := auditResult{Tenant: tn.Tailnet, TenantID: tn.TenantID, Lines: []auditLine{}, Verified: true}
 	seen := map[string]bool{}
 	var recs []mgmt.AuditRecord
+	limit := 0 // > 0: stop after this many records (bare tw audit)
 	query := func(q string) error {
 		// Always scoped to the tenant: one tenant's audit never shows
-		// another's. Every page is followed.
+		// another's. Every page is followed (up to limit).
 		cursor := ""
 		for {
 			var ar struct {
@@ -467,7 +396,11 @@ func cmdAudit(args []string) error {
 				Chains     []mgmt.ChainStatus `json:"chains"`
 				Verified   bool               `json:"verified"`
 			}
-			u := "/v1/audit?limit=500&tenant=" + url.QueryEscape(tn.TenantID)
+			pageN := 500
+			if limit > 0 {
+				pageN = min(pageN, limit-len(recs))
+			}
+			u := "/v1/audit?limit=" + fmt.Sprint(pageN) + "&tenant=" + url.QueryEscape(tn.TenantID)
 			if q != "" {
 				u += "&" + q
 			}
@@ -491,6 +424,10 @@ func cmdAudit(args []string) error {
 				}
 			}
 			if ar.NextCursor == nil || *ar.NextCursor == "" {
+				return nil
+			}
+			if limit > 0 && len(recs) >= limit {
+				res.Truncated = true
 				return nil
 			}
 			cursor = *ar.NextCursor
@@ -517,6 +454,12 @@ func cmdAudit(args []string) error {
 		if err := query(""); err != nil {
 			return err
 		}
+	case recent:
+		limit = *n
+		if err := query("order=desc"); err != nil {
+			return err
+		}
+		slices.Reverse(recs) // oldest first, like every other mode
 	default:
 		if err := query("trace=" + url.QueryEscape(*trace)); err != nil {
 			return err
@@ -553,8 +496,13 @@ func cmdAudit(args []string) error {
 			}
 			fmt.Printf("%s  %-13s %-34s %s%s\n", tsafe(ts), tsafe(kind), tsafe(orDash(l.Node)), tsafe(l.Text), tsafe(src))
 		}
+		// Verification speaks up only when it fails: a verified trail is
+		// one quiet line, plus any retention note (#406).
 		var cs []string
 		for _, c := range res.Chains {
+			if res.Verified && !(c.OK && c.PrunedThrough > 0) {
+				continue
+			}
 			st := "ok"
 			if !c.OK {
 				st = fmt.Sprintf("BROKEN at %d (%s)", c.BrokenAt, tsafe(c.Error))
@@ -566,11 +514,14 @@ func cmdAudit(args []string) error {
 			}
 			cs = append(cs, fmt.Sprintf("%s %s", tsafe(c.Chain), st))
 		}
-		v := "verified"
-		if !res.Verified {
-			v = "NOT VERIFIED"
+		if res.Verified {
+			fmt.Printf("%d records · chain verified%s\n", len(res.Lines), strings.Join(append([]string{""}, cs...), " · "))
+		} else {
+			fmt.Printf("chain NOT VERIFIED: %d records · %s\n", len(res.Lines), strings.Join(cs, " · "))
 		}
-		fmt.Printf("chain %s: %d records · %s\n", v, len(res.Lines), strings.Join(cs, " · "))
+		if res.Truncated {
+			fmt.Println("older records: tw audit --all (verifies every chain)")
+		}
 	})
 	if !res.Verified {
 		return fail("audit_unverified", "an audit chain failed verification")
@@ -582,12 +533,12 @@ func cmdAudit(args []string) error {
 
 func cmdLogs(args []string) error {
 	f := newFlags("logs")
-	comp := f.String("component", "", "mgmt | hostd | supervisor (default: hostd, or workerd for a workload)")
+	comp := f.String("component", "", "mgmt | hostd | supervisor: the daemons' logs")
 	// limits.md#logs-n
 	n := f.Int("n", 50, "lines")
 	follow := f.Bool("f", false, "follow")
 	tenantF := tenantFlag(f)
-	hostF := f.String("host", "", "linked machine: only the replica on this host")
+	hostF := f.String("host", "", "a replicated workload, from a linked machine: only its replica on this host")
 	lopts := logsFlags(f) // logs_records.go
 	pos, err := f.parse(args)
 	if err != nil {
@@ -597,20 +548,27 @@ func cmdLogs(args []string) error {
 	if err != nil {
 		return err
 	}
-	if len(pos) != 1 && !lo.filter.Empty() {
-		return fail("bad_request", "the record filters need a workload: tw logs <workload> --errors")
-	}
 	s, err := openState(*f.stateDir)
 	if err != nil {
 		return err
+	}
+	if !s.remote() && !s.configured() {
+		return fail("not_up", "tw is not set up in "+s.Dir)
+	}
+	if len(pos) == 0 && *comp == "" {
+		w, err := defaultLogsWorkload(s, *tenantF) // logs_default.go: never a daemon's log
+		if err != nil {
+			return err
+		}
+		pos = []string{w}
+	}
+	if len(pos) != 1 && !lo.filter.Empty() {
+		return fail("bad_request", "the record filters need a workload: tw logs <workload> --errors")
 	}
 	out, flush := logsOut(*f.json, pos, *comp, s.remote()) // agentjson.go: NDJSON with --json
 	defer flush()
 	if s.remote() {
 		return remoteLogs(out, s, pos, *comp, *tenantF, *hostF, *n, *follow, lo) // logs_remote.go
-	}
-	if !s.configured() {
-		return fail("not_up", "tw is not set up in "+s.Dir)
 	}
 	var path string
 	switch {
@@ -643,9 +601,6 @@ func cmdLogs(args []string) error {
 		}
 	default:
 		c := *comp
-		if c == "" {
-			c = "hostd"
-		}
 		if !slices.Contains([]string{"mgmt", "hostd", "supervisor"}, c) {
 			return fail("bad_request", "unknown component "+c)
 		}

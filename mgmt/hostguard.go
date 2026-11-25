@@ -116,8 +116,10 @@ func (a *HostAllowlist) guard(w http.ResponseWriter, r *http.Request) bool {
 	if names := a.Names(); len(names) > 0 {
 		want = strings.Join(names, ", ") + " or its tailnet IP"
 	}
-	writeErr(w, r, errf(http.StatusMisdirectedRequest, "misdirected_request",
-		"Host %q is not a name of this tw-mgmt (DNS-rebinding guard); address it as %s", r.Host, want))
+	e := errf(http.StatusMisdirectedRequest, "misdirected_request",
+		"Host %q is not a name of this tw-mgmt (DNS-rebinding guard); address it as %s", r.Host, want)
+	e.hostNames = a.Names()
+	writeErr(w, r, e)
 	return false
 }
 

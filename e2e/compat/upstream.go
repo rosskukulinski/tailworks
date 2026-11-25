@@ -67,7 +67,6 @@ func upstreamProjects() []*Project {
 		agentsUp("ag-cross-domain", "cross-domain", func(p *Project) {
 			p.What = "Agent behind onBeforeConnect / onBeforeRequest token checks: HTTP and WebSocket"
 			p.Exercises = []string{"agents-sdk", "websockets"}
-			p.Expect = importedEnv
 			p.Probe = probeCrossDomain
 		}),
 		agentsUp("ag-github-webhook", "github-webhook", func(p *Project) {
@@ -90,7 +89,6 @@ func upstreamProjects() []*Project {
 			p.Exercises = []string{"agents-sdk", "mcp", "do-storage"}
 			p.AddDeps = map[string]string{"@modelcontextprotocol/server": MCPServerVersion}
 			p.Workarounds = append(p.Workarounds, mcpPeer)
-			p.Expect = importedEnv
 			p.Probe = probeElicitation
 		}),
 		agentsUp("ag-mcp-elicitation-mrtr", "mcp-elicitation-mrtr", func(p *Project) {
@@ -122,9 +120,14 @@ func upstreamProjects() []*Project {
 			p.Exercises = []string{"mcp", "kv", "vars", "assets"}
 			p.Build = viteBuild
 			p.OriginVar = "MCP_RESOURCE"
-			p.Changes = []string{"`vars.MCP_RESOURCE` in wrangler.jsonc set to the served URL + `/mcp`, as the example's README says to"}
-			p.ExpectDeployed = Expect{Kind: ExpectRefused, Compat: "fetch", Error: "must be an absolute HTTPS URI",
-				Why: "workers-oauth-provider accepts only an HTTPS resource URL (`http` on loopback), and a tailnet workload is served over `http://`, so with `MCP_RESOURCE` set to its tailnet URL workerd can't start the Worker ([#360](https://github.com/rosskukulinski/tailworks/issues/360))"}
+			// workers-oauth-provider accepts only an HTTPS resource URL
+			// (`http` on loopback): deployed, the workload is called at
+			// its https:// tailnet URL (#360).
+			p.TailnetHTTPS = true
+			p.Changes = []string{
+				"`vars.MCP_RESOURCE` in wrangler.jsonc set to the served URL + `/mcp`, as the example's README says to",
+				"deployed: `\"tailnet\": {\"https\": true}` in tailworks.jsonc, so the resource URL is the workload's `https://` tailnet URL ([#360](https://github.com/rosskukulinski/tailworks/issues/360))",
+			}
 			p.Probe = probeMCPWorkerAuth
 		}),
 		agentsUp("ag-push-notifications", "push-notifications", func(p *Project) {
@@ -204,8 +207,6 @@ func upstreamProjects() []*Project {
 			p.AddDeps = map[string]string{"@ai-sdk/react": "^4.0.0"}
 			p.Workarounds = []string{agentsPin + `; likewise "@cloudflare/ai-chat" 0.12.3 and "@cloudflare/codemode" 0.5.6; @ai-sdk/react (a peer the monorepo root provides) added at the root's ^4.0.0`}
 			p.Build = viteBuild
-			p.Expect = Expect{Kind: ExpectProbeFail, Compat: "do-rpc",
-				Why: "it starts, and 8 of the 9 demo families the probe covers pass; the multi-agent demo's `SupervisorAgent.createChild` (an agent calling another agent's method over Durable Object RPC after `getAgentByName`) fails with `Could not serialize object of type \"RpcPromise\"`. A smaller app bundled by the built-in bundler with the same two classes and calls passes"}
 			p.Probe = probePlayground
 		}),
 
@@ -312,10 +313,6 @@ func upstreamProjects() []*Project {
 		}),
 	}
 }
-
-// importedEnv: the example reaches its agents through the module-level env.
-var importedEnv = Expect{Kind: ExpectProbeFail, Compat: "do-identity",
-	Why: "the example passes the imported env (`import { env } from \"cloudflare:workers\"`) to the Agents SDK; tailworks creates a new object only through the `env` it hands the handler, so the first request for a new agent is `403 create_not_admitted` ([#355](https://github.com/rosskukulinski/tailworks/issues/355)). With the handler's `env` (a one-line change) it runs"}
 
 const mcpPeer = "@modelcontextprotocol/server@" + MCPServerVersion + " added: a peer of `agents` that the monorepo hoists"
 
@@ -447,19 +444,20 @@ var chatMessages = map[string]any{"messages": []any{map[string]any{"id": "m1", "
 // the first function tool on the first turn when there is one, else text.
 // Every other fetch goes out unchanged.
 const openAIStub = `// Written by e2e/compat: a scripted OpenAI Responses API. No key, no network.
+// Plain JavaScript (no type annotations), so it is also a .js file.
 const realFetch = globalThis.fetch;
 export const STUB_TEXT = "tw-compat scripted reply";
 
-function sse(events: unknown[]): Response {
+function sse(events) {
   const body = events.map((e) => "data: " + JSON.stringify(e) + "\n\n").join("");
   return new Response(body, { headers: { "content-type": "text/event-stream" } });
 }
 
-function reply(req: { model?: string; input?: unknown; tools?: { type: string; name?: string }[] }): Response {
+function reply(req) {
   const model = req.model ?? "stub";
-  const base = { id: "resp_twcompat", object: "response", created_at: 1, model, status: "in_progress", output: [] as unknown[] };
+  const base = { id: "resp_twcompat", object: "response", created_at: 1, model, status: "in_progress", output: [] };
   const usage = { input_tokens: 1, output_tokens: 1, total_tokens: 2, input_tokens_details: { cached_tokens: 0 }, output_tokens_details: { reasoning_tokens: 0 } };
-  const input = Array.isArray(req.input) ? (req.input as { type?: string }[]) : [];
+  const input = Array.isArray(req.input) ? req.input : [];
   const fn = (req.tools ?? []).find((t) => t.type === "function");
   const called = input.some((i) => i.type === "function_call_output");
   if (fn && !called) {
@@ -485,14 +483,14 @@ function reply(req: { model?: string; input?: unknown; tools?: { type: string; n
   ]);
 }
 
-globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+globalThis.fetch = async (input, init) => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
   if (new URL(url).pathname.endsWith("/responses")) {
     const body = init?.body ?? (input instanceof Request ? await input.clone().text() : "{}");
     return reply(JSON.parse(String(body)));
   }
-  return realFetch(input as RequestInfo, init);
-}) as typeof fetch;
+  return realFetch(input, init);
+};
 `
 
 func probeAIHono(r *Run) error {
@@ -694,8 +692,8 @@ type NotRun struct {
 	Why  string
 }
 
-// UpstreamNotRun lists every example of the three upstream projects that
-// has no Project, so the published tables account for all of them.
+// UpstreamNotRun lists every example of the upstream projects that has no
+// Project, so the published tables account for all of them.
 func UpstreamNotRun() []NotRun {
 	ag := func(why string, dirs ...string) NotRun {
 		return NotRun{Section: SectionAgents, Repo: "cloudflare/agents", Commit: agentsCommit, Base: "examples/", Dirs: dirs, Why: why}
@@ -703,8 +701,8 @@ func UpstreamNotRun() []NotRun {
 	ai := func(why string, dirs ...string) NotRun {
 		return NotRun{Section: SectionVercel, Repo: "vercel/ai", Commit: vercelAICommit, Base: "examples/", Dirs: dirs, Why: why}
 	}
-	return []NotRun{
-		ag("needs Workers AI (`env.AI`, an `ai` binding in its wrangler config), which tailworks doesn't provide",
+	return append(pythonNotRun(), []NotRun{ // python.go
+		ag("needs Workers AI (`env.AI`, an `ai` binding in its wrangler config), which tailworks doesn't provide. A scripted `env.AI` isn't possible without changing each example: tailworks ignores the `ai` binding (`env.AI` is undefined), so there is no binding to point at a stub, and one would have to be wired into each example: its config, or a wrapper around each of its agent classes (they read `this.env.AI` inside their Durable Objects)",
 			"a2a", "agents-as-tools", "auth-agent", "chat-sdk-messenger", "codemode-browser", "context-overflow-recovery", "deploy-churn",
 			"dynamic-tools", "mcp-rpc-transport", "multi-ai-chat", "resumable-stream-chat", "structured-input", "think-chat-sdk",
 			"think-submissions", "think-workflows", "vue-chat", "web-fetch-lab", "web-research"),
@@ -724,20 +722,14 @@ func UpstreamNotRun() []NotRun {
 			"tictactoe"),
 		ag("needs a funded test wallet key and the public x402.org facilitator",
 			"x402", "x402-mcp"),
-		ag("not reached in this pass. These declare no Cloudflare-only binding (plain `DurableObject` + `Lifecycle` capabilities), so they are the next ones to add",
-			"next/lifecycle", "next/mcp-client", "next/queue", "next/routing", "next/schedules", "next/sessions", "next/streams", "next/tasks", "next/websockets"),
-		ag("not reached in this pass; needs Workers AI, the Worker Loader, a container or a model provider key",
+		ag("needs Workers AI, the Worker Loader, a container or a model provider key",
 			"next/channels", "next/dynamic-agents", "next/harnesses/*", "next/models", "next/tools/browser"),
 
 		ai("a Next.js, Nuxt, SvelteKit or Angular app that calls a model provider with an API key. tailworks' Worker tier runs Workers projects, not these frameworks' builds, and none of them has a Workers target",
 			"ai-e2e-next", "angular", "harness-e2e-next", "next", "next-agent", "next-fastapi", "next-google-vertex", "next-langchain",
 			"next-openai-kasada-bot-protection", "next-openai-pages", "next-openai-telemetry", "next-openai-telemetry-sentry",
 			"next-openai-upstash-rate-limits", "next-workflow", "nuxt-openai", "sveltekit-openai", "xai-tts-demo"),
-		ai("a Node server on a framework with its own HTTP layer (Fastify, Nest); not tried",
-			"fastify", "nest"),
 		ai("scripts and a terminal UI, not servers; they call model providers with API keys",
 			"ai-functions", "harness-e2e-tui"),
-		ai("Node MCP servers and clients run as script pairs (`tsx server.ts`, `tsx client.ts`), several over stdio; not tried",
-			"mcp"),
-	}
+	}...)
 }

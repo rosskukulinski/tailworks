@@ -51,13 +51,17 @@ func callerGrantOptions(o policy.Options) policy.Options {
 // returns the grant, or nil and, when the admin should add one themselves,
 // a line for PolicyApplyResult.Manual ("" when nothing needs saying).
 func callerGrant(tags []string, keep policy.Snippet, pol *Policy, o policy.Options) (map[string]any, string) {
+	return callerGrantPorts(tags, []string{CallerPort}, keep, pol, o)
+}
+
+// callerGrantPorts is callerGrant on these ports (CallerPorts).
+func callerGrantPorts(tags, ports []string, keep policy.Snippet, pol *Policy, o policy.Options) (map[string]any, string) {
 	if len(tags) == 0 || pol == nil {
 		return nil, ""
 	}
-	g := map[string]any{"src": []string{CallerSrc}, "dst": append([]string(nil), tags...), "ip": []string{CallerPort}}
-	gb, _ := json.Marshal(g)
+	g := map[string]any{"src": []string{CallerSrc}, "dst": append([]string(nil), tags...), "ip": append([]string(nil), ports...)}
 	manual := func(why string) (map[string]any, string) {
-		return nil, fmt.Sprintf("callers: no grant lets people call this app, and tailworks didn't write one (%s); add it, or a narrower one, yourself: %s", why, gb)
+		return nil, fmt.Sprintf("callers: no grant lets people call this app, and tailworks didn't write one (%s); add it, or a narrower one, yourself: %s", why, policy.EntryHuJSON(g))
 	}
 	if pol.peopleReach("*") {
 		return nil, ""

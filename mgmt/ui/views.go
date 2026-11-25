@@ -87,6 +87,10 @@ type host struct {
 		URL  string `json:"url"`
 	} `json:"push"`
 	Leases []lease `json:"leases"`
+
+	// cordon.go
+	CordonedAt int64  `json:"cordonedAt"`
+	CordonedBy string `json:"cordonedBy"`
 }
 
 // PushTransport names how mgmt reaches the host's push listener.
@@ -124,7 +128,6 @@ type tenant struct {
 type classConfig struct {
 	Class string   `json:"class"`
 	Tags  []string `json:"tags"`
-	Agent bool     `json:"agent"`
 	TTL   string   `json:"ttl"`
 }
 
@@ -378,7 +381,7 @@ func ttl(secs int64) string {
 }
 
 // badge maps a status to its CSS class: ready/live/running green,
-// pending/minted/stale amber, killed/stopped/superseded grey, failed and
+// pending/minted/stale amber, killed/stopped/superseded/transferred grey, failed and
 // crashloop red.
 func badge(st string) string {
 	switch st {
@@ -386,7 +389,7 @@ func badge(st string) string {
 		return "ok"
 	case "pending", "minted", "assigned", "stale", "deploying":
 		return "warn"
-	case "killed", "stopped", "superseded":
+	case "killed", "stopped", "superseded", "transferred":
 		return "off"
 	case "failed", "error", "broken",
 		"crashloop": // served, now restarting with backoff (hostd/restart.go)

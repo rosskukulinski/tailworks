@@ -39,6 +39,9 @@ func TestMatchesBuildMJS(t *testing.T) {
 					t.Skip("runtime \"node\" template: bundled by build-node.mjs, not esbundle")
 				}
 			}
+			if _, err := os.Stat(filepath.Join(dir, "src", "entry.py")); err == nil {
+				t.Skip("Python template: packed as it is, not bundled (cmd/tw/python.go)")
+			}
 			wb, err := os.ReadFile(filepath.Join(dir, "wrangler.jsonc"))
 			if err != nil {
 				t.Fatal(err)

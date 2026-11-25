@@ -18,9 +18,14 @@ import (
 // while mgmt's row stays "minted". The new deployment adopts the ready node
 // and never reports it again, so `tw deploy` ends in identity_pending.
 //
+// The other case is a report that got no answer, or a 5xx: mgmt restarting,
+// a replica going down, a store blip (#604). Nothing else sends it again
+// for a node that only serves (rereport waits for egress), so mgmt's row
+// stayed "minted" and the deployment's endpoint never became ready.
+//
 // It stops when the report is accepted, when the object is no longer the
 // ready node it was (killed, or restarted: gen moved), when the workload
-// is no longer active here, or on any error other than lease_lost.
+// is no longer active here, or on an error retryableReady rejects.
 func (h *Host) retryReady(o *object, req mgmtapi.ReadyRequest, gen uint64) {
 	const maxTries = 5
 	w := h.workloadOf(o)
@@ -47,6 +52,7 @@ func (h *Host) retryReady(o *object, req mgmtapi.ReadyRequest, gen uint64) {
 		ctx, cancel := context.WithTimeout(h.ctx, 15*time.Second)
 		err := h.mgmt.Ready(ctx, o.ID, req)
 		cancel()
+		h.noteReport(o, req.StableNodeID, err) // egressgate.go (#331)
 		if err == nil {
 			h.log.Info("mgmt ready retried", "object", o.ID, "attempt", try, "epoch", req.Epoch)
 			return
@@ -56,12 +62,23 @@ func (h *Host) retryReady(o *object, req mgmtapi.ReadyRequest, gen uint64) {
 			h.killLocal(o.ID, "killed during join")
 			return
 		}
-		if !ok || e.Code != mgmtapi.CodeLeaseLost {
+		if !retryableReady(err) {
 			h.log.Warn("mgmt ready retry failed", "object", o.ID, "attempt", try, "err", err)
 			return
 		}
 	}
-	h.log.Warn("mgmt ready still refused with lease_lost; giving up", "object", o.ID, "tries", maxTries)
+	h.log.Warn("mgmt ready still not accepted; giving up", "object", o.ID, "tries", maxTries)
+}
+
+// retryableReady reports whether a failed ready report is worth sending
+// again: mgmt refused it with lease_lost (#210), or it got no answer or a
+// 5xx (#604). killed and other refusals are final.
+func retryableReady(err error) bool {
+	e, ok := mgmtapi.AsError(err)
+	if !ok {
+		return true // no answer: mgmt restarting, a replica down
+	}
+	return e.Code == mgmtapi.CodeLeaseLost || e.Status >= 500
 }
 
 // refreshEpoch raises w's lease epoch to the one in mgmt's assignments for

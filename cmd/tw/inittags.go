@@ -156,6 +156,14 @@ func setTags(raw []byte, o initTagOverrides) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if cfg.Tailnet.Tags == nil && len(o.workload) > 0 {
+		// No tailnet.tags to rewrite (it defaults to tag:tw-wl-<workload>,
+		// defaulttags.go): add the line.
+		if raw, err = insertWorkloadTags(raw, o.workload); err != nil {
+			return nil, err
+		}
+		o.workload = nil
+	}
 	type owner struct {
 		who      string
 		cur, new []string

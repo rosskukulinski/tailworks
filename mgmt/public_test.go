@@ -3,6 +3,7 @@ package mgmt
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -44,10 +46,14 @@ func (p *pushRecorder) count(path string) int {
 }
 
 // publicHost registers host h1 with a push listener.
+// publicHostSeq keeps publicHost's socket names apart when parallel tests
+// start within the same microsecond.
+var publicHostSeq atomic.Int64
+
 func publicHost(t *testing.T, e *testEnv) *pushRecorder {
 	t.Helper()
 	rec := &pushRecorder{hits: map[string]int{}}
-	sock := filepath.Join(os.TempDir(), "tw-pub-"+filepath.Base(e.sock)+"-"+time.Now().Format("150405.000000")+".sock")
+	sock := filepath.Join(os.TempDir(), fmt.Sprintf("tw-pub-%s-%s-%d.sock", filepath.Base(e.sock), time.Now().Format("150405.000000"), publicHostSeq.Add(1)))
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
 		t.Fatal(err)

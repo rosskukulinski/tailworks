@@ -40,8 +40,8 @@ vulnerability, see [SECURITY.md](../SECURITY.md).
   Each object's key is single use, pre-authorized, tagged and expires
   within 5 minutes (`KeyExpiry` in `mgmt/types.go`). Warm keys, minted
   ahead of time so new objects start faster, wait in mgmt's custody for up
-  to 30 minutes ([INSTALL.md](INSTALL.md#tuning-how-fast-a-new-objects-own-node-comes-up)).
-  `tw status` shows how many each tenant has; `tw down` and `tw tenant rm`
+  to 30 minutes ([concepts.md](concepts.md#tuning-how-fast-a-new-objects-own-node-comes-up)).
+  `tw status` shows how many each tenant has, when any; `tw down` and `tw tenant rm`
   revoke them. Revoking the credential
   stops all future minting.
 - **mgmt's own node key is handed over in a single-use file.** On the
@@ -51,7 +51,12 @@ vulnerability, see [SECURITY.md](../SECURITY.md).
   directory that workloads' sandboxes can't read. mgmt reads the key and
   deletes the file before it joins; a failed start deletes it too, and so
   does `tw up` when it returns. A host's own join key
-  (`~/.tailworks/hostd/join.env`) is handled the same way.
+  (`~/.tailworks/hostd/join.env`) is handled the same way. The join file
+  `tw host add` writes for another machine (0600) carries that host's
+  single-use key and one-time registration secret, plus non-secret
+  settings (host ID, mgmt's URL, control URL); tw-hostd deletes it after
+  the join and keeps only the settings and the registration secret beside
+  the node state (0600).
 - **Kill is a network cut.** `tw kill` tombstones the object, its node
   stops answering (410), and with the Devices scope the device is deleted.
 
@@ -64,6 +69,14 @@ vulnerability, see [SECURITY.md](../SECURITY.md).
 
 The process tier is not a VM boundary. Don't run code you don't trust on
 it.
+
+The process sandbox is on by default. On Linux it needs no root and no
+user namespaces, only a kernel with Landlock (5.13+ with Landlock enabled,
+for example Ubuntu 22.04+, Debian 12, Fedora): a small launcher in
+tw-hostd applies the rules, then execs workerd or node in place. `tw
+doctor` checks that the sandbox enforces on your machine (on Linux, the
+Landlock ABI too) and, while tailworks runs, that every workload is under
+it. Without a sandbox (Linux without Landlock) `tw doctor` warns loudly.
 
 ### Side channels inside a workload
 
@@ -113,7 +126,7 @@ changes them is noticed (ledger `C-clocks`, `H-sidechannel-inproc`).
 | Signals | only itself and its own children (`same-sandbox`): not tw-hostd, tw-mgmt or another workload | only itself and its own process group | same as ABI ≥ 4 |
 | Other syscalls | not filtered; exec only of the runtime binary, its own dirs and the OS dirs (`/bin`, `/usr`, `/opt`, …) | seccomp refuses ptrace, `process_vm_readv/writev`, mount, bpf, perf, keyrings, new namespaces, kexec, modules, io_uring, … | same as ABI ≥ 4 |
 | Environment | the list hostd builds for it (`hostd.WorkerdEnv`), not hostd's own: only `TZ`, and only when hostd has one. Nothing of the operator's shell (a foreground `tw up`) or of the service manager (`--service`) reaches workerd, whichever way it is started: `sandbox-exec`, the Landlock launcher or no sandbox. A Node app gets the list in [node-tier.md](node-tier.md). (On the microVM tier, tw-guestd gives its workerd `HOME=/tmp PATH=/usr/bin:/bin TZ=UTC`.) | same | same |
-| Node-tier egress (`tw status`) | `enforced` | `enforced` | `unenforced`: the egress proxy is cooperative |
+| Node-runtime egress (`tw status`) | `enforced` | `enforced` | `unenforced`: the egress proxy is cooperative |
 
 On every platform the process tier caps each workload's V8 heap and sets
 no other CPU or memory limit (see
@@ -123,7 +136,7 @@ workload runs as the same user as tailworks.
 So on Landlock ABI 1–3, a hostile Node app, or workerd code after a V8
 escape, can open TCP connections with the host's network identity
 (including to other tenants' loopback ports and to services on your LAN).
-[node-tier.md](node-tier.md) describes what the Node tier still guarantees
+[node-tier.md](node-tier.md) describes what the Node runtime still guarantees
 there. On macOS, `tw-hostd -sandbox seatbelt-legacy` keeps the previous
 profile for one release in case the strict one breaks a workload: it
 confines reads, writes and unix socket connects under the deny list only,
@@ -181,7 +194,10 @@ more means it is on, and this section should change.
 tailworks runs a second tenant's process-tier workloads on a host only when
 the host passes these checks, unless you start it with
 `tw up --insecure-shared-host` (tenants are then not isolated from each
-other):
+other). The flag is saved in tw.json and kept by every later `tw up`, so
+`tw up` and `tw status` print it on a `! unsafe` line each time
+(`unsafeFlags` in `--json`), with `--allow-experimental-flags` and
+`--local-dev`. The checks:
 
 - **No sandbox** (Linux without Landlock, or `-sandbox none`): the second
   tenant is refused (`sandbox_unavailable`), and so is a Node app on a host
@@ -193,6 +209,11 @@ other):
   refuses every unix socket outside the workload's own dirs; under
   `-sandbox seatbelt-legacy` it refuses only those under the deny list,
   and hostd doesn't check for the tailscaled socket.)
+
+`tw doctor` reports the last two as `host_sockets`: it warns if *your
+user* can reach the system tailscaled's socket or a container engine, or
+is in the docker/podman/lxd groups. To share a host, run tailworks as a
+dedicated user without them.
 
 A host whose sandbox works but doesn't confine TCP (Landlock ABI 1–3, or
 macOS with `-sandbox seatbelt-legacy`) **is admitted** as a shared host.
@@ -219,14 +240,14 @@ Spectre-class attacks for any isolation technology; the mitigations make
 them impractical, not impossible.
 
 "No native code" does not hold on two tiers, so don't count on it there.
-The Node tier runs native code by design (`node:vm`, child processes,
+The Node runtime runs native code by design (`node:vm`, child processes,
 native modules, with precise timers and threads), and a microVM guest runs
 whatever the tenant ships. workerd on the process tier runs only
 JavaScript and WebAssembly, which is a weaker attacker but still one with
 timers and shared-memory threads.
 
 What the operator keeps on, on a Linux host that serves more than one
-tenant, runs a Node-tier workload or offers the microVM tier:
+tenant, runs a Node-runtime workload or offers the microVM tier:
 
 - **Kernel mitigations on**: the kernel's defaults, no `mitigations=off`;
   every entry in `/sys/devices/system/cpu/vulnerabilities/` reads
@@ -318,7 +339,7 @@ limit is `429 rate_limited` ([limits.md](limits.md#management-api)).
   added with `tw host add`) turns it off for a whole host. A refused
   destination is `internet_egress_unavailable`.
 - **What a workload can do with the host's address.** Since ADR-052,
-  `connect()` (and `node:net`, and the Node tier's CONNECT) reaches any
+  `connect()` (and `node:net`, and the Node runtime's CONNECT) reaches any
   public address on any TCP port, from the host's own address, and the
   destination can't tell tenants on one host apart: whatever a workload
   sends, the operator's address takes the blame for. The controls are
@@ -415,6 +436,15 @@ On a single-machine install all three are usually you. When you run
 tailworks for other people, they trust the operators of mgmt and of every
 host their workloads are placed on.
 
+The CLI also runs some of your project's own code on the machine you
+deploy from. When the wrangler config has a custom build
+(`"build": {"command": "…"}`), `tw deploy`, `tw policy` and `tw dev` run
+that command in a shell before bundling, as wrangler does, and print it
+(`› build      <command>`); `--wrangler` runs the project's own wrangler,
+which runs it too. This is the same trust as `npm run build` in that
+directory: deploy only projects whose code you would run yourself
+([wrangler.md](wrangler.md#custom-builds)).
+
 ## Telemetry and the update check
 
 tailworks sends no telemetry, usage data or crash reports anywhere. (`tw
@@ -455,9 +485,11 @@ The red team's open items are tracked in
   caller (ledger H08, F5). Three more limits apply. A `cf` passed as
   plain data, rather than on a `Request`, isn't checked. A `Request` passed
   as an RPC argument is checked for facet objects but not for plain DOs
-  (`"egress": "workload"`). And plain DOs run in the same isolate as the
+  (`"egress": "workload"`, and internal classes: `"node": false` or not
+  in `tailnet.objects`). And plain DOs run in the same isolate as the
   Worker, so code that rewrites that isolate's JavaScript built-ins can
-  defeat any check made there. Facet objects (the default) each get
+  defeat any check made there. Facet objects (classes listed in
+  `tailnet.objects` with tags, in the default egress mode) each get
   their own isolate.
 - **Isolates are not a side-channel boundary inside a workload.** The
   objects of one workload and the platform wrapper that holds its key

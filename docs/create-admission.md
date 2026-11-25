@@ -18,7 +18,7 @@ hostd creates an object only when its creation was **admitted**:
 | An **object** (facet or plain DO) reaching another object through its env | the object's own identity (`as`, attested by the platform's props); chained creation is the app's logic |
 | An object's **`ctx.tailnet.spawn()`** | the parent object (attested) |
 | The Worker's `ctx.tailnet.spawn()` | the request's ticket |
-| A **Workflow** (`run()` and its steps, ADR-040) | nothing for a class with its own node: it reaches existing objects only. An object of a class with no node (`"node": false`, or a class missing from `tailnet.objects`) mints nothing, so no admission applies, and a Workflow reaches it as an `AgentWorkflow` reaches its Agent ([#359](https://github.com/rosskukulinski/tailworks/issues/359)) |
+| A **Workflow** (`run()` and its steps, ADR-040) | nothing for a class with its own node: it reaches existing objects only. An object of a class with no node (`"node": false`, which is also what a class missing from `tailnet.objects` gets) mints nothing, so no admission applies, and a Workflow reaches it as an `AgentWorkflow` reaches its Agent ([#359](https://github.com/rosskukulinski/tailworks/issues/359)) |
 | A **public (Funnel) request** | only `public.create` on the class, under `maxObjects` and the per-tenant lane (ADR-029 D5) |
 | Anything else: `import { env } from "cloudflare:workers"`, an `env` cached in a global from an earlier request, the platform binding `__TW` reached directly, a cached admit on a killed name | **nothing**: hostd answers `403 create_not_admitted` |
 

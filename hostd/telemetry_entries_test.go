@@ -95,8 +95,16 @@ func testEntryTraces(t *testing.T, s *suite, coll *collector, logPath, base, in,
 			if code, r := s.getJSON(base + "/arm/" + c.kind + "/" + c.name); code != 200 {
 				t.Fatalf("arm: %d %v", code, r)
 			}
+			// Wait for the alarm's record before asking the object what the
+			// alarm saw. workerd's tail can put the alarm's console.log on
+			// a request to the object that runs at the same time, so
+			// polling the object here left the alarm's record without its
+			// log line under load (#410).
+			rec := waitRecord(t, logPath, c.cls+"'s alarm record", func(r obs.Record) bool {
+				return r.Event == "alarm" && r.Class == c.cls && hasLog(r, "alarm "+c.cls) && r.TraceID != ""
+			})
 			var seen string
-			waitFor(t, c.cls+"'s alarm", 20*time.Second, func() bool {
+			waitFor(t, c.cls+"'s alarm result", 10*time.Second, func() bool {
 				_, r := s.getJSON(base + "/alarm/" + c.kind + "/" + c.name)
 				seen, _ = r["alarm"].(string)
 				return seen != ""
@@ -105,9 +113,6 @@ func testEntryTraces(t *testing.T, s *suite, coll *collector, logPath, base, in,
 			if !ok {
 				t.Fatalf("the alarm's egress carried no traceparent: %q", seen)
 			}
-			rec := waitRecord(t, logPath, c.cls+"'s alarm record", func(r obs.Record) bool {
-				return r.Event == "alarm" && r.Class == c.cls && hasLog(r, "alarm "+c.cls) && r.TraceID != ""
-			})
 			if rec.TraceID != ec.TraceID || rec.ParentSpanID != "" || rec.TraceID == t0 {
 				t.Fatalf("alarm record: %+v (egress %s)", rec, seen)
 			}

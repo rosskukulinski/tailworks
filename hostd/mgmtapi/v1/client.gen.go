@@ -1904,7 +1904,6 @@ type ChainStatus struct {
 
 // ClassConfig One DO namespace from `tailworks.jsonc` `tailnet.objects`.
 type ClassConfig struct {
-	Agent *bool  `json:"agent,omitempty"`
 	Class string `json:"class"`
 
 	// PreviewOf `_workload` only, previews: the workload this deployment is a preview of (ADR-048), deployed as the workload `<workload>--preview-<alias>`.
@@ -2368,7 +2367,7 @@ type Error struct {
 	// | `public_name_in_use` | 409 | release of a public name the workload still serves: its latest deployment declares public routes, or its public node is live |
 	// | `move_unconfirmed` | 409 | `replace` would move a stateful workload off its live host, leaving its DO storage behind; confirm with `forceTakeover` |
 	// | `lease_changed` | 409 | the workload's lease changed while `replace` was moving it (a concurrent deploy); retry |
-	// | `takeover_unconfirmed` | 409 | the workload has Durable Objects and its host stopped heartbeating but is still registered: it may still be serving them. `tw host rm <host> --drain`, or redeploy with `--force-takeover` |
+	// | `takeover_unconfirmed` | 409 | the workload has Durable Objects and its host stopped heartbeating but is still registered: it may still be serving them. `tw host rm <host> --force`, or redeploy with `--force-takeover` |
 	// | `already_joined` | 409 | credential for an object that has a node |
 	// | `identity_conflict` | 409 | object ID collision across identities |
 	// | `namespace_ambiguous` | 409 | class declared by several workloads, `workload` missing |
@@ -2473,7 +2472,7 @@ type Error struct {
 // | `public_name_in_use` | 409 | release of a public name the workload still serves: its latest deployment declares public routes, or its public node is live |
 // | `move_unconfirmed` | 409 | `replace` would move a stateful workload off its live host, leaving its DO storage behind; confirm with `forceTakeover` |
 // | `lease_changed` | 409 | the workload's lease changed while `replace` was moving it (a concurrent deploy); retry |
-// | `takeover_unconfirmed` | 409 | the workload has Durable Objects and its host stopped heartbeating but is still registered: it may still be serving them. `tw host rm <host> --drain`, or redeploy with `--force-takeover` |
+// | `takeover_unconfirmed` | 409 | the workload has Durable Objects and its host stopped heartbeating but is still registered: it may still be serving them. `tw host rm <host> --force`, or redeploy with `--force-takeover` |
 // | `already_joined` | 409 | credential for an object that has a node |
 // | `identity_conflict` | 409 | object ID collision across identities |
 // | `namespace_ambiguous` | 409 | class declared by several workloads, `workload` missing |
@@ -2521,6 +2520,15 @@ type HealthOk bool
 type Host struct {
 	// Arch A Go GOARCH. Container images must match their host's.
 	Arch *Arch `json:"arch,omitempty"`
+
+	// AuditHead Only in the answer to `PUT /v1/hosts/{id}`: the hash of the last
+	// record mgmt stores on the host's audit chain (`host:<hostID>`);
+	// absent when the chain is empty. A restarted host continues its
+	// chain from this head only when it matches the last record the
+	// host itself chained and flushed before a clean shutdown;
+	// otherwise it starts a new segment (`prevHash: ""`), which
+	// verification reports as a break.
+	AuditHead *string `json:"auditHead,omitempty"`
 
 	// AuditPubKey base64 ed25519; verifies `hostSig`.
 	AuditPubKey *string `json:"auditPubKey,omitempty"`
@@ -2697,7 +2705,7 @@ type HostDrainResult struct {
 		// | `public_name_in_use` | 409 | release of a public name the workload still serves: its latest deployment declares public routes, or its public node is live |
 		// | `move_unconfirmed` | 409 | `replace` would move a stateful workload off its live host, leaving its DO storage behind; confirm with `forceTakeover` |
 		// | `lease_changed` | 409 | the workload's lease changed while `replace` was moving it (a concurrent deploy); retry |
-		// | `takeover_unconfirmed` | 409 | the workload has Durable Objects and its host stopped heartbeating but is still registered: it may still be serving them. `tw host rm <host> --drain`, or redeploy with `--force-takeover` |
+		// | `takeover_unconfirmed` | 409 | the workload has Durable Objects and its host stopped heartbeating but is still registered: it may still be serving them. `tw host rm <host> --force`, or redeploy with `--force-takeover` |
 		// | `already_joined` | 409 | credential for an object that has a node |
 		// | `identity_conflict` | 409 | object ID collision across identities |
 		// | `namespace_ambiguous` | 409 | class declared by several workloads, `workload` missing |
@@ -2749,6 +2757,12 @@ type HostJoin struct {
 
 	// Hostname `tw-host-<hostID>`
 	Hostname string `json:"hostname"`
+
+	// KeyTagsOnly The host's node must advertise no tags; its join key carries `tag:tw-host` (Headscale, ADR-015). `tw-hostd -tsnet-key-tags-only`.
+	KeyTagsOnly *bool `json:"keyTagsOnly,omitempty"`
+
+	// MgmtURL Where the host reaches mgmt over the tailnet (`tw-hostd -mgmt`): `http://tw-mgmt.<tailnet>`. Absent when mgmt doesn't know its own node name (local-dev).
+	MgmtURL *string `json:"mgmtURL,omitempty"`
 
 	// RegistrationSecret One-time secret (32 random bytes, base64url) the host presents in its first `PUT /v1/hosts/{id}`; mgmt stores only its SHA-256 and clears it once the node is bound.
 	RegistrationSecret string   `json:"registrationSecret"`
@@ -2881,7 +2895,10 @@ type ImageAlias struct {
 	// Arch "" = every arch.
 	Arch *string `json:"arch,omitempty"`
 	From string  `json:"from"`
-	To   string  `json:"to"`
+
+	// Source A digest-pinned external image (`ghcr.io/…:<tag>@sha256:…`) that fills `to` when it is not in tailworks' registry yet: mgmt copies it into `public/` at deploy (unless `-no-mirror`), and `tw deploy` builds from it. Absent: `to` must be pushed (`tw image push`).
+	Source *string `json:"source,omitempty"`
+	To     string  `json:"to"`
 }
 
 // ImageAliasList defines model for ImageAliasList.
@@ -3312,6 +3329,9 @@ type PolicyApply struct {
 	// CallerGrant The grant in `added` that lets every user of the tailnet call the app (`autogroup:member` to the workload's own tags, `tcp:80`), as JSON. Absent when `added` has none.
 	CallerGrant *string `json:"callerGrant,omitempty"`
 
+	// CanWrite With `dryRun`, when `added` is not empty — the control plane accepted the policy with `added` merged in, so the write would go through (Tailscale refuses a client without Policy File write). `tw deploy` on a terminal offers to write the lines only when it is true. Absent otherwise.
+	CanWrite *bool `json:"canWrite,omitempty"`
+
 	// Changed The policy was written.
 	Changed bool `json:"changed"`
 	DryRun  bool `json:"dryRun"`
@@ -3338,9 +3358,22 @@ type PolicyApplyCreate struct {
 	Namespaces *[]ClassConfig `json:"namespaces,omitempty"`
 }
 
+// PolicySnippet Additions to a tailnet policy, in the policy file's own shape.
+type PolicySnippet struct {
+	AutoApprovers *struct {
+		Services *map[string][]string `json:"services,omitempty"`
+	} `json:"autoApprovers,omitempty"`
+	Grants    *[]map[string]interface{} `json:"grants,omitempty"`
+	NodeAttrs *[]map[string]interface{} `json:"nodeAttrs,omitempty"`
+	TagOwners *map[string][]string      `json:"tagOwners,omitempty"`
+}
+
 // PreflightMissing defines model for PreflightMissing.
 type PreflightMissing struct {
 	Dst string `json:"dst"`
+
+	// IP The grant's port (`tcp:5432`).
+	IP *string `json:"ip,omitempty"`
 
 	// Snippet The grant to add (HuJSON).
 	Snippet string `json:"snippet"`
@@ -3372,6 +3405,9 @@ type PreflightResult struct {
 
 	// ServiceUnapproved The policy's `autoApprovers.services` doesn't let the workload tags host `service`: the node would advertise it but control would never route it. `ok` is false.
 	ServiceUnapproved *bool `json:"serviceUnapproved,omitempty"`
+
+	// Snippet Everything above that is missing, as one typed policy snippet: the string fields (`tagOwnersSnippet`, `nodeAttrsSnippet`, `serviceSnippet`, each `missing[].snippet`) are renderings of its parts. Absent when nothing is missing. Never holds the caller grant (`PolicyApply.callerGrant`).
+	Snippet *PolicySnippet `json:"snippet,omitempty"`
 
 	// SrcTags The tags checked (workload + object tags from the bundle).
 	SrcTags *[]string `json:"srcTags,omitempty"`
@@ -3739,6 +3775,31 @@ type QueueSendResult struct {
 	// Ids The new messages' IDs, in order.
 	Ids      []string `json:"ids"`
 	OldestAt *int64   `json:"oldestAt,omitempty"`
+}
+
+// R2Object One live object of an R2 bucket, as its index describes it.
+type R2Object struct {
+	// ContentType The object's `httpMetadata.contentType`, if set.
+	ContentType *string `json:"contentType,omitempty"`
+	Etag        string  `json:"etag"`
+	Key         string  `json:"key"`
+
+	// Size Bytes.
+	Size int64 `json:"size"`
+
+	// Uploaded Upload time (unix ms).
+	Uploaded int64 `json:"uploaded"`
+
+	// Version The object's version (R2's `R2Object.version`): new on every put.
+	Version string `json:"version"`
+}
+
+// R2ObjectPage defines model for R2ObjectPage.
+type R2ObjectPage struct {
+	Items []R2Object `json:"items"`
+
+	// NextCursor Pass as `?cursor=` for the next page; `null` when there is none.
+	NextCursor nullable.Nullable[string] `json:"nextCursor"`
 }
 
 // ReleaseArtifact defines model for ReleaseArtifact.
@@ -4565,7 +4626,7 @@ type TombstoneError struct {
 	// | `public_name_in_use` | 409 | release of a public name the workload still serves: its latest deployment declares public routes, or its public node is live |
 	// | `move_unconfirmed` | 409 | `replace` would move a stateful workload off its live host, leaving its DO storage behind; confirm with `forceTakeover` |
 	// | `lease_changed` | 409 | the workload's lease changed while `replace` was moving it (a concurrent deploy); retry |
-	// | `takeover_unconfirmed` | 409 | the workload has Durable Objects and its host stopped heartbeating but is still registered: it may still be serving them. `tw host rm <host> --drain`, or redeploy with `--force-takeover` |
+	// | `takeover_unconfirmed` | 409 | the workload has Durable Objects and its host stopped heartbeating but is still registered: it may still be serving them. `tw host rm <host> --force`, or redeploy with `--force-takeover` |
 	// | `already_joined` | 409 | credential for an object that has a node |
 	// | `identity_conflict` | 409 | object ID collision across identities |
 	// | `namespace_ambiguous` | 409 | class declared by several workloads, `workload` missing |
@@ -4951,8 +5012,13 @@ type ListAuditParams struct {
 	Tenant *string `form:"tenant,omitempty" json:"tenant,omitempty"`
 
 	// Chain `mgmt` or `host:<hostID>`.
-	Chain *string      `form:"chain,omitempty" json:"chain,omitempty"`
-	Kind  *[]AuditKind `form:"kind,omitempty" json:"kind,omitempty"`
+	Chain *string `form:"chain,omitempty" json:"chain,omitempty"`
+
+	// Workload Records about this workload: records whose object belongs to it,
+	// and mgmt records that name it in their detail (deploy, undeploy,
+	// secrets). Combine with `tenant` when several tenants use the name.
+	Workload *string      `form:"workload,omitempty" json:"workload,omitempty"`
+	Kind     *[]AuditKind `form:"kind,omitempty" json:"kind,omitempty"`
 
 	// Since Records at or after this time (RFC 3339 or unix ms).
 	Since *string `form:"since,omitempty" json:"since,omitempty"`
@@ -5076,6 +5142,12 @@ type ListObjectsParams struct {
 
 	// Namespace DO class name, or `_workload`.
 	Namespace *string `form:"namespace,omitempty" json:"namespace,omitempty"`
+
+	// Tag Objects carrying this tag (the full `tag:<name>`, matched exactly).
+	Tag *string `form:"tag,omitempty" json:"tag,omitempty"`
+
+	// Human Objects whose `actingFor` is this principal (exact match, as on `GET /v1/audit`).
+	Human *string `form:"human,omitempty" json:"human,omitempty"`
 
 	// State Repeatable. Default is every state, tombstones included.
 	State *[]ObjectStatus `form:"state,omitempty" json:"state,omitempty"`
@@ -5258,8 +5330,8 @@ type GetWorkloadLogsParams struct {
 	// Host Only the replica on this host (a host ID).
 	Host *string `form:"host,omitempty" json:"host,omitempty"`
 
-	// Source `console`: the app's raw output (workerd's stdout, the node
-	// tier's `app.log`, the microVM console). `requests`: the
+	// Source `console`: the app's raw output (workerd's stdout, the Node
+	// runtime's `app.log`, the microVM console). `requests`: the
 	// workload's structured request records (ADR-045), as
 	// JSON Lines (`application/x-ndjson`), one `RequestRecord` per
 	// line; `n` and the filters below then count records, not lines.
@@ -5370,6 +5442,18 @@ type GetKVValueParams struct {
 type PutKVValueParams struct {
 	// Key The KV key (any UTF-8, 1 to 512 bytes; not `.` or `..`).
 	Key string `form:"key" json:"key"`
+}
+
+// ListR2ObjectsParams defines parameters for ListR2Objects.
+type ListR2ObjectsParams struct {
+	// Limit Page size, 1–500 (default 50). Out-of-range values are `400 bad_request`.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque page cursor from the previous page's `nextCursor`. Filters must be repeated unchanged.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Prefix Only objects whose keys start with this.
+	Prefix *string `form:"prefix,omitempty" json:"prefix,omitempty"`
 }
 
 // ReadStoreJournalParams defines parameters for ReadStoreJournal.
@@ -5772,6 +5856,17 @@ type ClientInterface interface {
 	// of the tenant has that node (the receiver then applies the WhoIs caps
 	// unchanged: the peer is not a tailworks object); `410 killed` for a tombstone.
 	//
+	// The certificate is the one mgmt signed at `ready` (re-issued on fetch
+	// when missing or within 1 h of expiry). The receiving netd verifies it
+	// against the tenant's `oboPublicKey` and narrows the caller's caps to
+	// `cert.lim`; a certificate that fails verification, names another node
+	// or cannot be fetched makes netd withhold the caller's caps.
+	//
+	// To read an object's certificate, pass the object's `stableNodeID` and
+	// `tenantID` (the admin UI's object page does). Replaces
+	// `GET /v0/certs/{nodeID}` and the deprecated
+	// `GET /v1/objects/{id}/certificate`.
+	//
 	// Corresponds with GET /v1/certificates/{stableNodeID} (the `GetCertificate` operationId).
 	GetCertificate(ctx context.Context, stableNodeID string, params *GetCertificateParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -5866,7 +5961,7 @@ type ClientInterface interface {
 	//
 	// mgmt reads `tailworks.jsonc` from the bundle (a tar, optionally gzipped;
 	// the shallowest `tailworks.jsonc`): `tailnet.tags` (the `_workload` entry
-	// node), `tailnet.objects.<Class>.{tags, agent, ttl, node}`,
+	// node), `tailnet.objects.<Class>.{tags, ttl, node}`,
 	// `tailnet.spawn.{maxLive ≤ 64, maxDepth ≤ 3}`, `tailnet.connects`,
 	// `tier`, `runtime`, `placement.{mode, targets, aggregate}` (or
 	// wrangler's `placement`). A bundle with neither `tailnet.tags` nor
@@ -5927,7 +6022,7 @@ type ClientInterface interface {
 	//
 	// mgmt reads `tailworks.jsonc` from the bundle (a tar, optionally gzipped;
 	// the shallowest `tailworks.jsonc`): `tailnet.tags` (the `_workload` entry
-	// node), `tailnet.objects.<Class>.{tags, agent, ttl, node}`,
+	// node), `tailnet.objects.<Class>.{tags, ttl, node}`,
 	// `tailnet.spawn.{maxLive ≤ 64, maxDepth ≤ 3}`, `tailnet.connects`,
 	// `tier`, `runtime`, `placement.{mode, targets, aggregate}` (or
 	// wrangler's `placement`). A bundle with neither `tailnet.tags` nor
@@ -6523,15 +6618,16 @@ type ClientInterface interface {
 
 	// GetObjectCertificate Read the object's node certificate
 	//
-	// The certificate mgmt signed at `ready` (re-issued on fetch when missing
-	// or within 1 h of expiry). The receiving netd verifies it against the
-	// tenant's `oboPublicKey` and narrows the caller's caps to `cert.lim`;
-	// a certificate that fails verification, names another node or cannot
-	// be fetched makes netd withhold the caller's caps. `410 killed` for
-	// tombstones. Replaces `GET /v0/certs/{nodeID}`; see also
-	// `GET /v1/certificates/{stableNodeID}` for lookup by node.
+	// **Deprecated:** use `GET /v1/certificates/{stableNodeID}?tenant=`
+	// with the object's `stableNodeID` and `tenantID` (both on `Object`).
+	// This route returns the same certificate, sends a `Deprecation` header
+	// and a `Link` to that route (`rel="successor-version"`), and will be
+	// removed no earlier than two releases later. `409 not_ready` when the
+	// object has no node yet; `410 killed` for tombstones.
 	//
 	// Corresponds with GET /v1/objects/{id}/certificate (the `GetObjectCertificate` operationId).
+	//
+	// Deprecated: this operation has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	GetObjectCertificate(ctx context.Context, id ObjectID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CreateObjectCredential Mint a single-use auth key for the object's node
@@ -6564,7 +6660,7 @@ type ClientInterface interface {
 	// ImportReleasesWithBody Import catalog entries (from a release's share/tailworks/catalog.json)
 	//
 	// Adds or replaces imported entries. Entries built into this tw-mgmt are never replaced.
-	// `tw release import <tarball>` reads the tarball's `share/tailworks/catalog.json`, posts it here,
+	// `tw upgrade import <tarball>…|<version>` reads the tarball's `share/tailworks/catalog.json`, posts it here,
 	// then uploads the tarball (`PUT /v1/releases/{version}/artifacts/{name}`). Audited
 	// `release_import`.
 	//
@@ -6576,7 +6672,7 @@ type ClientInterface interface {
 	// ImportReleases Import catalog entries (from a release's share/tailworks/catalog.json)
 	//
 	// Adds or replaces imported entries. Entries built into this tw-mgmt are never replaced.
-	// `tw release import <tarball>` reads the tarball's `share/tailworks/catalog.json`, posts it here,
+	// `tw upgrade import <tarball>…|<version>` reads the tarball's `share/tailworks/catalog.json`, posts it here,
 	// then uploads the tarball (`PUT /v1/releases/{version}/artifacts/{name}`). Audited
 	// `release_import`.
 	//
@@ -7596,7 +7692,7 @@ type ClientInterface interface {
 
 	// ListKVKeys List a KV namespace's keys
 	//
-	// Workers KV's `list()` for operators (`tw kv key list`,
+	// Workers KV's `list()` for operators (`tw kv key ls`,
 	// ADR-037): live keys in UTF-8 byte order, with their
 	// expiration and metadata, `limit` at a time (default and maximum
 	// 1000). Pass the answer's `cursor` to get the next page. mgmt reads
@@ -7609,7 +7705,7 @@ type ClientInterface interface {
 
 	// DeleteKVValue Delete one KV value
 	//
-	// `tw kv key delete`. Deleting a key that does not exist succeeds and writes nothing. Audited (`kind: kv_delete`, the namespace only) when it deletes.
+	// `tw kv key rm`. Deleting a key that does not exist succeeds and writes nothing. Audited (`kind: kv_delete`, the namespace only) when it deletes.
 	//
 	// Corresponds with DELETE /v1/tenants/{id}/workloads/{workload}/stores/kv/{name}/value (the `DeleteKVValue` operationId).
 	DeleteKVValue(ctx context.Context, id TenantID, workload WorkloadName, name StoreName, params *DeleteKVValueParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -7655,6 +7751,21 @@ type ClientInterface interface {
 	//
 	// Corresponds with PUT /v1/tenants/{id}/workloads/{workload}/stores/kv/{name}/value (the `PutKVValue` operationId).
 	PutKVValue(ctx context.Context, id TenantID, workload WorkloadName, name StoreName, params *PutKVValueParams, body PutKVValueJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListR2Objects List an R2 bucket's objects
+	//
+	// `tw r2 object ls` (ADR-036 §8): the bucket's live objects in key
+	// order (UTF-8 bytes), with their size, etag, upload time and content
+	// type. mgmt folds the bucket's index journal (its own copy, written
+	// by the workload's R2 binding), so the answer includes every
+	// acknowledged write; object bytes stay in the hosts' R2 backend.
+	// `404 unknown_store` if the bucket does not exist. `409
+	// version_skew` if the index has entries written by a newer
+	// tailworks; `409 store_conflict` if the bucket was deleted or
+	// recreated during the read.
+	//
+	// Corresponds with GET /v1/tenants/{id}/workloads/{workload}/stores/r2/{name}/objects (the `ListR2Objects` operationId).
+	ListR2Objects(ctx context.Context, id TenantID, workload WorkloadName, name StoreName, params *ListR2ObjectsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// DeleteWorkloadStore Delete a store and its data
 	//
@@ -7792,7 +7903,7 @@ type ClientInterface interface {
 	// host, once per change: with `degraded` when it stops, without it
 	// when the entry applies (or was skipped with `…/repair`). mgmt
 	// keeps the latest report on the store (`Store.degraded`, shown by
-	// `tw d1 list`, `tw kv namespace ls`, `tw r2 bucket ls`, `tw status`
+	// `tw d1 ls`, `tw kv namespace ls`, `tw r2 bucket ls`, `tw status`
 	// and the console) and audits the first report of each failing
 	// entry on each host (`kind: store_replay_failed`). A report for
 	// another incarnation is ignored. A healthy report clears the record
@@ -7815,7 +7926,7 @@ type ClientInterface interface {
 	// host, once per change: with `degraded` when it stops, without it
 	// when the entry applies (or was skipped with `…/repair`). mgmt
 	// keeps the latest report on the store (`Store.degraded`, shown by
-	// `tw d1 list`, `tw kv namespace ls`, `tw r2 bucket ls`, `tw status`
+	// `tw d1 ls`, `tw kv namespace ls`, `tw r2 bucket ls`, `tw status`
 	// and the console) and audits the first report of each failing
 	// entry on each host (`kind: store_replay_failed`). A report for
 	// another incarnation is ignored. A healthy report clears the record
@@ -8024,6 +8135,17 @@ func (c *Client) GetAuditVerification(ctx context.Context, reqEditors ...Request
 // of the tenant has that node (the receiver then applies the WhoIs caps
 // unchanged: the peer is not a tailworks object); `410 killed` for a tombstone.
 //
+// The certificate is the one mgmt signed at `ready` (re-issued on fetch
+// when missing or within 1 h of expiry). The receiving netd verifies it
+// against the tenant's `oboPublicKey` and narrows the caller's caps to
+// `cert.lim`; a certificate that fails verification, names another node
+// or cannot be fetched makes netd withhold the caller's caps.
+//
+// To read an object's certificate, pass the object's `stableNodeID` and
+// `tenantID` (the admin UI's object page does). Replaces
+// `GET /v0/certs/{nodeID}` and the deprecated
+// `GET /v1/objects/{id}/certificate`.
+//
 // Corresponds with GET /v1/certificates/{stableNodeID} (the `GetCertificate` operationId).
 func (c *Client) GetCertificate(ctx context.Context, stableNodeID string, params *GetCertificateParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetCertificateRequest(c.Server, stableNodeID, params)
@@ -8178,7 +8300,7 @@ func (c *Client) ListDeployments(ctx context.Context, params *ListDeploymentsPar
 //
 // mgmt reads `tailworks.jsonc` from the bundle (a tar, optionally gzipped;
 // the shallowest `tailworks.jsonc`): `tailnet.tags` (the `_workload` entry
-// node), `tailnet.objects.<Class>.{tags, agent, ttl, node}`,
+// node), `tailnet.objects.<Class>.{tags, ttl, node}`,
 // `tailnet.spawn.{maxLive ≤ 64, maxDepth ≤ 3}`, `tailnet.connects`,
 // `tier`, `runtime`, `placement.{mode, targets, aggregate}` (or
 // wrangler's `placement`). A bundle with neither `tailnet.tags` nor
@@ -8249,7 +8371,7 @@ func (c *Client) CreateDeploymentWithBody(ctx context.Context, params *CreateDep
 //
 // mgmt reads `tailworks.jsonc` from the bundle (a tar, optionally gzipped;
 // the shallowest `tailworks.jsonc`): `tailnet.tags` (the `_workload` entry
-// node), `tailnet.objects.<Class>.{tags, agent, ttl, node}`,
+// node), `tailnet.objects.<Class>.{tags, ttl, node}`,
 // `tailnet.spawn.{maxLive ≤ 64, maxDepth ≤ 3}`, `tailnet.connects`,
 // `tier`, `runtime`, `placement.{mode, targets, aggregate}` (or
 // wrangler's `placement`). A bundle with neither `tailnet.tags` nor
@@ -9207,15 +9329,15 @@ func (c *Client) UpdateObjectWithApplicationMergePatchPlusJSONBody(ctx context.C
 
 // GetObjectCertificate Read the object's node certificate
 //
-// The certificate mgmt signed at `ready` (re-issued on fetch when missing
-// or within 1 h of expiry). The receiving netd verifies it against the
-// tenant's `oboPublicKey` and narrows the caller's caps to `cert.lim`;
-// a certificate that fails verification, names another node or cannot
-// be fetched makes netd withhold the caller's caps. `410 killed` for
-// tombstones. Replaces `GET /v0/certs/{nodeID}`; see also
-// `GET /v1/certificates/{stableNodeID}` for lookup by node.
+// **Deprecated:** use `GET /v1/certificates/{stableNodeID}?tenant=`
+// with the object's `stableNodeID` and `tenantID` (both on `Object`).
+// This route returns the same certificate, sends a `Deprecation` header
+// and a `Link` to that route (`rel="successor-version"`), and will be
+// removed no earlier than two releases later. `409 not_ready` when the
+// object has no node yet; `410 killed` for tombstones.
 //
 // Corresponds with GET /v1/objects/{id}/certificate (the `GetObjectCertificate` operationId).
+// Deprecated: this operation has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 func (c *Client) GetObjectCertificate(ctx context.Context, id ObjectID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetObjectCertificateRequest(c.Server, id)
 	if err != nil {
@@ -9278,7 +9400,7 @@ func (c *Client) ListReleases(ctx context.Context, reqEditors ...RequestEditorFn
 // ImportReleasesWithBody Import catalog entries (from a release's share/tailworks/catalog.json)
 //
 // Adds or replaces imported entries. Entries built into this tw-mgmt are never replaced.
-// `tw release import <tarball>` reads the tarball's `share/tailworks/catalog.json`, posts it here,
+// `tw upgrade import <tarball>…|<version>` reads the tarball's `share/tailworks/catalog.json`, posts it here,
 // then uploads the tarball (`PUT /v1/releases/{version}/artifacts/{name}`). Audited
 // `release_import`.
 //
@@ -9300,7 +9422,7 @@ func (c *Client) ImportReleasesWithBody(ctx context.Context, contentType string,
 // ImportReleases Import catalog entries (from a release's share/tailworks/catalog.json)
 //
 // Adds or replaces imported entries. Entries built into this tw-mgmt are never replaced.
-// `tw release import <tarball>` reads the tarball's `share/tailworks/catalog.json`, posts it here,
+// `tw upgrade import <tarball>…|<version>` reads the tarball's `share/tailworks/catalog.json`, posts it here,
 // then uploads the tarball (`PUT /v1/releases/{version}/artifacts/{name}`). Audited
 // `release_import`.
 //
@@ -10960,7 +11082,7 @@ func (c *Client) ListWorkloadStores(ctx context.Context, id TenantID, workload W
 
 // ListKVKeys List a KV namespace's keys
 //
-// Workers KV's `list()` for operators (`tw kv key list`,
+// Workers KV's `list()` for operators (`tw kv key ls`,
 // ADR-037): live keys in UTF-8 byte order, with their
 // expiration and metadata, `limit` at a time (default and maximum
 // 1000). Pass the answer's `cursor` to get the next page. mgmt reads
@@ -10983,7 +11105,7 @@ func (c *Client) ListKVKeys(ctx context.Context, id TenantID, workload WorkloadN
 
 // DeleteKVValue Delete one KV value
 //
-// `tw kv key delete`. Deleting a key that does not exist succeeds and writes nothing. Audited (`kind: kv_delete`, the namespace only) when it deletes.
+// `tw kv key rm`. Deleting a key that does not exist succeeds and writes nothing. Audited (`kind: kv_delete`, the namespace only) when it deletes.
 //
 // Corresponds with DELETE /v1/tenants/{id}/workloads/{workload}/stores/kv/{name}/value (the `DeleteKVValue` operationId).
 func (c *Client) DeleteKVValue(ctx context.Context, id TenantID, workload WorkloadName, name StoreName, params *DeleteKVValueParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -11060,6 +11182,31 @@ func (c *Client) PutKVValueWithBody(ctx context.Context, id TenantID, workload W
 // Corresponds with PUT /v1/tenants/{id}/workloads/{workload}/stores/kv/{name}/value (the `PutKVValue` operationId).
 func (c *Client) PutKVValue(ctx context.Context, id TenantID, workload WorkloadName, name StoreName, params *PutKVValueParams, body PutKVValueJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewPutKVValueRequest(c.Server, id, workload, name, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListR2Objects List an R2 bucket's objects
+//
+// `tw r2 object ls` (ADR-036 §8): the bucket's live objects in key
+// order (UTF-8 bytes), with their size, etag, upload time and content
+// type. mgmt folds the bucket's index journal (its own copy, written
+// by the workload's R2 binding), so the answer includes every
+// acknowledged write; object bytes stay in the hosts' R2 backend.
+// `404 unknown_store` if the bucket does not exist. `409
+// version_skew` if the index has entries written by a newer
+// tailworks; `409 store_conflict` if the bucket was deleted or
+// recreated during the read.
+//
+// Corresponds with GET /v1/tenants/{id}/workloads/{workload}/stores/r2/{name}/objects (the `ListR2Objects` operationId).
+func (c *Client) ListR2Objects(ctx context.Context, id TenantID, workload WorkloadName, name StoreName, params *ListR2ObjectsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListR2ObjectsRequest(c.Server, id, workload, name, params)
 	if err != nil {
 		return nil, err
 	}
@@ -11286,7 +11433,7 @@ func (c *Client) RepairStore(ctx context.Context, id TenantID, workload Workload
 // host, once per change: with `degraded` when it stops, without it
 // when the entry applies (or was skipped with `…/repair`). mgmt
 // keeps the latest report on the store (`Store.degraded`, shown by
-// `tw d1 list`, `tw kv namespace ls`, `tw r2 bucket ls`, `tw status`
+// `tw d1 ls`, `tw kv namespace ls`, `tw r2 bucket ls`, `tw status`
 // and the console) and audits the first report of each failing
 // entry on each host (`kind: store_replay_failed`). A report for
 // another incarnation is ignored. A healthy report clears the record
@@ -11319,7 +11466,7 @@ func (c *Client) ReportStoreStatusWithBody(ctx context.Context, id TenantID, wor
 // host, once per change: with `degraded` when it stops, without it
 // when the entry applies (or was skipped with `…/repair`). mgmt
 // keeps the latest report on the store (`Store.degraded`, shown by
-// `tw d1 list`, `tw kv namespace ls`, `tw r2 bucket ls`, `tw status`
+// `tw d1 ls`, `tw kv namespace ls`, `tw r2 bucket ls`, `tw status`
 // and the console) and audits the first report of each failing
 // entry on each host (`kind: store_replay_failed`). A report for
 // another incarnation is ignored. A healthy report clears the record
@@ -11637,6 +11784,18 @@ func NewListAuditRequest(server string, params *ListAuditParams) (*http.Request,
 		if params.Chain != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "chain", *params.Chain, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Workload != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "workload", *params.Workload, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
 				return nil, err
 			} else {
 				for _, qp := range strings.Split(queryFrag, "&") {
@@ -13242,6 +13401,30 @@ func NewListObjectsRequest(server string, params *ListObjectsParams) (*http.Requ
 		if params.Namespace != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "namespace", *params.Namespace, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Tag != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "tag", *params.Tag, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Human != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "human", *params.Human, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
 				return nil, err
 			} else {
 				for _, qp := range strings.Split(queryFrag, "&") {
@@ -16950,6 +17133,105 @@ func NewPutKVValueRequestWithBody(server string, id TenantID, workload WorkloadN
 	return req, nil
 }
 
+// NewListR2ObjectsRequest constructs an http.Request for the ListR2Objects method
+func NewListR2ObjectsRequest(server string, id TenantID, workload WorkloadName, name StoreName, params *ListR2ObjectsParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "workload", workload, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/workloads/%s/stores/r2/%s/objects", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "cursor", *params.Cursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Prefix != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "prefix", *params.Prefix, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewDeleteWorkloadStoreRequest constructs an http.Request for the DeleteWorkloadStore method
 func NewDeleteWorkloadStoreRequest(server string, id TenantID, workload WorkloadName, kind StoreKind, name StoreName) (*http.Request, error) {
 	var err error
@@ -17876,6 +18158,17 @@ type ClientWithResponsesInterface interface {
 	// of the tenant has that node (the receiver then applies the WhoIs caps
 	// unchanged: the peer is not a tailworks object); `410 killed` for a tombstone.
 	//
+	// The certificate is the one mgmt signed at `ready` (re-issued on fetch
+	// when missing or within 1 h of expiry). The receiving netd verifies it
+	// against the tenant's `oboPublicKey` and narrows the caller's caps to
+	// `cert.lim`; a certificate that fails verification, names another node
+	// or cannot be fetched makes netd withhold the caller's caps.
+	//
+	// To read an object's certificate, pass the object's `stableNodeID` and
+	// `tenantID` (the admin UI's object page does). Replaces
+	// `GET /v0/certs/{nodeID}` and the deprecated
+	// `GET /v1/objects/{id}/certificate`.
+	//
 	// Returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with GET /v1/certificates/{stableNodeID} (the `GetCertificate` operationId).
@@ -17978,7 +18271,7 @@ type ClientWithResponsesInterface interface {
 	//
 	// mgmt reads `tailworks.jsonc` from the bundle (a tar, optionally gzipped;
 	// the shallowest `tailworks.jsonc`): `tailnet.tags` (the `_workload` entry
-	// node), `tailnet.objects.<Class>.{tags, agent, ttl, node}`,
+	// node), `tailnet.objects.<Class>.{tags, ttl, node}`,
 	// `tailnet.spawn.{maxLive ≤ 64, maxDepth ≤ 3}`, `tailnet.connects`,
 	// `tier`, `runtime`, `placement.{mode, targets, aggregate}` (or
 	// wrangler's `placement`). A bundle with neither `tailnet.tags` nor
@@ -18039,7 +18332,7 @@ type ClientWithResponsesInterface interface {
 	//
 	// mgmt reads `tailworks.jsonc` from the bundle (a tar, optionally gzipped;
 	// the shallowest `tailworks.jsonc`): `tailnet.tags` (the `_workload` entry
-	// node), `tailnet.objects.<Class>.{tags, agent, ttl, node}`,
+	// node), `tailnet.objects.<Class>.{tags, ttl, node}`,
 	// `tailnet.spawn.{maxLive ≤ 64, maxDepth ≤ 3}`, `tailnet.connects`,
 	// `tier`, `runtime`, `placement.{mode, targets, aggregate}` (or
 	// wrangler's `placement`). A bundle with neither `tailnet.tags` nor
@@ -18671,17 +18964,18 @@ type ClientWithResponsesInterface interface {
 
 	// GetObjectCertificateWithResponse Read the object's node certificate
 	//
-	// The certificate mgmt signed at `ready` (re-issued on fetch when missing
-	// or within 1 h of expiry). The receiving netd verifies it against the
-	// tenant's `oboPublicKey` and narrows the caller's caps to `cert.lim`;
-	// a certificate that fails verification, names another node or cannot
-	// be fetched makes netd withhold the caller's caps. `410 killed` for
-	// tombstones. Replaces `GET /v0/certs/{nodeID}`; see also
-	// `GET /v1/certificates/{stableNodeID}` for lookup by node.
+	// **Deprecated:** use `GET /v1/certificates/{stableNodeID}?tenant=`
+	// with the object's `stableNodeID` and `tenantID` (both on `Object`).
+	// This route returns the same certificate, sends a `Deprecation` header
+	// and a `Link` to that route (`rel="successor-version"`), and will be
+	// removed no earlier than two releases later. `409 not_ready` when the
+	// object has no node yet; `410 killed` for tombstones.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with GET /v1/objects/{id}/certificate (the `GetObjectCertificate` operationId).
+	//
+	// Deprecated: this operation has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	GetObjectCertificateWithResponse(ctx context.Context, id ObjectID, reqEditors ...RequestEditorFn) (*GetObjectCertificateResponse, error)
 
 	// CreateObjectCredentialWithResponse Mint a single-use auth key for the object's node
@@ -18718,7 +19012,7 @@ type ClientWithResponsesInterface interface {
 	// ImportReleasesWithBodyWithResponse Import catalog entries (from a release's share/tailworks/catalog.json)
 	//
 	// Adds or replaces imported entries. Entries built into this tw-mgmt are never replaced.
-	// `tw release import <tarball>` reads the tarball's `share/tailworks/catalog.json`, posts it here,
+	// `tw upgrade import <tarball>…|<version>` reads the tarball's `share/tailworks/catalog.json`, posts it here,
 	// then uploads the tarball (`PUT /v1/releases/{version}/artifacts/{name}`). Audited
 	// `release_import`.
 	//
@@ -18730,7 +19024,7 @@ type ClientWithResponsesInterface interface {
 	// ImportReleasesWithResponse Import catalog entries (from a release's share/tailworks/catalog.json)
 	//
 	// Adds or replaces imported entries. Entries built into this tw-mgmt are never replaced.
-	// `tw release import <tarball>` reads the tarball's `share/tailworks/catalog.json`, posts it here,
+	// `tw upgrade import <tarball>…|<version>` reads the tarball's `share/tailworks/catalog.json`, posts it here,
 	// then uploads the tarball (`PUT /v1/releases/{version}/artifacts/{name}`). Audited
 	// `release_import`.
 	//
@@ -19814,7 +20108,7 @@ type ClientWithResponsesInterface interface {
 
 	// ListKVKeysWithResponse List a KV namespace's keys
 	//
-	// Workers KV's `list()` for operators (`tw kv key list`,
+	// Workers KV's `list()` for operators (`tw kv key ls`,
 	// ADR-037): live keys in UTF-8 byte order, with their
 	// expiration and metadata, `limit` at a time (default and maximum
 	// 1000). Pass the answer's `cursor` to get the next page. mgmt reads
@@ -19829,7 +20123,7 @@ type ClientWithResponsesInterface interface {
 
 	// DeleteKVValueWithResponse Delete one KV value
 	//
-	// `tw kv key delete`. Deleting a key that does not exist succeeds and writes nothing. Audited (`kind: kv_delete`, the namespace only) when it deletes.
+	// `tw kv key rm`. Deleting a key that does not exist succeeds and writes nothing. Audited (`kind: kv_delete`, the namespace only) when it deletes.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -19879,6 +20173,23 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with PUT /v1/tenants/{id}/workloads/{workload}/stores/kv/{name}/value (the `PutKVValue` operationId).
 	PutKVValueWithResponse(ctx context.Context, id TenantID, workload WorkloadName, name StoreName, params *PutKVValueParams, body PutKVValueJSONRequestBody, reqEditors ...RequestEditorFn) (*PutKVValueResponse, error)
+
+	// ListR2ObjectsWithResponse List an R2 bucket's objects
+	//
+	// `tw r2 object ls` (ADR-036 §8): the bucket's live objects in key
+	// order (UTF-8 bytes), with their size, etag, upload time and content
+	// type. mgmt folds the bucket's index journal (its own copy, written
+	// by the workload's R2 binding), so the answer includes every
+	// acknowledged write; object bytes stay in the hosts' R2 backend.
+	// `404 unknown_store` if the bucket does not exist. `409
+	// version_skew` if the index has entries written by a newer
+	// tailworks; `409 store_conflict` if the bucket was deleted or
+	// recreated during the read.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /v1/tenants/{id}/workloads/{workload}/stores/r2/{name}/objects (the `ListR2Objects` operationId).
+	ListR2ObjectsWithResponse(ctx context.Context, id TenantID, workload WorkloadName, name StoreName, params *ListR2ObjectsParams, reqEditors ...RequestEditorFn) (*ListR2ObjectsResponse, error)
 
 	// DeleteWorkloadStoreWithResponse Delete a store and its data
 	//
@@ -20024,7 +20335,7 @@ type ClientWithResponsesInterface interface {
 	// host, once per change: with `degraded` when it stops, without it
 	// when the entry applies (or was skipped with `…/repair`). mgmt
 	// keeps the latest report on the store (`Store.degraded`, shown by
-	// `tw d1 list`, `tw kv namespace ls`, `tw r2 bucket ls`, `tw status`
+	// `tw d1 ls`, `tw kv namespace ls`, `tw r2 bucket ls`, `tw status`
 	// and the console) and audits the first report of each failing
 	// entry on each host (`kind: store_replay_failed`). A report for
 	// another incarnation is ignored. A healthy report clears the record
@@ -20047,7 +20358,7 @@ type ClientWithResponsesInterface interface {
 	// host, once per change: with `degraded` when it stops, without it
 	// when the entry applies (or was skipped with `…/repair`). mgmt
 	// keeps the latest report on the store (`Store.degraded`, shown by
-	// `tw d1 list`, `tw kv namespace ls`, `tw r2 bucket ls`, `tw status`
+	// `tw d1 ls`, `tw kv namespace ls`, `tw r2 bucket ls`, `tw status`
 	// and the console) and audits the first report of each failing
 	// entry on each host (`kind: store_replay_failed`). A report for
 	// another incarnation is ignored. A healthy report clears the record
@@ -28845,6 +29156,124 @@ func (r PutKVValueResponse) ContentType() string {
 	return ""
 }
 
+// ListR2ObjectsResponse200Headers the declared response headers of an HTTP 200 response for ListR2Objects
+type ListR2ObjectsResponse200Headers struct {
+	CacheControl *string
+}
+
+// ListR2ObjectsResponse400Headers the declared response headers of an HTTP 400 response for ListR2Objects
+type ListR2ObjectsResponse400Headers struct {
+	TwError *string
+}
+
+// ListR2ObjectsResponse403Headers the declared response headers of an HTTP 403 response for ListR2Objects
+type ListR2ObjectsResponse403Headers struct {
+	TwError *string
+}
+
+// ListR2ObjectsResponse404Headers the declared response headers of an HTTP 404 response for ListR2Objects
+type ListR2ObjectsResponse404Headers struct {
+	TwError *string
+}
+
+// ListR2ObjectsResponse409Headers the declared response headers of an HTTP 409 response for ListR2Objects
+type ListR2ObjectsResponse409Headers struct {
+	TwError *string
+}
+
+// ListR2ObjectsResponseDefaultHeaders the declared response headers of an HTTP default response for ListR2Objects
+type ListR2ObjectsResponseDefaultHeaders struct {
+	TwError *string
+}
+
+type ListR2ObjectsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *R2ObjectPage
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Conflict
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *ListR2ObjectsResponse200Headers
+	// Headers400 the parsed response headers for an HTTP 400 response
+	Headers400 *ListR2ObjectsResponse400Headers
+	// Headers403 the parsed response headers for an HTTP 403 response
+	Headers403 *ListR2ObjectsResponse403Headers
+	// Headers404 the parsed response headers for an HTTP 404 response
+	Headers404 *ListR2ObjectsResponse404Headers
+	// Headers409 the parsed response headers for an HTTP 409 response
+	Headers409 *ListR2ObjectsResponse409Headers
+	// HeadersDefault the parsed response headers for an HTTP default response
+	HeadersDefault *ListR2ObjectsResponseDefaultHeaders
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListR2ObjectsResponse) GetJSON200() *R2ObjectPage {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r ListR2ObjectsResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r ListR2ObjectsResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r ListR2ObjectsResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r ListR2ObjectsResponse) GetJSON409() *Conflict {
+	return r.JSON409
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ListR2ObjectsResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ListR2ObjectsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListR2ObjectsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListR2ObjectsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListR2ObjectsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // DeleteWorkloadStoreResponse403Headers the declared response headers of an HTTP 403 response for DeleteWorkloadStore
 type DeleteWorkloadStoreResponse403Headers struct {
 	TwError *string
@@ -30295,6 +30724,17 @@ func (c *ClientWithResponses) GetAuditVerificationWithResponse(ctx context.Conte
 // of the tenant has that node (the receiver then applies the WhoIs caps
 // unchanged: the peer is not a tailworks object); `410 killed` for a tombstone.
 //
+// The certificate is the one mgmt signed at `ready` (re-issued on fetch
+// when missing or within 1 h of expiry). The receiving netd verifies it
+// against the tenant's `oboPublicKey` and narrows the caller's caps to
+// `cert.lim`; a certificate that fails verification, names another node
+// or cannot be fetched makes netd withhold the caller's caps.
+//
+// To read an object's certificate, pass the object's `stableNodeID` and
+// `tenantID` (the admin UI's object page does). Replaces
+// `GET /v0/certs/{nodeID}` and the deprecated
+// `GET /v1/objects/{id}/certificate`.
+//
 // Returns a wrapper object for the known response body format(s).
 //
 // Corresponds with GET /v1/certificates/{stableNodeID} (the `GetCertificate` operationId).
@@ -30433,7 +30873,7 @@ func (c *ClientWithResponses) ListDeploymentsWithResponse(ctx context.Context, p
 //
 // mgmt reads `tailworks.jsonc` from the bundle (a tar, optionally gzipped;
 // the shallowest `tailworks.jsonc`): `tailnet.tags` (the `_workload` entry
-// node), `tailnet.objects.<Class>.{tags, agent, ttl, node}`,
+// node), `tailnet.objects.<Class>.{tags, ttl, node}`,
 // `tailnet.spawn.{maxLive ≤ 64, maxDepth ≤ 3}`, `tailnet.connects`,
 // `tier`, `runtime`, `placement.{mode, targets, aggregate}` (or
 // wrangler's `placement`). A bundle with neither `tailnet.tags` nor
@@ -30500,7 +30940,7 @@ func (c *ClientWithResponses) CreateDeploymentWithBodyWithResponse(ctx context.C
 //
 // mgmt reads `tailworks.jsonc` from the bundle (a tar, optionally gzipped;
 // the shallowest `tailworks.jsonc`): `tailnet.tags` (the `_workload` entry
-// node), `tailnet.objects.<Class>.{tags, agent, ttl, node}`,
+// node), `tailnet.objects.<Class>.{tags, ttl, node}`,
 // `tailnet.spawn.{maxLive ≤ 64, maxDepth ≤ 3}`, `tailnet.connects`,
 // `tier`, `runtime`, `placement.{mode, targets, aggregate}` (or
 // wrangler's `placement`). A bundle with neither `tailnet.tags` nor
@@ -31350,17 +31790,18 @@ func (c *ClientWithResponses) UpdateObjectWithApplicationMergePatchPlusJSONBodyW
 
 // GetObjectCertificateWithResponse Read the object's node certificate
 //
-// The certificate mgmt signed at `ready` (re-issued on fetch when missing
-// or within 1 h of expiry). The receiving netd verifies it against the
-// tenant's `oboPublicKey` and narrows the caller's caps to `cert.lim`;
-// a certificate that fails verification, names another node or cannot
-// be fetched makes netd withhold the caller's caps. `410 killed` for
-// tombstones. Replaces `GET /v0/certs/{nodeID}`; see also
-// `GET /v1/certificates/{stableNodeID}` for lookup by node.
+// **Deprecated:** use `GET /v1/certificates/{stableNodeID}?tenant=`
+// with the object's `stableNodeID` and `tenantID` (both on `Object`).
+// This route returns the same certificate, sends a `Deprecation` header
+// and a `Link` to that route (`rel="successor-version"`), and will be
+// removed no earlier than two releases later. `409 not_ready` when the
+// object has no node yet; `410 killed` for tombstones.
 //
 // Returns a wrapper object for the known response body format(s).
 //
 // Corresponds with GET /v1/objects/{id}/certificate (the `GetObjectCertificate` operationId).
+//
+// Deprecated: this operation has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 func (c *ClientWithResponses) GetObjectCertificateWithResponse(ctx context.Context, id ObjectID, reqEditors ...RequestEditorFn) (*GetObjectCertificateResponse, error) {
 	rsp, err := c.GetObjectCertificate(ctx, id, reqEditors...)
 	if err != nil {
@@ -31415,7 +31856,7 @@ func (c *ClientWithResponses) ListReleasesWithResponse(ctx context.Context, reqE
 // ImportReleasesWithBodyWithResponse Import catalog entries (from a release's share/tailworks/catalog.json)
 //
 // Adds or replaces imported entries. Entries built into this tw-mgmt are never replaced.
-// `tw release import <tarball>` reads the tarball's `share/tailworks/catalog.json`, posts it here,
+// `tw upgrade import <tarball>…|<version>` reads the tarball's `share/tailworks/catalog.json`, posts it here,
 // then uploads the tarball (`PUT /v1/releases/{version}/artifacts/{name}`). Audited
 // `release_import`.
 //
@@ -31433,7 +31874,7 @@ func (c *ClientWithResponses) ImportReleasesWithBodyWithResponse(ctx context.Con
 // ImportReleasesWithResponse Import catalog entries (from a release's share/tailworks/catalog.json)
 //
 // Adds or replaces imported entries. Entries built into this tw-mgmt are never replaced.
-// `tw release import <tarball>` reads the tarball's `share/tailworks/catalog.json`, posts it here,
+// `tw upgrade import <tarball>…|<version>` reads the tarball's `share/tailworks/catalog.json`, posts it here,
 // then uploads the tarball (`PUT /v1/releases/{version}/artifacts/{name}`). Audited
 // `release_import`.
 //
@@ -32901,7 +33342,7 @@ func (c *ClientWithResponses) ListWorkloadStoresWithResponse(ctx context.Context
 
 // ListKVKeysWithResponse List a KV namespace's keys
 //
-// Workers KV's `list()` for operators (`tw kv key list`,
+// Workers KV's `list()` for operators (`tw kv key ls`,
 // ADR-037): live keys in UTF-8 byte order, with their
 // expiration and metadata, `limit` at a time (default and maximum
 // 1000). Pass the answer's `cursor` to get the next page. mgmt reads
@@ -32922,7 +33363,7 @@ func (c *ClientWithResponses) ListKVKeysWithResponse(ctx context.Context, id Ten
 
 // DeleteKVValueWithResponse Delete one KV value
 //
-// `tw kv key delete`. Deleting a key that does not exist succeeds and writes nothing. Audited (`kind: kv_delete`, the namespace only) when it deletes.
+// `tw kv key rm`. Deleting a key that does not exist succeeds and writes nothing. Audited (`kind: kv_delete`, the namespace only) when it deletes.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -32995,6 +33436,29 @@ func (c *ClientWithResponses) PutKVValueWithResponse(ctx context.Context, id Ten
 		return nil, err
 	}
 	return ParsePutKVValueResponse(rsp)
+}
+
+// ListR2ObjectsWithResponse List an R2 bucket's objects
+//
+// `tw r2 object ls` (ADR-036 §8): the bucket's live objects in key
+// order (UTF-8 bytes), with their size, etag, upload time and content
+// type. mgmt folds the bucket's index journal (its own copy, written
+// by the workload's R2 binding), so the answer includes every
+// acknowledged write; object bytes stay in the hosts' R2 backend.
+// `404 unknown_store` if the bucket does not exist. `409
+// version_skew` if the index has entries written by a newer
+// tailworks; `409 store_conflict` if the bucket was deleted or
+// recreated during the read.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /v1/tenants/{id}/workloads/{workload}/stores/r2/{name}/objects (the `ListR2Objects` operationId).
+func (c *ClientWithResponses) ListR2ObjectsWithResponse(ctx context.Context, id TenantID, workload WorkloadName, name StoreName, params *ListR2ObjectsParams, reqEditors ...RequestEditorFn) (*ListR2ObjectsResponse, error) {
+	rsp, err := c.ListR2Objects(ctx, id, workload, name, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListR2ObjectsResponse(rsp)
 }
 
 // DeleteWorkloadStoreWithResponse Delete a store and its data
@@ -33189,7 +33653,7 @@ func (c *ClientWithResponses) RepairStoreWithResponse(ctx context.Context, id Te
 // host, once per change: with `degraded` when it stops, without it
 // when the entry applies (or was skipped with `…/repair`). mgmt
 // keeps the latest report on the store (`Store.degraded`, shown by
-// `tw d1 list`, `tw kv namespace ls`, `tw r2 bucket ls`, `tw status`
+// `tw d1 ls`, `tw kv namespace ls`, `tw r2 bucket ls`, `tw status`
 // and the console) and audits the first report of each failing
 // entry on each host (`kind: store_replay_failed`). A report for
 // another incarnation is ignored. A healthy report clears the record
@@ -33218,7 +33682,7 @@ func (c *ClientWithResponses) ReportStoreStatusWithBodyWithResponse(ctx context.
 // host, once per change: with `degraded` when it stops, without it
 // when the entry applies (or was skipped with `…/repair`). mgmt
 // keeps the latest report on the store (`Store.degraded`, shown by
-// `tw d1 list`, `tw kv namespace ls`, `tw r2 bucket ls`, `tw status`
+// `tw d1 ls`, `tw kv namespace ls`, `tw r2 bucket ls`, `tw status`
 // and the console) and audits the first report of each failing
 // entry on each host (`kind: store_replay_failed`). A report for
 // another incarnation is ignored. A healthy report clears the record
@@ -42156,6 +42620,130 @@ func ParsePutKVValueResponse(rsp *http.Response) (*PutKVValueResponse, error) {
 		response.Headers409 = &headers
 	case true:
 		var headers PutKVValueResponseDefaultHeaders
+		if values := rsp.Header.Values("Tw-Error"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Tw-Error", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.TwError = &value
+		}
+		response.HeadersDefault = &headers
+	}
+
+	return response, nil
+}
+
+// ParseListR2ObjectsResponse parses an HTTP response from a ListR2ObjectsWithResponse call
+func ParseListR2ObjectsResponse(rsp *http.Response) (*ListR2ObjectsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListR2ObjectsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest R2ObjectPage
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 200:
+		var headers ListR2ObjectsResponse200Headers
+		if values := rsp.Header.Values("Cache-Control"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Cache-Control", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.CacheControl = &value
+		}
+		response.Headers200 = &headers
+	case rsp.StatusCode == 400:
+		var headers ListR2ObjectsResponse400Headers
+		if values := rsp.Header.Values("Tw-Error"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Tw-Error", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.TwError = &value
+		}
+		response.Headers400 = &headers
+	case rsp.StatusCode == 403:
+		var headers ListR2ObjectsResponse403Headers
+		if values := rsp.Header.Values("Tw-Error"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Tw-Error", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.TwError = &value
+		}
+		response.Headers403 = &headers
+	case rsp.StatusCode == 404:
+		var headers ListR2ObjectsResponse404Headers
+		if values := rsp.Header.Values("Tw-Error"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Tw-Error", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.TwError = &value
+		}
+		response.Headers404 = &headers
+	case rsp.StatusCode == 409:
+		var headers ListR2ObjectsResponse409Headers
+		if values := rsp.Header.Values("Tw-Error"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Tw-Error", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.TwError = &value
+		}
+		response.Headers409 = &headers
+	case true:
+		var headers ListR2ObjectsResponseDefaultHeaders
 		if values := rsp.Header.Values("Tw-Error"); len(values) > 0 {
 			var value string
 			if err := runtime.BindStyledParameterWithOptions("simple", "Tw-Error", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {

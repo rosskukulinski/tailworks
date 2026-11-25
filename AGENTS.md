@@ -70,7 +70,8 @@ master, and replace the slug everywhere in that same change
 (`git grep ADR-<slug>`). ADRs are one file each in `docs/design/adr/`:
 draft as `docs/design/adr/<slug>.md`, rename to `NNN-<slug>.md` when the
 number is assigned, and add the row to `docs/design/adr/README.md` in sorted
-position.
+position. `TestADRIndex` accepts a draft whose first line starts
+`# ADR-<slug>`, so a design PR passes CI before it has a number.
 
 ### 6. Stay close to master
 
@@ -84,6 +85,33 @@ position.
   public-ingress merge was one.
 - Never use bare `git stash` / `git stash pop`. The stash stack is shared with
   every other worktree. Use a WIP commit instead.
+
+## Issue labels: who acts next
+
+Two labels say whether an issue is waiting on the maintainer or ready for an
+agent. An open issue has at most one of them.
+
+- **`needs-decision`**: blocked on the maintainer, for a design choice, a
+  product call, or an answer to a question. Agents don't start work on these
+  issues.
+  - Add it when you file an issue that you can't resolve without such a
+    choice, for example "fix it or document it" or "which of these
+    behaviours do we want". Say so in the issue body: list the options with
+    their trade-offs, give your recommendation, and say what happens
+    meanwhile (for example "the checker records it as a note").
+  - Also add it to an existing issue when your work stops on such a
+    question. Put the question in a comment.
+- **`agent-ready`**: scoped and decided, so any agent can pick it up without
+  asking anything. The body says what to change and how to know it's done.
+  - The maintainer adds it, usually when replacing `needs-decision` with the
+    answer.
+  - An agent may file an issue with it directly when nothing is left to
+    decide: a confirmed bug with a clear fix, or a flaky test.
+  - When you start on one, comment with your branch name, so two agents
+    don't take the same issue.
+
+When you pick up an `agent-ready` issue and find a decision that isn't in it,
+stop. Swap the label for `needs-decision` and comment with the question.
 
 ## Definition of done (before you open or merge a PR)
 
@@ -106,6 +134,7 @@ goes red, fixing it comes before landing anything else.
    | You changed | Also run |
    | --- | --- |
    | `mgmt` store or `mgmt/migrations/` | `make test-pg` |
+   | anything in `mgmt` every replica runs (leases, mints, reaper, throttles, kills, audit) | `make e2e-multimgmt` (needs Docker) |
    | placement, leases, D1 across moves | `make e2e-placement` |
    | locks / leader election | `make e2e-locks` |
    | Queues | `make e2e-queues` |

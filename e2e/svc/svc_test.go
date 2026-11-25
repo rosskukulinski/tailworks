@@ -160,7 +160,7 @@ func TestE2EService(t *testing.T) {
 
 	// The app: hello with its own tag and a Service.
 	dir := filepath.Join(work, "svchello")
-	e.MustJSON(nil, "init", dir, "--template", "hello", "--keep-tags")
+	e.MustJSON(nil, "init", dir, "--template", "hello")
 	tj := filepath.Join(dir, "tailworks.jsonc")
 	cfg := []byte(`{
   "name": "svchello",

@@ -86,7 +86,7 @@ func TestCLIDeployWranglerTOML(t *testing.T) {
 	// with no tagOwners stops at preflight with the snippet. The warnings
 	// come first, one per key.
 	so, se, _, err := e.Tw("deploy", app, "--name", "wtoml-noowner")
-	if err == nil || !strings.Contains(se, "acl_denied") || !strings.Contains(so, `"tagOwners": { "tag:tw-wl-wtoml-noowner"`) {
+	if err == nil || !strings.Contains(se, "acl_denied") || !strings.Contains(so, `"tag:tw-wl-wtoml-noowner": ["autogroup:admin", "tag:tw"],`) {
 		t.Fatalf("deploy without tagOwners should fail preflight naming the default tag: %v\n%s\n%s", err, so, se)
 	}
 	for _, w := range []string{

@@ -219,7 +219,7 @@ func CheckLogs(s string) ([]map[string]any, error) {
 	return ls, nil
 }
 
-var codeHeading = regexp.MustCompile(`(?m)^### ([a-z_]+)$`)
+var codeHeading = regexp.MustCompile(`(?m)^### ([a-z0-9_]+)$`)
 
 // KnownCodes are the error codes docs/errors.md documents.
 func KnownCodes() map[string]bool {

@@ -33,15 +33,18 @@ func workloadLabel(s string) string {
 
 func cmdInit(args []string) error {
 	f := newFlags("init")
-	tmpl := f.String("template", "hello", "hello | agent | mcp | ai-agent | lock | static-site | refund-approval | node-workflow")
+	tmpl := f.String("template", "hello", startingPoints(" | ")+" (tw init --list: every template)")
+	list := f.Bool("list", false, "list every template: the starting points, then demos and patterns (templates.go)")
 	name := f.String("name", "", "workload name (default: the directory name)")
-	keepTags := f.Bool("keep-tags", false, "keep the template's tags instead of naming them after the app (tag:tw-wl-<workload>, tag:tw-<workload>-<class>)")
 	tags := f.String("tags", "", "use these existing tags for the workload node instead of a new per-app tag (comma-separated, e.g. tag:tw-app); see docs/tailworks-jsonc.md#tags-and-tw-init")
 	var objectTags repeated
 	f.Var(&objectTags, "object-tags", "use existing tags for the Durable Object classes with their own node: tag:a,tag:b for every class, or <Class>=tag:a,tag:b for one (repeatable)")
 	pos, err := f.parse(args)
 	if err != nil {
 		return err
+	}
+	if *list {
+		return cmdInitList(f)
 	}
 	if len(pos) != 1 {
 		return fail("bad_request", "tw init needs a directory", "usage: tw "+usageOf("init"))
@@ -95,6 +98,8 @@ func cmdInit(args []string) error {
 	}
 	// Name the workload after the directory (tailworks.jsonc and wrangler.jsonc),
 	// and the npm package too (its first "name" is the top-level one).
+	// create-tailworks without tw does the same (lib/init.mjs); keep them in
+	// step (TestCreateTailworksRenamesLikeInit).
 	for _, fn := range []string{"package.json", "tailworks.jsonc", "wrangler.jsonc"} {
 		p := filepath.Join(dir, fn)
 		b, err := os.ReadFile(p)
@@ -110,11 +115,7 @@ func cmdInit(args []string) error {
 			done = true
 			return re.ReplaceAll(m, []byte(`${1}"`+wl+`"`))
 		})
-		if fn == "wrangler.jsonc" {
-			// A template var that names the app (refund-approval's approve hint).
-			b = regexp.MustCompile(`("APP_NAME"\s*:\s*)"[^"]*"`).ReplaceAll(b, []byte(`${1}"`+wl+`"`))
-		}
-		if fn == "tailworks.jsonc" && !*keepTags {
+		if fn == "tailworks.jsonc" {
 			if nb, _, err := appTags(b, wl); err == nil {
 				b = nb
 			}
@@ -144,18 +145,7 @@ func cmdInit(args []string) error {
 		if tags := initTags(dir); len(tags) > 0 {
 			fmt.Printf("  tags: %s (tw policy prints what to add to your tailnet policy for them)\n", strings.Join(tags, ", "))
 		}
-		if *tmpl == "node-workflow" {
-			// The Node tier bundles the app's own dependencies with the
-			// machine's Node.js; nothing is vendored for it.
-			fmt.Printf("  cd %s && npm install && tw dev    # or tw deploy\n", pos[0])
-			fmt.Printf("  needs Node.js ≥ 24 and npm on this machine; `npm install` fetches the template's dependencies, so this one can't be built or deployed offline\n")
-			return
-		}
-		fmt.Printf("  cd %s && tw policy && tw deploy   # or `tw dev` for a local run with no tailnet\n", pos[0])
-		if *tmpl == "ai-agent" {
-			// Its tools are a second app's; on its own it only refuses.
-			fmt.Printf("  its tools need the mcp template deployed as workload \"mcp\" and a grant: see %s\n", filepath.Join(pos[0], "README.md"))
-		}
+		printInitNext(pos[0], *tmpl) // templates.go
 	})
 	return nil
 }
@@ -179,6 +169,10 @@ type app struct {
 
 	// Pages is a Cloudflare Pages project (pages.go); nil for a Worker.
 	Pages *pagesProject
+
+	// WranglerName is the wrangler config's top-level "name", before
+	// --env (appname.go compares it with tailworks.jsonc's).
+	WranglerName string
 }
 
 func loadApp(dir, name string) (*app, error) { return loadAppWith(dir, name, appOpts{}) }
@@ -208,7 +202,7 @@ func loadAppWith(dir, name string, o appOpts) (*app, error) {
 					withFix(`add a wrangler.jsonc: {"name": "<site>", "pages_build_output_dir": "./public"} (the folder your build writes)`)
 			}
 			if twErr != nil {
-				return nil, fail("bad_request", "no tailworks.jsonc or wrangler config in "+dir).withFix("tw init <dir> --template hello|agent|mcp|ai-agent|lock|static-site|refund-approval|node-workflow")
+				return nil, fail("bad_request", "no tailworks.jsonc or wrangler config in "+dir).withFix("tw init <dir>   (tw init --list: the templates)")
 			}
 			return nil, fail("bad_request", "no wrangler.jsonc, wrangler.json or wrangler.toml in "+dir)
 		}
@@ -224,7 +218,7 @@ func loadAppWith(dir, name string, o appOpts) (*app, error) {
 	}
 	if twErr != nil {
 		// A wrangler-only project: tailworks' defaults stand in for tailworks.jsonc.
-		raw = defaultTwConfig(workloadLabel(a.Name), a.Wrangler)
+		raw = defaultTwConfig(workloadLabel(a.Name))
 		a.Warnings = append(a.Warnings, fmt.Sprintf("no tailworks.jsonc: using defaults (workload node tag:tw-wl-%s; Durable Object classes internal, no node of their own); add a tailworks.jsonc to change them", workloadLabel(a.Name)))
 	}
 	a.TwRaw = raw
@@ -238,10 +232,13 @@ func loadAppWith(dir, name string, o appOpts) (*app, error) {
 	if wl := workloadLabel(a.Name); wl != a.Name {
 		return nil, fail("bad_request", fmt.Sprintf("workload name %q is not a DNS label", a.Name)).withFix("tw deploy --name " + wl)
 	}
-	if len(a.Cfg.Tailnet.Tags) == 0 {
-		return nil, fail("bad_request", "tailworks.jsonc has no tailnet.tags (the workload node's tags)").
-			withFix(`add "tailnet": { "tags": ["tag:tw-wl-` + a.Name + `"] }`)
+	if err := a.defaultWorkloadTags(); err != nil { // defaulttags.go
+		return nil, err
 	}
+	if err := a.defaultInternalClasses(); err != nil { // defaultobjects.go
+		return nil, err
+	}
+	a.Warnings = append(a.Warnings, a.nameNotes(name, top.Name)...) // appname.go
 	if a.Pages != nil {
 		secrets, _ := typesSecrets(a)
 		_, declared := genTypes(a, a.Dir, secrets)
@@ -267,6 +264,17 @@ func (a *app) srcTags() []string {
 // twin of create-tailworks's build.mjs), into what hostd/gen expects
 // (dist/index.js + tailworks.jsonc + wrangler.jsonc + tw-bundle.json), and packs it.
 func (a *app) build(vars map[string]string) ([]byte, int, error) {
+	if err := a.prebuild(); err != nil { // buildcmd.go: the wrangler config's build.command
+		return nil, 0, err
+	}
+	if a.Runtime != bundle.RuntimeNode && isPythonApp(a.Wrangler) { // python.go: packed as it is, no bundler
+		files, main, types, n, err := a.buildPython()
+		if err != nil {
+			return nil, 0, err
+		}
+		tb, err := a.packWorkerd(files, main, types, vars)
+		return tb, n, err
+	}
 	ct, err := createTailworksDir()
 	if err != nil {
 		return nil, 0, err
@@ -299,9 +307,6 @@ func (a *app) build(vars map[string]string) ([]byte, int, error) {
 		// An assets-only project (assets.go): no Worker to bundle.
 		tb, err := a.packWorkerd(map[string][]byte{}, "", nil, vars)
 		return tb, 0, err
-	}
-	if err := pythonWorker(a.WranglerFile, a.Wrangler); err != nil {
-		return nil, 0, err
 	}
 	if a.Opts.builder() == "wrangler" && a.Pages.hasCode() {
 		_, err = a.pagesEntry(out) // pages.go: refuses --wrangler
@@ -340,6 +345,7 @@ func (a *app) buildNode(node, ct, out string, vars map[string]string) ([]byte, i
 	if err != nil {
 		return nil, 0, err
 	}
+	files["tailworks.jsonc"] = a.TwRaw // with the defaulted tailnet.tags (defaulttags.go)
 	tb, err := bundle.Pack(files)
 	return tb, len(files["dist/server.mjs"]), err
 }
@@ -376,6 +382,9 @@ type deployResult struct {
 	// Replicas (tailworks.jsonc "replicas" > 1): every copy and its host.
 	Replicas []mgmt.ReplicaRef `json:"replicas,omitempty"`
 
+	// Images: what each container image was pinned to (deploypins.go).
+	Images []deployImage `json:"images,omitempty"`
+
 	// Warnings: wrangler config tailworks ignores, one line per key.
 	Warnings []string `json:"warnings,omitempty"`
 
@@ -393,23 +402,26 @@ type deployResult struct {
 
 func cmdDeploy(args []string) error {
 	f := newFlags("deploy")
-	name := f.String("name", "", "workload name (default: tailworks.jsonc name)")
-	allowMissing := f.Bool("allow-missing-grants", false, "deploy even if tailnet.connects grants are missing")
-	applyPolicy := f.Bool("apply-policy", false, "when the preflight finds tagOwners, grants, funnel nodeAttrs or Service auto-approval missing, write them to the tailnet policy first (as tw policy --apply)")
-	yes := f.Bool("yes", false, "with --apply-policy: write the policy without asking (needed without a terminal, and with --json)")
-	noWait := f.Bool("no-wait", false, "return once mgmt accepted the deploy")
-	forceTakeover := f.Bool("force-takeover", false, "the workload's current host is gone for good: move its Durable Objects anyway (audited; see takeover_unconfirmed); with --replace, confirms moving a stateful workload off a live host")
+	name := f.String("name", "", "workload name (default: tailworks.jsonc name, then wrangler name, then the directory)")
+	po := addPlacementFlags(f, "deploy") // placementflags.go
+	allowMissing, noWait, wait := po.allowMissing, po.noWait, po.wait
+	applyPolicy := f.Bool("apply-policy", false, "when the preflight finds tagOwners, grants, funnel nodeAttrs or Service auto-approval missing, write them to the tailnet policy first (as tw policy --apply; shows the lines and asks, --yes to skip). Without the flag tw deploy asks only on a terminal (not with --json or --yes); --apply-policy=false never asks or writes")
+	yes := yesFlagBefore(f, "--apply-policy writes the policy")
 	platform := f.String("platform", "", "containers: arches to build Dockerfile images for (linux/amd64,linux/arm64; default: the arches of the tenant pool's container hosts)")
-	hostF := f.String("host", "", "pin the workload to this host (it must be live, in the tenant's pool and offer the tier)")
-	replace := f.Bool("replace", false, "re-place the workload: move it to a clearly better host (smart placement: the best measured path to tailnet.connects) instead of keeping it where it runs")
 	preview := f.Bool("preview", false, "deploy as a preview next to the workload (<workload>--preview-<alias>), leaving the workload as it is; tw promote makes it the workload")
-	previewAlias := f.String("preview-alias", "", "the preview's alias (implies --preview; default: the start of the bundle's SHA-256)")
-	wait := f.Duration("wait", 3*time.Minute, "how long to wait for ready")
+	previewAlias := f.String("preview-alias", "", "--preview's alias, the <alias> in <workload>--preview-<alias> (implies --preview; default: the start of the bundle's SHA-256)")
 	waitPublic := f.Duration("wait-public", 0, "also wait (up to this long) until the public URL answers from the public internet (tailworks.jsonc \"public\")")
 	tenantF := tenantFlag(f)
 	vars := varFlags{}
 	f.Var(vars, "var", "override a wrangler var (KEY=VALUE, repeatable)")
 	ao := addAppFlags(f) // wranglerapp.go: --env, --wrangler, --from-wrangler-out
+	// --help lists these under Advanced (helpflags.go).
+	f.group(advancedFlags,
+		"platform",
+		"wait-public",
+		"wrangler",
+		"from-wrangler-out",
+	)
 	pos, err := f.parse(args)
 	if err != nil {
 		return err
@@ -474,7 +486,7 @@ func cmdDeploy(args []string) error {
 		if policyUnavailable != "" {
 			fmt.Printf("› preflight  skipped: mgmt can't read the tailnet policy (%s)\n             give the OAuth client the Policy File › Read scope to preflight grants; tags are still checked by Tailscale at mint\n", firstLine(policyUnavailable))
 		} else {
-			printPreflight(a, pf, *applyPolicy)
+			printPreflight(a, pf, policyModeOf(f, *applyPolicy, *yes) != policyPrintOnly)
 			printPublicPreflight(pf)
 		}
 	}
@@ -482,13 +494,15 @@ func cmdDeploy(args []string) error {
 	if !*f.json {
 		printNodeBudget("✓ preflight  nodes: ", "! preflight  nodes: ", tn.Tailnet, res.Nodes)
 	}
-	if !pf.OK && *applyPolicy {
-		ar, err := applyAppPolicy(ctx, mc, f, tn.TenantID, a.Name, tb, *yes, "tw deploy --apply-policy")
-		if err != nil {
+	if !pf.OK && !*allowMissing && policyModeOf(f, *applyPolicy, *yes) == policyAskFirst {
+		if err := deployAskPolicy(ctx, mc, f, tn.TenantID, a.Name, tb, &pf, &res, ev); err != nil { // deploy_policy.go (#481)
 			return err
 		}
-		pf, res.Preflight, res.PolicyApplied = ar.Preflight, ar.Preflight, ar
-		ev.emit("policy", map[string]any{"changed": ar.Changed, "added": ar.Added, "manual": ar.Manual, "ok": pf.OK})
+	}
+	if !pf.OK && *applyPolicy {
+		if err := deployApplyPolicy(ctx, mc, f, tn.TenantID, a.Name, tb, *yes, *allowMissing, &pf, &res, ev); err != nil { // deploy_policy.go
+			return err
+		}
 	}
 	if !pf.OK && !*allowMissing {
 		return preflightFailure(pf)
@@ -522,15 +536,7 @@ func cmdDeploy(args []string) error {
 	if len(builtImages) > 0 {
 		body["containerImages"] = builtImages
 	}
-	if *forceTakeover {
-		body["forceTakeover"] = true
-	}
-	if *hostF != "" {
-		body["host"] = *hostF
-	}
-	if *replace {
-		body["replace"] = true
-	}
+	po.apply(body)
 	res.Preview = addPreview(body, a.Name, *preview, *previewAlias, tb) // preview.go
 	if err := mc.Do(ctx, "POST", "/v1/deployments", body, &dr); err != nil {
 		return err
@@ -584,13 +590,20 @@ func cmdDeploy(args []string) error {
 		return err
 	}
 	res.Replicas = dr.Replicas
+	res.Images = deployImages(v) // deploypins.go
 	res.Status, res.Endpoint, res.Public = v.Status, v.Endpoint, v.Public
 	res.Timings["ready"] = ms(time.Since(ds))
-	ev.emit("ready", map[string]any{"deploymentID": dr.DeploymentID, "host": v.Host, "magicDNS": v.Endpoint.MagicDNS, "url": "http://" + v.Endpoint.MagicDNS + "/"})
+	wurl := workloadURL(a.TwRaw, v.Endpoint.MagicDNS) // tailnethttps.go
+	ready := map[string]any{"deploymentID": dr.DeploymentID, "host": v.Host, "magicDNS": v.Endpoint.MagicDNS, "url": wurl}
+	if len(res.Images) > 0 {
+		ready["images"] = res.Images
+	}
+	ev.emit("ready", ready)
 	if !*f.json {
-		fmt.Printf("✓ deployed   %s@%s · node %s · http://%s/  (deploy → ready %.1fs)\n", orName(res.Preview, a.Name), v.Host, v.Endpoint.Node, v.Endpoint.MagicDNS, res.Timings["ready"]/1000)
+		printDeployImages(os.Stdout, res.Images, builtImages)
+		fmt.Printf("✓ deployed   %s@%s · node %s · %s  (deploy → ready %.1fs)\n", orName(res.Preview, a.Name), v.Host, v.Endpoint.Node, wurl, res.Timings["ready"]/1000)
 		if res.Preview != "" {
-			fmt.Print(previewNotice(a.Name, res.Preview, "http://"+v.Endpoint.MagicDNS+"/"))
+			fmt.Print(previewNotice(a.Name, res.Preview, wurl))
 		}
 		if len(dr.Replicas) > 1 {
 			parts := make([]string, 0, len(dr.Replicas))
@@ -603,7 +616,7 @@ func cmdDeploy(args []string) error {
 			fmt.Printf("✓ service    %s · http://%s/  (stable across redeploys and host moves; callers need a grant to %s)\n", sv.Name, sv.MagicDNS, sv.Name)
 		}
 		printPublic(v.Public)
-		printDeployNext(a.Name, "http://"+v.Endpoint.MagicDNS+"/") // deploy_next.go
+		printDeployNext(a.Name, wurl) // deploy_next.go
 	}
 	if p := v.Public; *waitPublic > 0 && p != nil && p.Allowed && p.Exposed {
 		last := ""
@@ -638,7 +651,8 @@ func printPreflight(a *app, pf mgmt.PreflightResult, applying bool) {
 	}
 	if pf.Service != "" {
 		if pf.ServiceUnapproved {
-			fmt.Printf("› preflight: service %s … ✗ not in autoApprovers.services for the workload tags (control would never route it)\n    add to your tailnet policy:\n    %s\n", pf.Service, pf.ServiceSnippet)
+			fmt.Printf("› preflight: service %s … ✗ not in autoApprovers.services for the workload tags (control would never route it)\n    add to your tailnet policy:\n", pf.Service)
+			printPaste(snippetService(preflightPolicy(pf)), "    ") // policysnippet.go
 		} else {
 			fmt.Printf("✓ preflight  service %s auto-approved for the workload node\n", pf.Service)
 		}
@@ -677,17 +691,12 @@ func printPreflight(a *app, pf mgmt.PreflightResult, applying bool) {
 		}
 	}
 	if len(pf.Missing) > 0 || len(pf.MissingTagOwners) > 0 || len(pf.UndefinedConnects) > 0 {
-		if pf.TagOwnersSnippet != "" {
-			fmt.Printf("  add to your tailnet policy:\n    %s\n", pf.TagOwnersSnippet)
+		if c := snippetConnects(preflightPolicy(pf)); !c.Empty() { // policysnippet.go
+			fmt.Printf("  add to your tailnet policy:\n")
+			printPaste(c, "    ")
 		}
 		if len(pf.MissingTagOwners) > 0 && !applying { // --apply-policy: the plan that follows says what is written
-			printCallerGrant(a.Cfg.Tailnet.Tags, pf.Service) // callergrant.go
-		}
-		if len(pf.Missing) > 0 {
-			fmt.Printf("  add to \"grants\" in your tailnet policy:\n")
-			for _, g := range pf.MissingGrants() {
-				fmt.Printf("    %s\n", g.Snippet)
-			}
+			printCallerGrant(a.Cfg.Tailnet.Tags, a.Cfg.Tailnet.HTTPS, pf.Service) // callergrant.go
 		}
 	}
 }

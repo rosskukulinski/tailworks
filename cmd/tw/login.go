@@ -70,8 +70,8 @@ func joinMgmtNode(ctx context.Context, o joinOpts) (*mgmtNode, error) {
 		if err != nil {
 			if wctx.Err() != nil {
 				return nil, fail("login_timeout", fmt.Sprintf("no login after %v", o.Timeout),
-					"the login URL was printed above; tw up waits for the browser login to complete").
-					withFix("run tw up again and finish the login, or pass --mgmt-authkey-file for an unattended join")
+					"the login URL was printed above; tw link --tsnet waits for the browser login to complete").
+					withFix("run tw link --tsnet again and finish the login, or pass --tsnet-authkey-file to tw link --tsnet for an unattended join")
 			}
 			return nil, fail("bootstrap_failed", "tailnet join failed", err.Error())
 		}

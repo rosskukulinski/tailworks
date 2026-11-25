@@ -41,7 +41,7 @@ func doctorSideChannels(s *state) (string, string, string) {
 		now = append(now, fmt.Sprintf("%d tenants", len(tenants)))
 	}
 	if nodeApps > 0 {
-		now = append(now, fmt.Sprintf("%d Node-tier workloads", nodeApps))
+		now = append(now, fmt.Sprintf("%d Node-runtime workloads", nodeApps))
 	}
 	if strings.Contains(strings.Join(hv.Tiers, ","), "microvm") {
 		now = append(now, "the microVM tier")

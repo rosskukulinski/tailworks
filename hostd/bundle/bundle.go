@@ -50,6 +50,12 @@ type App struct {
 	// EgressVia is tailnet.egress.via: "" or ViaExitNode (the workload needs
 	// a host whose internet path is an exit node; internet.go).
 	EgressVia string
+
+	// TailnetHTTPS is tailnet.https: the workload node also serves :443
+	// with its ts.net certificate, and requests that arrive that way get
+	// an https:// request.url (#360, hostd/tailnethttps.go).
+	TailnetHTTPS bool
+
 	// Tier is the requested isolation tier (tailworks.jsonc "tier"): "" (host
 	// default), "process" or "microvm".
 	Tier string
@@ -105,6 +111,10 @@ type App struct {
 	// dist/index.js.map), not modules: hostd maps exception stacks in
 	// request records with them (hostd/stackmap.go).
 	SourceMaps map[string][]byte
+
+	// Python: main is a .py module (python.go). hostd runs the modules in
+	// a Python worker behind a JavaScript front.
+	Python bool
 }
 
 // RuntimeNode is the opt-in Node.js process tier (tailworks.jsonc "runtime": "node").
@@ -137,7 +147,6 @@ type DOBinding struct {
 type Class struct {
 	Name   string
 	Tags   []string
-	Agent  bool
 	Egress string // EgressObject | EgressWorkload
 	TTL    string
 	// Node is false for internal classes (`"node": false`): no tailnet node,
@@ -182,15 +191,15 @@ type twConfig struct {
 		Args   []string          `json:"args"`
 	} `json:"node"`
 	// Containers is parsed by internal/container (only its presence here):
-	// an array like wrangler's, or {"<Class>": {"image", "images"}}, the
-	// pins tw deploy writes once it has built them (ADR-032 D3).
+	// an array like wrangler's, or {"<Class>": {"image", "images"}},
+	// per-class image refs you pin; mgmt records the digests it resolves
+	// in the deployment (ADR-032 D3).
 	Containers json.RawMessage `json:"containers"`
 	Tailnet    struct {
 		Tags     []string `json:"tags"`
 		Connects []string `json:"connects"`
 		Objects  map[string]struct {
 			Tags   []string              `json:"tags"`
-			Agent  bool                  `json:"agent"`
 			Egress string                `json:"egress"`
 			TTL    string                `json:"ttl"`
 			Node   *bool                 `json:"node"`
@@ -204,6 +213,9 @@ type twConfig struct {
 			Internet InternetEgress `json:"internet"`
 			Via      string         `json:"via"`
 		} `json:"egress"`
+
+		// HTTPS is tailnet.https (App.TailnetHTTPS).
+		HTTPS bool `json:"https"`
 	} `json:"tailnet"`
 }
 
@@ -264,6 +276,7 @@ func Parse(files map[string][]byte) (*App, error) {
 		Internet: t.Tailnet.Egress.Internet, Tier: t.Tier, Public: t.Public,
 		EgressVia: t.Tailnet.Egress.Via,
 	}
+	a.TailnetHTTPS = t.Tailnet.HTTPS
 	if err := a.Public.Validate(); err != nil {
 		return nil, fmt.Errorf("bundle: tailworks.jsonc %w", err)
 	}
@@ -317,7 +330,7 @@ func Parse(files map[string][]byte) (*App, error) {
 			continue
 		}
 		switch strings.ToLower(path.Ext(p)) {
-		case ".js", ".mjs", ".cjs", ".json", ".txt", ".wasm", ".html", ".bin":
+		case ".js", ".mjs", ".cjs", ".json", ".txt", ".wasm", ".html", ".bin", ".py":
 			if p == "wrangler.json" || p == "package.json" || p == "tw-bundle.json" || strings.HasPrefix(p, "node_modules/") {
 				continue
 			}
@@ -356,7 +369,7 @@ func Parse(files map[string][]byte) (*App, error) {
 		if c == nil {
 			return nil, fmt.Errorf("bundle: tailworks.jsonc tailnet.objects.%s has no durable_objects binding", name)
 		}
-		c.Tags, c.Agent, c.TTL = o.Tags, o.Agent, o.TTL
+		c.Tags, c.TTL = o.Tags, o.TTL
 		if err := o.Public.Validate(name); err != nil {
 			return nil, fmt.Errorf("bundle: tailworks.jsonc %w", err)
 		}
@@ -411,6 +424,9 @@ func Parse(files map[string][]byte) (*App, error) {
 		}
 		a.Containers[c.Class] = c
 	}
+	if err := finishPython(a); err != nil { // python.go
+		return nil, err
+	}
 	return a, nil
 }
 
@@ -438,6 +454,7 @@ func parseNode(files map[string][]byte, t *twConfig) (*App, error) {
 	a := &App{
 		Name: t.Name, Runtime: RuntimeNode, Classes: map[string]*Class{}, Modules: map[string][]byte{},
 		WorkloadTags: t.Tailnet.Tags, Internet: t.Tailnet.Egress.Internet, Tier: t.Tier,
+		TailnetHTTPS: t.Tailnet.HTTPS,
 	}
 	if t.Public != nil {
 		return nil, errors.New("bundle: tailworks.jsonc \"public\" is not supported for runtime \"node\" yet (ADR-029 v1: workerd workloads only)")

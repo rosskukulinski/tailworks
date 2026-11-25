@@ -27,6 +27,7 @@ const (
 )
 
 func addWorkerInternetFlag(f *flags) *string {
+	f.group(upGroupIsolation, "worker-internet")
 	return f.String("worker-internet", workerInternetDirect, "how Workers' fetch() reaches internet hosts, subject to each workload's tailnet.egress.internet: "+hostdrun.InternetModeHelp)
 }
 

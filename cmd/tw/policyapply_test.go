@@ -67,8 +67,8 @@ func TestCLIPolicyApply(t *testing.T) {
 	if cliCode(err) != "confirmation_required" || !strings.Contains(cliText(err), "tw policy --apply --yes") {
 		t.Fatalf("--apply without --yes: %v\n%s", err, out)
 	}
-	for _, want := range []string{`+ "tagOwners": {`, `+   "tag:tw-wl-support": ["autogroup:admin","tag:tw"],`, `"dst":["tag:db"]`,
-		`"src":["autogroup:member"]`, "lets every user in your tailnet call support"} {
+	for _, want := range []string{`+ "tagOwners": {`, `+   "tag:tw-wl-support": ["autogroup:admin", "tag:tw"],`, `"dst": ["tag:db"]`,
+		`"src": ["autogroup:member"]`, "lets every user in your tailnet call support"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("diff lacks %q:\n%s", want, out)
 		}
@@ -98,7 +98,7 @@ func TestCLIPolicyApply(t *testing.T) {
 	}
 	// The caller grant is in the diff, said in plain words, and not left
 	// in a snippet to paste.
-	for _, w := range []string{`+   {"dst":["tag:tw-wl-support"],"ip":["tcp:80"],"src":["autogroup:member"]},`,
+	for _, w := range []string{`+   { "src": ["autogroup:member"], "dst": ["tag:tw-wl-support"], "ip": ["tcp:80"] },`,
 		"lets every user in your tailnet call support", "every user in your tailnet may call support; run tw deploy"} {
 		if !strings.Contains(out, w) {
 			t.Fatalf("--apply --yes output lacks %q:\n%s", w, out)

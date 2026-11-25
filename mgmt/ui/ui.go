@@ -56,6 +56,7 @@ func Handler(api *http.Client, baseURL string) http.Handler {
 	mux.HandleFunc("POST /ui/deployments/{id}/undeploy", u.undeployForm)
 	mux.HandleFunc("GET /ui/hosts/{id}", u.host)
 	mux.HandleFunc("POST /ui/hosts/{id}/remove", u.removeHostForm)
+	mux.HandleFunc("POST /ui/hosts/{id}/cordon", u.cordonHostForm) // cordon.go
 	mux.HandleFunc("GET /ui/tenants/{id}", u.tenant)
 	// logs.go
 	mux.HandleFunc("GET /ui/tenants/{id}/workloads/{workload}/logs", u.workloadLogs)
@@ -275,7 +276,10 @@ func (u *ui) base(r *http.Request, title string) base {
 	} else {
 		u.call(r, "GET", "/v1/whoami", &b.Who)
 	}
-	if b.Who.Admin || b.Who.Kind == "local" || b.Who.Kind == "" {
+	// whoami reports admin for mgmt's own node too. A zero Who (whoami
+	// failed; only the error page gets here) skips /v1/status and renders
+	// the approvals-only nav.
+	if b.Who.Admin {
 		u.call(r, "GET", "/v1/status", &b.Status) // a tenant admin may not read it
 	}
 	b.Flash = r.URL.Query().Get("ok")
@@ -342,7 +346,7 @@ func (u *ui) overview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var err error
-	operator := d.Who.Admin || d.Who.Kind == "local"
+	operator := d.Who.Admin
 	if operator { // a tenant admin sees its own tenants, not hosts
 		d.Hosts, err = listAll[host](u, r, "/v1/hosts?limit=500", 2000)
 		note("hosts", err)
@@ -465,7 +469,7 @@ func (u *ui) object(w http.ResponseWriter, r *http.Request) {
 	d.Children = len(d.Down) - 1
 	if d.Obj.Live() && d.Obj.StableNodeID != "" {
 		var nc nodeCert
-		if err := u.call(r, "GET", "/v1/objects/"+url.PathEscape(id)+"/certificate", &nc); err == nil {
+		if err := u.call(r, "GET", "/v1/certificates/"+url.PathEscape(d.Obj.StableNodeID)+"?tenant="+url.QueryEscape(d.Obj.TenantID), &nc); err == nil {
 			d.Cert = &nc
 		} else {
 			d.CertErr = err.Error()

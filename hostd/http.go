@@ -14,6 +14,7 @@ import (
 	"github.com/rosskukulinski/tailworks/hostd/gen"
 	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
 	"github.com/rosskukulinski/tailworks/hostd/sandbox"
+	"github.com/rosskukulinski/tailworks/internal/wallclock"
 	"github.com/rosskukulinski/tailworks/netd"
 )
 
@@ -79,6 +80,10 @@ func (h *Host) ingressHandler(t *tenant) http.Handler {
 			writeAPIError(w, &apiError{Code: "no_identity", Detail: "missing cf blob"})
 			return
 		}
+		if why := h.stallFenced(wl); why != "" { // stallfence.go (#501)
+			writeAPIError(w, &apiError{Code: "upstream_unavailable", Detail: why})
+			return
+		}
 		if h.serveApprovals(w, r, wl, blob) { // approvals.go: /_tw/approvals
 			return
 		}
@@ -90,6 +95,7 @@ func (h *Host) ingressHandler(t *tenant) http.Handler {
 			return
 		}
 		trace := newTraceID()
+		markHTTPSRoute(r, o, blob, route) // tailnethttps.go
 		blob["tw"] = route
 		blob["traceId"] = trace
 		// limits.md#redeploy-wait
@@ -105,8 +111,8 @@ func (h *Host) ingressHandler(t *tenant) http.Handler {
 			// A tailnet request may create objects: its ticket (hostd-issued,
 			// hostd-verified) is what the runtime's guarded env presents to
 			// "admit". Public requests get none (RT3-06/07).
-			route["ticket"] = gen.CreateTicket(inst.macKey(), trace, time.Now())
-			sealCaller(blob, inst.macKey(), time.Now()) // sealcf.go (#148)
+			route["ticket"] = gen.CreateTicket(inst.macKey(), trace, wallclock.Now())
+			sealCaller(blob, inst.macKey(), wallclock.Now()) // sealcf.go (#148)
 		}
 		b, _ := json.Marshal(blob)
 		r.Header.Set(netd.HeaderCF, string(b))
@@ -154,7 +160,7 @@ func (h *Host) egressObjHandler(inst *instance) http.Handler {
 			h.serveConnect(w, r, inst, h.connectAsFacet(inst)) // connect.go
 			return
 		}
-		cls, name, ok := gen.VerifyEgressOnce(inst.res.MACKey, r.Header, r.Method, r.RequestURI, time.Now(), &inst.nonces)
+		cls, name, ok := gen.VerifyEgressOnce(inst.res.MACKey, r.Header, r.Method, r.RequestURI, wallclock.Now(), &inst.nonces)
 		bc := takeBinding(r) // servicebind.go
 		if !ok {
 			writeAPIError(w, &apiError{Code: "unknown_object", Detail: "egress request failed platform authentication"})
@@ -393,7 +399,7 @@ func (h *Host) hostAPI(inst *instance) http.Handler {
 			// request is held to public.create (ADR-029 D5).
 			var existing bool
 			var e *apiError
-			_, ticketOK := gen.VerifyTicket(inst.macKey(), req.Ticket, time.Now())
+			_, ticketOK := gen.VerifyTicket(inst.macKey(), req.Ticket, wallclock.Now())
 			if req.As != nil || ticketOK {
 				existing, e = h.admitCreate(wl, inst.app, req.Class, req.Name)
 			} else if req.Workflow {
@@ -414,6 +420,8 @@ func (h *Host) hostAPI(inst *instance) http.Handler {
 			}
 			v := h.objView(o)
 			v["epoch"] = wl.epochNow() // the lease epoch: fencing tokens (docs/locks.md)
+			v["workload"] = wl.name
+			v["deploymentId"] = inst.depID
 			writeJSON(w, 200, v)
 		case "spawn":
 			c := inst.app.Classes[req.Class]
@@ -437,7 +445,7 @@ func (h *Host) hostAPI(inst *instance) http.Handler {
 				// A spawn from the Worker (workload identity) is admitted by the
 				// request's ticket; a public request has none, and neither has
 				// code that reached __TW some other way (RT3-07).
-				if _, ok := gen.VerifyTicket(inst.macKey(), req.Ticket, time.Now()); !ok {
+				if _, ok := gen.VerifyTicket(inst.macKey(), req.Ticket, wallclock.Now()); !ok {
 					fail(&apiError{Code: "create_not_admitted", Detail: "spawn from the workload needs the request's create ticket (a public request may not spawn)"})
 					return
 				}
@@ -552,8 +560,10 @@ func (h *Host) hostAPI(inst *instance) http.Handler {
 
 // ---- push API (mgmt → hostd) and status ----
 
-// pushHandlers registers the pushes mgmt sends a host: kills and
-// assignment changes. They are served on both push surfaces.
+// pushHandlers registers what mgmt sends a host: the pushes (kill,
+// assignments, probe, upgrade) and its calls for logs, store admin and
+// approvals. They are served on every surface: the tsnet push port, the
+// local socket and in-process (docs/contracts/hostd-api.md).
 func (h *Host) pushHandlers(m *http.ServeMux) {
 	m.HandleFunc("POST /v1/push/kill", func(w http.ResponseWriter, r *http.Request) {
 		var k mgmtapi.KillOrder
@@ -589,19 +599,19 @@ func (h *Host) pushHandlers(m *http.ServeMux) {
 }
 
 // tsnetPushAPI is what the host's own tailnet node serves (Config.
-// PushListener): the pushes only, each authenticated as coming from mgmt's
-// node (pushAuth). Status, purge and VM checks are the operator's and stay
-// on the local socket.
+// PushListener): pushHandlers' routes only, each authenticated as coming
+// from mgmt's node (pushAuth). Status, purge, teardown and VM checks are
+// the operator's and stay on the local socket.
 func (h *Host) tsnetPushAPI() http.Handler {
 	m := http.NewServeMux()
 	h.pushHandlers(m)
 	return h.pushAuth.handler(m)
 }
 
-// PushHandler is the push API (POST /v1/push/kill, POST /v1/push/assignments)
-// for mgmt running in the same process (Config.PushInProcess): mgmt serves
-// each push through it directly, so there is no peer to authenticate. It
-// routes nothing else (status and purge stay on the local socket).
+// PushHandler is the push API (pushHandlers' routes) for mgmt running in
+// the same process (Config.PushInProcess): mgmt serves each push through
+// it directly, so there is no peer to authenticate. It routes nothing else
+// (status, purge, teardown and VM checks stay on the local socket).
 func (h *Host) PushHandler() http.Handler {
 	m := http.NewServeMux()
 	h.pushHandlers(m)
@@ -757,6 +767,10 @@ type StatusView struct {
 	Containers []ContainerStatus `json:",omitempty"`
 	// ImageCacheBytes is the converted container image cache on disk.
 	ImageCacheBytes int64 `json:",omitempty"`
+
+	// ContainersOff is why this host offers no containers ("" when it
+	// does; containersoff.go).
+	ContainersOff string `json:",omitempty"`
 }
 
 // Status returns a snapshot.
@@ -765,6 +779,7 @@ func (h *Host) Status() StatusView {
 	v := StatusView{HostID: h.cfg.HostID, Sandbox: h.SandboxInfo(), Tiers: h.tiers(), InsecureSharedHost: h.cfg.InsecureSharedHost}
 	v.WorkerInternet = workerInternetMode(h.cfg.WorkerInternet) // internet.go
 	v.WorkerInternetProblem = workerInternetProblem(h.cfg.WorkerInternet)
+	v.ContainersOff = h.containersOff() // containersoff.go
 	if h.cfg.VM != nil {
 		if vv, ok := h.cfg.VM.(interface{ Via() string }); ok {
 			v.VMVia = vv.Via()

@@ -21,9 +21,9 @@ on, it is a major version.
 
 - **Hosts upgrade after mgmt.** A host that is out of the window keeps
   heartbeating, and its running workloads aren't disturbed, but placement
-  skips it. `tw status --json` lists it under `versions.skewed`.
+  skips it. mgmt's `GET /v1/status` lists it under `versions.skewed`.
 - **Features gate new work.** Hosts report their features when they
-  register (`d1`, `kv`, `queues`, `r2`, `telemetry`, `worker-internet`, `workflows`, `self-upgrade`, `internet-exit-node`, `internet-ports`, …). A deployment
+  register (`d1`, `kv`, `queues`, `r2`, `telemetry`, `worker-internet`, `workflows`, `self-upgrade`, `internet-exit-node`, `internet-ports`, `tailnet-https`, …). A deployment
   that uses a KV namespace is placed only on hosts that offer `kv`. When none
   does, the deploy fails with `feature_unavailable`, which names the hosts to
   upgrade.
@@ -37,6 +37,7 @@ tw upgrade --plan              # what would change: notes, breaking changes, mig
 tw upgrade                     # the latest published release
 tw upgrade 0.3.1               # a given release
 tw upgrade --from tailworks-0.3.1-linux-amd64.tar.gz   # an offline copy (SHA256SUMS next to it)
+tw upgrade rollback            # back to the release before, if you change your mind
 ```
 
 `tw upgrade` runs these steps:
@@ -72,42 +73,67 @@ tw upgrade --from tailworks-0.3.1-linux-amd64.tar.gz   # an offline copy (SHA256
 
 There is no automatic rollback once a **contract migration** has run,
 because the previous tw-mgmt can't open the contracted store. In that case
-`tw upgrade` stops and prints the restore command. Run `tw upgrade --plan`
-to see contract migrations before you start.
+`tw upgrade` stops and prints the `tw upgrade rollback` command that also
+puts the store back. Run `tw upgrade --plan` to see contract migrations
+before you start.
 
 **Which install it upgrades.** `tw upgrade` replaces the install that
 runs the state dir (`--state-dir`, `~/.tailworks` by default): the binary the
-`tw up --service` unit or the running supervisor was started from, or else
-the state dir itself, which is where `install.sh` installs by default. If
-the `tw` you run lives somewhere else, `tw upgrade` refuses and names both
-places. Pass `--prefix <dir>` to say which install to replace.
+`tw up --service` unit or the running supervisor was started from, else the
+install the last `tw up` ran from (recorded in `tw.json`), else the state dir
+itself, which is where `install.sh` installs by default. If the `tw` you run
+lives somewhere else, such as an extracted tarball, `tw upgrade` stops with
+[`prefix_mismatch`](errors.md#prefix_mismatch) and names both places. Pass
+`--prefix <dir>` to say which install to replace, or run that install's
+`bin/tw`. The prefix and the state dir, and what is in each:
+[What is in ~/.tailworks](INSTALL.md#what-is-in-tailworks). Upgrading from
+0.1.0, which has no `tw upgrade`, is in the
+[0.2.0 upgrade guide](https://github.com/rosskukulinski/tailworks/blob/v0.2.0/docs/upgrading.md#the-first-upgrade-from-a-release-without-tw-upgrade).
 
-### The first upgrade from a release without `tw upgrade`
+**Not `get.sh` or `install.sh`.** While tailworks runs from the prefix,
+`get.sh` and `install.sh` refuse to install another version over it, since
+they would swap the binaries under it with no backup, health check or
+rollback. They name the `tw upgrade` command to run instead. Stop
+tailworks first (`tw down`) to install by hand, or pass `--force`
+(`TW_INSTALL_FORCE=1` for `get.sh`) to swap anyway. Re-running the same
+version (a repair) is always allowed.
 
-A release that predates `tw upgrade` (0.1.0) can't upgrade itself, so run
-the new release's `tw` from the extracted tarball and point it at your
-install:
+### Roll back
+
+`tw upgrade rollback` puts the release before back: the one `install.sh`
+kept as `bin.prev`, `share.prev` and `VERSION.prev`. Use it when an upgrade
+went through but you want the old release back, or when `tw upgrade` could
+not roll back by itself ([`upgrade_failed`](errors.md#upgrade_failed)):
 
 ```sh
-tar -xzf tailworks-0.2.0-darwin-arm64.tar.gz -C /tmp
-/tmp/tailworks-0.2.0-darwin-arm64/bin/tw upgrade --from tailworks-0.2.0-darwin-arm64.tar.gz --prefix ~/.tailworks --plan
-/tmp/tailworks-0.2.0-darwin-arm64/bin/tw upgrade --from tailworks-0.2.0-darwin-arm64.tar.gz --prefix ~/.tailworks
+tw upgrade rollback                    # the binaries only, when the old release can open the store
+tw upgrade rollback --restore          # the store too, from the backup tw upgrade took
+tw upgrade rollback ~/.tailworks/backups/<time>-<from>   # the store from this backup
 ```
 
-Without `--prefix` it stops with `prefix_mismatch` rather than treat the
-extracted directory as the install. From then on, run `tw upgrade` from
-the installed `tw`.
+- It asks first; `--yes` skips that. When the store goes back, you type
+  `rollback` to confirm, because every change since the backup is lost.
+- It keeps the current state in `~/.tailworks/backups/<time>-before-rollback`
+  first, so `tw restore` of that undoes it.
+- **Binaries only** is the default while the previous tw-mgmt can still open
+  the store, that is, no contract migration ran since. Otherwise it restores
+  the newest `~/.tailworks/backups/<time>-<from>` that `tw upgrade` took, then
+  fences it as [`tw restore`](INSTALL.md#restore-tw-restore) does.
+- It stops tailworks, swaps `.prev` back (`install.sh --rollback`), starts the
+  previous release the way it ran, and waits until it is healthy.
+- A Postgres store isn't restored by `tw`: it prints the `pg_restore` and
+  `tw-mgmt restore-fence` commands to run before `tw up`, as `tw restore` does.
+- It refuses on a machine linked to a remote tw-mgmt (`remote_unsupported`)
+  and on an npm install, which keeps no previous release
+  ([Installed with npm](#installed-with-npm)).
 
-To roll back by hand (the store part is `tw restore <backup>`,
-[INSTALL.md](INSTALL.md#restore-tw-restore)):
-
-```sh
-tw down
-cp -R ~/.tailworks/backups/<time>-<from>/mgmt/. ~/.tailworks/mgmt/   # after removing mgmt.db, mgmt.db-wal, mgmt.db-shm
-~/.tailworks/install.sh --rollback
-tw-mgmt restore-fence -state-dir ~/.tailworks/mgmt
-tw up
-```
+**Agent skills.** The skills `tw agent setup` wrote into your home
+directory are stamped with the version that wrote them. After a healthy
+upgrade, `tw upgrade` runs the new `tw` to rewrite them (only files and
+blocks that `tw` wrote; it creates nothing new), and `--plan` lists that
+step when there is something to refresh. Skills installed into a project
+(`--scope project`) keep the old version until you re-run
+`tw agent setup --scope project` there.
 
 **The microVM tier's helper** is root-owned. `tw upgrade` doesn't touch it.
 When `tw doctor` reports its protocol out of range, run
@@ -119,8 +145,10 @@ within one release line.
 
 If `tw` came from npm (`npm install -g tailworks`, or `npx tailworks`;
 [INSTALL.md](INSTALL.md#install-with-npm)), npm owns the binaries, so
-`tw upgrade` refuses with `npm_install` and `tw version --check` prints the
-npm command. Upgrade with npm instead:
+`tw upgrade` refuses with `npm_install`. `tw upgrade --plan`,
+`tw version --check` and `tw doctor` print the npm command
+(`tw backup && tw down && npm install -g tailworks@<version> && tw up`).
+Upgrade with npm instead:
 
 ```sh
 tw backup                                            # npm has no rollback: keep a way back
@@ -144,19 +172,35 @@ A remote host that should upgrade itself needs the release tarball.
 
 ## A fleet (tw-mgmt replicas and remote hosts)
 
-From a machine linked to tw-mgmt (`tw link`), or with `--fleet`:
+With `tw upgrade fleet`, from a machine linked to tw-mgmt (`tw link`; there
+`tw upgrade` is `tw upgrade fleet`) or on a `tw up` machine:
 
 ```sh
-tw release import tailworks-0.3.1-linux-amd64.tar.gz tailworks-0.3.1-linux-arm64.tar.gz   # once per release
-tw upgrade --plan 0.3.1        # mgmt plans it from its catalog and the fleet's versions
-tw upgrade 0.3.1               # start the upgrade run; follows it until done (--no-wait returns)
-tw upgrade status | pause | resume | abort
+tw upgrade import 0.3.1             # once per release: download, verify and import it
+tw upgrade fleet --plan 0.3.1       # mgmt plans it from its catalog and the fleet's versions
+tw upgrade fleet 0.3.1              # start the upgrade run; follows it until done (--no-wait returns)
+tw upgrade fleet status | pause | resume | abort
 ```
 
 - **The release catalog.** tw-mgmt knows every release up to its own
-  without network access. `tw release import` adds a newer release from its
-  tarball: the notes, and the tarball itself, which hosts download.
-  `tw release ls` lists the catalog.
+  without network access. `tw upgrade import` adds a newer release: the
+  notes, and the tarball itself, which hosts download. `tw upgrade releases`
+  lists the catalog.
+  - `tw upgrade import <version>` downloads the release's `SHA256SUMS` and
+    checks its signature (`SHA256SUMS.sig`) against the release keys built
+    into `tw`; there is no `--allow-unsigned` here. It then downloads the
+    tarball for each platform the hosts that upgrade themselves run
+    (`--platform linux-amd64,…` names them instead), checks it against
+    `SHA256SUMS`, and imports it. Each host checks the signature again
+    when it installs the tarball.
+  - `tw upgrade import <tarball>…` imports tarballs you downloaded yourself
+    (`SHA256SUMS` next to them), for a fleet without internet access.
+  - Nothing is fetched behind your back: `tw upgrade fleet` and `--plan`
+    plan from what the catalog has. Without a version, the target is the
+    newest release in the catalog.
+- **The old spellings** still work for one release and print the new one:
+  `--fleet`, `status|pause|resume|abort` straight after `tw upgrade`, and
+  `release ls|import` (now `tw upgrade releases` and `tw upgrade import`).
 - **The upgrade run.** The run is stored in mgmt's database and driven by
   whichever replica holds its lease. Closing the laptop doesn't stop it, and
   a replica that dies hands it to another. Its steps:
@@ -184,7 +228,7 @@ tw upgrade status | pause | resume | abort
      continues once it re-registers.
 - **When a gate fails,** for example a host that doesn't come back within
   `--settle` or a canary that fails its soak, the run **pauses** with the
-  reason. Fix the cause, then run `tw upgrade resume`. `abort` ends the run
+  reason. Fix the cause, then run `tw upgrade fleet resume`. `abort` ends the run
   and uncordons the host in progress.
 - **More than one release line.** A fleet more than one line behind the
   target, or a target past a release with contract migrations, needs an

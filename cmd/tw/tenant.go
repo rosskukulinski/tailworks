@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/rosskukulinski/tailworks/hostd"
-	"github.com/rosskukulinski/tailworks/internal/policy"
 	"github.com/rosskukulinski/tailworks/internal/procsb"
 	"github.com/rosskukulinski/tailworks/internal/tsapi"
 	"github.com/rosskukulinski/tailworks/mgmt"
@@ -102,11 +101,11 @@ func (s *state) tenant(ref string) (TenantRef, error) {
 		names = append(names, t.Tailnet)
 	}
 	return TenantRef{}, fail("unknown_tenant", fmt.Sprintf("no tenant %q", ref), "tenants: "+strings.Join(names, ", ")).
-		withFix("tw tenant ls", "tw tenant add <tailnet> --oauth-client-file <file>   (on the host)")
+		withFix("tw tenant ls", "tw tenant add <tailnet>   (on the host)")
 }
 
 func tenantFlag(f *flags) *string {
-	return f.String("tenant", "", "tenant: its tailnet, tenant ID or tailnet label (default: the `tw up` tenant)")
+	return f.String("tenant", "", tenantUsage) // helpflags.go: printed on the global line
 }
 
 // objectsOf lists a tenant's objects (every page; max > 0 caps the count).
@@ -132,17 +131,17 @@ func cmdTenant(args []string) error {
 		}
 	}
 	if sub < 0 {
-		return fail("bad_request", "tw tenant needs a subcommand: add | ls | set | rm", "usage: tw "+usageOf("tenant"))
+		return needsSubcommand("tenant")
 	}
 	rest := append(append([]string{}, args[:sub]...), args[sub+1:]...)
-	switch args[sub] {
+	switch normalizeVerb(args[sub]) {
 	case "add":
 		return cmdTenantAdd(rest)
-	case "ls", "list":
+	case "ls":
 		return cmdTenantLs(rest)
 	case "set":
 		return cmdTenantSet(rest)
-	case "rm", "remove", "delete":
+	case "rm":
 		return cmdTenantRm(rest)
 	}
 	return fail("bad_request", fmt.Sprintf("unknown subcommand %q", args[sub]), "usage: tw "+usageOf("tenant"))
@@ -166,13 +165,12 @@ type tenantAddResult struct {
 // secret.
 func cmdTenantAdd(args []string) error {
 	f := newFlags("tenant add")
-	oauthFile := f.String("oauth-client-file", "", "this tailnet's OAuth client (mint mode \"oauth\"): 0600 file with TS_OAUTH_CLIENT_ID=… and TS_OAUTH_CLIENT_SECRET=tskey-client-… (Auth Keys write, tag tag:tw); read at use, never copied")
-	keyFile := f.String("api-key-file", "", "--control=headscale only: 0600 file with HEADSCALE_API_KEY=…; read at use, never copied")
+	oauthFile := f.String("oauth-client-file", "", "this tailnet's OAuth client (mint mode \"oauth\"): 0600 file with TS_OAUTH_CLIENT_SECRET=tskey-client-… (Auth Keys write, tag tag:tw); read at use, never copied. Omitted on a terminal: asked for and saved to ~/.config/tailworks/<tenant>-oauth.env")
+	keyFile := f.String("api-key-file", "", "Headscale only: 0600 file with HEADSCALE_API_KEY=…; read at use, never copied. With a non-default --control-url it selects the Headscale profile")
 	profile := f.String("control", controlTailscale, "control-plane profile: tailscale, or headscale (ADR-015: a Headscale server at --control-url; the tailnet argument is its dns.base_domain)")
-	apply := f.Bool("apply-policy", false, "write the base policy snippet to the tailnet policy instead of printing it (additive, validated first, written with If-Match); shows the lines and asks first")
-	yes := f.Bool("yes", false, "with --apply-policy: write the policy without asking (needed without a terminal, and with --json)")
+	apply := f.Bool("apply-policy", false, "--control=headscale: write the owner tag's tagOwners entry (\"tag:tw\": []) when it is missing instead of printing it (additive, validated first, written with If-Match); shows the line and asks first. Without the flag it asks only on a terminal (not with --json or --yes); --apply-policy=false never asks or writes. A Tailscale tenant's policy is never written")
+	yes := yesFlagBefore(f, "--apply-policy writes the policy")
 	control := f.String("control-url", prodControl, "coordination server for this tailnet's nodes")
-	rpm := f.Int("registrations-per-minute", 0, "this tenant's node registration throttle (default 200/min)")
 	ownerTag := f.String("owner-tag", "", "another team's tenant on a tailnet that already has one (docs/teams.md): the tag that owns its tags, e.g. tag:tw-t-payments; its --oauth-client-file must be scoped to it")
 	namePrefix := f.String("name-prefix", "", "with --owner-tag: goes in front of every tailnet name tw makes for this tenant (up to 11 of a-z, 0-9, -)")
 	pos, err := f.parse(args)
@@ -183,6 +181,9 @@ func cmdTenantAdd(args []string) error {
 		return fail("bad_request", "tw tenant add needs one tailnet", "usage: tw "+usageOf("tenant"))
 	}
 	tailnet := strings.TrimSuffix(pos[0], ".")
+	if headscaleInferred(f.FlagSet, *keyFile, *control) { // up_headscale.go
+		*profile = controlHeadscale
+	}
 	if err := checkControlProfile(*profile, *control, "tenant add"); err != nil {
 		return err
 	}
@@ -190,16 +191,15 @@ func cmdTenantAdd(args []string) error {
 	switch {
 	case hs && *oauthFile != "":
 		return fail("profile_unsupported", "the Headscale profile mints with a Headscale API key: OAuth clients are a Tailscale feature").
-			withFix("tw tenant add " + tailnet + " --control=headscale --control-url <server_url> --api-key-file <file with HEADSCALE_API_KEY=…>")
+			withFix("tw tenant add " + tailnet + " --control-url <server_url> --api-key-file <file with HEADSCALE_API_KEY=…>")
 	case hs && *keyFile == "":
 		_, err := headscaleKeyFile("")
 		return err
 	case !hs && *keyFile != "":
 		return fail("mint_mode_removed", "tw no longer mints with a Tailscale API key (--api-key-file is for --control=headscale only)").
-			withFix("tw tenant add " + tailnet + " --oauth-client-file <file>   (an OAuth client of that tailnet: Auth Keys write, tag tag:tw)")
-	case !hs && *oauthFile == "":
-		return fail("bad_request", "tw tenant add needs --oauth-client-file (an OAuth client of "+tailnet+")").
-			withFix("tw tenant add " + tailnet + " --oauth-client-file <file>")
+			withFix("tw tenant add "+tailnet+" --oauth-client-file <file>   (an OAuth client of that tailnet: Auth Keys write, tag tag:tw)", headscaleOnHint)
+	case !hs && *oauthFile == "" && !tenantOAuthPromptable(f, *ownerTag, *namePrefix): // tenant_oauth.go
+		return tenantNeedsOAuthFile(tailnet)
 	}
 	s, err := openState(*f.stateDir)
 	if err != nil {
@@ -236,6 +236,11 @@ func cmdTenantAdd(args []string) error {
 		if why := tailscaledExposed(s, hs.Tailscaled); why != "" {
 			return fail("sandbox_unavailable", "this user can reach "+hs.Tailscaled+" (this host's tailnet identity) and "+why+", so this host must not serve more than one tenant",
 				"tw doctor lists it under host_sockets").withFix(fix + "; or enable Landlock and use TCP listen mode for Node apps")
+		}
+	}
+	if !hs && *oauthFile == "" { // asked for on the terminal (tenant_oauth.go)
+		if *oauthFile, err = tenantPromptOAuthFile(s, f, tailnet); err != nil {
+			return err
 		}
 	}
 	t0 := time.Now()
@@ -308,9 +313,6 @@ func cmdTenantAdd(args []string) error {
 		if !hs {
 			body = map[string]any{"tenantID": tid, "tailnet": tailnet, "controlURL": *control, "mintMode": mgmt.MintOAuth, "oauthClientFile": absOAuth, "oauthClientID": creds.ClientID}
 		}
-		if *rpm > 0 {
-			body["registrationsPerMinute"] = *rpm
-		}
 		if *ownerTag != "" {
 			body["ownerTag"] = *ownerTag
 		}
@@ -344,33 +346,9 @@ func cmdTenantAdd(args []string) error {
 	}
 	res.Timings["tenant_ready"] = ms(time.Since(t0))
 
-	snip, popts := profileSnippet(*profile)
-	owner := "tag:tw"
-	if *ownerTag != "" {
-		// The team's owner tag, owned by the tailnet's admins (teams.md).
-		owner = *ownerTag
-		if snip.TagOwners == nil {
-			snip.TagOwners = map[string][]string{}
-		}
-		snip.TagOwners[owner] = []string{"autogroup:admin"}
-	}
-	miss, err := policy.Missing(pol, snip)
-	if err != nil {
+	owner := tenantOwnerTag(*ownerTag) // tenant_policy.go
+	if err := tenantPolicy(ctx, f, &res, api, pol, policyReadable, *profile, owner, *apply, *yes); err != nil {
 		return err
-	}
-	res.PolicyOK = miss.Empty() || !policyReadable
-	if !res.PolicyOK {
-		res.PolicyDiff = miss.HuJSON()
-		if *apply {
-			if err := confirmBootstrapWrite(f, *yes, "tw tenant add --apply-policy", *profile, miss, nil); err != nil { // up_policyapply.go
-				return err
-			}
-			ar, err := policy.ApplyWith(ctx, api, snip, popts)
-			if err != nil {
-				return fail("policy_apply_failed", "could not apply the policy snippet", err.Error()).withFix("add it in "+policyHome(*profile)+":", res.PolicyDiff)
-			}
-			res.Applied, res.PolicyOK = ar.Changed, true
-		}
 	}
 	res.Timings["total"] = ms(time.Since(t0))
 	emit(f, res, func() {
@@ -384,19 +362,7 @@ func cmdTenantAdd(args []string) error {
 		}
 		fmt.Printf("✓ tenant   %s %s (tenant %s, %s) · control %s\n", tailnet, verb, tid, how, *control)
 		fmt.Printf("  isolated: its own netd registry, workerd processes, state dir (0700) and registration throttle\n")
-		switch {
-		case res.Applied:
-			fmt.Printf("✓ policy   applied %s tagOwners (validated, If-Match)\n", owner)
-		case res.PolicyOK && !policyReadable:
-			fmt.Printf("✓ policy   not checked (the OAuth client can't read the policy); the first mint proves %s ownership\n", owner)
-		case res.PolicyOK:
-			fmt.Printf("✓ policy   %s tagOwners present\n", owner)
-		default:
-			fmt.Printf("› policy   not applied (re-run with --apply-policy, or add in %s):\n", policyHome(*profile))
-			for _, l := range strings.Split(strings.TrimSpace(res.PolicyDiff), "\n") {
-				fmt.Printf("    %s\n", l)
-			}
-		}
+		tenantPolicyReport(res, policyReadable, *profile, owner, *apply)
 		if *profile == controlHeadscale {
 			fmt.Printf("› profile  %s\n", headscaleProfileNote)
 		}

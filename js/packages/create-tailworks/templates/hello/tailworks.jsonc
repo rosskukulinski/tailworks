@@ -1,9 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/rosskukulinski/tailworks/master/schema/tailworks.schema.json",
-  "name": "hello",
   "tailnet": {
-    // the workload node's tags (your policy must let tag:tw own them)
-    "tags": ["tag:tw-wl-hello"],
+    // "tags" (the workload node's) defaults to ["tag:tw-wl-<workload>"];
+    // your policy must let tag:tw own it (tw policy prints the line)
     // tags this app calls, e.g. ["tag:db"]; `tw deploy` checks your policy grants them
     "connects": []
   }

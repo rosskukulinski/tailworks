@@ -36,53 +36,61 @@ type queuesResult struct {
 
 const queuesSubs = "create | ls | info | rm | purge | messages | send"
 
-func cmdQueues(args []string) error {
-	// Global flags (--state-dir X, --json) may precede the subcommand.
-	sub := -1
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		if !strings.HasPrefix(a, "-") {
-			sub = i
-			break
-		}
-		if (a == "--state-dir" || a == "-state-dir" || a == "--tenant" || a == "-tenant") && i+1 < len(args) {
-			i++
-		}
-	}
-	if sub < 0 {
-		return fail("bad_request", "tw queues needs a subcommand: "+queuesSubs, "usage: tw "+usageOf("queues"))
-	}
-	return cmdQueuesSub(args[sub], append(append([]string{}, args[:sub]...), args[sub+1:]...))
+// queuesOpts are tw queues' flags. A verb registers only its own
+// (queuesFlags); the others keep their zero value.
+type queuesOpts struct {
+	tenant *string
+
+	// messages
+	limit *int
+
+	// send
+	text  *bool
+	delay *int
+
+	// rm, purge
+	yes *bool
 }
 
-func cmdQueuesSub(sub string, args []string) error {
+// queuesFlags registers verb's flags ("send"; anyVerb: every verb's) on f.
+func queuesFlags(f *flags, verb string) *queuesOpts {
+	o := &queuesOpts{limit: new(int), text: new(bool), delay: new(int), yes: new(bool)}
+	o.tenant = tenantFlag(f)
+	if onVerb(verb, "messages") {
+		o.limit = f.Int("limit", 20, "at most this many (1-100)")
+	}
+	if onVerb(verb, "send") {
+		o.text = f.Bool("text", false, "the body is text (contentType text), not JSON")
+		o.delay = f.Int("delay", 0, "delaySeconds (0-43200)")
+	}
+	if onVerb(verb, "rm", "purge") {
+		o.yes = yesFlag(f)
+	}
+	return o
+}
+
+func cmdQueues(args []string) error {
+	sub, args, _ := scanVerb(args, func(f *flags) { queuesFlags(f, anyVerb) }, func(string) int { return 1 })
+	if sub == "peek" {
+		sub = "messages"
+	}
+	if sub != "" && !onVerb(sub, "create", "ls", "info", "rm", "purge", "messages", "send") {
+		return fail("bad_request", fmt.Sprintf("unknown subcommand %q (%s)", sub, queuesSubs), "usage: tw "+usageOf("queues"))
+	}
 	f := newFlags("queues")
-	tenantF := tenantFlag(f)
-	limitF := f.Int("limit", 20, "messages: at most this many (1-100)")
-	textF := f.Bool("text", false, "send: the body is text (contentType text), not JSON")
-	delayF := f.Int("delay", 0, "send: delaySeconds (0-43200)")
-	yes := yesFlag(f)
+	o := queuesFlags(f, sub)
 	pos, err := f.parse(args)
 	if err != nil {
 		return err
 	}
-	switch sub {
-	case "list":
-		sub = "ls"
-	case "delete":
-		sub = "rm"
-	case "peek":
-		sub = "messages"
-	}
 	switch {
+	case sub == "":
+		return needsSubcommand("queues")
 	case sub == "ls" && len(pos) != 0:
 		return fail("bad_request", "tw queues ls takes no arguments", "usage: tw "+usageOf("queues"))
 	case sub == "send" && (len(pos) < 1 || len(pos) > 2):
 		return fail("bad_request", "tw queues send needs the queue (and a body, else stdin)", "usage: tw "+usageOf("queues"))
 	case sub != "ls" && sub != "send" && len(pos) != 1:
-		if !strings.Contains(" create info rm purge messages ", " "+sub+" ") {
-			return fail("bad_request", fmt.Sprintf("unknown subcommand %q (%s)", sub, queuesSubs), "usage: tw "+usageOf("queues"))
-		}
 		return fail("bad_request", "tw queues "+sub+" needs the queue name", "usage: tw "+usageOf("queues"))
 	}
 	name := ""
@@ -94,11 +102,11 @@ func cmdQueuesSub(sub string, args []string) error {
 	}
 	switch sub {
 	case "rm":
-		if err := confirmDestroy(f, *yes, "deleting queue "+name+" deletes it with its messages", name, "tw queues rm "+name); err != nil {
+		if err := confirmDestroy(f, *o.yes, "deleting queue "+name+" deletes it with its messages", name, "tw queues rm "+name); err != nil {
 			return err
 		}
 	case "purge":
-		if err := confirmDestroy(f, *yes, "purging queue "+name+" deletes every message in it", name, "tw queues purge "+name,
+		if err := confirmDestroy(f, *o.yes, "purging queue "+name+" deletes every message in it", name, "tw queues purge "+name,
 			"tw queues messages "+name+"   (first, to see what's in it)"); err != nil {
 			return err
 		}
@@ -112,14 +120,14 @@ func cmdQueuesSub(sub string, args []string) error {
 			return fail("bad_request", "can't read the message body: "+err.Error())
 		}
 		ct := "json"
-		if *textF {
+		if *o.text {
 			ct = "text"
 		} else if !json.Valid(body) {
 			return fail("bad_request", "the body is not JSON").withFix("tw queues send "+name+" '{\"k\":1}'", "tw queues send "+name+" --text 'plain text'")
 		}
 		msg = map[string]any{"body": body, "contentType": ct}
-		if *delayF > 0 {
-			msg["delaySeconds"] = *delayF
+		if *o.delay > 0 {
+			msg["delaySeconds"] = *o.delay
 		}
 	}
 	s, err := openState(*f.stateDir)
@@ -129,7 +137,7 @@ func cmdQueuesSub(sub string, args []string) error {
 	if err := s.requireUp(); err != nil {
 		return err
 	}
-	tn, err := s.tenant(*tenantF)
+	tn, err := s.tenant(*o.tenant)
 	if err != nil {
 		return err
 	}
@@ -197,7 +205,7 @@ func cmdQueuesSub(sub string, args []string) error {
 		emit(f, res, func() { fmt.Printf("✓ purged %d messages from queue %s\n", pr.Purged, name) })
 	case "messages":
 		var out struct{ Messages []mgmt.QueueMessage }
-		if err := c.DoHeaders(ctx, "GET", base+"/"+name+"/messages?limit="+strconv.Itoa(*limitF), nil, &out, hdr); err != nil {
+		if err := c.DoHeaders(ctx, "GET", base+"/"+name+"/messages?limit="+strconv.Itoa(*o.limit), nil, &out, hdr); err != nil {
 			return err
 		}
 		msgs := append([]mgmt.QueueMessage{}, out.Messages...)

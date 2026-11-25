@@ -46,6 +46,9 @@ func buildContainerImages(ctx context.Context, mc *mgmtapi.Client, a *app, bundl
 	if err != nil || len(jobs) == 0 {
 		return nil, err
 	}
+	if err := containerBuildxCheck(ctx); err != nil { // containerbuild.go
+		return nil, err
+	}
 	arches, err := buildArches(ctx, mc, tenantID, platforms, classes)
 	if err != nil {
 		return nil, err
@@ -98,12 +101,7 @@ func buildArches(ctx context.Context, mc *mgmtapi.Client, tenantID, platforms st
 	if err := mc.Do(ctx, "GET", "/v1/tenants/"+tenantID, nil, &tn); err != nil {
 		return nil, err
 	}
-	hosts, err := listAll[struct {
-		Status string   `json:"status"`
-		Tiers  []string `json:"tiers"`
-		Arch   string   `json:"arch"`
-		Pool   string   `json:"pool"`
-	}](ctx, mc, "/v1/hosts", 0)
+	hosts, err := listAll[containersHost](ctx, mc, "/v1/hosts", 0) // doctor_containers.go
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +113,7 @@ func buildArches(ctx context.Context, mc *mgmtapi.Client, tenantID, platforms st
 	sort.Strings(out)
 	if len(out) == 0 {
 		return nil, fail("no_host", "no live host in this tenant's pool offers containers, so there is no arch to build the Dockerfile images for").
-			withFix("set up a Linux host with KVM: sudo tw host setup --microvm", "or build anyway: tw deploy --platform linux/arm64")
+			withFix(containersNoHostFix(containersLocalState(), hosts), "or build anyway: tw deploy --platform linux/arm64")
 	}
 	return out, nil
 }
@@ -141,14 +139,14 @@ func cmdImage(args []string) error {
 		}
 	}
 	if len(words) == 0 {
-		return fail("bad_request", "tw image needs a subcommand: public add|ls|rm, push", "usage: tw "+usageOf("image"))
+		return needsSubcommand("image")
 	}
 	switch words[0] {
 	case "public":
 		if len(words) < 2 {
 			return fail("bad_request", "tw image public add|ls|rm", "usage: tw "+usageOf("image"))
 		}
-		return cmdImagePublic(words[1], rest)
+		return cmdImagePublic(normalizeVerb(words[1]), rest)
 	case "push":
 		return cmdImagePush(rest)
 	}
@@ -158,7 +156,11 @@ func cmdImage(args []string) error {
 
 func cmdImagePublic(sub string, args []string) error {
 	f := newFlags("image public " + sub)
-	arch := f.String("arch", "", "comma-separated arches to mark (default: every linux amd64/arm64 image the ref has)")
+	// --arch only means something to add; ls and rm reject it as unknown.
+	arch := new(string)
+	if sub == "add" {
+		arch = f.String("arch", "", "comma-separated arches to mark (default: every linux amd64/arm64 image the ref has)")
+	}
 	pos, err := f.parse(args)
 	if err != nil {
 		return err

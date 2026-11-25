@@ -31,8 +31,8 @@ its own node on your tailnet, with its own name and tags
   tools a caller may run ([COMPAT.md](COMPAT.md#mcp)).
 - **Sub-agents are narrowed.** An object created with `ctx.tailnet.spawn()`
   gets at most its parent's grants ([concepts](concepts.md#sub-agent)).
-- **Kill is per node.** `tw kill` takes one object off the tailnet;
-  `--cascade` takes its sub-agents too ([concepts](concepts.md#kill)).
+- **Kill is per node.** `tw kill` takes an object and its sub-agents off
+  the tailnet ([concepts](concepts.md#kill)).
 - **Approvals are decided by a tailnet identity**, not by whichever code
   holds a binding ([approvals.md](approvals.md)).
 - **The audit trail is hash-chained**, so truncation and gaps show
@@ -72,7 +72,7 @@ the network, so that a network policy can tell one from another?
   machine, no per-object identity and your own process supervision are
   enough, you don't need anything on top. Its README warns that "workerd
   is not a hardened sandbox" and must run inside one; that applies to
-  tailworks' process tier too ([Isolation](INSTALL.md#isolation)).
+  tailworks' process tier too ([Isolation tiers](security-model.md#isolation-tiers)).
 - **OpenOrange** targets AWS, Google Cloud, Azure or your own servers with
   storage in S3, and lists bindings tailworks doesn't have (Hyperdrive,
   pluggable Workers AI). It runs on Node.js rather than
@@ -146,9 +146,11 @@ Until then, the storage story is single-host
   ([COMPAT.md](COMPAT.md#do-storage), [locks](COMPAT.md#locks)). celld,
   Rivet and Cloudflare all replicate object storage or keep it in object
   storage.
-- **You write Python Workers.** Not supported
-  ([#292](https://github.com/rosskukulinski/tailworks/issues/292)); Python
-  runs only in a [container](containers.md).
+- **You write Python Workers that need Cloudflare-only pieces.** Python
+  Workers run ([python.md](python.md)), with Durable Objects, KV, R2 and D1
+  cron triggers, Queues, static assets and packages vendored by
+  pywrangler, on both isolation tiers. Python Workflows don't yet, and
+  Python Durable Objects have no tailnet node of their own.
 - **You are building a public SaaS.** tailworks identifies callers by
   tailnet identity, so its model fits internal tools and agents. Public
   routes exist, as opt-in paths over Tailscale Funnel

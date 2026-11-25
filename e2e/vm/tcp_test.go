@@ -41,8 +41,14 @@ func TestE2EVMTCPEgress(t *testing.T) {
 			}
 			go func(c net.Conn) {
 				defer c.Close()
-				who, err := echo.LC.WhoIs(context.Background(), c.RemoteAddr().String())
-				if err != nil {
+				// A netstack conn reset before we got here has no remote
+				// address: RemoteAddr returns nil (#411).
+				ra := c.RemoteAddr()
+				if ra == nil {
+					return
+				}
+				who, err := echo.LC.WhoIs(context.Background(), ra.String())
+				if err != nil || who == nil || who.Node == nil {
 					io.WriteString(c, "whois failed\n")
 					return
 				}

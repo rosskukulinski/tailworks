@@ -118,10 +118,16 @@ func rebaseWranglerPaths(cfg map[string]any, cfgDir string) {
 		if s, ok := m["image"].(string); ok {
 			m["image"] = rebaseSource(s)
 		}
+		if s, ok := m["image_build_context"].(string); ok {
+			m["image_build_context"] = rebase(s)
+		}
 		if imgs, ok := m["images"].(map[string]any); ok {
 			for n, v := range imgs {
 				if s, ok := v.(string); ok {
 					imgs[n] = rebaseSource(s)
+				}
+				if im, ok := v.(map[string]any); ok {
+					rebaseContainerImage(im, rebase, rebaseSource) // containerbuild.go
 				}
 			}
 		}

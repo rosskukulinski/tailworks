@@ -51,7 +51,7 @@ described in
 
 ## What's in scope
 
-The tailworks binaries (`tw`, `tw-mgmt`, `tw-hostd`, `tw-netd`,
+The tailworks binaries (`tw`, `tw-mgmt`, `tw-hostd` (which embeds netd),
 `tw-vmhelper`), the microVM guest, the platform runtime and the `@tailworks/*`
 packages in this repository. Bugs in workerd, Firecracker or Tailscale go
 to those projects; tell us too if tailworks' use of them makes things worse.

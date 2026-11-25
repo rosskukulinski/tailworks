@@ -191,10 +191,5 @@ func servicePreflight(pol *Policy, res *PreflightResult, name string, wlTags []s
 	if pol.serviceAutoApproved(name, wlTags) {
 		return
 	}
-	res.ServiceUnapproved = true
-	tag := "tag:tw"
-	if len(wlTags) > 0 {
-		tag = wlTags[0]
-	}
-	res.ServiceSnippet = fmt.Sprintf(`"autoApprovers": { "services": { %q: [%q] } }`, name, tag)
+	res.ServiceUnapproved = true // ServiceSnippet: preflightsnippet.go
 }

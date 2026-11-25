@@ -24,7 +24,7 @@ func TestDoctorSideChannelsFixtures(t *testing.T) {
 		{
 			dir:    "mitigated",
 			status: "ok",
-			detail: []string{"the 9 CPU vulnerabilities the kernel reports are mitigated or not affected", "SMT off (nosmt)", "KSM off", "more than one tenant", "Node-tier", "microVM"},
+			detail: []string{"the 9 CPU vulnerabilities the kernel reports are mitigated or not affected", "SMT off (nosmt)", "KSM off", "more than one tenant", "Node-runtime", "microVM"},
 			absent: []string{"Vulnerable"},
 		},
 		{

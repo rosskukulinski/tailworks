@@ -29,6 +29,16 @@ If the value is already in the user's environment, they can pipe it
 printf %s "$LLM_API_KEY" | tw secret put LLM_API_KEY
 ```
 
+If the user already has the values in a file (`.dev.vars`, or a JSON
+object of strings), ask them to set them all at once. It only adds and
+replaces; it never removes a secret that isn't in the file:
+
+```sh
+tw secret bulk .dev.vars                         # the user runs this
+```
+
+Don't create or edit that file with real values yourself.
+
 ## Commands
 
 Run them from the app directory, or pass `--workload <workload>`:

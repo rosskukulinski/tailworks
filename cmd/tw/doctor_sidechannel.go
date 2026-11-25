@@ -97,7 +97,7 @@ func readTrim(path string) string {
 
 // sideChannelMatters says when the posture matters; it ends every
 // side_channels detail.
-const sideChannelMatters = "this matters when the host serves more than one tenant, runs a Node-tier workload or offers the microVM tier: those run native code, and the kernel's and CPU's mitigations are then what keeps a tenant from reading another tenant's or tailworks' secrets off a shared core (docs/security-model.md, Side channels)"
+const sideChannelMatters = "this matters when the host serves more than one tenant, runs a Node-runtime workload or offers the microVM tier: those run native code, and the kernel's and CPU's mitigations are then what keeps a tenant from reading another tenant's or tailworks' secrets off a shared core (docs/security-model.md, Side channels)"
 
 // report turns the posture into a check result: ok when everything the
 // kernel reports is mitigated, SMT is off and KSM is off; otherwise a

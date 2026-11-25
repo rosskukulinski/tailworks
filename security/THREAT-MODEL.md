@@ -181,7 +181,7 @@ process tier only.
 
 **Hardware side channels** (H-host-sidechannel, #334) are a residual on
 every tier, because every tier shares the host's cores and kernel with
-tw-hostd, tw-netd, tw-mgmt (assets A1–A3) and the other tenants; the
+tw-hostd (which embeds netd), tw-mgmt (assets A1–A3) and the other tenants; the
 process or VM boundary is where the OS's and CPU's mitigations apply, and
 tailworks turns none of them on. Per tier:
 
@@ -366,7 +366,8 @@ not workerd's: [#334](https://github.com/rosskukulinski/tailworks/issues/334).
 6. **Host / ops.** → a host is trusted only for its leases (B4). The
    operator of a host can read every tenant leased to it, and mgmt's
    operator holds every credential: see "Who you trust" in
-   docs/security-model.md. `--apply-policy` merges only additive grants
+   docs/security-model.md. The policy write (only after an interactive
+   y/N, or `--apply-policy --yes`; #481) merges only additive grants
    within `tag:tw*`, plus two grants tailworks builds itself (the admin
    grant, and `autogroup:member` to a new app's own tag; C12). Releases are signature-checked on every install
    and upgrade path (B9). A host's path reports cover only its own rows

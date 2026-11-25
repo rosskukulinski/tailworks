@@ -31,6 +31,10 @@ type pubEnv struct {
 
 	// policyWrites counts POST /acl (policyapply_test.go).
 	policyWrites int
+
+	// writeDenied: the OAuth client has Policy File › Read only (POST /acl
+	// and /acl/validate answer 403; deploy_policy_test.go).
+	writeDenied bool
 }
 
 func newPubEnv(t *testing.T) *pubEnv {
@@ -44,6 +48,11 @@ func newPubEnv(t *testing.T) *pubEnv {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v2/oauth/token" {
 			w.Write([]byte(`{"access_token":"oauth-access-1","token_type":"Bearer","expires_in":3600}`))
+			return
+		}
+		if r.Method == "POST" && strings.Contains(r.URL.Path, "/acl") && e.denied() {
+			w.WriteHeader(403)
+			w.Write([]byte(`{"message":"calling actor does not have enough permissions to perform this function"}`))
 			return
 		}
 		if strings.HasSuffix(r.URL.Path, "/acl/validate") {

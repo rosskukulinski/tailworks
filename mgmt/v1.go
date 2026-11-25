@@ -162,6 +162,9 @@ type hostView struct {
 	Leases []Lease `json:"leases,omitempty"`
 
 	Skew string `json:"skew,omitempty"` // versions.go
+
+	// AuditHead: only in the RegisterHost answer (hostauditresume.go).
+	AuditHead string `json:"auditHead,omitempty"`
 }
 
 func (a *v1api) hostView(r *http.Request, h Host) hostView {
@@ -621,7 +624,10 @@ func (a *v1api) CreateHost(w http.ResponseWriter, r *http.Request) {
 		Hostname           string   `json:"hostname"`
 		ControlURL         string   `json:"controlURL,omitempty"`
 		Tailnet            string   `json:"tailnet,omitempty"`
-	}{a.hostView(r, hj.Host), hj.AuthKey, hj.RegistrationSecret, hj.ExpiresAt, hj.Tags, hj.Hostname, hj.ControlURL, hj.Tailnet}
+		KeyTagsOnly        bool     `json:"keyTagsOnly,omitempty"`
+		MgmtURL            string   `json:"mgmtURL,omitempty"`
+	}{a.hostView(r, hj.Host), hj.AuthKey, hj.RegistrationSecret, hj.ExpiresAt, hj.Tags, hj.Hostname, hj.ControlURL, hj.Tailnet,
+		hj.KeyTagsOnly, a.hostJoinMgmtURL()}
 	if created {
 		location(w, "/v1/hosts/"+hj.Host.ID)
 		writeJSON(w, 201, out)
@@ -703,7 +709,14 @@ func (a *v1api) RegisterHost(w http.ResponseWriter, r *http.Request, id v1.HostI
 	if created {
 		status = 201
 	}
-	writeResource(w, r, status, a.hostView(r, h))
+	v := a.hostView(r, h)
+	et := etagOf(v) // the resource's ETag, as GET answers it: auditHead is not part of the host record
+	if v.AuditHead, err = a.s.M.hostAuditHead(r.Context(), h.ID); err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	w.Header().Set("ETag", et)
+	writeJSON(w, status, v)
 }
 
 func (a *v1api) DeleteHost(w http.ResponseWriter, r *http.Request, id v1.HostID, params v1.DeleteHostParams) {
@@ -1024,7 +1037,8 @@ func (a *v1api) ListObjects(w http.ResponseWriter, r *http.Request, params v1.Li
 		return
 	}
 	f := ObjectFilter{TenantID: tenant, Workload: str(params.Workload), Namespace: str(params.Namespace),
-		ParentID: str(params.Parent), RootID: str(params.Root), Page: pg}
+		ParentID: str(params.Parent), RootID: str(params.Root), Page: pg,
+		Tag: str(params.Tag), ActingFor: str(params.Human)}
 	if params.State != nil {
 		for _, s := range *params.State {
 			f.Status = append(f.Status, string(s))
@@ -1270,6 +1284,7 @@ func (a *v1api) CreateObjectCredential(w http.ResponseWriter, r *http.Request, i
 
 func (a *v1api) GetObjectCertificate(w http.ResponseWriter, r *http.Request, id v1.ObjectID) {
 	o, err := a.s.M.store.GetObject(r.Context(), id)
+	setObjectCertDeprecation(w, o, err) // deprecated_routes.go
 	if err != nil {
 		writeErr(w, r, err)
 		return
@@ -1343,7 +1358,8 @@ func (a *v1api) ListAudit(w http.ResponseWriter, r *http.Request, params v1.List
 		return
 	}
 	f := AuditFilter{ObjectID: str(params.Object), ActingFor: str(params.Human), TraceID: str(params.Trace), TenantID: tenant,
-		Chain: str(params.Chain), Since: normTS(str(params.Since)), Until: normTS(str(params.Until)), Page: pg}
+		Chain: str(params.Chain), Since: normTS(str(params.Since)), Until: normTS(str(params.Until)), Page: pg,
+		Workload: str(params.Workload)}
 	f.Desc = params.Order != nil && *params.Order == v1.Desc
 	if params.Kind != nil {
 		for _, k := range *params.Kind {

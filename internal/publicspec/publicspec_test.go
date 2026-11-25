@@ -97,3 +97,29 @@ func TestEffective(t *testing.T) {
 		t.Fatalf("%+v", e)
 	}
 }
+
+// An unset burst is derived from rps: min(ceiling, max(default, ceil(2*rps))).
+// It only ever grows, and an explicit burst is kept as written.
+func TestEffectiveDerivesBurst(t *testing.T) {
+	for _, tc := range []struct {
+		in             Limits
+		burst, ipBurst int
+	}{
+		{Limits{RPS: 5}, 100, 20},
+		{Limits{RPS: 200}, 400, 20},
+		{Limits{RPS: 1000}, 2000, 20},
+		{Limits{RPS: 0.6, IPRPS: 0.4}, 100, 20},
+		{Limits{IPRPS: 5}, 100, 20},
+		{Limits{IPRPS: 50.5}, 100, 101},
+		{Limits{IPRPS: 200}, 100, 400},
+		{Limits{RPS: 1000, Burst: 10, IPRPS: 200, IPBurst: 3}, 10, 3},
+	} {
+		e := tc.in.Effective()
+		if e.Burst != tc.burst || e.IPBurst != tc.ipBurst {
+			t.Errorf("%+v: burst %d ipBurst %d, want %d %d", tc.in, e.Burst, e.IPBurst, tc.burst, tc.ipBurst)
+		}
+		if e.Burst > Ceilings.Burst || e.IPBurst > Ceilings.IPBurst {
+			t.Errorf("%+v: above the ceilings: %+v", tc.in, e)
+		}
+	}
+}

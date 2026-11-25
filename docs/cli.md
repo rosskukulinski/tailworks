@@ -6,7 +6,8 @@ Every `tw` command and subcommand with its `--help` output: the usage line
 and each flag with its default. `tw help` lists the commands by group;
 `tw <command> --help` prints one of these sections. Every command also
 takes `--state-dir` (default `$TW_STATE_DIR` or `~/.tailworks`) and `--json`
-([cli-json.md](cli-json.md)).
+([cli-json.md](cli-json.md)). The environment variables tw reads are at the
+end: [Environment](#environment).
 
 ## Set up
 
@@ -17,83 +18,83 @@ start tailworks on this machine
 ```text
 tw up: start tailworks on this machine (one process: mgmt + embedded host; --separate-host for the two-node layout); an OAuth client of your tailnet mints every node key (Headscale: its API key); the first tw up asks for the client secret and saves it to ~/.config/tailworks/oauth.env, and installs a login service
 
-usage: tw up [--oauth-client-file <file>] [--apply-policy [--yes]] [--service=false]  |  up --control=headscale --control-url <url> --tailnet <base_domain> --api-key-file <file> [--apply-policy [--yes]]
+usage: tw up [--apply-policy [--yes]] [--service=false]
 
 flags:
-  -allow-experimental-flags
-    	let deployments on this host set compatibility flags workerd marks experimental (unsafe_module, rtti_api, precise_timers, …); refused by default (docs/COMPAT.md#experimental-flags)
-  -allow-sibling-egress
-    	dial other objects on this host over WireGuard (a hairpin) instead of netd's in-process hop (tests)
-  -api-key-file string
-    	--control=headscale only: 0600 file with HEADSCALE_API_KEY=… (read at use, never copied). Tailscale API keys are not a mint mode: use --oauth-client-file
   -apply-policy
-    	write the tagOwners and grants tailworks needs to the tailnet policy instead of printing them (additive, validated first, written with If-Match); tw up shows the lines and asks first (--yes to skip). Tailscale: the OAuth client needs Policy File write. Headscale: needs policy.mode database
-  -audit-max-age duration
-    	audit retention: delete audit records older than this (e.g. 2160h), keeping a checkpoint so the rest still verify (0 = keep every record, the default)
-  -audit-max-records int
-    	audit retention: keep only the newest N records of each audit chain (0 = keep every record, the default)
+    	write the tagOwners and grants tailworks needs to the tailnet policy instead of printing them (additive, validated first, written with If-Match); tw up shows the lines and asks first (--yes to skip). Without the flag tw up asks only on a terminal (not with --json or --yes); --apply-policy=false never asks or writes. Tailscale: the OAuth client needs Policy File write. Headscale: needs policy.mode database
+  -oauth-client-file string
+    	mint mode "oauth" (Tailscale): file with TS_OAUTH_CLIENT_SECRET=tskey-client-… (an OAuth client with Auth Keys write, tag tag:tw; tightened to 0600). Default on the default state dir: ~/.config/tailworks/oauth.env, asked for and saved on the first tw up
+  -service
+    	run the supervisor as a service that starts at login: Linux systemd user unit (~/.config/systemd/user/tw.service), macOS LaunchAgent (~/Library/LaunchAgents/dev.tailworks.up.plist). Default: on for a new default state dir where available; an existing state dir keeps how it runs (--service=false runs it in the background without a service)
+  -yes
+    	skip the confirmation before --apply-policy writes the policy; needed without a terminal and with --json
+
+Control plane (Tailscale or Headscale):
+  -api-key-file string
+    	Headscale only: 0600 file with HEADSCALE_API_KEY=… (read at use, never copied); with a non-default --control-url it selects the Headscale profile. Default on the default state dir with a Headscale --control-url: ~/.config/tailworks/headscale.env when it exists. Tailscale API keys are not a mint mode: use --oauth-client-file
   -control string
-    	control-plane profile: tailscale, or headscale (ADR-015: a Headscale server at --control-url; --api-key-file holds HEADSCALE_API_KEY=…, --tailnet is its dns.base_domain) (default "tailscale")
+    	control-plane profile: tailscale, or headscale (ADR-015: a Headscale server; implied by --api-key-file with a non-default --control-url: tw up --control-url <url> --tailnet <base_domain> [--api-key-file <file>]; the file holds HEADSCALE_API_KEY=…, --tailnet is its dns.base_domain; docs/headscale.md) (default "tailscale")
   -control-url string
     	coordination server for the tailnet's nodes (default "https://controlplane.tailscale.com")
+  -tailnet string
+    	the tailnet to serve (oauth: read from the client's devices or mgmt's node; headscale: required, the dns.base_domain). Overrides discovery
+
+Store and custody (Postgres, setec):
   -custody string
     	where mgmt keeps secrets: file (default: AES-GCM in <state>/mgmt/custody) or setec (with --setec-url; what several mgmt replicas on one store need)
   -db string
     	mgmt's store: a postgres://… DSN (saved in tw.json; prefer --db-file for a DSN with a password). Default: SQLite in <state>/mgmt/mgmt.db. Move an existing install first: tw-mgmt migrate --from sqlite --to-file <file>
   -db-file string
     	read mgmt's store DSN from this 0600 file at every start (keeps a Postgres password out of tw.json and argv)
-  -device-delete-delay duration
-    	delete a killed object's device this long after the kill (< --kill-tombstone) (default 8s)
+  -setec-url string
+    	--custody setec: the setec server URL
+
+Retention:
+  -audit-max-age duration
+    	audit retention: delete audit records older than this (e.g. 2160h), keeping a checkpoint so the rest still verify (0 = keep every record, the default)
+  -audit-max-records int
+    	audit retention: keep only the newest N records of each audit chain (0 = keep every record, the default)
+  -request-log-max-age duration
+    	also drop request records (tw logs --source requests) older than this, e.g. 168h (0 = only the size rotation, the default)
+
+Layout and identity:
   -ephemeral
     	join object nodes as ephemeral; 'tw down' then deletes every device (tests, demos)
-  -heartbeat duration
-    	host heartbeat period (default 1s)
   -host-id string
     	this host's ID (default "h-<hostname>")
   -hostname-prefix string
     	prefix for every object node hostname (default "tw-")
-  -insecure-shared-host
-    	on a host without a process sandbox (Linux without Landlock), still serve process-tier workloads of more than one tenant; tenants are then NOT isolated from each other
-  -json
-    	machine-readable output
-  -kill-tombstone duration
-    	keep a killed node answering object_killed this long (default 12s)
-  -local-dev
-    	DEVELOPMENT ONLY: hostd and the CLI use mgmt's unix socket with the per-host token instead of the tailnet (hermetic tests). Normal operation is tsnet only
-  -mgmt-authkey-file string
-    	TS_AUTHKEY=… file for mgmt's node (unattended join: tests, automation); default: the tenant's credential mints it
   -mgmt-hostname string
     	mgmt's own tailnet node name (default tw-mgmt)
-  -oauth-client-file string
-    	mint mode "oauth" (Tailscale): file with TS_OAUTH_CLIENT_SECRET=tskey-client-… (an OAuth client with Auth Keys write, tag tag:tw; tightened to 0600). Default on the default state dir: ~/.config/tailworks/oauth.env, asked for and saved on the first tw up
+  -separate-host
+    	run tw-hostd as its own process on its own tag:tw-host tailnet node (the scale-out layout; default: ONE process, the host agent embedded in tw-mgmt, mgmt's node the only infrastructure device). --local-dev implies it
+
+Isolation and egress:
+  -allow-experimental-flags
+    	let deployments on this host set compatibility flags workerd marks experimental (unsafe_module, rtti_api, precise_timers, …); refused by default (docs/COMPAT.md#experimental-flags)
+  -insecure-shared-host
+    	on a host without a process sandbox (Linux without Landlock), still serve process-tier workloads of more than one tenant; tenants are then NOT isolated from each other
+  -worker-internet string
+    	how Workers' fetch() reaches internet hosts, subject to each workload's tailnet.egress.internet: direct (this host's network, public addresses only), exit-node=<node>[,dns=<ip[:port]>] (through that tailnet exit node, via this host's own node) or off (default "direct")
+
+Tuning:
   -pool-nodes int
     	pre-joined nodes kept per hot class (a create here in the last hour), so a new object is renamed onto one (~0.2 s) instead of joining a new node; each is a device (0 = off) (default 1)
   -port-mapping
     	use UPnP/NAT-PMP/PCP for this host's nodes (off by default: it adds ~250 ms to every new node's join and has every node ask the router for a mapping; turn on behind hard NATs that need router-assisted direct paths)
-  -push-port int
-    	port on this host's own tailnet node where mgmt pushes kills (--separate-host) (default 7474)
-  -request-log-max-age duration
-    	also drop request records (tw logs --source requests) older than this, e.g. 168h (0 = only the size rotation, the default)
-  -separate-host
-    	run tw-hostd as its own process on its own tag:tw-host tailnet node (the scale-out layout; default: ONE process, the host agent embedded in tw-mgmt, mgmt's node the only infrastructure device). --local-dev implies it
-  -service
-    	run the supervisor as a service that starts at login: Linux systemd user unit (~/.config/systemd/user/tw.service), macOS LaunchAgent (~/Library/LaunchAgents/dev.tailworks.up.plist). Default: on for a new default state dir where available; an existing state dir keeps how it runs (--service=false runs it in the background without a service)
-  -setec-url string
-    	--custody setec: the setec server URL
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tailnet string
-    	the tailnet to serve (oauth: read from the client's devices or mgmt's node; headscale: required, the dns.base_domain). Overrides discovery
-  -tsapi-url string
-    	Tailscale API base URL (testing)
   -warm-keys int
     	pre-minted single-use keys kept per (tenant, tag set), so a new object skips the key-API call; sized from the recent create rate, capped here (0 = off) (default 5)
-  -worker-internet string
-    	how Workers' fetch() reaches internet hosts, subject to each workload's tailnet.egress.internet: direct (this host's network, public addresses only), exit-node=<node>[,dns=<ip[:port]>] (through that tailnet exit node, via this host's own node) or off (default "direct")
+
+Development and testing:
+  -mgmt-authkey-file string
+    	TS_AUTHKEY=… file for mgmt's node (unattended join: tests, automation); default: the tenant's credential mints it
   -workerd string
-    	workerd binary
-  -yes
-    	with --apply-policy: write the policy without asking (needed without a terminal, and with --json). Otherwise accepted and ignored: tw up asks nothing else
+    	workerd binary (default: $TW_WORKERD, the install's, or PATH)
+
+also accepted, for the test harness: --allow-sibling-egress --local-dev --tsapi-url
+also accepted, deprecated and ignored: --device-delete-delay --heartbeat --kill-tombstone --push-port
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
 ```
 
 ### tw down
@@ -106,14 +107,34 @@ tw down: stop everything tw up started (--purge: kill every object and delete it
 usage: tw down [--purge] [--service]
 
 flags:
-  -json
-    	machine-readable output
   -purge
     	kill every live object (audit: "tw down --purge") and delete its device before stopping (default with --ephemeral)
   -service
     	also disable and remove the service installed by tw up --service (systemd user unit / macOS LaunchAgent)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
+```
+
+### tw uninstall
+
+remove tailworks from this machine
+
+```text
+tw uninstall: remove tailworks from this machine in one go: kill every object and delete its device, stop tailworks and remove its service, delete mgmt's own node, remove the coding agents' skills, the install and the state dir (--keep-state keeps the state dir's data); it prints what it removes and asks first
+
+usage: tw uninstall [--keep-state] [--dry-run] [--yes] [--force]
+
+flags:
+  -dry-run
+    	print what it would do and delete, and change nothing
+  -force
+    	go on when tailworks is set up here but tw-mgmt isn't running or healthy (the objects' devices are then left: delete them in the admin console)
+  -keep-state
+    	keep the state dir's data (tw.json, mgmt/, hostd/, backups/, …): remove the install, service, devices and skills only
+  -yes
+    	skip the confirmation before deleting; needed without a terminal and with --json
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
 ```
 
 ### tw link
@@ -128,25 +149,1292 @@ usage: tw link [tw-mgmt.<tailnet>.ts.net] [--unlink]
 flags:
   -control-url string
     	--tsnet: control URL for the CLI node (default "https://controlplane.tailscale.com")
-  -json
-    	machine-readable output
   -login-timeout duration
     	--tsnet: how long to wait for the browser login (default 5m0s)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
   -tsnet
     	this machine has no Tailscale: the CLI runs its own ephemeral tsnet node (state under <state>/cli, interactive login the first time; your login is the identity mgmt sees)
-  -tsnet-authkey-file string
-    	--tsnet: TS_AUTHKEY=… file for an unattended first join (tests); default: interactive login
-  -tsnet-dir string
-    	--tsnet: node state dir (default <state>/cli); tests pass one explicitly
   -tsnet-hostname string
     	--tsnet: the CLI node's hostname (default tw-cli-<user>)
-  -tsnet-tags string
-    	--tsnet: comma-separated tags the CLI node advertises (tests)
   -unlink
     	forget the linked mgmt
+
+Advanced:
+  -tsnet-authkey-file string
+    	--tsnet: TS_AUTHKEY=… file for an unattended first join (automation, CI); default: interactive login
+  -tsnet-tags string
+    	--tsnet: comma-separated tags the CLI node advertises (an unattended join with a tagged key)
+
+also accepted, for the test harness: --tsnet-dir
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
 ```
+
+### tw doctor
+
+check this machine can run tw
+
+```text
+tw doctor: check this machine: workerd runs, bundler offline, ~/.tailworks writable, the mint credential works, process sandbox active, system tailscaled not used; on Linux also glibc, kernel/Landlock ABI, KVM, firecracker, cgroups v2, systemd, the microVM tier and the CPU side-channel posture (mitigations, SMT, KSM)
+
+usage: tw doctor
+
+flags:
+  -v	print every check with its full detail (default: problems, then one line per group)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
+```
+
+## Develop
+
+### tw init
+
+create an app from a template
+
+```text
+tw init: create an app from a template (--list: every template, with the demos and patterns)
+
+usage: tw init <dir> [--template hello|agent|mcp|static-site] [--name <workload>] [--tags <tag>,…] [--object-tags [<Class>=]<tag>,…]…  |  init --list
+
+flags:
+  -list
+    	list every template: the starting points, then demos and patterns (templates.go)
+  -name string
+    	workload name (default: the directory name)
+  -object-tags value
+    	use existing tags for the Durable Object classes with their own node: tag:a,tag:b for every class, or <Class>=tag:a,tag:b for one (repeatable)
+  -tags string
+    	use these existing tags for the workload node instead of a new per-app tag (comma-separated, e.g. tag:tw-app); see docs/tailworks-jsonc.md#tags-and-tw-init
+  -template string
+    	hello | agent | mcp | static-site (tw init --list: every template) (default "hello")
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
+```
+
+### tw dev
+
+run an app locally, no tailnet
+
+```text
+tw dev: run an app locally: process tier + embedded control plane (no tailnet)
+
+usage: tw dev [dir] [--port 8787] [--env <name>] [--once] [--test-scheduled]
+
+flags:
+  -caller value
+    	an extra identity: its own dev node (tagged with =tag:a,tag:b) and local URL, listed in the result (repeatable; black-box tests of who may call what: docs/testing.md)
+  -env string
+    	wrangler environment: use env.<name> from the wrangler config, as 'wrangler --env' does (the workload is named <name>-<env> unless the env sets a name)
+  -from-wrangler-out string
+    	deploy a bundle wrangler already built (the --outdir of 'wrangler deploy --dry-run')
+  -once
+    	start, make one request (GET /; for an MCP app an initialize to its route), print it and exit (smoke test)
+  -port int
+    	local port on 127.0.0.1 (default: wrangler dev.port, else 8787, else a free port when 8787 is busy; 0 picks a free one) (default 8787)
+  -test-scheduled
+    	serve /__scheduled?cron=<expr>[&time=<ms>] on the local port: run a cron trigger's scheduled() now
+  -wrangler
+    	bundle with the wrangler CLI (wrangler deploy --dry-run --outdir; nothing is sent to Cloudflare) instead of the built-in esbuild
+
+Advanced:
+  -console-port int
+    	serve the read-only data console (KV keys, D1 rows) on 127.0.0.1:<port>; 0 picks a free port, -1 turns it off (devconsole.go)
+  -inspector-port int
+    	serve workerd's V8 inspector on 127.0.0.1:<port> for Chrome DevTools or VS Code; any local web page can attach while it runs, so pass it only while you debug (docs/dev-debugging.md)
+  -v	hostd logs to stderr
+  -workerd string
+    	workerd binary (default: $TW_WORKERD, the install's, or PATH)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
+```
+
+### tw types
+
+generate Env types from tailworks.jsonc and wrangler config
+
+```text
+tw types: write the app's TypeScript Env (vars, Durable Object, KV, R2, D1, Queue and Workflow bindings, secret names) from its wrangler config and tailworks.jsonc, like wrangler types; secret names come from .dev.vars, .dev.vars.example (names and placeholder values only) and secrets.required; --check fails when the file is stale (CI)
+
+usage: tw types [dir] [--env <name>] [--out worker-configuration.d.ts] [--check]
+
+flags:
+  -check
+    	write nothing; fail (types_stale) if the file is missing or differs from what tw types would write (for CI)
+  -env string
+    	wrangler environment: type env.<name> from the wrangler config, as 'tw deploy --env' deploys it
+  -out string
+    	the declaration file to write, relative to the app directory (default "worker-configuration.d.ts")
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
+```
+
+### tw docs
+
+search and read tailworks' docs offline
+
+```text
+tw docs: tailworks' docs, offline: search them, print one doc or section (e.g. errors.md#acl_denied)
+
+subcommands:
+  tw docs search <words…> [--limit 10]
+  tw docs show <doc>[#<anchor>]
+  tw docs ls
+
+tw docs <subcommand> --help   its flags
+  (every command takes --state-dir, default ~/.tailworks, and --json)
+```
+
+#### tw docs ls
+
+```text
+flags:
+  (none besides the global ones)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
+```
+
+#### tw docs search
+
+```text
+flags:
+  -limit int
+    	at most this many sections (default 10)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
+```
+
+#### tw docs show
+
+Same flags as [tw docs ls](#tw-docs-ls).
+
+## Coding agents
+
+### tw mcp
+
+tailworks' MCP server for coding agents (stdio)
+
+```text
+tw mcp: tailworks' MCP server for coding agents, over stdio (a bridge to mgmt's /mcp; tools: whoami status ls logs audit, and deploy kill undeploy when allowed); --config prints how to register it with each agent, and is what tw mcp does on a terminal or with --json
+
+usage: tw mcp [--allow deploy,kill,undeploy] | mcp --config
+
+flags:
+  -allow string
+    	also allow these tools: deploy, kill, undeploy (comma-separated). On the tw host this is what enables them; from a linked machine your github.com/rosskukulinski/tailworks/cap/mcp grant decides, and this only narrows
+  -config
+    	print how to register tailworks' MCP server with a coding agent, and exit (the default on a terminal and with --json)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
+```
+
+### tw agent
+
+teach coding agents to drive tw (skills)
+
+```text
+tw agent: teach coding agents (Claude Code, Codex, Cursor, Gemini CLI, OpenCode) to drive tw: install or remove tailworks' skills, list or print them
+
+subcommands:
+  tw agent setup [--scope user|project] [--dir <dir>] [--agent claude,codex,cursor,gemini,opencode] [--dry-run] [--yes]
+  tw agent remove [same flags]
+  tw agent ls
+  tw agent show <skill>
+
+tw agent <subcommand> --help   its flags
+  (every command takes --state-dir, default ~/.tailworks, and --json)
+```
+
+#### tw agent ls
+
+```text
+flags:
+  (none besides the global ones)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
+```
+
+#### tw agent remove
+
+```text
+flags:
+  -agent string
+    	comma-separated agents: claude, codex, cursor, gemini, opencode (default: setup, the ones installed here; remove, all)
+  -dir string
+    	the project directory (--scope project) (default ".")
+  -dry-run
+    	print what would change and write nothing
+  -scope string
+    	user: your home directory (every project) | project: this project's files (--dir) (default "user")
+  -yes
+    	skip the confirmation before writing (review --dry-run first); needed without a terminal and with --json
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
+```
+
+#### tw agent setup
+
+Same flags as [tw agent remove](#tw-agent-remove).
+
+#### tw agent show
+
+Same flags as [tw agent ls](#tw-agent-ls).
+
+## Deploy
+
+### tw deploy
+
+bundle, place and deploy an app; wait until ready
+
+```text
+tw deploy: bundle, preflight grants, build + push Dockerfile container images (docker buildx), place (prints why), deploy, wait until ready; --replace re-places a running workload; --preview runs it next to the workload instead (tw promote)
+
+usage: tw deploy [dir] [--env <name>] [--name <workload>] [--var K=V]… [--apply-policy [--yes]] [--preview [--preview-alias <alias>]] [--no-wait] [--tenant <tailnet>]
+
+flags:
+  -apply-policy
+    	when the preflight finds tagOwners, grants, funnel nodeAttrs or Service auto-approval missing, write them to the tailnet policy first (as tw policy --apply; shows the lines and asks, --yes to skip). Without the flag tw deploy asks only on a terminal (not with --json or --yes); --apply-policy=false never asks or writes
+  -env string
+    	wrangler environment: use env.<name> from the wrangler config, as 'wrangler --env' does (the workload is named <name>-<env> unless the env sets a name)
+  -name string
+    	workload name (default: tailworks.jsonc name, then wrangler name, then the directory)
+  -no-wait
+    	return once mgmt accepted the request, without waiting for ready
+  -preview
+    	deploy as a preview next to the workload (<workload>--preview-<alias>), leaving the workload as it is; tw promote makes it the workload
+  -preview-alias string
+    	--preview's alias, the <alias> in <workload>--preview-<alias> (implies --preview; default: the start of the bundle's SHA-256)
+  -var value
+    	override a wrangler var (KEY=VALUE, repeatable)
+  -yes
+    	skip the confirmation before --apply-policy writes the policy; needed without a terminal and with --json
+
+Advanced:
+  -allow-missing-grants
+    	deploy even if the preflight finds policy lines the bundle needs missing (the app runs without them; on Tailscale a tag with no tagOwners entry still fails to mint)
+  -force-takeover
+    	the workload's current host is gone for good: move its Durable Objects anyway (audited; see takeover_unconfirmed); with --replace, confirms moving a stateful workload off a live host
+  -from-wrangler-out string
+    	deploy a bundle wrangler already built (the --outdir of 'wrangler deploy --dry-run')
+  -host string
+    	pin the workload to this host (it must be live, in the tenant's pool and offer the tier)
+  -platform string
+    	containers: arches to build Dockerfile images for (linux/amd64,linux/arm64; default: the arches of the tenant pool's container hosts)
+  -replace
+    	re-place the workload: move it to a clearly better host (smart placement: the best measured path to tailnet.connects) instead of keeping it on its host with its Durable Object storage
+  -wait duration
+    	how long to wait for ready (default 3m0s)
+  -wait-public duration
+    	also wait (up to this long) until the public URL answers from the public internet (tailworks.jsonc "public")
+  -wrangler
+    	bundle with the wrangler CLI (wrangler deploy --dry-run --outdir; nothing is sent to Cloudflare) instead of the built-in esbuild
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+### tw policy
+
+the tailnet policy an app needs, before deploying
+
+```text
+tw policy: print everything an app needs in the tailnet policy as one snippet: missing tagOwners, tailnet.connects grants, service auto-approval and public nodeAttrs (checked against the live policy, like tw deploy's preflight; nothing is deployed), plus the grant that lets people call it; exits acl_denied when a checked part is missing; --apply writes the missing tag:tw* lines itself (additive, If-Match)
+
+usage: tw policy [dir] [--name <workload>] [--env <name>] [--wrangler | --from-wrangler-out <dir>] [--apply [--yes]]
+
+flags:
+  -apply
+    	write the missing tagOwners, grants, funnel nodeAttrs and Service auto-approval to the tailnet policy (additive, tag:tw* only, If-Match; needs Policy File write)
+  -env string
+    	wrangler environment: use env.<name> from the wrangler config, as 'wrangler --env' does (the workload is named <name>-<env> unless the env sets a name)
+  -from-wrangler-out string
+    	deploy a bundle wrangler already built (the --outdir of 'wrangler deploy --dry-run')
+  -name string
+    	workload name (default: tailworks.jsonc name, then wrangler name, then the directory)
+  -var value
+    	override a wrangler var (KEY=VALUE, repeatable)
+  -wrangler
+    	bundle with the wrangler CLI (wrangler deploy --dry-run --outdir; nothing is sent to Cloudflare) instead of the built-in esbuild
+  -yes
+    	skip the confirmation before --apply writes the policy; needed without a terminal and with --json
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+### tw deployments
+
+a workload's deployment history
+
+```text
+tw deployments: a workload's deployment history, newest first: id, created, bundle sha256, status, host, who deployed (mgmt keeps the newest bundles for rollback)
+
+usage: tw deployments <workload> [--limit N]
+
+flags:
+  -limit int
+    	show the newest N deployments (0 = all) (default 20)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+### tw previews
+
+a workload's running preview deploys
+
+```text
+tw previews: a workload's running previews (tw deploy --preview): alias, created, bundle sha256, status, host, URL
+
+usage: tw previews <workload>
+
+flags:
+  (none besides the global ones)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+### tw promote
+
+make a preview the workload's deployment
+
+```text
+tw promote: deploy a preview's bundle to the workload as a new deployment, then undeploy the preview; code and config only, the workload keeps its data and secrets
+
+usage: tw promote <workload> <preview> [--keep-preview] [--no-wait]
+
+flags:
+  -keep-preview
+    	leave the preview running (default: undeploy it once promoted)
+  -no-wait
+    	return once mgmt accepted the request, without waiting for ready
+
+Advanced:
+  -allow-missing-grants
+    	promote even if the preflight finds policy lines the bundle needs missing (the app runs without them; on Tailscale a tag with no tagOwners entry still fails to mint)
+  -force-takeover
+    	the workload's current host is gone for good: move its Durable Objects anyway (audited; see takeover_unconfirmed); with --replace, confirms moving a stateful workload off a live host
+  -host string
+    	pin the workload to this host (it must be live, in the tenant's pool and offer the tier)
+  -replace
+    	re-place the workload: move it to a clearly better host (smart placement: the best measured path to tailnet.connects) instead of keeping it on its host with its Durable Object storage
+  -wait duration
+    	how long to wait for ready (default 3m0s)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+### tw rollback
+
+redeploy an earlier deployment's bundle
+
+```text
+tw rollback: redeploy an earlier deployment's stored bundle as a new deployment (default: the previous one that ran); code and config only, data and secrets stay as they are now
+
+usage: tw rollback <workload> [<deployment>] [--no-wait]
+
+flags:
+  -no-wait
+    	return once mgmt accepted the request, without waiting for ready
+
+Advanced:
+  -allow-missing-grants
+    	roll back even if the preflight finds policy lines the bundle needs missing (the app runs without them; on Tailscale a tag with no tagOwners entry still fails to mint)
+  -force-takeover
+    	the workload's current host is gone for good: move its Durable Objects anyway (audited; see takeover_unconfirmed); with --replace, confirms moving a stateful workload off a live host
+  -host string
+    	pin the workload to this host (it must be live, in the tenant's pool and offer the tier)
+  -replace
+    	re-place the workload: move it to a clearly better host (smart placement: the best measured path to tailnet.connects) instead of keeping it on its host with its Durable Object storage
+  -wait duration
+    	how long to wait for ready (default 3m0s)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+### tw undeploy
+
+stop a workload and release its lease
+
+```text
+tw undeploy: stop a workload: kill its objects (cascade), release its lease
+
+usage: tw undeploy <workload> [--reason <text>]
+
+flags:
+  -reason string
+    	why (recorded in audit)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+### tw expose
+
+open or close a workload's public routes
+
+```text
+tw expose: open or close a workload's public (Funnel) routes; survives redeploys (tailworks.jsonc "public", ADR-029). names lists the public names the tenant owns (it keeps one across undeploys); release frees one nothing serves
+
+subcommands:
+  tw expose on|off <workload>
+  tw expose names
+  tw expose release <name>
+  common flags: [--tenant <tailnet>]
+
+flags:
+  (none besides the global ones)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+#### tw expose names
+
+Same flags as [tw expose](#tw-expose).
+
+#### tw expose off
+
+Same flags as [tw expose](#tw-expose).
+
+#### tw expose on
+
+Same flags as [tw expose](#tw-expose).
+
+#### tw expose release
+
+Same flags as [tw expose](#tw-expose).
+
+### tw secret
+
+a workload's secrets (env.NAME)
+
+```text
+tw secret: a workload's secrets (env.NAME, like wrangler secret): put reads the value from stdin (hidden prompt on a terminal), bulk sets several from a dotenv or JSON file or piped stdin, ls shows names only; changes apply on the next deploy
+
+subcommands:
+  tw secret put <NAME>
+  tw secret bulk [<file>]
+  tw secret ls
+  tw secret rm <NAME>
+  common flags: [--workload <workload>] [--tenant <tailnet>]
+
+flags:
+  -workload string
+    	workload (default: the app in the current directory, as tw deploy names it)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+#### tw secret bulk
+
+Same flags as [tw secret](#tw-secret).
+
+#### tw secret ls
+
+Same flags as [tw secret](#tw-secret).
+
+#### tw secret put
+
+Same flags as [tw secret](#tw-secret).
+
+#### tw secret rm
+
+Same flags as [tw secret](#tw-secret).
+
+## Data
+
+### tw d1
+
+a workload's D1 databases and migrations
+
+```text
+tw d1: a workload's D1 databases (like wrangler d1): create, list, delete, run SQL, export, and wrangler-layout migrations; execute/export/migrations reach the running workload
+
+subcommands:
+  tw d1 create <db>
+  tw d1 ls
+  tw d1 rm <db> [--yes]
+  tw d1 execute <db> [--command <sql> | --file <file>]
+  tw d1 export <db> [--output <file>]
+  tw d1 repair <db> --skip <seq> [--yes]
+  tw d1 migrations create <db> <message>
+  tw d1 migrations ls <db>
+  tw d1 migrations apply <db>
+  common flags: [--workload <workload>] [--tenant <tailnet>]
+
+flags:
+  -workload string
+    	workload whose database it is (default: the app in the current directory, as tw deploy names it)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+#### tw d1 create
+
+Same flags as [tw d1](#tw-d1).
+
+#### tw d1 execute
+
+```text
+flags:
+  -command string
+    	SQL to run (one or more statements, run as one batch)
+  -file string
+    	a file of SQL to run as one batch (with neither flag, the SQL is read from stdin: tw d1 execute <db> < file.sql)
+  -workload string
+    	workload whose database it is (default: the app in the current directory, as tw deploy names it)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+#### tw d1 export
+
+```text
+flags:
+  -output string
+    	write the SQL to this file (default: stdout)
+  -workload string
+    	workload whose database it is (default: the app in the current directory, as tw deploy names it)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+#### tw d1 ls
+
+Same flags as [tw d1](#tw-d1).
+
+#### tw d1 migrations apply
+
+Same flags as [tw d1](#tw-d1).
+
+#### tw d1 migrations create
+
+Same flags as [tw d1](#tw-d1).
+
+#### tw d1 migrations ls
+
+Same flags as [tw d1](#tw-d1).
+
+#### tw d1 repair
+
+```text
+flags:
+  -skip int
+    	the journal entry to skip (the entry tw d1 ls shows the database degraded at)
+  -workload string
+    	workload whose database it is (default: the app in the current directory, as tw deploy names it)
+  -yes
+    	skip the confirmation before deleting; needed without a terminal and with --json
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+#### tw d1 rm
+
+```text
+flags:
+  -workload string
+    	workload whose database it is (default: the app in the current directory, as tw deploy names it)
+  -yes
+    	skip the confirmation before deleting; needed without a terminal and with --json
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+### tw kv
+
+a workload's Workers KV namespaces and keys
+
+```text
+tw kv: a workload's Workers KV namespaces (kv_namespaces, like wrangler kv): key commands name the namespace with --namespace (its name or binding; default: the app's only one); writes reach running workloads within 60 s
+
+subcommands:
+  tw kv namespace create <NAME>
+  tw kv namespace ls
+  tw kv namespace rm <NAME> [--yes]
+  tw kv key put <KEY> [VALUE] [--namespace N] [--path FILE] [--ttl S] [--expiration T] [--metadata JSON]
+  tw kv key get <KEY> [--namespace N]
+  tw kv key rm <KEY> [--namespace N]
+  tw kv key ls [--namespace N] [--prefix P]
+  common flags: [--workload <workload>] [--tenant <tailnet>]
+
+flags:
+  -workload string
+    	workload whose namespaces these are (default: the app in the current directory)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+#### tw kv key get
+
+```text
+flags:
+  -binding string
+    	same as --namespace (wrangler's spelling)
+  -namespace string
+    	the namespace: its name (a kv_namespaces id) or its binding in the app's wrangler config (default: the app's only kv_namespaces entry)
+  -workload string
+    	workload whose namespaces these are (default: the app in the current directory)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+#### tw kv key ls
+
+```text
+flags:
+  -binding string
+    	same as --namespace (wrangler's spelling)
+  -namespace string
+    	the namespace: its name (a kv_namespaces id) or its binding in the app's wrangler config (default: the app's only kv_namespaces entry)
+  -prefix string
+    	only keys starting with this
+  -workload string
+    	workload whose namespaces these are (default: the app in the current directory)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+#### tw kv key put
+
+```text
+flags:
+  -binding string
+    	same as --namespace (wrangler's spelling)
+  -expiration int
+    	expire at this Unix time (≥ 60 s ahead)
+  -metadata string
+    	metadata (JSON, ≤ 1024 bytes)
+  -namespace string
+    	the namespace: its name (a kv_namespaces id) or its binding in the app's wrangler config (default: the app's only kv_namespaces entry)
+  -path string
+    	read the value from this file
+  -ttl int
+    	expire after this many seconds (≥ 60)
+  -workload string
+    	workload whose namespaces these are (default: the app in the current directory)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+#### tw kv key rm
+
+Same flags as [tw kv key get](#tw-kv-key-get).
+
+#### tw kv namespace create
+
+Same flags as [tw kv](#tw-kv).
+
+#### tw kv namespace ls
+
+Same flags as [tw kv](#tw-kv).
+
+#### tw kv namespace rm
+
+```text
+flags:
+  -workload string
+    	workload whose namespaces these are (default: the app in the current directory)
+  -yes
+    	skip the confirmation before deleting; needed without a terminal and with --json
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+### tw queues
+
+the tenant's queues: create, peek, send
+
+```text
+tw queues: the tenant's queues (like wrangler queues): producers' first send creates a queue; messages peeks without claiming (read a dead-letter queue); send takes JSON (or --text) from the argument or stdin
+
+subcommands:
+  tw queues create <queue>
+  tw queues ls
+  tw queues info <queue>
+  tw queues rm <queue>
+  tw queues purge <queue>
+  tw queues messages <queue> [--limit N]
+  tw queues send <queue> [<json>|--text <text>] [--delay S]
+  common flags: [--tenant <tailnet>]
+
+flags:
+  (none besides the global ones)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+#### tw queues create
+
+Same flags as [tw queues](#tw-queues).
+
+#### tw queues info
+
+Same flags as [tw queues](#tw-queues).
+
+#### tw queues ls
+
+Same flags as [tw queues](#tw-queues).
+
+#### tw queues messages
+
+```text
+flags:
+  -limit int
+    	at most this many (1-100) (default 20)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+#### tw queues purge
+
+```text
+flags:
+  -yes
+    	skip the confirmation before deleting; needed without a terminal and with --json
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+#### tw queues rm
+
+Same flags as [tw queues purge](#tw-queues-purge).
+
+#### tw queues send
+
+```text
+flags:
+  -delay int
+    	delaySeconds (0-43200)
+  -text
+    	the body is text (contentType text), not JSON
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+### tw r2
+
+a workload's R2 buckets and objects
+
+```text
+tw r2: a workload's R2 buckets (r2_buckets bindings): list, create or delete buckets, list a bucket's objects
+
+subcommands:
+  tw r2 bucket ls
+  tw r2 bucket create <bucket>
+  tw r2 bucket rm <bucket>
+  tw r2 object ls <bucket> [--prefix P]
+  common flags: [--workload <workload>] [--tenant <tailnet>]
+
+flags:
+  -workload string
+    	workload (default: the app in the current directory, as tw deploy names it)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+#### tw r2 bucket create
+
+Same flags as [tw r2](#tw-r2).
+
+#### tw r2 bucket ls
+
+Same flags as [tw r2](#tw-r2).
+
+#### tw r2 bucket rm
+
+```text
+flags:
+  -workload string
+    	workload (default: the app in the current directory, as tw deploy names it)
+  -yes
+    	skip the confirmation before deleting; needed without a terminal and with --json
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+#### tw r2 object ls
+
+```text
+flags:
+  -prefix string
+    	only keys starting with this
+  -workload string
+    	workload (default: the app in the current directory, as tw deploy names it)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+## Observe
+
+### tw whoami
+
+who the CLI acts as, and what it may do
+
+```text
+tw whoami: who this CLI acts as (WhoIs through tw link, or the local operator), its tenant, the mgmt it talks to, and its github.com/rosskukulinski/tailworks/cap/* capabilities: admin, approve, MCP tools
+
+usage: tw whoami
+
+flags:
+  (none besides the global ones)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
+```
+
+### tw status
+
+health of mgmt, hosts, tenants, deployments
+
+```text
+tw status: health of mgmt, the host, the tenant and deployments
+
+usage: tw status
+
+flags:
+  (none besides the global ones)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
+```
+
+### tw ls
+
+list deployments and objects
+
+```text
+tw ls: list deployments and live objects, or one workload's with its previews and replicas; --all adds killed objects and stopped deployments (at most 5000 objects: --limit N, 0 for no ceiling)
+
+usage: tw ls [workload] [--all]
+
+flags:
+  -all
+    	also list killed objects and stopped deployments
+
+Advanced:
+  -limit int
+    	list at most this many objects (0: no ceiling) (default 5000)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+### tw telemetry
+
+the tenant's OTLP export
+
+```text
+tw telemetry: the tenant's OTLP export of request records, metrics and spans (each workload exports from its own node); --header NAME reads a credential from stdin, never shown again
+
+subcommands:
+  tw telemetry [show]
+  tw telemetry set --otlp <url> [--header NAME[=VALUE]]... [--signals logs,metrics,traces]
+  tw telemetry rm
+  common flags: [--tenant <tailnet>]
+
+flags:
+  (none besides the global ones)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+#### tw telemetry rm
+
+Same flags as [tw telemetry](#tw-telemetry).
+
+#### tw telemetry set
+
+```text
+flags:
+  -header value
+    	a header for every export, NAME=VALUE, or NAME alone to read its value from stdin (repeatable)
+  -otlp string
+    	the OTLP/HTTP base URL of a collector on the tailnet (http://otel-collector:4318)
+  -signals string
+    	what to export, comma-separated (default logs,metrics,traces)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+### tw audit
+
+who did what, when and why
+
+```text
+tw audit: show who did what, when and why (the tamper-evident audit trail): the newest -n records, or every record of an object (and its descendants), a principal, a trace or the tenant (--all)
+
+usage: tw audit [-n 50] | <object> | --human <login> | --trace <id> | --all
+
+flags:
+  -all
+    	every record of the tenant
+  -human string
+    	records acting for this principal (login or caller node)
+  -n int
+    	bare tw audit: the newest records (an object, --human, --trace and --all are always complete) (default 50)
+  -trace string
+    	records of one trace
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+### tw logs
+
+request records and console lines; daemon logs
+
+```text
+tw logs: show a workload's request records (one line per request with its console.* lines; --json, filters; --console for the raw app output); default workload: the app in the current directory, else your only workload; --component for the daemons' logs
+
+usage: tw logs [workload] [-n 50] [-f] [--errors] [--console] [--json] [--status 5xx] [--outcome exception] [--object <id|Class/name>] [--caller <login|node>] [--trace <id>] [--component mgmt|hostd|supervisor] [--host <id>]
+
+flags:
+  -caller string
+    	only callers whose login or node name contains this (public: Funnel requests)
+  -component string
+    	mgmt | hostd | supervisor: the daemons' logs
+  -console
+    	the app's raw output (workerd.log, the Node runtime's app.log, the microVM console) instead of request records
+  -errors
+    	only errors (status ≥ 400, an outcome other than ok, or an exception)
+  -f	follow
+  -host string
+    	a replicated workload, from a linked machine: only its replica on this host
+  -n int
+    	lines (default 50)
+  -object string
+    	only this object (object ID, Class/name, Class or name)
+  -outcome string
+    	only this outcome: ok, exception, canceled, … (wrangler tail's --status)
+  -status string
+    	only this status (404) or class (5xx)
+  -trace string
+    	only this trace ID (or a prefix), or audit trace ID
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+## Operate
+
+### tw kill
+
+kill an object and its sub-agents
+
+```text
+tw kill: kill an object and its sub-agents (--cascade=false kills only the object; the reaper kills its sub-agents within seconds)
+
+usage: tw kill <object> [--reason <text>] [--cascade=false]
+
+flags:
+  -cascade
+    	also kill every descendant (sub-agents); --cascade=false leaves them to the reaper (default true)
+  -reason string
+    	why (recorded in audit)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+### tw approvals
+
+Workflow approvals waiting for a decision
+
+```text
+tw approvals: Workflow approvals waiting for a decision (with age and the instance's params)
+
+usage: tw approvals [workload] [--all]
+
+flags:
+  -all
+    	also show decided and timed-out approvals the hosts still keep
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+### tw approve
+
+approve or reject a waiting Workflow
+
+```text
+tw approve: approve (or --reject) a waiting Workflow as your own tailnet identity (needs a github.com/rosskukulinski/tailworks/cap/approve grant; from a `tw link`ed machine)
+
+usage: tw approve <workload> <instance> [--reject] [--comment <text>] [--workflow <name>] [--step <name>]
+
+flags:
+  -comment string
+    	shown to the Workflow and recorded in the audit log
+  -reject
+    	reject instead of approve
+  -step string
+    	which wait, when the instance waits for several
+  -workflow string
+    	the Workflow's name (default: the one whose instance waits)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+### tw notify
+
+a webhook for approvals waiting for a decision
+
+```text
+tw notify: tell people when a Workflow waits for an approval: mgmt POSTs JSON with a link to the approvals page (Slack and chat incoming webhooks show its text); the URL is a secret, never shown again
+
+subcommands:
+  tw notify [show]
+  tw notify set --webhook <url|-> [--header NAME[=VALUE]]...
+  tw notify test
+  tw notify rm
+  common flags: [--tenant <tailnet>]
+
+flags:
+  (none besides the global ones)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+#### tw notify rm
+
+Same flags as [tw notify](#tw-notify).
+
+#### tw notify set
+
+```text
+flags:
+  -header value
+    	a header for every notification, NAME=VALUE, or NAME alone to read its value from stdin (repeatable)
+  -webhook string
+    	the URL mgmt POSTs to (https://hooks.slack.com/services/…, http://chat-bot/notify); - reads it from stdin
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
+```
+
+#### tw notify test
+
+Same flags as [tw notify](#tw-notify).
+
+### tw completion
+
+shell completion script (bash, zsh, fish)
+
+```text
+tw completion: print a shell completion script for every command, subcommand and flag (bash: eval "$(tw completion bash)"; zsh: tw completion zsh > "${fpath[1]}/_tw"; fish: tw completion fish > ~/.config/fish/completions/tw.fish)
+
+subcommands:
+  tw completion bash|zsh|fish
+
+flags:
+  (none besides the global ones)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
+```
+
+#### tw completion bash
+
+Same flags as [tw completion](#tw-completion).
+
+#### tw completion fish
+
+Same flags as [tw completion](#tw-completion).
+
+#### tw completion zsh
+
+Same flags as [tw completion](#tw-completion).
+
+### tw image
+
+public base images and operator images
+
+```text
+tw image: container images (ADR-032): mark public base images shared across tenants (mirrored now), push operator images (the arm64 alias targets) to tailworks' registry
+
+subcommands:
+  tw image public add <ref> [flags]
+  tw image public ls
+  tw image public rm <id>
+  tw image push <oci-layout|docker-save.tar> tw.local/<name>:<tag>
+
+tw image <subcommand> --help   its flags
+  (every command takes --state-dir, default ~/.tailworks, and --json)
+```
+
+#### tw image public add
+
+```text
+flags:
+  -arch string
+    	comma-separated arches to mark (default: every linux amd64/arm64 image the ref has)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
+```
+
+#### tw image public ls
+
+```text
+flags:
+  (none besides the global ones)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
+```
+
+#### tw image public rm
+
+Same flags as [tw image public ls](#tw-image-public-ls).
+
+#### tw image push
+
+Same flags as [tw image public ls](#tw-image-public-ls).
+
+### tw backup
+
+back up mgmt's store, custody and DO storage, online
+
+```text
+tw backup: back up this install while it runs: mgmt's store (a consistent SQLite copy), custody, the ID secret, mgmt's node state and tw.json, and this host's Durable Object storage (each database a consistent copy) and fs R2 bytes, into a new directory (tw restore puts it back); --hostd=false copies the control plane only
+
+usage: tw backup [--out <dir>] [--hostd=false]
+
+flags:
+  -hostd
+    	also copy each workload's Durable Object storage and the fs backend's R2 bytes (--hostd=false: the control plane only) (default true)
+  -out string
+    	write the backup to this new directory (default <state>/backups/<time>-backup-<version>)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
+```
+
+### tw restore
+
+put a tw backup back (tailworks stopped)
+
+```text
+tw restore: restore a tw backup (or a tw upgrade backup) with tailworks stopped: the current state is kept in <state>/backups first, then the restore fence moves every lease epoch past any handed out since the backup
+
+usage: tw restore <backup-dir> [--yes]
+
+flags:
+  -yes
+    	skip the confirmation before deleting; needed without a terminal and with --json
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
+```
+
+### tw upgrade
+
+upgrade tailworks on this machine or the fleet
+
+```text
+tw upgrade: upgrade tailworks: on a tw up machine, back up, install a newer release and roll back if it isn't healthy (tw upgrade rollback goes back by hand); tw upgrade fleet plans and runs a fleet upgrade through tw-mgmt (status, pause, resume, abort), from the release catalog that tw upgrade import fills and tw upgrade releases lists; on a linked machine tw upgrade is tw upgrade fleet
+
+subcommands:
+  tw upgrade [<version>] [--from <tarball|dir>] [--plan] [--yes] [--allow-unsigned]
+  tw upgrade fleet [<version>] [--plan] [--yes] [--hosts <host>,…] [--canary <host>] [--soak <d>] [--settle <d>] [--no-wait]
+  tw upgrade fleet status|pause|resume|abort [<run-id>]
+  tw upgrade import <tarball>…|<version> [--platform <os>-<arch>,…]
+  tw upgrade releases
+  tw upgrade rollback [<backup-dir>] [--restore] [--prefix <dir>] [--yes]
+
+flags:
+  -allow-unsigned
+    	install a release that isn't signed by a pinned key (a build you made; TW_ALLOW_UNSIGNED=1)
+  -from string
+    	install this release tarball (tw-<v>-<os>-<arch>.tar.gz, with SHA256SUMS next to it) or extracted release directory instead of downloading
+  -plan
+    	print the plan and change nothing
+  -yes
+    	skip the confirmation before upgrading; needed without a terminal and with --json
+
+Advanced:
+  -health-timeout duration
+    	how long the upgraded tw may take to report healthy before it is rolled back (default 3m0s)
+  -no-rollback
+    	keep the new release even if the health check fails
+  -prefix string
+    	the install.sh prefix to upgrade (default: the one that owns --state-dir)
+
+also accepted, for one release (now tw upgrade fleet): --canary --fleet --hosts --no-wait --settle --soak
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
+```
+
+#### tw upgrade fleet
+
+```text
+flags:
+  -canary string
+    	the canary host (default: the first)
+  -hosts string
+    	only these hosts (comma-separated)
+  -no-wait
+    	start the run and return (tw upgrade fleet status follows it)
+  -plan
+    	print the plan and start nothing
+  -settle duration
+    	how long a host may take to come back and settle (default 5m0s)
+  -soak duration
+    	watch the canary this long before the other hosts (default 5m0s)
+  -yes
+    	skip the confirmation before starting the upgrade run; needed without a terminal and with --json
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
+```
+
+#### tw upgrade fleet abort
+
+```text
+flags:
+  (none besides the global ones)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
+```
+
+#### tw upgrade fleet pause
+
+Same flags as [tw upgrade fleet abort](#tw-upgrade-fleet-abort).
+
+#### tw upgrade fleet resume
+
+Same flags as [tw upgrade fleet abort](#tw-upgrade-fleet-abort).
+
+#### tw upgrade fleet status
+
+Same flags as [tw upgrade fleet abort](#tw-upgrade-fleet-abort).
+
+#### tw upgrade import
+
+```text
+flags:
+  -platform string
+    	with a version: import the tarballs for these platforms (comma-separated <os>-<arch>; default: the platforms of the hosts that upgrade themselves)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
+```
+
+#### tw upgrade releases
+
+Same flags as [tw upgrade fleet abort](#tw-upgrade-fleet-abort).
+
+#### tw upgrade rollback
+
+```text
+flags:
+  -restore
+    	also put the store back from the backup tw upgrade took (default: only when the previous release can't open the store)
+  -yes
+    	skip the confirmation before rolling back; needed without a terminal and with --json
+
+Advanced:
+  -prefix string
+    	the install.sh prefix to roll back (default: the one that owns --state-dir)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
+```
+
+### tw version
+
+print the version; --check for a newer release
+
+```text
+tw version: print the tw version (and the pinned workerd / built-in esbuild)
+
+usage: tw version
+
+flags:
+  -check
+    	compare with the latest release, print how to upgrade, and say whether the running tw up needs a restart
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
+```
+
+## Scale out
 
 ### tw tenant
 
@@ -155,7 +1443,13 @@ serve, list, update or remove tenants
 ```text
 tw tenant: serve another tenant (its own tailnet) from this host; list, update (PATCH) or remove tenants
 
-usage: tw tenant add <tailnet> --oauth-client-file <file> [--apply-policy [--yes]] [--owner-tag <tag> --name-prefix <p>] | tenant ls | tenant set <tenant> [--owner-tag <tag>] [--name-prefix <p>] [--max-objects N] [--registrations-per-minute N] [--pool P] [--tier T] [--oauth-client-file FILE] [--max-containers N] [--max-container-mem-mib N] [--max-container-vcpu F] [--max-store-bytes SIZE] [--max-queue-bytes SIZE] [--max-stores N] [--public-ingress allow|deny] | tenant rm <tenant> [--force]
+subcommands:
+  tw tenant add <tailnet> [--oauth-client-file <file>] [--apply-policy [--yes]] [--owner-tag <tag> --name-prefix <p>]
+  tw tenant ls
+  tw tenant set <tenant> [--<setting> <value>]…  (tw tenant set --help; docs/limits.md)
+  tw tenant rm <tenant> [--force]
+
+tw tenant <subcommand> --help   its flags
   (every command takes --state-dir, default ~/.tailworks, and --json)
 ```
 
@@ -164,37 +1458,32 @@ usage: tw tenant add <tailnet> --oauth-client-file <file> [--apply-policy [--yes
 ```text
 flags:
   -api-key-file string
-    	--control=headscale only: 0600 file with HEADSCALE_API_KEY=…; read at use, never copied
+    	Headscale only: 0600 file with HEADSCALE_API_KEY=…; read at use, never copied. With a non-default --control-url it selects the Headscale profile
   -apply-policy
-    	write the base policy snippet to the tailnet policy instead of printing it (additive, validated first, written with If-Match); shows the lines and asks first
+    	--control=headscale: write the owner tag's tagOwners entry ("tag:tw": []) when it is missing instead of printing it (additive, validated first, written with If-Match); shows the line and asks first. Without the flag it asks only on a terminal (not with --json or --yes); --apply-policy=false never asks or writes. A Tailscale tenant's policy is never written
   -control string
     	control-plane profile: tailscale, or headscale (ADR-015: a Headscale server at --control-url; the tailnet argument is its dns.base_domain) (default "tailscale")
   -control-url string
     	coordination server for this tailnet's nodes (default "https://controlplane.tailscale.com")
-  -json
-    	machine-readable output
   -name-prefix string
     	with --owner-tag: goes in front of every tailnet name tw makes for this tenant (up to 11 of a-z, 0-9, -)
   -oauth-client-file string
-    	this tailnet's OAuth client (mint mode "oauth"): 0600 file with TS_OAUTH_CLIENT_ID=… and TS_OAUTH_CLIENT_SECRET=tskey-client-… (Auth Keys write, tag tag:tw); read at use, never copied
+    	this tailnet's OAuth client (mint mode "oauth"): 0600 file with TS_OAUTH_CLIENT_SECRET=tskey-client-… (Auth Keys write, tag tag:tw); read at use, never copied. Omitted on a terminal: asked for and saved to ~/.config/tailworks/<tenant>-oauth.env
   -owner-tag string
     	another team's tenant on a tailnet that already has one (docs/teams.md): the tag that owns its tags, e.g. tag:tw-t-payments; its --oauth-client-file must be scoped to it
-  -registrations-per-minute int
-    	this tenant's node registration throttle (default 200/min)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
   -yes
-    	with --apply-policy: write the policy without asking (needed without a terminal, and with --json)
+    	skip the confirmation before --apply-policy writes the policy; needed without a terminal and with --json
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
 ```
 
 #### tw tenant ls
 
 ```text
 flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
+  (none besides the global ones)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
 ```
 
 #### tw tenant rm
@@ -203,20 +1492,16 @@ flags:
 flags:
   -force
     	kill every live object (cascade) and purge before deleting
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
   -yes
-    	delete without asking (needed without a terminal, and with --json)
+    	skip the confirmation before deleting; needed without a terminal and with --json
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
 ```
 
 #### tw tenant set
 
 ```text
 flags:
-  -json
-    	machine-readable output
   -max-container-mem-mib int
     	containers: total guest memory quota (MiB)
   -max-container-vcpu float
@@ -243,27 +1528,10 @@ flags:
     	public (Funnel) ingress gate for tailworks.jsonc "public" routes: allow | deny (ADR-029)
   -registrations-per-minute int
     	node registration throttle
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
   -tier string
     	default isolation tier: process | microvm ("-" = unset)
-```
 
-### tw doctor
-
-check this machine can run tw
-
-```text
-tw doctor: check this machine: workerd runs, bundler offline, ~/.tailworks writable, the mint credential works, process sandbox active, system tailscaled not used; on Linux also glibc, kernel/Landlock ABI, KVM, firecracker, cgroups v2, systemd, the microVM tier and the CPU side-channel posture (mitigations, SMT, KSM)
-
-usage: tw doctor
-
-flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -v	print every check with its full detail (default: problems, then one line per group)
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
 ```
 
 ### tw host
@@ -273,7 +1541,17 @@ add, list, remove or set up hosts
 ```text
 tw host: add a remote host (mgmt mints its single-use tag:tw-host join key), list or remove hosts; cordon (no new placements), uncordon, or drain one (move its workloads elsewhere); install the microVM tier's helper; check a microVM
 
-usage: tw host add <host-id> [--tenant <tailnet>] [--out <file>] | host ls | host rm <host-id> [--drain] | host cordon <host-id> | host uncordon <host-id> | host drain <host-id> [--allow-local-state-loss] [--dry-run] | host setup --microvm [--user <name>] [--hugepages N] | host setup --undo   (Linux, with sudo, once) | host vmcheck <workload> [--keyscan] [--container <Class>/<name>]
+subcommands:
+  tw host add <host-id> [flags]
+  tw host ls
+  tw host rm <host-id> [flags]
+  tw host cordon <host-id>
+  tw host uncordon <host-id>
+  tw host drain <host-id> [flags]
+  tw host setup --microvm [flags] | --undo   (Linux, with sudo, once)
+  tw host vmcheck <workload> [flags]
+
+tw host <subcommand> --help   its flags
   (every command takes --state-dir, default ~/.tailworks, and --json)
 ```
 
@@ -281,24 +1559,19 @@ usage: tw host add <host-id> [--tenant <tailnet>] [--out <file>] | host ls | hos
 
 ```text
 flags:
-  -json
-    	machine-readable output
   -out string
-    	write the join key (TS_AUTHKEY=…) and the one-time registration secret (TW_REGISTRATION_SECRET=…) here (default ./<host-id>.join.env)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
+    	write the join file here (default ./<host-id>.join.env): the join key (TS_AUTHKEY=…), the one-time registration secret (TW_REGISTRATION_SECRET=…), and the host ID, mgmt URL and control URL tw-hostd -join-token-file reads
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json · --tenant <tailnet|id> (default: the tw up tenant)
 ```
 
 #### tw host cordon
 
 ```text
 flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
+  (none besides the global ones)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
 ```
 
 #### tw host drain
@@ -309,67 +1582,48 @@ flags:
     	also move workloads with Durable Objects (their storage stays on this host; they start empty elsewhere)
   -dry-run
     	show what would move; change nothing
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
 ```
 
 #### tw host ls
 
-```text
-flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-```
+Same flags as [tw host cordon](#tw-host-cordon).
 
 #### tw host rm
 
 ```text
 flags:
   -drain
-    	kill the host's objects and release its leases first
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
+    	deprecated: same as --force
+  -force
+    	kill the host's objects and release its leases first (their data on that host is lost; to move them instead, tw host drain)
   -yes
-    	delete without asking (needed without a terminal, and with --json)
+    	skip the confirmation before deleting; needed without a terminal and with --json
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
 ```
 
 #### tw host setup
 
 ```text
 flags:
-  -firecracker string
-    	firecracker binary to install (default: the release's share/tailworks/vm/firecracker)
   -hugepages int
     	2 MiB huge pages to reserve for guest RAM (default: enough for 4 VMs, at most a quarter of RAM; 0 = none) (default -1)
-  -jailer string
-    	jailer binary to install (default: the release's share/tailworks/vm/jailer)
-  -json
-    	machine-readable output
   -microvm
     	install the microVM tier's privileged helper (tw-vmhelper) for --user
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
   -undo
     	remove everything 'tw host setup --microvm' installed
   -user string
     	the user tailworks runs as (default: $SUDO_USER)
+
+also accepted, to install other firecracker builds: --firecracker --jailer
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
 ```
 
 #### tw host uncordon
 
-```text
-flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-```
+Same flags as [tw host cordon](#tw-host-cordon).
 
 #### tw host vmcheck
 
@@ -377,1951 +1631,63 @@ flags:
 flags:
   -container string
     	scan this object's container guest (<Class>/<name>; implies --keyscan)
-  -json
-    	machine-readable output
   -keyscan
     	also scan the guest's disks, files and RAM for key material
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-```
-
-## Develop
-
-### tw init
-
-create an app from a template
-
-```text
-tw init: create an app from a template (node-workflow needs Node.js on the deploying machine)
-
-usage: tw init <dir> [--template hello|agent|mcp|ai-agent|lock|static-site|refund-approval|node-workflow] [--name <workload>] [--tags <tag>,…] [--object-tags [<Class>=]<tag>,…]…
-
-flags:
-  -json
-    	machine-readable output
-  -keep-tags
-    	keep the template's tags instead of naming them after the app (tag:tw-wl-<workload>, tag:tw-<workload>-<class>)
-  -name string
-    	workload name (default: the directory name)
-  -object-tags value
-    	use existing tags for the Durable Object classes with their own node: tag:a,tag:b for every class, or <Class>=tag:a,tag:b for one (repeatable)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tags string
-    	use these existing tags for the workload node instead of a new per-app tag (comma-separated, e.g. tag:tw-app); see docs/tailworks-jsonc.md#tags-and-tw-init
-  -template string
-    	hello | agent | mcp | ai-agent | lock | static-site | refund-approval | node-workflow (default "hello")
-```
-
-### tw dev
-
-run an app locally, no tailnet
-
-```text
-tw dev: run an app locally: process tier + embedded control plane (no tailnet)
-
-usage: tw dev [dir] [--port 8787] [--caller <name>[=<tag>,…]]… [--env <name>] [--wrangler | --from-wrangler-out <dir>]
-
-flags:
-  -caller value
-    	an extra identity: its own dev node (tagged with =tag:a,tag:b) and local URL, listed in the result (repeatable)
-  -console-port int
-    	serve the read-only data console (KV keys, D1 rows) on 127.0.0.1:<port>; 0 picks a free port, -1 turns it off (devconsole.go)
-  -env string
-    	wrangler environment: use env.<name> from the wrangler config, as 'wrangler --env' does (the workload is named <name>-<env> unless the env sets a name)
-  -from-wrangler-out string
-    	deploy a bundle wrangler already built (the --outdir of 'wrangler deploy --dry-run')
-  -inspector-port int
-    	serve workerd's V8 inspector on 127.0.0.1:<port> for Chrome DevTools or VS Code (devinspector.go)
-  -json
-    	machine-readable output
-  -once
-    	start, make one request (GET /; for an MCP app an initialize to its route), print it and exit (smoke test)
-  -port int
-    	local port (127.0.0.1) (default 8787)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -test-scheduled
-    	serve /__scheduled?cron=<expr>[&time=<ms>] on the local port: run a cron trigger's scheduled() now
-  -v	hostd logs to stderr
-  -workerd string
-    	workerd binary
-  -wrangler
-    	bundle with the wrangler CLI (wrangler deploy --dry-run --outdir; nothing is sent to Cloudflare) instead of the built-in esbuild
-```
-
-### tw types
-
-generate Env types from tailworks.jsonc and wrangler config
-
-```text
-tw types: write the app's TypeScript Env (vars, Durable Object, KV, R2, D1, Queue and Workflow bindings, secret names) from its wrangler config and tailworks.jsonc, like wrangler types; --check fails when the file is stale (CI)
-
-usage: tw types [dir] [--env <name>] [--out worker-configuration.d.ts] [--check] [--remote]
-
-flags:
-  -check
-    	write nothing; fail (types_stale) if the file is missing or differs from what tw types would write (for CI)
-  -env string
-    	wrangler environment: type env.<name> from the wrangler config, as 'tw deploy --env' deploys it
-  -json
-    	machine-readable output
-  -out string
-    	the declaration file to write, relative to the app directory (default "worker-configuration.d.ts")
-  -remote
-    	also declare the workload's secrets from mgmt (the names 'tw secret ls' lists); needs a running or linked tw
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-```
-
-### tw docs
-
-search and read tailworks' docs offline
-
-```text
-tw docs: tailworks' docs, offline: search them, print one doc or section (e.g. errors.md#acl_denied)
-
-usage: tw docs search <words…> [--limit 10] | docs show <doc>[#<anchor>] | docs ls
-  (every command takes --state-dir, default ~/.tailworks, and --json)
-```
-
-#### tw docs ls
-
-```text
-flags:
-  -json
-    	machine-readable output
-  -limit int
-    	search: at most this many sections (default 10)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-```
-
-#### tw docs search
-
-```text
-flags:
-  -json
-    	machine-readable output
-  -limit int
-    	search: at most this many sections (default 10)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-```
-
-#### tw docs show
-
-```text
-flags:
-  -json
-    	machine-readable output
-  -limit int
-    	search: at most this many sections (default 10)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-```
-
-### tw mcp
-
-tailworks' MCP server for coding agents (stdio)
-
-```text
-tw mcp: tailworks' MCP server for coding agents, over stdio (a bridge to mgmt's /mcp; tools: whoami status ls logs audit, and deploy kill undeploy when allowed); --config prints how to register it
-
-usage: tw mcp [--allow deploy,kill,undeploy] | mcp --config
-
-flags:
-  -allow string
-    	also allow these tools: deploy, kill, undeploy (comma-separated). On the tw host this is what enables them; from a linked machine your github.com/rosskukulinski/tailworks/cap/mcp grant decides, and this only narrows
-  -config
-    	print how to register tailworks' MCP server with a coding agent, and exit
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-```
-
-### tw agent
-
-teach coding agents to drive tw (skills)
-
-```text
-tw agent: teach coding agents (Claude Code, Codex, Cursor, Gemini CLI, OpenCode) to drive tw: install or remove tailworks' skills, list or print them
-
-usage: tw agent setup [--scope user|project] [--dir <dir>] [--agent claude,codex,cursor,gemini,opencode] [--dry-run] [--yes] | agent remove [same flags] | agent ls | agent show <skill>
-  (every command takes --state-dir, default ~/.tailworks, and --json)
-```
-
-#### tw agent ls
-
-```text
-flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-```
-
-#### tw agent remove
-
-```text
-flags:
-  -agent string
-    	comma-separated agents: claude, codex, cursor, gemini, opencode (default: setup, the ones installed here; remove, all)
-  -dir string
-    	the project directory (--scope project) (default ".")
-  -dry-run
-    	print what would change and write nothing
-  -json
-    	machine-readable output
-  -scope string
-    	user: your home directory (every project) | project: this project's files (--dir) (default "user")
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -yes
-    	don't ask before writing (needed without a terminal; review --dry-run first)
-```
-
-#### tw agent setup
-
-```text
-flags:
-  -agent string
-    	comma-separated agents: claude, codex, cursor, gemini, opencode (default: setup, the ones installed here; remove, all)
-  -dir string
-    	the project directory (--scope project) (default ".")
-  -dry-run
-    	print what would change and write nothing
-  -json
-    	machine-readable output
-  -scope string
-    	user: your home directory (every project) | project: this project's files (--dir) (default "user")
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -yes
-    	don't ask before writing (needed without a terminal; review --dry-run first)
-```
-
-#### tw agent show
-
-```text
-flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-```
-
-## Deploy
-
-### tw deploy
-
-bundle, place and deploy an app; wait until ready
-
-```text
-tw deploy: bundle, preflight grants, build + push Dockerfile container images (docker buildx), place (prints why), deploy, wait until ready; --replace re-places a running workload; --preview runs it next to the workload instead (tw promote)
-
-usage: tw deploy [dir] [--tenant <tailnet>] [--name <workload>] [--env <name>] [--wrangler | --from-wrangler-out <dir>] [--host <id>] [--replace] [--force-takeover] [--allow-missing-grants] [--apply-policy [--yes]] [--no-wait] [--platform linux/amd64,linux/arm64] [--wait-public 5m] [--preview] [--preview-alias <alias>]
-
-flags:
-  -allow-missing-grants
-    	deploy even if tailnet.connects grants are missing
-  -apply-policy
-    	when the preflight finds tagOwners, grants, funnel nodeAttrs or Service auto-approval missing, write them to the tailnet policy first (as tw policy --apply)
-  -env string
-    	wrangler environment: use env.<name> from the wrangler config, as 'wrangler --env' does (the workload is named <name>-<env> unless the env sets a name)
-  -force-takeover
-    	the workload's current host is gone for good: move its Durable Objects anyway (audited; see takeover_unconfirmed); with --replace, confirms moving a stateful workload off a live host
-  -from-wrangler-out string
-    	deploy a bundle wrangler already built (the --outdir of 'wrangler deploy --dry-run')
-  -host string
-    	pin the workload to this host (it must be live, in the tenant's pool and offer the tier)
-  -json
-    	machine-readable output
-  -name string
-    	workload name (default: tailworks.jsonc name)
-  -no-wait
-    	return once mgmt accepted the deploy
-  -platform string
-    	containers: arches to build Dockerfile images for (linux/amd64,linux/arm64; default: the arches of the tenant pool's container hosts)
-  -preview
-    	deploy as a preview next to the workload (<workload>--preview-<alias>), leaving the workload as it is; tw promote makes it the workload
-  -preview-alias string
-    	the preview's alias (implies --preview; default: the start of the bundle's SHA-256)
-  -replace
-    	re-place the workload: move it to a clearly better host (smart placement: the best measured path to tailnet.connects) instead of keeping it where it runs
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -var value
-    	override a wrangler var (KEY=VALUE, repeatable)
-  -wait duration
-    	how long to wait for ready (default 3m0s)
-  -wait-public duration
-    	also wait (up to this long) until the public URL answers from the public internet (tailworks.jsonc "public")
-  -wrangler
-    	bundle with the wrangler CLI (wrangler deploy --dry-run --outdir; nothing is sent to Cloudflare) instead of the built-in esbuild
-  -yes
-    	with --apply-policy: write the policy without asking (needed without a terminal, and with --json)
-```
-
-### tw policy
-
-the tailnet policy an app needs, before deploying
-
-```text
-tw policy: print everything an app needs in the tailnet policy as one snippet: missing tagOwners, tailnet.connects grants, service auto-approval and public nodeAttrs (checked against the live policy, like tw deploy's preflight; nothing is deployed), plus the grant that lets people call it; exits acl_denied when a checked part is missing; --apply writes the missing tag:tw* lines itself (additive, If-Match)
-
-usage: tw policy [dir] [--tenant <tailnet>] [--name <workload>] [--env <name>] [--wrangler | --from-wrangler-out <dir>] [--apply [--yes]]
-
-flags:
-  -apply
-    	write the missing tagOwners, grants, funnel nodeAttrs and Service auto-approval to the tailnet policy (additive, tag:tw* only, If-Match; needs Policy File write)
-  -env string
-    	wrangler environment: use env.<name> from the wrangler config, as 'wrangler --env' does (the workload is named <name>-<env> unless the env sets a name)
-  -from-wrangler-out string
-    	deploy a bundle wrangler already built (the --outdir of 'wrangler deploy --dry-run')
-  -json
-    	machine-readable output
-  -name string
-    	workload name (default: tailworks.jsonc name)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -var value
-    	override a wrangler var (KEY=VALUE, repeatable)
-  -wrangler
-    	bundle with the wrangler CLI (wrangler deploy --dry-run --outdir; nothing is sent to Cloudflare) instead of the built-in esbuild
-  -yes
-    	with --apply: write without asking (needed without a terminal, and with --json)
-```
-
-### tw deployments
-
-a workload's deployment history
-
-```text
-tw deployments: a workload's deployment history, newest first: id, created, bundle sha256, status, host, who deployed (mgmt keeps the newest bundles for rollback)
-
-usage: tw deployments <workload> [--tenant <tailnet>] [--limit N]
-
-flags:
-  -json
-    	machine-readable output
-  -limit int
-    	show the newest N deployments (0 = all) (default 20)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-```
-
-### tw previews
-
-a workload's running preview deploys
-
-```text
-tw previews: a workload's running previews (tw deploy --preview): alias, created, bundle sha256, status, host, URL
-
-usage: tw previews <workload> [--tenant <tailnet>]
-
-flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-```
-
-### tw promote
-
-make a preview the workload's deployment
-
-```text
-tw promote: deploy a preview's bundle to the workload as a new deployment, then undeploy the preview; code and config only, the workload keeps its data and secrets
-
-usage: tw promote <workload> <preview> [--tenant <tailnet>] [--host <id>] [--replace] [--force-takeover] [--keep-preview] [--allow-missing-grants] [--no-wait]
-
-flags:
-  -allow-missing-grants
-    	promote even if the current policy lacks grants the preview's bundle needs
-  -force-takeover
-    	as tw deploy --force-takeover
-  -host string
-    	pin the workload to this host (as tw deploy --host)
-  -json
-    	machine-readable output
-  -keep-preview
-    	leave the preview running (default: undeploy it once promoted)
-  -no-wait
-    	return once mgmt accepted the promotion
-  -replace
-    	re-place the workload (as tw deploy --replace); by default it stays on its host, with its Durable Object storage
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -wait duration
-    	how long to wait for ready (default 3m0s)
-```
-
-### tw rollback
-
-redeploy an earlier deployment's bundle
-
-```text
-tw rollback: redeploy an earlier deployment's stored bundle as a new deployment (default: the previous one that ran); code and config only, data and secrets stay as they are now
-
-usage: tw rollback <workload> [<deployment>] [--tenant <tailnet>] [--host <id>] [--replace] [--force-takeover] [--allow-missing-grants] [--no-wait]
-
-flags:
-  -allow-missing-grants
-    	roll back even if the current policy lacks grants the old bundle needs
-  -force-takeover
-    	as tw deploy --force-takeover
-  -host string
-    	pin the rolled-back workload to this host (as tw deploy --host)
-  -json
-    	machine-readable output
-  -no-wait
-    	return once mgmt accepted the rollback
-  -replace
-    	re-place the workload (as tw deploy --replace); by default it stays on its host, with its Durable Object storage
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -wait duration
-    	how long to wait for ready (default 3m0s)
-```
-
-### tw undeploy
-
-stop a workload and release its lease
-
-```text
-tw undeploy: stop a workload: kill its objects (cascade), release its lease
-
-usage: tw undeploy <workload> [--tenant <tailnet>] [--reason <text>]
-
-flags:
-  -json
-    	machine-readable output
-  -reason string
-    	why (recorded in audit)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-```
-
-### tw expose
-
-open or close a workload's public routes
-
-```text
-tw expose: open or close a workload's public (Funnel) routes; survives redeploys (tailworks.jsonc "public", ADR-029)
-
-usage: tw expose on|off <workload> [--tenant <tailnet>]
-
-flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-```
-
-#### tw expose off
-
-```text
-flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-```
-
-#### tw expose on
-
-```text
-flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-```
-
-### tw secret
-
-a workload's secrets (env.NAME)
-
-```text
-tw secret: a workload's secrets (env.NAME, like wrangler secret): put reads the value from stdin (hidden prompt on a terminal), ls shows names only; changes apply on the next deploy
-
-usage: tw secret put <NAME> | secret ls | secret rm <NAME>   [--workload <workload>] [--tenant <tailnet>]
-  (every command takes --state-dir, default ~/.tailworks, and --json)
-```
-
-#### tw secret ls
-
-```text
-flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -workload string
-    	workload (default: the app in the current directory, as tw deploy names it)
-```
-
-#### tw secret put
-
-```text
-flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -workload string
-    	workload (default: the app in the current directory, as tw deploy names it)
-```
-
-#### tw secret rm
-
-```text
-flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -workload string
-    	workload (default: the app in the current directory, as tw deploy names it)
-```
-
-### tw image
-
-public base images and operator images
-
-```text
-tw image: container images (ADR-032): mark public base images shared across tenants (mirrored now), push operator images (the arm64 alias targets) to tailworks' registry
-
-usage: tw image public add <ref> [--arch amd64,arm64] | image public ls | image public rm <id> | image push <oci-layout|docker-save.tar> tw.local/<name>:<tag>
-  (every command takes --state-dir, default ~/.tailworks, and --json)
-```
-
-#### tw image public add
-
-```text
-flags:
-  -arch string
-    	comma-separated arches to mark (default: every linux amd64/arm64 image the ref has)
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-```
-
-#### tw image public ls
-
-```text
-flags:
-  -arch string
-    	comma-separated arches to mark (default: every linux amd64/arm64 image the ref has)
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-```
-
-#### tw image public rm
-
-```text
-flags:
-  -arch string
-    	comma-separated arches to mark (default: every linux amd64/arm64 image the ref has)
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-```
-
-#### tw image push
-
-```text
-flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-```
-
-## Data
-
-### tw d1
-
-a workload's D1 databases and migrations
-
-```text
-tw d1: a workload's D1 databases (like wrangler d1): create, list, delete, run SQL, export, and wrangler-layout migrations; execute/export/migrations reach the running workload
-
-usage: tw d1 create <db> | d1 list | d1 delete <db> [--yes] | d1 execute <db> --command <sql> | --file <file> | d1 export <db> [--output <file>] | d1 repair <db> --skip <seq> [--yes] | d1 migrations create <db> <message> | d1 migrations list <db> | d1 migrations apply <db>   [--workload <workload>] [--tenant <tailnet>]
-  (every command takes --state-dir, default ~/.tailworks, and --json)
-```
-
-#### tw d1 create
-
-```text
-flags:
-  -command string
-    	execute: SQL to run (one or more statements, run as one batch)
-  -file string
-    	execute: a file of SQL to run as one batch
-  -json
-    	machine-readable output
-  -output string
-    	export: write the SQL to this file (default: stdout)
-  -skip int
-    	repair: the journal entry to skip (the entry tw d1 list shows the database degraded at)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -workload string
-    	workload whose database it is (default: the app in the current directory, as tw deploy names it)
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-#### tw d1 delete
-
-```text
-flags:
-  -command string
-    	execute: SQL to run (one or more statements, run as one batch)
-  -file string
-    	execute: a file of SQL to run as one batch
-  -json
-    	machine-readable output
-  -output string
-    	export: write the SQL to this file (default: stdout)
-  -skip int
-    	repair: the journal entry to skip (the entry tw d1 list shows the database degraded at)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -workload string
-    	workload whose database it is (default: the app in the current directory, as tw deploy names it)
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-#### tw d1 execute
-
-```text
-flags:
-  -command string
-    	execute: SQL to run (one or more statements, run as one batch)
-  -file string
-    	execute: a file of SQL to run as one batch
-  -json
-    	machine-readable output
-  -output string
-    	export: write the SQL to this file (default: stdout)
-  -skip int
-    	repair: the journal entry to skip (the entry tw d1 list shows the database degraded at)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -workload string
-    	workload whose database it is (default: the app in the current directory, as tw deploy names it)
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-#### tw d1 export
-
-```text
-flags:
-  -command string
-    	execute: SQL to run (one or more statements, run as one batch)
-  -file string
-    	execute: a file of SQL to run as one batch
-  -json
-    	machine-readable output
-  -output string
-    	export: write the SQL to this file (default: stdout)
-  -skip int
-    	repair: the journal entry to skip (the entry tw d1 list shows the database degraded at)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -workload string
-    	workload whose database it is (default: the app in the current directory, as tw deploy names it)
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-#### tw d1 list
-
-```text
-flags:
-  -command string
-    	execute: SQL to run (one or more statements, run as one batch)
-  -file string
-    	execute: a file of SQL to run as one batch
-  -json
-    	machine-readable output
-  -output string
-    	export: write the SQL to this file (default: stdout)
-  -skip int
-    	repair: the journal entry to skip (the entry tw d1 list shows the database degraded at)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -workload string
-    	workload whose database it is (default: the app in the current directory, as tw deploy names it)
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-#### tw d1 migrations apply
-
-```text
-flags:
-  -command string
-    	execute: SQL to run (one or more statements, run as one batch)
-  -file string
-    	execute: a file of SQL to run as one batch
-  -json
-    	machine-readable output
-  -output string
-    	export: write the SQL to this file (default: stdout)
-  -skip int
-    	repair: the journal entry to skip (the entry tw d1 list shows the database degraded at)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -workload string
-    	workload whose database it is (default: the app in the current directory, as tw deploy names it)
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-#### tw d1 migrations create
-
-```text
-flags:
-  -command string
-    	execute: SQL to run (one or more statements, run as one batch)
-  -file string
-    	execute: a file of SQL to run as one batch
-  -json
-    	machine-readable output
-  -output string
-    	export: write the SQL to this file (default: stdout)
-  -skip int
-    	repair: the journal entry to skip (the entry tw d1 list shows the database degraded at)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -workload string
-    	workload whose database it is (default: the app in the current directory, as tw deploy names it)
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-#### tw d1 migrations list
-
-```text
-flags:
-  -command string
-    	execute: SQL to run (one or more statements, run as one batch)
-  -file string
-    	execute: a file of SQL to run as one batch
-  -json
-    	machine-readable output
-  -output string
-    	export: write the SQL to this file (default: stdout)
-  -skip int
-    	repair: the journal entry to skip (the entry tw d1 list shows the database degraded at)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -workload string
-    	workload whose database it is (default: the app in the current directory, as tw deploy names it)
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-#### tw d1 repair
-
-```text
-flags:
-  -command string
-    	execute: SQL to run (one or more statements, run as one batch)
-  -file string
-    	execute: a file of SQL to run as one batch
-  -json
-    	machine-readable output
-  -output string
-    	export: write the SQL to this file (default: stdout)
-  -skip int
-    	repair: the journal entry to skip (the entry tw d1 list shows the database degraded at)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -workload string
-    	workload whose database it is (default: the app in the current directory, as tw deploy names it)
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
 
-### tw kv
-
-a workload's Workers KV namespaces and keys
-
-```text
-tw kv: a workload's Workers KV namespaces (kv_namespaces, like wrangler kv): key commands name the namespace by --binding (from the wrangler config) or --namespace; writes reach running workloads within 60 s
-
-usage: tw kv namespace create <NAME> | kv namespace list | kv namespace delete <NAME> | kv key put <KEY> [VALUE] [--path FILE] [--ttl S] [--expiration T] [--metadata JSON] | kv key get <KEY> | kv key delete <KEY> | kv key list [--prefix P]   [--binding <BINDING> or --namespace <NAME>] [--workload <workload>] [--tenant <tailnet>]
-
-flags:
-  -binding string
-    	key commands: the namespace bound as this binding in the app's wrangler.jsonc
-  -expiration int
-    	key put: expire at this Unix time (≥ 60 s ahead)
-  -json
-    	machine-readable output
-  -metadata string
-    	key put: metadata (JSON, ≤ 1024 bytes)
-  -namespace string
-    	key commands: the namespace's name (its kv_namespaces id)
-  -path string
-    	key put: read the value from this file
-  -prefix string
-    	key list: only keys starting with this
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -ttl int
-    	key put: expire after this many seconds (≥ 60)
-  -workload string
-    	workload whose namespaces these are (default: the app in the current directory)
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-#### tw kv key
-
-```text
-flags:
-  -binding string
-    	key commands: the namespace bound as this binding in the app's wrangler.jsonc
-  -expiration int
-    	key put: expire at this Unix time (≥ 60 s ahead)
-  -json
-    	machine-readable output
-  -metadata string
-    	key put: metadata (JSON, ≤ 1024 bytes)
-  -namespace string
-    	key commands: the namespace's name (its kv_namespaces id)
-  -path string
-    	key put: read the value from this file
-  -prefix string
-    	key list: only keys starting with this
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -ttl int
-    	key put: expire after this many seconds (≥ 60)
-  -workload string
-    	workload whose namespaces these are (default: the app in the current directory)
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-#### tw kv key delete
-
-```text
-flags:
-  -binding string
-    	key commands: the namespace bound as this binding in the app's wrangler.jsonc
-  -expiration int
-    	key put: expire at this Unix time (≥ 60 s ahead)
-  -json
-    	machine-readable output
-  -metadata string
-    	key put: metadata (JSON, ≤ 1024 bytes)
-  -namespace string
-    	key commands: the namespace's name (its kv_namespaces id)
-  -path string
-    	key put: read the value from this file
-  -prefix string
-    	key list: only keys starting with this
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -ttl int
-    	key put: expire after this many seconds (≥ 60)
-  -workload string
-    	workload whose namespaces these are (default: the app in the current directory)
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-#### tw kv key get
-
-```text
-flags:
-  -binding string
-    	key commands: the namespace bound as this binding in the app's wrangler.jsonc
-  -expiration int
-    	key put: expire at this Unix time (≥ 60 s ahead)
-  -json
-    	machine-readable output
-  -metadata string
-    	key put: metadata (JSON, ≤ 1024 bytes)
-  -namespace string
-    	key commands: the namespace's name (its kv_namespaces id)
-  -path string
-    	key put: read the value from this file
-  -prefix string
-    	key list: only keys starting with this
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -ttl int
-    	key put: expire after this many seconds (≥ 60)
-  -workload string
-    	workload whose namespaces these are (default: the app in the current directory)
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-#### tw kv key list
-
-```text
-flags:
-  -binding string
-    	key commands: the namespace bound as this binding in the app's wrangler.jsonc
-  -expiration int
-    	key put: expire at this Unix time (≥ 60 s ahead)
-  -json
-    	machine-readable output
-  -metadata string
-    	key put: metadata (JSON, ≤ 1024 bytes)
-  -namespace string
-    	key commands: the namespace's name (its kv_namespaces id)
-  -path string
-    	key put: read the value from this file
-  -prefix string
-    	key list: only keys starting with this
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -ttl int
-    	key put: expire after this many seconds (≥ 60)
-  -workload string
-    	workload whose namespaces these are (default: the app in the current directory)
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-#### tw kv key put
-
-```text
-flags:
-  -binding string
-    	key commands: the namespace bound as this binding in the app's wrangler.jsonc
-  -expiration int
-    	key put: expire at this Unix time (≥ 60 s ahead)
-  -json
-    	machine-readable output
-  -metadata string
-    	key put: metadata (JSON, ≤ 1024 bytes)
-  -namespace string
-    	key commands: the namespace's name (its kv_namespaces id)
-  -path string
-    	key put: read the value from this file
-  -prefix string
-    	key list: only keys starting with this
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -ttl int
-    	key put: expire after this many seconds (≥ 60)
-  -workload string
-    	workload whose namespaces these are (default: the app in the current directory)
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-#### tw kv namespace
-
-```text
-flags:
-  -binding string
-    	key commands: the namespace bound as this binding in the app's wrangler.jsonc
-  -expiration int
-    	key put: expire at this Unix time (≥ 60 s ahead)
-  -json
-    	machine-readable output
-  -metadata string
-    	key put: metadata (JSON, ≤ 1024 bytes)
-  -namespace string
-    	key commands: the namespace's name (its kv_namespaces id)
-  -path string
-    	key put: read the value from this file
-  -prefix string
-    	key list: only keys starting with this
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -ttl int
-    	key put: expire after this many seconds (≥ 60)
-  -workload string
-    	workload whose namespaces these are (default: the app in the current directory)
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-#### tw kv namespace create
-
-```text
-flags:
-  -binding string
-    	key commands: the namespace bound as this binding in the app's wrangler.jsonc
-  -expiration int
-    	key put: expire at this Unix time (≥ 60 s ahead)
-  -json
-    	machine-readable output
-  -metadata string
-    	key put: metadata (JSON, ≤ 1024 bytes)
-  -namespace string
-    	key commands: the namespace's name (its kv_namespaces id)
-  -path string
-    	key put: read the value from this file
-  -prefix string
-    	key list: only keys starting with this
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -ttl int
-    	key put: expire after this many seconds (≥ 60)
-  -workload string
-    	workload whose namespaces these are (default: the app in the current directory)
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-#### tw kv namespace delete
-
-```text
-flags:
-  -binding string
-    	key commands: the namespace bound as this binding in the app's wrangler.jsonc
-  -expiration int
-    	key put: expire at this Unix time (≥ 60 s ahead)
-  -json
-    	machine-readable output
-  -metadata string
-    	key put: metadata (JSON, ≤ 1024 bytes)
-  -namespace string
-    	key commands: the namespace's name (its kv_namespaces id)
-  -path string
-    	key put: read the value from this file
-  -prefix string
-    	key list: only keys starting with this
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -ttl int
-    	key put: expire after this many seconds (≥ 60)
-  -workload string
-    	workload whose namespaces these are (default: the app in the current directory)
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-#### tw kv namespace list
-
-```text
-flags:
-  -binding string
-    	key commands: the namespace bound as this binding in the app's wrangler.jsonc
-  -expiration int
-    	key put: expire at this Unix time (≥ 60 s ahead)
-  -json
-    	machine-readable output
-  -metadata string
-    	key put: metadata (JSON, ≤ 1024 bytes)
-  -namespace string
-    	key commands: the namespace's name (its kv_namespaces id)
-  -path string
-    	key put: read the value from this file
-  -prefix string
-    	key list: only keys starting with this
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -ttl int
-    	key put: expire after this many seconds (≥ 60)
-  -workload string
-    	workload whose namespaces these are (default: the app in the current directory)
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-### tw queues
-
-the tenant's queues: create, peek, send
-
-```text
-tw queues: the tenant's queues (like wrangler queues): producers' first send creates a queue; messages peeks without claiming (read a dead-letter queue); send takes JSON (or --text) from the argument or stdin
-
-usage: tw queues create <queue> | queues ls | queues info <queue> | queues rm <queue> | queues purge <queue> | queues messages <queue> [--limit N] | queues send <queue> [<json>|--text <text>] [--delay S]   [--tenant <tailnet>]
-  (every command takes --state-dir, default ~/.tailworks, and --json)
-```
-
-#### tw queues create
-
-```text
-flags:
-  -delay int
-    	send: delaySeconds (0-43200)
-  -json
-    	machine-readable output
-  -limit int
-    	messages: at most this many (1-100) (default 20)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -text
-    	send: the body is text (contentType text), not JSON
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-#### tw queues info
-
-```text
-flags:
-  -delay int
-    	send: delaySeconds (0-43200)
-  -json
-    	machine-readable output
-  -limit int
-    	messages: at most this many (1-100) (default 20)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -text
-    	send: the body is text (contentType text), not JSON
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-#### tw queues ls
-
-```text
-flags:
-  -delay int
-    	send: delaySeconds (0-43200)
-  -json
-    	machine-readable output
-  -limit int
-    	messages: at most this many (1-100) (default 20)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -text
-    	send: the body is text (contentType text), not JSON
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-#### tw queues messages
-
-```text
-flags:
-  -delay int
-    	send: delaySeconds (0-43200)
-  -json
-    	machine-readable output
-  -limit int
-    	messages: at most this many (1-100) (default 20)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -text
-    	send: the body is text (contentType text), not JSON
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-#### tw queues purge
-
-```text
-flags:
-  -delay int
-    	send: delaySeconds (0-43200)
-  -json
-    	machine-readable output
-  -limit int
-    	messages: at most this many (1-100) (default 20)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -text
-    	send: the body is text (contentType text), not JSON
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-#### tw queues rm
-
-```text
-flags:
-  -delay int
-    	send: delaySeconds (0-43200)
-  -json
-    	machine-readable output
-  -limit int
-    	messages: at most this many (1-100) (default 20)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -text
-    	send: the body is text (contentType text), not JSON
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-#### tw queues send
-
-```text
-flags:
-  -delay int
-    	send: delaySeconds (0-43200)
-  -json
-    	machine-readable output
-  -limit int
-    	messages: at most this many (1-100) (default 20)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -text
-    	send: the body is text (contentType text), not JSON
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-### tw r2
-
-a workload's R2 buckets and objects
-
-```text
-tw r2: a workload's R2 buckets (r2_buckets bindings): list, create or delete buckets, list a bucket's objects
-
-usage: tw r2 bucket ls | r2 bucket create <bucket> | r2 bucket rm <bucket> | r2 object ls <bucket> [--prefix P]   [--workload <workload>] [--tenant <tailnet>]
-  (every command takes --state-dir, default ~/.tailworks, and --json)
-```
-
-#### tw r2 bucket create
-
-```text
-flags:
-  -json
-    	machine-readable output
-  -prefix string
-    	object ls: only keys starting with this
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -workload string
-    	workload (default: the app in the current directory, as tw deploy names it)
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-#### tw r2 bucket ls
-
-```text
-flags:
-  -json
-    	machine-readable output
-  -prefix string
-    	object ls: only keys starting with this
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -workload string
-    	workload (default: the app in the current directory, as tw deploy names it)
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-#### tw r2 bucket rm
-
-```text
-flags:
-  -json
-    	machine-readable output
-  -prefix string
-    	object ls: only keys starting with this
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -workload string
-    	workload (default: the app in the current directory, as tw deploy names it)
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-#### tw r2 object ls
-
-```text
-flags:
-  -json
-    	machine-readable output
-  -prefix string
-    	object ls: only keys starting with this
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -workload string
-    	workload (default: the app in the current directory, as tw deploy names it)
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
-
-## Observe
-
-### tw whoami
-
-who the CLI acts as, and what it may do
-
-```text
-tw whoami: who this CLI acts as (WhoIs through tw link, or the local operator), its tenant, the mgmt it talks to, and its github.com/rosskukulinski/tailworks/cap/* capabilities: admin, approve, MCP tools
-
-usage: tw whoami
-
-flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-```
-
-### tw status
-
-health of mgmt, hosts, tenants, deployments
-
-```text
-tw status: health of mgmt, the host, the tenant and deployments
-
-usage: tw status
-
-flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-```
-
-### tw ls
-
-list deployments and objects
-
-```text
-tw ls: list deployments and objects (paged; --all follows every page and shows killed objects)
-
-usage: tw ls [--tenant <tailnet>] [--all] [--limit N]
-
-flags:
-  -all
-    	include killed objects, and fetch every page
-  -json
-    	machine-readable output
-  -limit int
-    	at most this many objects (pages of ≤500 are followed up to it; --all lifts the cap) (default 200)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-```
-
-### tw telemetry
-
-the tenant's OTLP export
-
-```text
-tw telemetry: the tenant's OTLP export of request records, metrics and spans (each workload exports from its own node); --header NAME reads a credential from stdin, never shown again
-
-usage: tw telemetry [show] | telemetry set --otlp <url> [--header NAME[=VALUE]]... [--signals logs,metrics,traces] | telemetry rm   [--tenant <tailnet>]
-
-flags:
-  -header value
-    	set: a header for every export, NAME=VALUE, or NAME alone to read its value from stdin (repeatable)
-  -json
-    	machine-readable output
-  -otlp string
-    	set: the OTLP/HTTP base URL of a collector on the tailnet (http://otel-collector:4318)
-  -signals string
-    	set: what to export, comma-separated (default logs,metrics,traces)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-```
-
-#### tw telemetry rm
-
-```text
-flags:
-  -header value
-    	set: a header for every export, NAME=VALUE, or NAME alone to read its value from stdin (repeatable)
-  -json
-    	machine-readable output
-  -otlp string
-    	set: the OTLP/HTTP base URL of a collector on the tailnet (http://otel-collector:4318)
-  -signals string
-    	set: what to export, comma-separated (default logs,metrics,traces)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-```
-
-#### tw telemetry set
-
-```text
-flags:
-  -header value
-    	set: a header for every export, NAME=VALUE, or NAME alone to read its value from stdin (repeatable)
-  -json
-    	machine-readable output
-  -otlp string
-    	set: the OTLP/HTTP base URL of a collector on the tailnet (http://otel-collector:4318)
-  -signals string
-    	set: what to export, comma-separated (default logs,metrics,traces)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-```
-
-### tw audit
-
-the hash-chained audit trail
-
-```text
-tw audit: show the hash-chained audit trail
-
-usage: tw audit [--tenant <tailnet>] <object> | --human <login> | --trace <id> | --all
-
-flags:
-  -all
-    	every record of the tenant
-  -human string
-    	records acting for this principal (login or caller node)
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -trace string
-    	records of one trace
-```
-
-### tw logs
-
-request records and console lines; daemon logs
-
-```text
-tw logs: show a workload's request records (one line per request with its console.* lines; --json, filters; --console for the raw app output), else the daemons' logs
-
-usage: tw logs [workload] [--tenant <tailnet>] [--component mgmt|hostd|supervisor] [--host <id>] [-n 50] [-f] [--json] [--console] [--object <id|Class/name>] [--status 5xx] [--outcome exception] [--errors] [--caller <login|node>] [--trace <id>]
-
-flags:
-  -caller string
-    	only callers whose login or node name contains this (public: Funnel requests)
-  -component string
-    	mgmt | hostd | supervisor (default: hostd, or workerd for a workload)
-  -console
-    	the app's raw output (workerd.log, the node tier's app.log, the microVM console) instead of request records
-  -errors
-    	only errors (status ≥ 400, an outcome other than ok, or an exception)
-  -f	follow
-  -host string
-    	linked machine: only the replica on this host
-  -json
-    	machine-readable output
-  -n int
-    	lines (default 50)
-  -object string
-    	only this object (object ID, Class/name, Class or name)
-  -outcome string
-    	only this outcome (ok, exception, canceled, …)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -status string
-    	only this status (404) or class (5xx)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -trace string
-    	only this trace ID (or a prefix), or audit trace ID
-```
-
-## Operate
-
-### tw kill
-
-kill an object (--cascade: its sub-agents)
-
-```text
-tw kill: kill an object (and with --cascade its sub-agents)
-
-usage: tw kill <object> [--tenant <tailnet>] [--cascade] [--reason <text>]
-
-flags:
-  -cascade
-    	also kill every descendant (sub-agents)
-  -json
-    	machine-readable output
-  -reason string
-    	why (recorded in audit)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-```
-
-### tw approvals
-
-Workflow approvals waiting for a decision
-
-```text
-tw approvals: Workflow approvals waiting for a decision (with age and the instance's params)
-
-usage: tw approvals [workload] [--tenant <tailnet>] [--all]
-
-flags:
-  -all
-    	also show decided and timed-out approvals the hosts still keep
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-```
-
-### tw approve
-
-approve or reject a waiting Workflow
-
-```text
-tw approve: approve (or --reject) a waiting Workflow as your own tailnet identity (needs a github.com/rosskukulinski/tailworks/cap/approve grant; from a `tw link`ed machine)
-
-usage: tw approve <workload> <instance> [--reject] [--comment <text>] [--workflow <name>] [--step <name>] [--tenant <tailnet>]
-
-flags:
-  -comment string
-    	shown to the Workflow and recorded in the audit log
-  -json
-    	machine-readable output
-  -reject
-    	reject instead of approve
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -step string
-    	which wait, when the instance waits for several
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -workflow string
-    	the Workflow's name (default: the one whose instance waits)
-```
-
-### tw notify
-
-a webhook for approvals waiting for a decision
-
-```text
-tw notify: tell people when a Workflow waits for an approval: mgmt POSTs JSON with a link to the approvals page (Slack and chat incoming webhooks show its text); the URL is a secret, never shown again
-
-usage: tw notify [show] | notify set --webhook <url|-> [--header NAME[=VALUE]]... [--events approval_requested] | notify test | notify rm   [--tenant <tailnet>]
-
-flags:
-  -events string
-    	set: what to send, comma-separated (default approval_requested)
-  -header value
-    	set: a header for every notification, NAME=VALUE, or NAME alone to read its value from stdin (repeatable)
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -webhook string
-    	set: the URL mgmt POSTs to (https://hooks.slack.com/services/…, http://chat-bot/notify); - reads it from stdin
-```
-
-#### tw notify rm
-
-```text
-flags:
-  -events string
-    	set: what to send, comma-separated (default approval_requested)
-  -header value
-    	set: a header for every notification, NAME=VALUE, or NAME alone to read its value from stdin (repeatable)
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -webhook string
-    	set: the URL mgmt POSTs to (https://hooks.slack.com/services/…, http://chat-bot/notify); - reads it from stdin
-```
-
-#### tw notify set
-
-```text
-flags:
-  -events string
-    	set: what to send, comma-separated (default approval_requested)
-  -header value
-    	set: a header for every notification, NAME=VALUE, or NAME alone to read its value from stdin (repeatable)
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -webhook string
-    	set: the URL mgmt POSTs to (https://hooks.slack.com/services/…, http://chat-bot/notify); - reads it from stdin
-```
-
-#### tw notify test
-
-```text
-flags:
-  -events string
-    	set: what to send, comma-separated (default approval_requested)
-  -header value
-    	set: a header for every notification, NAME=VALUE, or NAME alone to read its value from stdin (repeatable)
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -tenant string
-    	tenant: its tailnet, tenant ID or tailnet label (default: the 'tw up' tenant)
-  -webhook string
-    	set: the URL mgmt POSTs to (https://hooks.slack.com/services/…, http://chat-bot/notify); - reads it from stdin
-```
-
-### tw completion
-
-shell completion script (bash, zsh, fish)
-
-```text
-tw completion: print a shell completion script for every command, subcommand and flag (bash: eval "$(tw completion bash)"; zsh: tw completion zsh > "${fpath[1]}/_tw"; fish: tw completion fish > ~/.config/fish/completions/tw.fish)
-
-usage: tw completion bash|zsh|fish
-
-flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-```
-
-#### tw completion bash
-
-```text
-flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-```
-
-#### tw completion fish
-
-```text
-flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-```
-
-#### tw completion zsh
-
-```text
-flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-```
-
-### tw backup
-
-back up mgmt's store, custody and DO storage, online
-
-```text
-tw backup: back up this install while it runs: mgmt's store (a consistent SQLite copy), custody, the ID secret, mgmt's node state and tw.json, and this host's Durable Object storage (each database a consistent copy) and fs R2 bytes, into a new directory (tw restore puts it back); --hostd=false copies the control plane only
-
-usage: tw backup [--out <dir>] [--hostd=false]
-
-flags:
-  -hostd
-    	also copy each workload's Durable Object storage and the fs backend's R2 bytes (--hostd=false: the control plane only) (default true)
-  -json
-    	machine-readable output
-  -out string
-    	write the backup to this new directory (default <state>/backups/<time>-backup-<version>)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
 ```
-
-### tw restore
-
-put a tw backup back (tailworks stopped)
 
-```text
-tw restore: restore a tw backup (or a tw upgrade backup) with tailworks stopped: the current state is kept in <state>/backups first, then the restore fence moves every lease epoch past any handed out since the backup
-
-usage: tw restore <backup-dir> [--yes]
-
-flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -yes
-    	delete without asking (needed without a terminal, and with --json)
-```
+## Advanced
 
 ### tw custody
 
-move file custody to setec (tailworks stopped)
+move secrets to setec to run several mgmt replicas
 
 ```text
 tw custody: move this install's secrets and store keys from file custody to setec, so it can run several mgmt replicas: every entry is mapped to its name (refused if one can't be), copied, read back, and tw.json switched; run with tailworks stopped
 
-usage: tw custody migrate --to setec --setec-url <url> [--dry-run]
+subcommands:
+  tw custody migrate --setec-url <url> [--dry-run]
 
 flags:
   -dry-run
     	migrate: map every entry and check setec, but write nothing
-  -json
-    	machine-readable output
   -setec-url string
-    	migrate --to setec: the setec server URL (what tw up --setec-url would take)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
+    	migrate: the setec server URL to move file custody to (what tw up --setec-url would take)
   -to string
-    	migrate: the custody to move to (setec)
+    	deprecated: setec is the only target; leave it out
+
+global: --state-dir <dir> (default $TW_STATE_DIR or ~/.tailworks) · --json
 ```
 
 #### tw custody migrate
 
-```text
-flags:
-  -dry-run
-    	migrate: map every entry and check setec, but write nothing
-  -json
-    	machine-readable output
-  -setec-url string
-    	migrate --to setec: the setec server URL (what tw up --setec-url would take)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -to string
-    	migrate: the custody to move to (setec)
-```
+Same flags as [tw custody](#tw-custody).
 
-### tw upgrade
+## Environment
 
-upgrade tailworks on this machine or the fleet
+The variables `tw` reads, and the ones `get.sh` and `install.sh` read
+("scripts"). A flag, where there is one, wins over the variable. The
+`tw up --service` unit sets only `PATH` and passes `--state-dir`, so
+none of these reach a tailworks that runs as a service unless the unit
+sets them. `TW_*` and `__TW*` names are reserved: a Worker never sees
+them, and secrets and `node.env` can't use them.
 
-```text
-tw upgrade: upgrade tailworks: on a tw up machine, back up, install a newer release and roll back if it isn't healthy; against a linked tw-mgmt (or --fleet), plan and run a fleet upgrade (status, pause, resume, abort)
+| Variable | What it does | Flag | Read by |
+| --- | --- | --- | --- |
+| `TW_STATE_DIR` | the state dir (default `~/.tailworks`). A `tw up --service` unit passes `--state-dir` itself. | `--state-dir` | tw |
+| `TW_HOME` | where `get.sh` and `install.sh` install the release (the prefix; default `~/.tailworks`). It shares the state dir's default but is a different thing: [What is in ~/.tailworks](INSTALL.md#what-is-in-tailworks). | `install.sh --prefix` | scripts |
+| `TW_INSTALL_FORCE` | `1`: `get.sh` replaces another version while tailworks runs from the prefix, with no backup or health check. Use `tw upgrade` instead. | `install.sh --force` | scripts |
+| `TW_NO_UPDATE_CHECK` | set (to `1`): no once-a-day "newer release" notice after a command. `CI` does the same. |  | tw |
+| `CI` | set (as CI systems do): no update notice, as with `TW_NO_UPDATE_CHECK`. |  | tw |
+| `TW_WORKERD` | the workerd binary, when it isn't next to `tw` or in `~/.tailworks/bin`. | `--workerd` (`tw up`, `tw dev`) | tw |
+| `TW_NODE` | the Node.js binary that runs `"runtime": "node"` workloads (default: `node` on `PATH`). |  | tw |
+| `TW_CREATE_TAILWORKS` | the create-tailworks package directory (bundler and templates), when it isn't in the install or a checkout. |  | tw |
+| `TW_WRANGLER` | the wrangler CLI that builds a wrangler project (default: the project's `node_modules/.bin/wrangler`, then `PATH`). |  | tw |
+| `TW_REPO` | the GitHub repository releases come from (default `rosskukulinski/tailworks`), for `tw upgrade` and `tw version --check`. |  | tw, scripts |
+| `TW_RELEASE_BASE` | a mirror to download release tarballs and `SHA256SUMS` from instead of GitHub (the per-tag directory). The signature check still applies. |  | tw, scripts |
+| `TW_RELEASE_API` | a mirror of the GitHub API that answers "latest release" (default `https://api.github.com`), for `tw upgrade`, `tw version --check` and `get.sh`. For tests and private mirrors. |  | tw, scripts |
+| `TW_RELEASE_SIGNERS` | an `allowed_signers` file that replaces the pinned release keys. For tests and private builds; a host's self-upgrade (`tw-hostd`) ignores it. |  | tw, scripts |
+| `TW_ALLOW_UNSIGNED` | `1`: the per-invocation form of `--allow-unsigned`, for a build you made yourself. Don't export it in a shell profile: every later `get.sh`, `install.sh` and `tw upgrade` would skip the release signature check ([security-model.md](security-model.md)). A host's self-upgrade ignores it. | `--allow-unsigned` | tw, scripts |
 
-usage: tw upgrade [<version>] [--from <tarball|dir>] [--plan] [--yes] [--allow-unsigned] [--fleet] [--hosts h1,h2] [--canary h] [--soak 5m] [--settle 5m] [--no-wait] | upgrade status|pause|resume|abort [<run-id>]
-
-flags:
-  -allow-unsigned
-    	homelab: install a release that isn't signed by a pinned key (a build you made; TW_ALLOW_UNSIGNED=1)
-  -canary string
-    	fleet: the canary host (default: the first)
-  -fleet
-    	upgrade the fleet through tw-mgmt (an upgrade run) even on a tw up machine
-  -from string
-    	install this release tarball (tw-<v>-<os>-<arch>.tar.gz, with SHA256SUMS next to it) or extracted release directory instead of downloading
-  -health-timeout duration
-    	homelab: how long the upgraded tw may take to report healthy before it is rolled back (default 3m0s)
-  -hosts string
-    	fleet: only these hosts (comma-separated)
-  -json
-    	machine-readable output
-  -no-rollback
-    	homelab: keep the new release even if the health check fails
-  -no-wait
-    	fleet: start the run and return (tw upgrade status follows it)
-  -plan
-    	print the plan and change nothing
-  -prefix string
-    	homelab: the install.sh prefix to upgrade (default: the one that owns --state-dir)
-  -settle duration
-    	fleet: how long a host may take to come back and settle (default 5m0s)
-  -soak duration
-    	fleet: watch the canary this long before the other hosts (default 5m0s)
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-  -yes
-    	don't ask for confirmation
-```
-
-#### tw upgrade abort
-
-```text
-flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-```
-
-#### tw upgrade pause
-
-```text
-flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-```
-
-#### tw upgrade resume
-
-```text
-flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-```
-
-#### tw upgrade status
-
-```text
-flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-```
-
-### tw release
-
-tw-mgmt's release catalog
-
-```text
-tw release: tw-mgmt's release catalog: list known releases, import a release (its notes and tarball, for hosts that upgrade themselves)
-
-usage: tw release ls | release import <tw-<v>-<os>-<arch>.tar.gz>…
-
-flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-```
-
-#### tw release import
-
-```text
-flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-```
-
-#### tw release ls
-
-```text
-flags:
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-```
-
-### tw version
-
-print the version; --check for a newer release
-
-```text
-tw version: print the tw version (and the pinned workerd / built-in esbuild)
-
-usage: tw version
-
-flags:
-  -check
-    	compare with the latest release, print how to upgrade, and say whether the running tw up needs a restart
-  -json
-    	machine-readable output
-  -state-dir string
-    	state directory (default $TW_STATE_DIR or ~/.tailworks)
-```
+For debugging and the test harness only: `TW_KEEP_INSTANCES`, when set, keeps a workload instance's directory after it stops; its VM disks and tenant secrets stay on disk, so never set it on a production host. `TW_TEST_LINK_NAME` is the name `tw link` discovers instead of `tw-mgmt`, for hermetic tests.

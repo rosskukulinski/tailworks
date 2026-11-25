@@ -105,7 +105,7 @@ func TestPolicyApply(t *testing.T) {
 
 	var plan PolicyApplyResult
 	e.c.ok("POST", path+"?dryRun=true", body, &plan)
-	if !plan.DryRun || plan.Changed || plan.Preflight.OK || !strings.Contains(plan.Added, `"tag:tw-wl-app"`) || !strings.Contains(plan.Added, `"dst":["tag:db"]`) {
+	if !plan.DryRun || plan.Changed || plan.Preflight.OK || !strings.Contains(plan.Added, `"tag:tw-wl-app"`) || !strings.Contains(plan.Added, `"dst": ["tag:db"]`) {
 		t.Fatalf("plan %+v", plan)
 	}
 	if _, n := e.policyState(); n != 0 {

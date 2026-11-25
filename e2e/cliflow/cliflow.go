@@ -70,12 +70,19 @@ func Policy() policy.Snippet {
 // BuildBinaries builds tailworks, tw-mgmt and tw-hostd into a temp dir.
 func BuildBinaries(t testing.TB) string {
 	t.Helper()
+	return BuildBinariesTags(t, "")
+}
+
+// BuildBinariesTags is BuildBinaries with build tags, for a test hook that
+// only a test build has (twtestclock: internal/wallclock).
+func BuildBinariesTags(t testing.TB, tags string) string {
+	t.Helper()
 	root, err := nettest.FindRepoRoot()
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	cmd := exec.Command("go", "build", "-o", dir+"/", "./cmd/tw", "./cmd/tw-mgmt", "./cmd/tw-hostd")
+	cmd := exec.Command("go", "build", "-tags="+tags, "-o", dir+"/", "./cmd/tw", "./cmd/tw-mgmt", "./cmd/tw-hostd")
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=local")
 	if b, err := cmd.CombinedOutput(); err != nil {
@@ -517,7 +524,7 @@ func (e *Env) Run() {
 	// Apps from the templates.
 	agentDir, mcpDir, helloDir := filepath.Join(e.WorkDir, "agent"), filepath.Join(e.WorkDir, "mcp"), filepath.Join(e.WorkDir, "hello")
 	for dir, tmpl := range map[string]string{agentDir: "agent", mcpDir: "mcp", helloDir: "hello"} {
-		e.MustJSON(nil, "init", dir, "--template", tmpl, "--keep-tags")
+		e.MustJSON(nil, InitArgs(dir, tmpl)...)
 	}
 	// Declare the agent's dependency on the echo service (preflighted).
 	tj := filepath.Join(agentDir, "tailworks.jsonc")

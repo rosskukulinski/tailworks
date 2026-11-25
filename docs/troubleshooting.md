@@ -1,17 +1,67 @@
-# My first deploy doesn't answer
+# Troubleshooting
+
+The usual problems, in the order people hit them: [`tw up`
+fails](#tw-up-fails), [a first deploy doesn't
+answer](#my-first-deploy-doesnt-answer), [`tw link` or a linked
+machine](#tw-link-and-linked-machines), [`tw doctor`
+warns](#tw-doctor-warns). Every error code links to its entry in
+[errors.md](errors.md), and `tw docs show errors.md#<code>` prints it
+offline.
+
+## `tw up` fails
+
+`tw up` checks the OAuth client, and the policy if the client can read
+it, before it mints anything
+([what it checks](INSTALL.md#the-oauth-client)).
+After fixing the cause, run `tw up` again.
+
+- `mint_mode_required`: no credential was given; pass
+  `--oauth-client-file` ([errors.md](errors.md#mint_mode_required); the
+  OAuth client: [INSTALL.md](INSTALL.md#the-oauth-client)).
+- `mint_mode_removed`: this state dir (or tenant) is in the API-key or WIF
+  mode an older tailworks used
+  ([errors.md](errors.md#mint_mode_removed);
+  [Upgrading from API-key or WIF mode](INSTALL.md#upgrading-from-api-key-or-wif-mode)).
+- `policy_missing_tag_owners`: `tag:tw` doesn't own `tag:tw-mgmt` and
+  `tag:tw-host` ([errors.md](errors.md#policy_missing_tag_owners)).
+- `oauth_exchange_failed`: the client secret is wrong or the client was
+  revoked ([errors.md](errors.md#oauth_exchange_failed)).
+- `credential_file_insecure`: a credential file is readable by others
+  ([errors.md](errors.md#credential_file_insecure)).
+- `sandbox_layout_unsafe` (Linux): the state dir, a credential file or the
+  home dir is under a directory every workload may read
+  ([errors.md](errors.md#sandbox_layout_unsafe)).
+- `tailnet_required`: tailworks couldn't name the tailnet
+  ([errors.md](errors.md#tailnet_required)). Tailworks won't bootstrap
+  from your Mac's Tailscale login.
+- `bootstrap_failed … without the tag:tw-mgmt tag`: mgmt's node joined
+  without its tag ([errors.md](errors.md#bootstrap_failed)).
+- `device_delete_unavailable` on `tw kill`: the kill held, but the OAuth
+  client can't delete devices
+  ([errors.md](errors.md#device_delete_unavailable)).
+- `mgmt_failed` or `host_failed`, or tailworks stops after it started:
+  the supervisor (`tw __supervise`, which runs mgmt and the host) exits 0
+  only on a clean stop (`tw down`, `systemctl --user stop tw`, `launchctl
+  bootout`). When mgmt or the host stops on its own (mgmt's listener
+  failed, or a component kept exiting), it logs why to
+  `~/.tailworks/logs/supervisor.log` (`tw logs --component supervisor`)
+  and exits 1 with `mgmt_failed` or `host_failed`. Under `tw up --service`
+  that non-zero exit makes systemd (`Restart=on-failure`) or launchd
+  (`KeepAlive` on an unsuccessful exit) start it again within a few
+  seconds; without a service, run `tw up` again.
+- Logs: `tw logs --component mgmt|hostd|supervisor` (on the host only).
+
+## My first deploy doesn't answer
 
 The usual reasons a first `tw deploy` fails, or succeeds but the workload
-doesn't answer, in the order people hit them. For problems with `tw up`
-itself, see [INSTALL.md › Troubleshooting](INSTALL.md#troubleshooting).
-Every error code links to its entry in [errors.md](errors.md), and
-`tw docs show errors.md#<code>` prints it offline.
+doesn't answer, in the order people hit them.
 
 The examples use the quick start's `support` app: workload tag
 `tag:tw-wl-support`, object class tag `tag:tw-support-support-agent`.
 Your tags are in your app's `tailworks.jsonc` (`tailnet.tags` and
 `tailnet.objects`); the words are explained in [concepts.md](concepts.md).
 
-## `curl` hangs, or the name doesn't resolve
+### `curl` hangs, or the name doesn't resolve
 
 `tw deploy` said `✓ deployed`, but
 `curl http://tw-support-<id>.<tailnet>.ts.net/…` hangs or fails with
@@ -50,7 +100,7 @@ restart.
   connected? Then `tw status` and `tw ls` on the host: the deployment
   should be `active`.
 
-## `identity_pending`
+### `identity_pending`
 
 From **`tw deploy`**: `error [identity_pending]: support not ready after
 3m0s (status …, node …)`. The deployment was placed, but its workload node
@@ -76,7 +126,7 @@ default [pool nodes](concepts.md#pool-node-_pool)), and answers
 keeps happening, `tw ls` shows the object's status and `tw logs
 support` the reason.
 
-## A tag isn't in tagOwners after renaming the app
+### A tag isn't in tagOwners after renaming the app
 
 `tw deploy` prints `› preflight: tagOwners tag:… … ✗ not in tagOwners`
 and fails with [`acl_denied`](errors.md#acl_denied).
@@ -92,7 +142,7 @@ again. Two more things a rename changes:
 - A new `name` is a new workload. The old one keeps running under its old
   name until you `tw undeploy <old-name>`.
 
-## `peer_not_visible` when the workload calls something
+### `peer_not_visible` when the workload calls something
 
 A `fetch()` from your workload to another tailnet device fails with `403`,
 header `tw-error: peer_not_visible`. The destination isn't in the calling
@@ -131,7 +181,7 @@ Destinations outside the tailnet and the host itself are refused with
 object on the same host is reached like one on another host (netd delivers
 the call in process), with the same grant.
 
-## The deployment is `failed` in `tw ls`
+### The deployment is `failed` in `tw ls`
 
 `tw deploy` failed with [`deploy_failed`](errors.md#deploy_failed), or
 `tw ls` shows the deployment as `failed` with an `error:` line under it:
@@ -149,3 +199,45 @@ stopped it. Fix it and `tw deploy` again. If the app runs under `tw dev`
 but not deployed, compare the tier and runtime (`"tier"`, `"runtime"` in
 `tailworks.jsonc`) and any [secrets](secrets.md): `.dev.vars` is for `tw dev`
 only, and `tw secret put` is applied on the next deploy.
+
+### Other deploy problems
+
+- `acl_denied` on deploy: add the printed grant to your tailnet policy
+  ([errors.md](errors.md#acl_denied)). `preflight skipped` means the
+  OAuth client has no Policy File › Read scope, so mgmt can't read the
+  policy.
+- A Node app on Linux gets `EACCES` from `net.connect` or its own
+  dispatcher: that's the sandbox; send egress through `HTTP(S)_PROXY` /
+  `@tailworks/node`'s `fetch`.
+
+## `tw link` and linked machines
+
+- `not_admin` from `tw link`: you need
+  `github.com/rosskukulinski/tailworks/cap/admin` from a grant to
+  `tag:tw-mgmt`; the error prints the grant
+  ([errors.md](errors.md#not_admin)).
+- `mgmt_unreachable` from a linked machine: your Tailscale isn't on the
+  tailnet that runs tailworks, or no grant lets you reach `tag:tw-mgmt`
+  ([errors.md](errors.md#mgmt_unreachable)).
+- Logs: `tw logs <workload>` works on the host or a linked machine (`-f`
+  to follow). From a linked machine, `host_unavailable` means mgmt could
+  not reach the workload's host on its push port
+  ([errors.md](errors.md#host_unavailable)).
+
+## `tw doctor` warns
+
+Every `tw doctor` line has a `fix:` when it fails. The ones that need more:
+
+- `workerd does not run on this machine`: re-sign it (`codesign -f -s -
+  ~/.tailworks/bin/workerd`) and clear quarantine (`xattr -d com.apple.quarantine
+  ~/.tailworks/bin/workerd`), then `tw doctor`.
+- `tw doctor` says `sandbox` failed: Seatbelt (`/usr/bin/sandbox-exec`)
+  or Landlock didn't start workerd or didn't enforce a deny on this OS
+  version. Report it; tenants are not confined until it is fixed.
+- `tw doctor` warns `NO PROCESS SANDBOX` on Linux: the kernel has no
+  Landlock (older than 5.13, or `landlock` missing from the `lsm=` boot
+  parameter; check `cat /sys/kernel/security/lsm`). Add it to the boot
+  parameters, use a newer kernel, or deploy with tier `microvm`.
+- `host_sockets`: your user can reach the system tailscaled's socket or a
+  container engine, so tailworks serves one tenant only
+  ([security-model.md](security-model.md#when-a-host-is-shared-between-tenants)).

@@ -16,7 +16,9 @@
 // another host, when an append finds another writer got in first, and
 // when a read finds its last sync older than the kind's freshness). So
 // local state is always a replay of a prefix of the journal, and an
-// acknowledged write survives the host.
+// acknowledged write survives the host. A read waits a bounded time for
+// its catch-up and then serves the local copy (fresh(), READ_WAIT_MS);
+// a write never goes around the journal.
 //
 // An entry the kind can't apply (apply throws: an entry written by a
 // newer tailworks, a corrupt entry, a D1 statement that fails on replay)
@@ -85,6 +87,29 @@ function b64dec(s) {
 // (Cloudflare KV's default cacheTtl is 60 s).
 export const DEFAULT_FRESH_MS = 60_000;
 
+// READ_WAIT_MS: how long a read that wants fresher data (fresh()) waits
+// for the catch-up with mgmt's journal before it serves the local copy
+// instead. A catch-up is normally one round trip to mgmt, milliseconds on
+// a tailnet; 2 s is far past that, yet short enough that a slow or
+// black-holed mgmt doesn't stall the workload's reads. The catch-up
+// itself carries on (hostd gives up on a journal read after 10 s,
+// storeReadTimeout in hostd/stores.go).
+export const READ_WAIT_MS = 2000;
+
+// STALE_RETRY_MS: once a catch-up for a read has failed or outlasted
+// READ_WAIT_MS, the journal counts as unreachable (the breaker is open):
+// reads serve the local copy at once, without waiting, and start one
+// catch-up in the background at most this often. The first catch-up that
+// succeeds closes the breaker. Writes are not affected: they always go
+// to the journal first, and fail while it can't be reached.
+export const STALE_RETRY_MS = 5000;
+
+// unreachable: e means the journal could not be reached (mgmt, the path
+// to it, or hostd), not that it answered.
+function unreachable(e) {
+  return !["store_degraded", "lease_lost", "store_conflict", "bad_request", "unknown_store"].includes(e?.code);
+}
+
 export class Store extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -103,6 +128,16 @@ export class Store extends DurableObject {
     this.syncedAt = 0; // last successful catch-up of this boot (ms)
     this.triedAt = 0; // last catch-up that stopped at a failing entry (ms)
     this.chain = Promise.resolve();
+    // Catch-ups started by sync() (concurrent ones coalesce): queued is
+    // one waiting its turn in the chain (it covers anyone who asks before
+    // it starts); running is {p, at} for the one in progress, started at
+    // `at`.
+    this.queued = null;
+    this.running = null;
+    // The read breaker (fresh): when the journal last proved unreachable
+    // (0: closed), and when a read last started a background catch-up.
+    this.staleSince = 0;
+    this.retriedAt = 0;
   }
 
   #meta(k, d) {
@@ -274,28 +309,79 @@ export class Store extends DurableObject {
     await this.#report(mgmtDegraded);
   }
 
-  // sync catches up with the journal now.
+  // sync catches up with the journal: with a catch-up that has not
+  // started yet if one is queued (it covers this caller too), else with a
+  // new one after every earlier commit/sync. It waits as long as that
+  // takes (hostd bounds each journal read): sync() is for callers that
+  // must see the journal (a D1 session bookmark, "first-primary").
   sync() {
     this.#check();
-    return this.#locked(() => this.#catchUp());
+    if (this.queued) return this.queued;
+    const p = this.#locked(async () => {
+      if (this.queued === p) this.queued = null;
+      const run = { p, at: Date.now() };
+      this.running = run;
+      try {
+        await this.#catchUp();
+        this.staleSince = 0;
+      } catch (e) {
+        if (!unreachable(e)) this.staleSince = 0;
+        else this.#openBreaker(e.message);
+        throw e;
+      } finally {
+        if (this.running === run) this.running = null;
+      }
+    });
+    this.queued = p;
+    return p;
   }
 
-  // fresh makes sure the last catch-up is at most maxAgeMs old. If the
-  // journal can't be reached, a store that has synced before serves what
-  // it has (fail static, like a Worker during a mgmt outage); one that
-  // never has refuses (store_unavailable).
+  #openBreaker(why) {
+    if (this.staleSince) return;
+    this.staleSince = Date.now();
+    this.retriedAt = this.staleSince;
+    console.warn("tw store " + this.kindName + "/" + this.name + ": journal unreachable (" + why + "); reads serve local data until it answers");
+  }
+
+  // fresh makes sure the last catch-up is at most maxAgeMs old, waiting at
+  // most READ_WAIT_MS for it. If the journal is slow or can't be reached,
+  // a store that has synced before serves what it has (fail static) and
+  // later reads don't wait for it (STALE_RETRY_MS); one that never has
+  // waits for the catch-up and refuses if it fails (store_unavailable).
+  // lease_lost is never served around.
   async fresh(maxAgeMs = DEFAULT_FRESH_MS) {
     this.#check();
-    if (this.syncedAt && Date.now() - this.syncedAt < maxAgeMs) return;
+    const now = Date.now();
+    if (this.syncedAt && now - this.syncedAt < maxAgeMs) return;
     // A degraded store tries its failing entry again at the same pace.
-    if (this.degraded && Date.now() - this.triedAt < maxAgeMs) return;
+    if (this.degraded && now - this.triedAt < maxAgeMs) return;
+    const local = this.everSynced;
+    if (this.staleSince && local) {
+      // The breaker is open: serve local data now; retry in the background.
+      if (!this.queued && !this.running && now - this.retriedAt >= STALE_RETRY_MS) {
+        this.retriedAt = now;
+        this.sync().catch(() => {});
+      }
+      return;
+    }
+    // Share a catch-up already in progress if it started recently enough.
+    const r = this.running;
+    const p = !this.queued && r && r.at >= now - maxAgeMs ? r.p : this.sync();
     try {
-      await this.sync();
+      if (!local) return await p; // nothing to serve meanwhile
+      let timer;
+      const late = new Promise((res) => (timer = setTimeout(() => res(true), READ_WAIT_MS)));
+      const timedOut = await Promise.race([p.then(() => false), late]).finally(() => clearTimeout(timer));
+      if (timedOut) {
+        p.catch(() => {}); // it carries on; sync() records how it ends
+        this.#openBreaker("no answer within " + READ_WAIT_MS + " ms");
+      }
     } catch (e) {
       // Degraded: what it has applied is an exact prefix of the journal.
       if (e?.code === "store_degraded") return;
-      if (!this.everSynced || e?.code === "lease_lost") throw e;
-      console.warn("tw store " + this.kindName + "/" + this.name + ": serving local data; journal unreachable: " + e.message);
+      if (!local || e?.code === "lease_lost") throw e;
+      if (!unreachable(e)) console.warn("tw store " + this.kindName + "/" + this.name + ": serving local data; catch-up failed: " + e.message);
+      // else sync() opened the breaker and logged it.
     }
   }
 
@@ -308,10 +394,23 @@ export class Store extends DurableObject {
     return this.#locked(async () => {
       // A degraded store tries its failing entry again first, and refuses
       // the write (store_degraded) if it still doesn't apply.
-      if (!this.syncedAt || this.degraded) await this.#catchUp();
+      let caughtUp = !this.syncedAt || this.degraded;
+      if (caughtUp) await this.#catchUp();
       for (let attempt = 0; attempt < 8; attempt++) {
         const es = (typeof entries === "function" ? entries() : entries).map((e) => ({ ckey: e.ckey || undefined, data: toBytes(e.data) }));
-        if (!es.length) return this.seq;
+        if (!es.length) {
+          // Nothing to write, as decided on the local copy (a delete of
+          // a key it doesn't have, an UPDATE that matches no row). Only
+          // an append is checked against the journal's head, and the
+          // copy can be behind it (another replica wrote; mgmt can't be
+          // reached), so confirm the decision on a caught-up copy before
+          // acknowledging it (#562). If the journal can't be reached the
+          // catch-up throws and the write fails, as every write does then.
+          if (caughtUp) return this.seq;
+          await this.#catchUp();
+          caughtUp = true;
+          continue;
+        }
         let r;
         try {
           r = await this.#hostd("append", {

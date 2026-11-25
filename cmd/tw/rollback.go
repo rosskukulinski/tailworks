@@ -38,12 +38,8 @@ type rollbackResult struct {
 func cmdRollback(args []string) error {
 	f := newFlags("rollback")
 	tenantF := tenantFlag(f)
-	hostF := f.String("host", "", "pin the rolled-back workload to this host (as tw deploy --host)")
-	replace := f.Bool("replace", false, "re-place the workload (as tw deploy --replace); by default it stays on its host, with its Durable Object storage")
-	forceTakeover := f.Bool("force-takeover", false, "as tw deploy --force-takeover")
-	allowMissing := f.Bool("allow-missing-grants", false, "roll back even if the current policy lacks grants the old bundle needs")
-	noWait := f.Bool("no-wait", false, "return once mgmt accepted the rollback")
-	wait := f.Duration("wait", 3*time.Minute, "how long to wait for ready")
+	po := addPlacementFlags(f, "roll back") // placementflags.go
+	allowMissing, noWait, wait := po.allowMissing, po.noWait, po.wait
 	pos, err := f.parse(args)
 	if err != nil {
 		return err
@@ -75,15 +71,7 @@ func cmdRollback(args []string) error {
 	if target != "" {
 		body["deploymentID"] = target
 	}
-	if *hostF != "" {
-		body["host"] = *hostF
-	}
-	if *replace {
-		body["replace"] = true
-	}
-	if *forceTakeover {
-		body["forceTakeover"] = true
-	}
+	po.apply(body)
 	t0 := time.Now()
 	res := rollbackResult{Workload: workload, Tenant: tn.Tailnet, TenantID: tn.TenantID, Timings: map[string]float64{}}
 	ev := newEvents(*f.json, os.Stderr)

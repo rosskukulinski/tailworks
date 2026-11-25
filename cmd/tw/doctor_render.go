@@ -57,6 +57,7 @@ var doctorMetas = map[string]doctorMeta{
 	"binaries":                   {group: "Install", label: "daemon binaries", fact: binariesFact},
 	"bundler":                    {group: "Install", label: "bundler"},
 	"cgroups_v2":                 {group: "Linux host", label: "cgroups v2"},
+	"containers":                 {group: "Isolation", label: "containers"},
 	"data_disk":                  {group: "Storage", label: "disk", fact: submatch(reDiskFree)},
 	"firecracker":                {group: "Linux host", label: "Firecracker"},
 	"glibc":                      {group: "Install", label: "glibc"},

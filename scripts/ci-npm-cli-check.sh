@@ -67,8 +67,11 @@ status=$(printf '%s' "$out" | node -e 'let s="";process.stdin.on("data",d=>s+=d)
 echo "smoke status $status"
 [ "$status" = 200 ] || { echo "$out"; exit 1; }
 
-say "5. tw upgrade refuses (npm owns the install)"
-if out=$(tw upgrade "$VERSION" --plan 2>&1); then echo "$out"; echo "tw upgrade ran from an npm install"; exit 1; fi
+say "5. tw upgrade --plan prints the npm command; tw upgrade refuses (npm owns the install)"
+out=$(tw upgrade "$VERSION" --plan 2>&1) || { echo "$out"; echo "tw upgrade --plan failed on an npm install"; exit 1; }
+echo "$out"
+case $out in *"npm install -g tailworks@$VERSION"*) ;; *) echo "want the npm command"; exit 1 ;; esac
+if out=$(tw upgrade "$VERSION" --yes 2>&1); then echo "$out"; echo "tw upgrade ran from an npm install"; exit 1; fi
 echo "$out"
 case $out in *npm_install*) ;; *) echo "want npm_install"; exit 1 ;; esac
 

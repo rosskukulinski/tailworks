@@ -199,9 +199,7 @@ func TestCloudflareAgents(t *testing.T) {
 				t.Fatalf("env.%s is %v; expected absent (update docs/COMPAT.md)", k, r[k])
 			}
 		}
-		if !strings.Contains(js(r["email"]), "not supported on tailworks") {
-			t.Fatalf("cloudflare:email: %v", r["email"])
-		}
+		emailCheck(t)
 		// subAgent() inside a facet: the facet's Dynamic Worker has no
 		// ctx.exports for tenant classes (documented gap).
 		if !strings.Contains(js(r["subAgent"]), "not found in worker exports") {

@@ -1,12 +1,13 @@
 {
   "dev": {
-    "date": "2026-11-24",
-    "commit": "5021fbb5d978c7b912785e53422e629980dfa81c",
+    "date": "2026-11-25",
+    "commit": "d4ac417b9325524b86060b7296060456a2c58430",
     "platform": "darwin/arm64",
     "results": {
       "ag-cross-domain": {
-        "outcome": "XFAIL",
-        "source": "cloudflare/agents/examples/cross-domain@95dacf84dcdf"
+        "outcome": "PASS",
+        "source": "cloudflare/agents/examples/cross-domain@95dacf84dcdf",
+        "steps": 3
       },
       "ag-github-webhook": {
         "outcome": "PASS",
@@ -19,8 +20,9 @@
         "steps": 4
       },
       "ag-mcp-elicitation": {
-        "outcome": "XFAIL",
-        "source": "cloudflare/agents/examples/mcp-elicitation@95dacf84dcdf"
+        "outcome": "PASS",
+        "source": "cloudflare/agents/examples/mcp-elicitation@95dacf84dcdf",
+        "steps": 10
       },
       "ag-mcp-elicitation-mrtr": {
         "outcome": "PASS",
@@ -37,9 +39,55 @@
         "source": "cloudflare/agents/examples/mcp-worker-authenticated@95dacf84dcdf",
         "steps": 14
       },
+      "ag-next-lifecycle": {
+        "outcome": "PASS",
+        "source": "cloudflare/agents/examples/next/lifecycle@95dacf84dcdf",
+        "steps": 19
+      },
+      "ag-next-mcp-client": {
+        "outcome": "PASS",
+        "source": "cloudflare/agents/examples/next/mcp-client@95dacf84dcdf",
+        "steps": 9
+      },
+      "ag-next-queue": {
+        "outcome": "PASS",
+        "source": "cloudflare/agents/examples/next/queue@95dacf84dcdf",
+        "steps": 2
+      },
+      "ag-next-routing": {
+        "outcome": "PASS",
+        "source": "cloudflare/agents/examples/next/routing@95dacf84dcdf",
+        "steps": 11
+      },
+      "ag-next-schedules": {
+        "outcome": "PASS",
+        "source": "cloudflare/agents/examples/next/schedules@95dacf84dcdf",
+        "steps": 7
+      },
+      "ag-next-sessions": {
+        "outcome": "PASS",
+        "source": "cloudflare/agents/examples/next/sessions@95dacf84dcdf",
+        "steps": 8
+      },
+      "ag-next-streams": {
+        "outcome": "PASS",
+        "source": "cloudflare/agents/examples/next/streams@95dacf84dcdf",
+        "steps": 4
+      },
+      "ag-next-tasks": {
+        "outcome": "PASS",
+        "source": "cloudflare/agents/examples/next/tasks@95dacf84dcdf",
+        "steps": 8
+      },
+      "ag-next-websockets": {
+        "outcome": "PASS",
+        "source": "cloudflare/agents/examples/next/websockets@95dacf84dcdf",
+        "steps": 8
+      },
       "ag-playground": {
-        "outcome": "XFAIL",
-        "source": "cloudflare/agents/examples/playground@95dacf84dcdf"
+        "outcome": "PASS",
+        "source": "cloudflare/agents/examples/playground@95dacf84dcdf",
+        "steps": 26
       },
       "ag-push-notifications": {
         "outcome": "PASS",
@@ -66,10 +114,27 @@
         "source": "vercel/ai/examples/express@8956ca55ed9c",
         "steps": 4
       },
+      "ai-fastify": {
+        "outcome": "XFAIL",
+        "source": "vercel/ai/examples/fastify@8956ca55ed9c"
+      },
       "ai-hono": {
         "outcome": "PASS",
         "source": "vercel/ai/examples/hono@8956ca55ed9c",
         "steps": 5
+      },
+      "ai-mcp-http": {
+        "outcome": "PASS",
+        "source": "vercel/ai/examples/mcp@8956ca55ed9c",
+        "steps": 5
+      },
+      "ai-mcp-sse": {
+        "outcome": "XFAIL",
+        "source": "vercel/ai/examples/mcp@8956ca55ed9c"
+      },
+      "ai-nest": {
+        "outcome": "XFAIL",
+        "source": "vercel/ai/examples/nest@8956ca55ed9c"
       },
       "ai-node-http": {
         "outcome": "PASS",
@@ -100,17 +165,101 @@
         "outcome": "PASS",
         "source": "vercel/mcp-handler/examples@5518e8af4386",
         "steps": 4
+      },
+      "py-assets": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/assets@47ec7d69f405",
+        "steps": 2
+      },
+      "py-binding": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/binding@47ec7d69f405",
+        "steps": 1
+      },
+      "py-chatroom": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/chatroom@47ec7d69f405",
+        "steps": 4
+      },
+      "py-cron": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/cron@47ec7d69f405",
+        "steps": 1
+      },
+      "py-django": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/django@47ec7d69f405",
+        "steps": 1
+      },
+      "py-django-markdown-r2": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/django-markdown-r2@47ec7d69f405",
+        "steps": 1
+      },
+      "py-django-todo-d1": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/django-todo-d1@47ec7d69f405",
+        "steps": 3
+      },
+      "py-durable-objects": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/durable-objects@47ec7d69f405",
+        "steps": 4
+      },
+      "py-fastapi": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/fastapi@47ec7d69f405",
+        "steps": 2
+      },
+      "py-hello": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/hello@47ec7d69f405",
+        "steps": 1
+      },
+      "py-image-gen": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/image-gen@47ec7d69f405",
+        "steps": 1
+      },
+      "py-js-api-pygments": {
+        "outcome": "XFAIL",
+        "source": "cloudflare/python-workers-examples/js-api-pygments/ts@47ec7d69f405"
+      },
+      "py-mcp-server": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/mcp-server@47ec7d69f405",
+        "steps": 1
+      },
+      "py-opengraph": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/opengraph@47ec7d69f405",
+        "steps": 1
+      },
+      "py-sync-http-clients": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/sync-http-clients@47ec7d69f405",
+        "steps": 1
+      },
+      "py-url-shortener": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/url-shortener@47ec7d69f405",
+        "steps": 2
+      },
+      "py-workflows": {
+        "outcome": "XFAIL",
+        "source": "cloudflare/python-workers-examples/workflows@47ec7d69f405"
       }
     }
   },
   "deployed": {
-    "date": "2026-11-24",
-    "commit": "0bc7003f79dd610c4df8d2ba277c5e2ac3556702",
+    "date": "2026-11-25",
+    "commit": "d4ac417b9325524b86060b7296060456a2c58430",
     "platform": "darwin/arm64",
     "results": {
       "ag-cross-domain": {
-        "outcome": "XFAIL",
-        "source": "cloudflare/agents/examples/cross-domain@95dacf84dcdf"
+        "outcome": "PASS",
+        "source": "cloudflare/agents/examples/cross-domain@95dacf84dcdf",
+        "steps": 3
       },
       "ag-github-webhook": {
         "outcome": "PASS",
@@ -123,8 +272,9 @@
         "steps": 4
       },
       "ag-mcp-elicitation": {
-        "outcome": "XFAIL",
-        "source": "cloudflare/agents/examples/mcp-elicitation@95dacf84dcdf"
+        "outcome": "PASS",
+        "source": "cloudflare/agents/examples/mcp-elicitation@95dacf84dcdf",
+        "steps": 10
       },
       "ag-mcp-elicitation-mrtr": {
         "outcome": "PASS",
@@ -136,13 +286,10 @@
         "source": "cloudflare/agents/examples/mcp-worker@95dacf84dcdf",
         "steps": 5
       },
-      "ag-mcp-worker-auth": {
-        "outcome": "XFAIL",
-        "source": "cloudflare/agents/examples/mcp-worker-authenticated@95dacf84dcdf"
-      },
       "ag-playground": {
-        "outcome": "XFAIL",
-        "source": "cloudflare/agents/examples/playground@95dacf84dcdf"
+        "outcome": "PASS",
+        "source": "cloudflare/agents/examples/playground@95dacf84dcdf",
+        "steps": 26
       },
       "ag-push-notifications": {
         "outcome": "PASS",
@@ -203,6 +350,89 @@
         "outcome": "PASS",
         "source": "vercel/mcp-handler/examples@5518e8af4386",
         "steps": 4
+      },
+      "py-assets": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/assets@47ec7d69f405",
+        "steps": 2
+      },
+      "py-binding": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/binding@47ec7d69f405",
+        "steps": 1
+      },
+      "py-chatroom": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/chatroom@47ec7d69f405",
+        "steps": 4
+      },
+      "py-cron": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/cron@47ec7d69f405",
+        "steps": 2
+      },
+      "py-django": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/django@47ec7d69f405",
+        "steps": 1
+      },
+      "py-django-markdown-r2": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/django-markdown-r2@47ec7d69f405",
+        "steps": 1
+      },
+      "py-django-todo-d1": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/django-todo-d1@47ec7d69f405",
+        "steps": 3
+      },
+      "py-durable-objects": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/durable-objects@47ec7d69f405",
+        "steps": 4
+      },
+      "py-fastapi": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/fastapi@47ec7d69f405",
+        "steps": 2
+      },
+      "py-hello": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/hello@47ec7d69f405",
+        "steps": 1
+      },
+      "py-image-gen": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/image-gen@47ec7d69f405",
+        "steps": 1
+      },
+      "py-js-api-pygments": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/js-api-pygments/ts@47ec7d69f405",
+        "steps": 1
+      },
+      "py-mcp-server": {
+        "outcome": "XFAIL",
+        "source": "cloudflare/python-workers-examples/mcp-server@47ec7d69f405"
+      },
+      "py-opengraph": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/opengraph@47ec7d69f405",
+        "steps": 1
+      },
+      "py-sync-http-clients": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/sync-http-clients@47ec7d69f405",
+        "steps": 1
+      },
+      "py-url-shortener": {
+        "outcome": "PASS",
+        "source": "cloudflare/python-workers-examples/url-shortener@47ec7d69f405",
+        "steps": 2
+      },
+      "py-workflows": {
+        "outcome": "XFAIL",
+        "source": "cloudflare/python-workers-examples/workflows@47ec7d69f405"
       }
     }
   }

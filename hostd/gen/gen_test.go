@@ -203,7 +203,7 @@ func startFilesOpts(t *testing.T, files map[string][]byte, mod func(*gen.Options
 	f.serve(t, res.Sockets.EgressObj, f.egressObj())
 	f.serve(t, res.Sockets.EgressWL, f.egressWL())
 	logf, _ := os.Create(filepath.Join(dir, "workerd.log"))
-	cmd := exec.Command(wdBin, "serve", res.Config, "--experimental")
+	cmd := exec.Command(wdBin, append([]string{"serve", res.Config, "--experimental"}, pythonArgs(t, app)...)...) // python_test.go
 	cmd.Stdout, cmd.Stderr = logf, logf
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -221,14 +221,21 @@ func startFilesOpts(t *testing.T, files map[string][]byte, mod func(*gen.Options
 	}}}
 	in := &inst{t: t, hc: hc, cmd: cmd, f: f}
 	in.cfg, in.log = res.Config, filepath.Join(dir, "workerd.log")
-	deadline := time.Now().Add(20 * time.Second)
+	// A Python Worker loads Pyodide before workerd listens: seconds on an
+	// idle machine, past 20 s on a loaded CI runner (#428).
+	wait := 20 * time.Second
+	if app.Python {
+		wait = 90 * time.Second
+	}
+	t0 := time.Now()
 	for {
 		code, _, _ := in.get("/", map[string]any{"kind": "admin", "op": "health"})
 		if code == 200 {
+			t.Logf("workerd up in %v", time.Since(t0).Round(time.Millisecond))
 			break
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("workerd did not come up")
+		if time.Since(t0) > wait {
+			t.Fatalf("workerd did not come up within %v", wait)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

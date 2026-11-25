@@ -103,6 +103,30 @@ func TestRT3_H10_PublicNameSquat(t *testing.T) {
 	c.ok("POST", "/v1/deployments", deploy(a), nil)
 }
 
+// A team tenant's public name carries its prefix (t.Name), and releasing
+// it is refused while the workload behind it still serves public routes.
+func TestRT3_H10_PrefixedPublicNameRelease(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t)
+	c, h1 := e.c, e.asHost("h1")
+	publicHost(t, e)
+	tn := v1Tenant(t, e, "t.ts.net", map[string]any{"publicIngress": "allow", "ownerTag": "tag:tw-t-pay", "namePrefix": "pay"})
+	var dep DeployResponse
+	c.ok("POST", "/v1/deployments", map[string]any{"tenantID": tn, "workload": "support", "bundle": publicBundle(t, publicTwJSONC)}, &dep)
+	if cl := publicNameClaims(t, e, tn); len(cl) != 1 || cl[0].Name != "pay-support" {
+		t.Fatalf("claims %+v", cl)
+	}
+	h1.ok("POST", "/v1/objects", map[string]any{"tenantID": tn, "workload": "support", "namespace": PublicNamespace, "objectName": "support"}, nil)
+	eb := c.fail("DELETE", "/v1/tenants/"+tn+"/public-names/pay-support", nil, 409, "public_name_in_use")
+	if msg, _ := eb["message"].(string); !strings.Contains(msg, "tw undeploy support") || !strings.Contains(msg, "tw expose release pay-support") {
+		t.Fatalf("in-use message: %v", eb)
+	}
+	c.ok("DELETE", "/v1/deployments/"+dep.DeploymentID, nil, nil)
+	if st := c.okStatus("DELETE", "/v1/tenants/"+tn+"/public-names/pay-support", nil, nil); st != 204 {
+		t.Fatalf("release: %d", st)
+	}
+}
+
 // A name a pre-upgrade deployment already serves has no claim row: the
 // first claim goes to the tenant serving it, not to whoever deploys next.
 func TestRT3_H10_PublicNameLegacyOwner(t *testing.T) {

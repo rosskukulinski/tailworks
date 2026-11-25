@@ -16,6 +16,7 @@ import { wrapStores } from "./d1.js";
 import { sealedRequest } from "./seal.js";
 import { installFetchPropagation, runTraced, tracedStubFetch, type SpanRecord } from "./trace.js";
 import { rpcCall, tracedEntry, traceGate, type EntryInfo } from "./rpctrace.js";
+import { facetNamespaces } from "./facetns.js";
 
 // Egress fetch() carries the running handler's trace context
 // (ADR-045).
@@ -127,17 +128,17 @@ export interface Spawned<T = unknown> {
 
 export interface TailnetContext {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
-  forward(request: Request, to: string | URL, init?: RequestInit): Promise<Response>;
   spawn<T = any>(ns: any, opts: SpawnOptions): Promise<Spawned<T>>;
   kill(opts?: { reason?: string; cascade?: boolean; target?: { class: string; name: string } }): Promise<{ killed: string[] }>;
   audit(records: Array<Record<string, unknown>>): Promise<void>;
   /**
-   * This object's (or the workload's) node, and `epoch`: the workload's
-   * lease epoch on this host. mgmt raises it on every deploy and every move
-   * to another host, so it orders this incarnation after every earlier one
-   * (fencing tokens, docs/locks.md).
+   * This object's (or the workload's) node; `workload`, the name of the
+   * workload it belongs to, and `deploymentId`, the deployment running now;
+   * and `epoch`: the workload's lease epoch on this host. mgmt raises it on
+   * every deploy and every move to another host, so it orders this
+   * incarnation after every earlier one (fencing tokens, docs/locks.md).
    */
-  self(): Promise<{ objectId: string; hostname: string; magicDNS?: string; status: string; kind: string; epoch: number }>;
+  self(): Promise<TailnetSelf>;
   /**
    * A raw TCP socket from this object's own node (facet mode) or, in the
    * Worker, the workload node, under the same policy as fetch(). Refusals
@@ -146,6 +147,20 @@ export interface TailnetContext {
    * workload node).
    */
   connect(address: SocketAddress, options?: TailnetSocketOptions): TailnetSocket;
+}
+
+/** What ctx.tailnet.self() answers. */
+export interface TailnetSelf {
+  objectId: string;
+  hostname: string;
+  magicDNS?: string;
+  status: string;
+  kind: string;
+  /** The workload's name (what `tw deploy` named it). */
+  workload: string;
+  /** The deployment running now. */
+  deploymentId: string;
+  epoch: number;
 }
 
 export type BindingMap = Record<string, string>; // env binding name -> DO class
@@ -181,11 +196,14 @@ export function createTailnetContext(tw: TailnetApiStub, env: Record<string, any
     if (err) throw err;
     return r;
   };
-  const tn: TailnetContext = {
+  const tn: TailnetContext & { forward: unknown } = {
     fetch: tfetch,
+    // forward is no longer part of TailnetContext: signed on-behalf-of
+    // assertions (RFC §4.6) are not built, so it was only fetch with the
+    // request's headers copied. Kept, unlisted, for one minor release so
+    // deployed apps that call it keep working; use
+    // ctx.tailnet.fetch(new Request(url, request)) instead.
     forward(request: Request, to: string | URL, init?: RequestInit) {
-      // MVP: re-issues the request from this node. Signed act-chain
-      // assertions (RFC §4.6) are not implemented yet.
       const hasBody = request.method !== "GET" && request.method !== "HEAD";
       return tfetch(new Request(String(to), { method: request.method, headers: request.headers, body: hasBody ? request.body : undefined, ...init }));
     },
@@ -343,7 +361,9 @@ export function wrapFacetClass(C: any, name: string, bindings: BindingMap, opts:
         const tw = env?.__TW;
         // Bindings admit before they reach an object (chained creation by
         // an attested object; hostd records it), and __TW stays platform-only.
-        const e = guardEnv(env, bindings, "tailnet", admitter(tw, {}));
+        // Its namespace bindings are NsProxy stubs: facetns.ts gives them
+        // idFromName and get() (#391).
+        const e = guardEnv(facetNamespaces(env, bindings), bindings, "tailnet", admitter(tw, {}));
         // Workflow bindings: the platform's WorkflowGate, as the Workflow API.
         for (const k of Object.keys(opts.workflows ?? {})) if (e?.[k]) e[k] = workflowClient(e[k]);
         define(ctx, createTailnetContext(tw, e, bindings));
@@ -961,6 +981,17 @@ export interface BindingDispatcher {
   call(ctx: any, env: any, entrypoint: string, method: string, args: unknown[], cf: any): Promise<unknown>;
 }
 
+// PY_RPC marks a Python Worker's generated front (hostd/gen/python.go,
+// ADR-055): its default export forwards an RPC call, to any entrypoint, to
+// the Python worker, which has the entrypoint classes the front can't see.
+const PY_RPC = Symbol.for("tailworks.pyRpc");
+
+/** pyCallCf is the part of a call's sealed cf a Python method sees as self.ctx.cf (no ticket). */
+function pyCallCf(scf: any): Record<string, unknown> {
+  const { tw: _tw, ...rest } = scf ?? {};
+  return rest;
+}
+
 export function bindingDispatcher(T: Record<string, any>, bindings: BindingMap): BindingDispatcher {
   const target = (ep: string) => {
     const H = ep ? T[ep] : T.default;
@@ -977,6 +1008,9 @@ export function bindingDispatcher(T: Record<string, any>, bindings: BindingMap):
   return {
     async fetch(ctx, env, req) {
       const ep = String((req as any)?.cf?.tw?.binding?.entrypoint ?? "");
+      if (ep && typeof T.default?.[PY_RPC] === "function" && !(ep in T)) {
+        return new TailnetError("service_not_found", `entrypoint ${ep} of a Python Worker answers RPC calls, not fetch(); bind the default entrypoint for fetch()`).toResponse();
+      }
       let t;
       try {
         t = target(ep);
@@ -995,6 +1029,17 @@ export function bindingDispatcher(T: Record<string, any>, bindings: BindingMap):
       const tw: TailnetApiStub | undefined = env?.__TW;
       const sealed: any = await sealedRequest(tw, { cf });
       const scf = sealed?.cf ?? {};
+      const py = T.default?.[PY_RPC];
+      if (typeof py === "function") {
+        // A Python Worker: the same refusals, then the call goes to the
+        // Python worker, which checks the entrypoint and method itself.
+        if (typeof method !== "string" || method in Object.prototype || HANDLER_METHODS.includes(method) || method === "constructor") {
+          throw new TypeError(`The RPC receiver does not implement the method "${method}".`);
+        }
+        const ticket = typeof scf?.tw?.ticket === "string" && scf.tw.ticket ? scf.tw.ticket : undefined;
+        const genv = guardEnv(env, bindings, "tailnet", admitter(tw, { ticket }));
+        return await py(genv, ep || "", method, args, pyCallCf(scf));
+      }
       const t = target(ep);
       if (typeof t.H !== "function") throw new TypeError(`entrypoint ${t.name} is not a WorkerEntrypoint class; RPC needs one`);
       const cctx = callCtx(ctx, scf);

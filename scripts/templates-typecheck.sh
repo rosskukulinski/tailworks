@@ -30,6 +30,10 @@ export TW_CREATE_TAILWORKS="$ROOT/js/packages/create-tailworks"
 fail=0
 for t in $TEMPLATES; do
 	app="$WORK/apps/$t-app"
+	if [ -f "js/packages/create-tailworks/templates/$t/src/entry.py" ]; then
+		echo "== $t (a Python Worker: no TypeScript to check)"
+		continue
+	fi
 	echo "== $t"
 	"$WORK/tw" init "$app" --template "$t" >/dev/null
 	node - "$app/package.json" "$WORK/pkgs" <<'EOF'

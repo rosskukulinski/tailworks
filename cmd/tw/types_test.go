@@ -133,6 +133,9 @@ func TestTypesTemplates(t *testing.T) {
 	ents, _ := os.ReadDir(filepath.Join(ct, "templates"))
 	for _, e := range ents {
 		dir := filepath.Join(ct, "templates", e.Name())
+		if _, err := os.Stat(filepath.Join(dir, "src", "entry.py")); err == nil {
+			continue // a Python Worker: no TypeScript, no worker-configuration.d.ts (docs/python.md)
+		}
 		if err := cmdTypes([]string{dir, "--check"}); err != nil {
 			t.Errorf("template %s: %v (run: tw types %s)", e.Name(), err, dir)
 		}

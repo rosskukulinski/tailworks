@@ -46,7 +46,7 @@ func TestDevCallers(t *testing.T) {
 	work := t.TempDir()
 	app := filepath.Join(work, "hello")
 	e := &cliflow.Env{T: t, BinDir: bin, StateDir: filepath.Join(work, "state"), WorkDir: work}
-	e.MustJSON(nil, "init", app, "--template", "hello", "--keep-tags")
+	e.MustJSON(nil, "init", app, "--template", "hello")
 	var r devResult
 	e.MustJSON(&r, "dev", app, "--once", "--port", "0", "--caller", "alice", "--caller", "ci=tag:ci")
 	if len(r.Callers) != 2 {

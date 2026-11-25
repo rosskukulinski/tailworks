@@ -8,7 +8,7 @@
     <dl class="kv" data-live="host">
       <dt>Last heartbeat</dt><dd>{{since .Host.LastSeen}}{{if .Host.LastSeen}} <span class="muted small">({{stamp .Host.LastSeen}})</span>{{end}}</dd>
       <dt>Nodes</dt><dd>{{.Host.LiveNodes}} running of {{.Host.CapacityNodes}} capacity</dd>
-      <dt>Tiers</dt><dd class="mono">{{join .Host.Tiers}}</dd>
+      <dt>Offers</dt><dd class="mono">{{join .Host.Tiers}}</dd>
       <dt>Pool</dt><dd class="mono">{{or .Host.Pool "—"}}</dd>
       <dt>Push</dt><dd class="mono">{{.Host.PushTransport}}{{if .Host.Push}}{{if .Host.Push.URL}} <span class="muted">{{.Host.Push.URL}}</span>{{end}}{{end}}</dd>
       <dt>Node ID</dt><dd class="mono">{{or .Host.NodeID "—"}}</dd>
@@ -59,13 +59,36 @@
   </div>
 </section>
 
+<section class="card act" data-live="cordon">
+  <h2>Cordon</h2>
+  {{if .Host.Cordoned}}
+  <p>Cordoned{{if .Host.CordonedAt}} {{since .Host.CordonedAt}} <span class="muted small">({{stamp .Host.CordonedAt}})</span>{{end}}{{if .Host.CordonedBy}} by <span class="mono">{{.Host.CordonedBy}}</span>{{end}}. It keeps what it runs and its leases; nothing new is placed there.</p>
+  {{if .Host.CordonedByUpgrade}}
+  <p class="small muted">An upgrade run cordoned this host and uncordons it when its step is done; see <span class="mono">tw upgrade fleet status</span>. Uncordoning it here would let placement use it mid-upgrade.</p>
+  {{else}}
+  <form method="post" action="/ui/hosts/{{.Host.HostID}}/cordon"
+        data-confirm="Uncordon host {{.Host.HostID}}? Placement may choose it again.">
+    <input type="hidden" name="uncordon" value="true">
+    <button type="submit">Uncordon</button>
+  </form>
+  {{end}}
+  {{else}}
+  <p>Not cordoned: placement may choose this host.</p>
+  <form method="post" action="/ui/hosts/{{.Host.HostID}}/cordon"
+        data-confirm="Cordon host {{.Host.HostID}}? It keeps what it runs; nothing new is placed there.">
+    <button type="submit">Cordon</button>
+  </form>
+  {{end}}
+  <p class="small muted">To move its workloads to other hosts, use <span class="mono">tw host drain {{.Host.HostID}}</span> in the CLI.</p>
+</section>
+
 <section class="card act">
   <h2>Remove this host</h2>
   <form method="post" action="/ui/hosts/{{.Host.HostID}}/remove"
-        data-confirm="Remove host {{.Host.HostID}}? With drain, every object it runs is killed and its leases released.">
-    <label><input type="checkbox" name="drain" value="true" checked> Drain first (kill its objects and release its leases)</label>
+        data-confirm="Remove host {{.Host.HostID}}? With force, every object it runs is killed and its leases released: their data is not moved. To move its workloads first, use tw host drain.">
+    <label><input type="checkbox" name="drain" value="true" checked> Force (kill its objects and release its leases)</label>
     <button type="submit" class="danger">Remove host</button>
   </form>
-  <p class="small muted">Without drain, removal is refused while the host holds leases (host_holds_leases).</p>
+  <p class="small muted">Without force, removal is refused while the host holds leases (host_holds_leases). This does not move anything: to move workloads off the host without losing data, run <span class="mono">tw host drain {{.Host.HostID}}</span> first.</p>
 </section>
 {{end}}

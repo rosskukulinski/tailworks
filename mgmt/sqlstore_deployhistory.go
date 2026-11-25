@@ -63,9 +63,16 @@ func (s *SQLStore) DeploymentRecordByID(ctx context.Context, id string) (Deploym
 }
 
 // SetDeploymentMeta records a deployment's bundle hash and, for a rollback,
-// the deployment it redeployed.
+// the deployment it redeployed. An empty value never overwrites a recorded
+// one: a history read backfills the hash of a record it found without one
+// (fillRecord) with the rollbackOf it read, and when that read raced the
+// deploy's own write (between the record's commit and afterDeploy), its
+// late write used to erase the rollback's rollbackOf for good (#563).
 func (s *SQLStore) SetDeploymentMeta(ctx context.Context, id, bundleSHA256, rollbackOf string) error {
-	res, err := s.db.ExecContext(ctx, s.q("UPDATE deployments SET bundle_sha256=?, rollback_of=? WHERE id=?"), bundleSHA256, rollbackOf, id)
+	res, err := s.db.ExecContext(ctx, s.q(`UPDATE deployments SET
+		bundle_sha256 = CASE WHEN CAST(? AS TEXT) = '' THEN bundle_sha256 ELSE ? END,
+		rollback_of = CASE WHEN CAST(? AS TEXT) = '' THEN rollback_of ELSE ? END
+		WHERE id=?`), bundleSHA256, bundleSHA256, rollbackOf, rollbackOf, id)
 	if err != nil {
 		return err
 	}

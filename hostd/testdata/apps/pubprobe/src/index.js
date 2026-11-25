@@ -57,7 +57,7 @@ export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
     const parts = url.pathname.split("/").filter(Boolean);
-    if (parts[0] === "hook") return Response.json({ ...who(req), seen: SEEN(req), path: url.pathname });
+    if (parts[0] === "hook") return Response.json({ ...who(req), seen: SEEN(req), path: url.pathname, url: req.url });
     if (parts[0] === "agents" && parts.length >= 3) {
       const ns = parts[1] === "room" ? env.ROOM : parts[1] === "open" ? env.OPEN : null;
       if (!ns) return new Response("no such class", { status: 404 });

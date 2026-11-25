@@ -144,6 +144,24 @@ func TestMCPServer(t *testing.T) {
 	if errv != nil || ls["tenantID"] != tn || ls["tenant"] != "op.ts.net" {
 		t.Fatalf("ls: %v %v", ls, errv)
 	}
+	// ls asks mgmt for live objects only, so tombstones never fill the page;
+	// all=true has them.
+	for i, st := range []string{StatusKilled, StatusReady} {
+		id := fmt.Sprintf("room-mcpls%d", i)
+		if err := e.store.CreateObject(context.Background(), Object{ID: id, TenantID: tn, Workload: "w", Namespace: "Room", Name: id, Hostname: id, RootID: id, Status: st}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, all := range []bool{false, true} {
+		got, errv := call("ro", "ls", map[string]any{"all": all})
+		var ids []string
+		for _, o := range got["objects"].([]any) {
+			ids = append(ids, fmt.Sprint(o.(map[string]any)["objectID"]))
+		}
+		if want := map[bool]string{false: "room-mcpls1", true: "room-mcpls0,room-mcpls1"}[all]; errv != nil || strings.Join(ids, ",") != want {
+			t.Errorf("ls all=%v: objects %v, want %s (%v)", all, ids, want, errv)
+		}
+	}
 	if _, errv := call("ro", "ls", map[string]any{"tenant": "nope.ts.net"}); errv == nil || errv["code"] != "unknown_tenant" {
 		t.Fatalf("ls unknown tenant: %v", errv)
 	}

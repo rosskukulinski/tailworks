@@ -1,9 +1,10 @@
 // buildApp bundles a tailworks app (wrangler.jsonc "main") into one ESM module at
 // dist/index.js, the way wrangler does for Workers: workerd conditions, Node
 // builtins mapped to node:* (needs "nodejs_compat"), cloudflare:* external.
-// cloudflare:email is stubbed (email is not supported on tailworks).
+// cloudflare:email is stubbed for dependencies and refused for the app's own
+// code (email is not supported on tailworks).
 import { builtinModules } from "node:module";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 
 const builtins = new Set(builtinModules);
@@ -98,7 +99,12 @@ export async function buildApp(dir, { outfile = "dist/index.js", minify = false 
     plugins: [requireBuiltinsJS(dir, (w.compatibility_flags || []).some((f) => f === "nodejs_compat" || f === "nodejs_compat_v2")), {
       name: "tw",
       setup(b) {
-        b.onResolve({ filter: /^cloudflare:email$/ }, () => ({ path: "email", namespace: "tw-stub" }));
+        // A dependency's import of cloudflare:email (under node_modules: the
+        // Agents SDK imports it) gets the stub; the app's own import is
+        // refused (internal/emailstub/refuse.go has the same rule and text).
+        b.onResolve({ filter: /^cloudflare:email$/ }, (a) => a.importer.split(path.sep).includes("node_modules")
+          ? { path: "email", namespace: "tw-stub" }
+          : { errors: [{ text: "cloudflare:email is not supported on tailworks yet (imported by " + path.relative(realpathSync(dir), a.importer).split(path.sep).join("/") + ")" }] });
         b.onLoad({ filter: /.*/, namespace: "tw-stub" }, () => ({
           contents: "export class EmailMessage { constructor() { throw new Error('cloudflare:email is not supported on tailworks'); } }",
           loader: "js",

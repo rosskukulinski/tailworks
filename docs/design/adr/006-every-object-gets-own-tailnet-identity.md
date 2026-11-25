@@ -38,6 +38,13 @@ table, and still are for any one class:
   objects act on their own (agents, sub-agents, anything that calls other
   tailnet services), and classes that are only state pay nothing.
 
+  *Amendment (#492):* an unlisted class is internal (`"node": false`: a
+  plain DO, as on Cloudflare), whether or not the app has a
+  `tailworks.jsonc`. Listing it with tags opts it into a node per object
+  and facet mode. Before, any `tailworks.jsonc` turned every unlisted
+  class into a facet with no node, so adding a three-line file changed DO
+  semantics and storage.
+
 Per-object won for the classes that opt in because it is the only option
 where the tailnet itself (grants, WhoIs, flow logs, kill by device) sees
 each object, with no tailworks code in the trust path.

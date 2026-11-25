@@ -69,7 +69,7 @@ func TestCustodyMigrateCLI(t *testing.T) {
 	}))
 	defer srv.Close()
 	run := func() error {
-		return cmdCustody([]string{"migrate", "--to", "setec", "--setec-url", srv.URL, "--state-dir", dir})
+		return cmdCustody([]string{"migrate", "--setec-url", srv.URL, "--state-dir", dir})
 	}
 	cfg := func() Config {
 		t.Helper()

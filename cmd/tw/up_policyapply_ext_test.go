@@ -22,7 +22,7 @@ func upApplyPolicyRefusals(t *testing.T, e *cliflow.Env, up []string, counts fun
 		if err == nil || !strings.Contains(se, "confirmation_required") || !strings.Contains(se, "tw up --apply-policy --yes") {
 			t.Fatalf("tw up %s without --yes: %v\n%s\n%s", flag, err, so, se)
 		}
-		for _, want := range []string{"tailworks will add to the tailnet policy", `+   "tag:tw-mgmt": ["tag:tw"],`, `+   "tag:tw-host": ["autogroup:admin","tag:tw"],`} {
+		for _, want := range []string{"tailworks will add to the tailnet policy", `+   "tag:tw-mgmt": ["tag:tw"],`, `+   "tag:tw-host": ["autogroup:admin", "tag:tw"],`} {
 			if !strings.Contains(so, want) {
 				t.Fatalf("tw up %s without --yes: output lacks %q:\n%s\n%s", flag, want, so, se)
 			}

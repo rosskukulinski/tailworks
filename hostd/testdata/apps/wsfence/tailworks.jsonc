@@ -1,0 +1,7 @@
+{
+  // Test fixture (#572): a stateful workload whose Durable Object echoes on
+  // hibernatable WebSockets, to check that a fenced copy stops answering
+  // the sockets it already has open.
+  "name": "wsfence",
+  "tailnet": { "tags": ["tag:ttest"], "objects": { "Room": { "tags": ["tag:ttest"] } } },
+}

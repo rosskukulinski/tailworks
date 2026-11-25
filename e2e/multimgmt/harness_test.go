@@ -16,7 +16,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,10 +27,9 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/rosskukulinski/tailworks/e2e/cliflow"
+	"github.com/rosskukulinski/tailworks/e2e/internal/mgmtpg"
 	"github.com/rosskukulinski/tailworks/mgmt"
 )
-
-const pgPassword = "twmm"
 
 // pgContainer is the throwaway Postgres container's name. TW_MM_PG_NAME
 // (with TW_MM_PG_PORT) isolates concurrent runs from other worktrees,
@@ -85,41 +83,8 @@ func startPG(t *testing.T, r *run) string {
 	if dsn := os.Getenv("TW_MM_PG_DSN"); dsn != "" {
 		return dsn
 	}
-	ctx, port := env("PG_CTX", "orbstack"), env("TW_MM_PG_PORT", "55434")
-	docker := func(args ...string) ([]byte, error) {
-		return exec.Command("docker", append([]string{"--context", ctx}, args...)...).CombinedOutput()
-	}
-	docker("rm", "-f", pgContainer)
-	out, err := docker("run", "-d", "--rm", "--name", pgContainer, "-e", "POSTGRES_PASSWORD="+pgPassword,
-		"-p", "127.0.0.1:"+port+":5432", "postgres:17-alpine",
-		"-c", "log_lock_waits=on", "-c", "deadlock_timeout=200ms", "-c", "track_activity_query_size=8192",
-		"-c", "max_connections=300")
-	if err != nil {
-		t.Fatalf("docker run postgres: %v: %s", err, out)
-	}
-	r.record("container", pgContainer, 0)
-	t.Cleanup(func() {
-		if logs, err := docker("logs", pgContainer); err == nil {
-			os.WriteFile(filepath.Join(r.dir, "postgres.log"), logs, 0o600)
-		}
-		docker("rm", "-f", pgContainer)
-	})
-	dsn := "postgres://postgres:" + pgPassword + "@127.0.0.1:" + port + "/postgres?sslmode=disable"
-	deadline := time.Now().Add(60 * time.Second)
-	for {
-		db, err := sql.Open("pgx", dsn)
-		if err == nil {
-			err = db.Ping()
-			db.Close()
-		}
-		if err == nil {
-			return dsn
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("postgres not ready: %v", err)
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
+	return mgmtpg.Start(t, mgmtpg.Options{Name: pgContainer, Port: env("TW_MM_PG_PORT", "55434"), Ctx: env("PG_CTX", "orbstack"),
+		LogDir: r.dir, Record: r.record}).DSN
 }
 
 // ---- fake Tailscale API ----
@@ -244,66 +209,16 @@ func (f *fakeTS) serve(w http.ResponseWriter, r *http.Request) {
 
 // ---- fake setec (shared custody) ----
 
-// setecVals is the fake setec's store (tests may inspect or delete entries).
-var setecVals = struct {
-	sync.Mutex
-	m map[string][]byte
-}{m: map[string][]byte{}}
+// curSetec is the running test's fake setec (tests may delete entries).
+var curSetec *mgmtpg.FakeSetec
 
-func setecDeletePrefix(prefix string) {
-	setecVals.Lock()
-	for k := range setecVals.m {
-		if strings.HasPrefix(k, prefix) {
-			delete(setecVals.m, k)
-		}
-	}
-	setecVals.Unlock()
-}
+func setecDeletePrefix(prefix string) { curSetec.DeletePrefix(prefix) }
 
-func setecDelete(name string) {
-	setecVals.Lock()
-	delete(setecVals.m, name)
-	setecVals.Unlock()
-}
+func setecDelete(name string) { curSetec.Delete(name) }
 
-func newFakeSetec(t *testing.T) *httptest.Server {
-	mu := &setecVals.Mutex
-	setecVals.Lock()
-	setecVals.m = map[string][]byte{}
-	setecVals.Unlock()
-	vals := setecVals.m
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Sec-X-Tailscale-No-Browsers") != "setec" {
-			w.WriteHeader(403)
-			return
-		}
-		var req struct {
-			Name  string
-			Value []byte
-		}
-		json.NewDecoder(r.Body).Decode(&req)
-		mu.Lock()
-		defer mu.Unlock()
-		switch r.URL.Path {
-		case "/api/put":
-			vals[req.Name] = req.Value
-			json.NewEncoder(w).Encode(1)
-		case "/api/activate":
-		case "/api/get":
-			v, ok := vals[req.Name]
-			if !ok {
-				http.Error(w, "not found", 404)
-				return
-			}
-			json.NewEncoder(w).Encode(map[string]any{"Value": v, "Version": 1})
-		case "/api/delete":
-			delete(vals, req.Name)
-		default:
-			w.WriteHeader(500)
-		}
-	}))
-	t.Cleanup(srv.Close)
-	return srv
+func newFakeSetec(t *testing.T) *mgmtpg.FakeSetec {
+	curSetec = mgmtpg.NewFakeSetec(t)
+	return curSetec
 }
 
 // ---- tw-mgmt replicas ----
@@ -348,7 +263,7 @@ type cluster struct {
 	r         *run
 	dsn       string
 	ts        *fakeTS
-	setec     *httptest.Server
+	setec     *mgmtpg.FakeSetec
 	tokenFile string
 	token     string
 	replicas  []*replica
@@ -388,9 +303,8 @@ func newCluster(t *testing.T, r *run, n int) *cluster {
 	for i := 0; i < n; i++ {
 		// unix socket paths are limited to ~104 bytes on macOS: keep them short.
 		sock := filepath.Join(os.TempDir(), fmt.Sprintf("tw-mm-%d-%d.sock", os.Getpid(), i))
-		u, _ := url.Parse(c.dsn)
 		c.replicas = append(c.replicas, &replica{i: i, dir: filepath.Join(r.dir, fmt.Sprintf("r%d", i)), sock: sock,
-			pg: newPGProxy(t, u.Host)})
+			pg: newPGProxy(t, mgmtpg.Host(t, c.dsn))})
 	}
 	t.Cleanup(func() {
 		for _, rp := range c.replicas {

@@ -34,16 +34,37 @@ func readDevVars(dir string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return parseDotenv(string(b))
+	return parseDotenv(DevVarsFile, string(b))
 }
 
 // parseDotenv parses KEY=VALUE lines: blank lines and # comments are
 // skipped, an optional `export ` prefix is allowed, "double quoted" values
 // may span lines and take \n \r \t \" \\ escapes, 'single quoted' values
 // are literal, and unquoted values end at " #" and are trimmed. Errors
-// name the line, never its value.
-func parseDotenv(s string) (map[string]string, error) {
-	out := map[string]string{}
+// name file and the line, never its value. A name given twice keeps its
+// last value.
+func parseDotenv(file, s string) (map[string]string, error) {
+	vars, err := dotenvVars(file, s)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(vars))
+	for _, v := range vars {
+		out[v.name] = v.value
+	}
+	return out, nil
+}
+
+// dotenvVar is one NAME=VALUE of a dotenv file, with the line it starts on.
+type dotenvVar struct {
+	name, value string
+	line        int
+}
+
+// dotenvVars is parseDotenv's NAME=VALUE pairs in file order, repeats
+// included.
+func dotenvVars(file, s string) ([]dotenvVar, error) {
+	var out []dotenvVar
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	lines := strings.Split(s, "\n")
 	for i := 0; i < len(lines); i++ {
@@ -55,8 +76,9 @@ func parseDotenv(s string) (map[string]string, error) {
 		k, v, ok := strings.Cut(ln, "=")
 		k = strings.TrimSpace(k)
 		if !ok || !mgmt.ValidSecretName(k) {
-			return nil, fmt.Errorf("%s line %d: want NAME=VALUE with NAME a JS identifier (not TW_…)", DevVarsFile, i+1)
+			return nil, fmt.Errorf("%s line %d: want NAME=VALUE with NAME a JS identifier (not TW_…)", file, i+1)
 		}
+		at := i + 1
 		v = strings.TrimLeft(v, " \t")
 		switch {
 		case strings.HasPrefix(v, `"`):
@@ -65,7 +87,7 @@ func parseDotenv(s string) (map[string]string, error) {
 			start := i
 			for !closesDouble(body) {
 				if i+1 >= len(lines) {
-					return nil, fmt.Errorf("%s line %d: unterminated \"", DevVarsFile, start+1)
+					return nil, fmt.Errorf("%s line %d: unterminated \"", file, start+1)
 				}
 				i++
 				body += "\n" + lines[i]
@@ -73,13 +95,13 @@ func parseDotenv(s string) (map[string]string, error) {
 			end := closingDouble(body)
 			uq, err := unescapeDouble(body[:end])
 			if err != nil {
-				return nil, fmt.Errorf("%s line %d: %v", DevVarsFile, start+1, err)
+				return nil, fmt.Errorf("%s line %d: %v", file, start+1, err)
 			}
 			v = uq
 		case strings.HasPrefix(v, "'"):
 			end := strings.Index(v[1:], "'")
 			if end < 0 {
-				return nil, fmt.Errorf("%s line %d: unterminated '", DevVarsFile, i+1)
+				return nil, fmt.Errorf("%s line %d: unterminated '", file, i+1)
 			}
 			v = v[1 : 1+end]
 		default:
@@ -88,7 +110,7 @@ func parseDotenv(s string) (map[string]string, error) {
 			}
 			v = strings.TrimSpace(v)
 		}
-		out[k] = v
+		out = append(out, dotenvVar{name: k, value: v, line: at})
 	}
 	return out, nil
 }

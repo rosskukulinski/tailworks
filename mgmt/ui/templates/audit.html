@@ -1,12 +1,8 @@
 {{define "content"}}
 <h1>Audit log</h1>
-<p class="hint">A tamper-evident record of everything tailworks did, newest first. Each entry is hash-chained to the one before it, so any edit or deletion shows up as a broken chain.</p>
+<p class="hint">Who did what, when and why: every deploy, kill, approval and change tailworks made, newest first.</p>
 
-{{if .Who.Admin}}<section class="card" data-live="verification">
-  <h2>Integrity {{if .Verification.OK}}<span class="badge ok">all chains verified</span>{{else}}<span class="badge bad">NOT VERIFIED</span>{{end}}</h2>
-  {{if .Verification.VerifiedAt}}<p class="hint">Last checked {{since .Verification.VerifiedAt}} ({{stamp .Verification.VerifiedAt}}).</p>{{end}}
-  <p class="chains">{{template "chains" .Verification.Chains}}</p>
-</section>{{end}}
+{{if .Who.Admin}}<div data-live="verification">{{if not .Verification.OK}}{{template "integrity" .Verification}}{{end}}</div>{{end}}
 
 <section class="card toolbar">
   <form method="get" action="/ui/audit" class="filters">
@@ -26,12 +22,12 @@
     <button type="submit">Filter</button>
     <a href="/ui/audit">Clear</a>
   </form>
-  <p class="small muted">Filters combine. Tenant, event, caller, object and trace are filtered by the API, like <span class="mono">tw audit</span>; the app filter is applied here, to each page{{if .Hidden}} (it hid {{.Hidden}} records on this page){{end}}.</p>
+  <p class="small muted">Filters combine. They are applied by the API (<span class="mono">GET /v1/audit</span>).</p>
 </section>
 
 <section>
   <div class="sect-head"><div>
-    <h2>Records <span class="count">{{len .Records}}</span> {{if .Verified}}<span class="badge ok">page verified</span>{{else}}<span class="badge bad">page NOT VERIFIED</span>{{end}}</h2>
+    <h2>Records <span class="count">{{len .Records}}</span> {{if not .Verified}}<span class="badge bad">page NOT VERIFIED</span>{{end}}</h2>
     <p class="hint">{{if .Filtered}}Matching records{{else}}Every record{{end}}, newest first, {{.Limit}} per page.</p>
   </div></div>
   <div class="tbl">
@@ -41,6 +37,14 @@
   </table>
   </div>
   <p class="pager">{{if .Paged}}<a href="{{.FirstURL}}">← Newest</a>{{end}}{{if .NextURL}}<a href="{{.NextURL}}">Older →</a>{{else}}<span class="muted">Oldest record reached</span>{{end}}</p>
-  <p class="chains">{{template "chains" .Chains}}</p>
+  {{if not .Verified}}<p class="chains">{{template "chains" .Chains}}</p>{{end}}
 </section>
+
+{{if .Who.Admin}}<div data-live="integrity">{{if .Verification.OK}}{{template "integrity" .Verification}}{{end}}</div>{{end}}
 {{end}}
+
+{{define "integrity"}}{{/* . is verification: shown on top when it fails, at the bottom otherwise (#406) */}}<section class="card">
+  <h2>Integrity {{if .OK}}<span class="badge ok">all chains verified</span>{{else}}<span class="badge bad">NOT VERIFIED</span>{{end}}</h2>
+  <p class="hint">Each record is hash-chained to the one before it, so an edit or deletion shows up as a broken chain.{{if .VerifiedAt}} Last checked {{since .VerifiedAt}} ({{stamp .VerifiedAt}}).{{end}}</p>
+  <p class="chains">{{template "chains" .Chains}}</p>
+</section>{{end}}

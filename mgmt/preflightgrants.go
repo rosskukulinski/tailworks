@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/rosskukulinski/tailworks/internal/policy"
 )
 
 // MissingGrant is one grant that covers every src tag of the app missing
@@ -21,7 +23,10 @@ func (pf PreflightResult) MissingGrants() []MissingGrant {
 	var out []MissingGrant
 	idx := map[string]int{}
 	for _, m := range pf.Missing {
-		ip := missingIP(m)
+		ip := m.IP
+		if ip == "" {
+			ip = missingIP(m)
+		}
 		k := m.Dst + "\x00" + ip
 		i, ok := idx[k]
 		if !ok {
@@ -33,14 +38,14 @@ func (pf PreflightResult) MissingGrants() []MissingGrant {
 	}
 	for i := range out {
 		g := &out[i]
-		src, _ := json.Marshal(g.Srcs)
-		g.Snippet = fmt.Sprintf(`{ "src": %s, "dst": [%q], "ip": [%q] }`, strings.ReplaceAll(string(src), `","`, `", "`), g.Dst, g.IP)
+		g.Snippet = policy.EntryHuJSON(grantEntry(g.Srcs, g.Dst, g.IP)) // preflightsnippet.go
 	}
 	return out
 }
 
 // missingIP is the port of a PreflightMissing's snippet (tcp:80 if it
-// can't be read).
+// can't be read), for a result from a mgmt older than PreflightMissing.IP
+// (the CLI may be newer than mgmt).
 func missingIP(m PreflightMissing) string {
 	var g struct {
 		IP []string `json:"ip"`

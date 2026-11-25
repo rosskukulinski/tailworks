@@ -1,0 +1,9 @@
+{
+  // e2e/dataplane routing loop (#422): long-lived WebSockets to a Durable
+  // Object that accepts them with the hibernation API.
+  "name": "rt-ws",
+  "tailnet": {
+    "tags": ["tag:ttest"],
+    "objects": { "Echo": { "tags": ["tag:ttest"], "egress": "workload" } },
+  },
+}

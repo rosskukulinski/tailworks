@@ -41,16 +41,16 @@ func TestCompletionTree(t *testing.T) {
 	}
 	for path, subs := range map[string][]string{
 		"kv":            {"namespace", "key"},
-		"kv key":        {"put", "get", "delete", "list"},
+		"kv key":        {"put", "get", "rm", "ls"},
 		"d1":            {"create", "execute", "migrations"},
-		"d1 migrations": {"create", "list", "apply"},
+		"d1 migrations": {"create", "ls", "apply"},
 		"r2 bucket":     {"ls", "create", "rm"},
 		"image public":  {"add", "ls", "rm"},
 		"host":          {"add", "ls", "rm", "setup", "vmcheck"},
 		"tenant":        {"add", "ls", "set", "rm"},
 		"secret":        {"put", "ls", "rm"},
 		"queues":        {"create", "send", "messages"},
-		"expose":        {"on", "off"},
+		"expose":        {"on", "off", "names", "release"},
 		"completion":    {"bash", "zsh", "fish"},
 		"docs":          {"search", "show", "ls"},
 		"agent":         {"setup", "remove", "ls", "show"},
@@ -175,10 +175,10 @@ c tw deploy --tenant ""
 		},
 		func(l string) bool { return l == "" }, // nothing starts with "ku"
 		func(l string) bool { return l == "namespace key" },
-		func(l string) bool { return l == "put get delete list" },
+		func(l string) bool { return l == "put get rm ls" },
 		func(l string) bool { return l == "--ttl" },
 		func(l string) bool { return l == "apply" },
-		func(l string) bool { return l == "on off" },
+		func(l string) bool { return l == "on off names release" },
 		func(l string) bool { return l == "" }, // a positional: files (complete -o default)
 		func(l string) bool { return l == "--replace" },
 		func(l string) bool { return l == "" }, // --tenant's value

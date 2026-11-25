@@ -102,6 +102,18 @@ func TestWhoami(t *testing.T) {
 				}
 			}
 
+			// The console URL is one mgmt's UI gate (mountUI) lets this
+			// caller open: /ui/ for the admin, the approvals page for bob.
+			wantConsole := map[string]string{"alice": api.URL + "/ui/", "bob": api.URL + "/ui/approvals"}[name]
+			if r.Console != wantConsole {
+				t.Fatalf("console = %q, want %q", r.Console, wantConsole)
+			}
+			if resp, err := api.Client().Get(r.Console); err != nil || resp.StatusCode != 200 {
+				t.Fatalf("GET %s: %v %v", r.Console, resp, err)
+			} else {
+				resp.Body.Close()
+			}
+
 			human, err := captureStdout(t, func() error { return cmdWhoami([]string{"--state-dir", devDir}) })
 			if err != nil {
 				t.Fatal(err)

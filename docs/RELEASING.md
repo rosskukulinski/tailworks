@@ -476,9 +476,10 @@ advice. On each release, check:
   the notes (below) so they are in this release.
 - **After publishing:** ship a patch. Never move a published tag.
 - **For users:** `tw upgrade` rolls back on a failed health check. To roll
-  back by hand, run `~/.tailworks/install.sh --rollback` and restore the mgmt
-  backup that `tw upgrade` took. Contract migrations can't be undone by a
-  rollback, which is why they ship a release after their expand step.
+  back later, `tw upgrade rollback` puts the previous release back, and the
+  backup that `tw upgrade` took when the previous tw-mgmt can't open the
+  store. Contract migrations can't be undone without that backup, which is
+  why they ship a release after their expand step.
 
 ## Re-finalizing an unpublished release
 

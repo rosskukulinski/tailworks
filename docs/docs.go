@@ -16,7 +16,10 @@ import (
 	"github.com/rosskukulinski/tailworks"
 )
 
-//go:embed *.md contracts/*.md design/RFC.md design/adr/*.md
+// Only docs/*.md: the design records (design/) and the generated API
+// contract (contracts/) are for contributors and live on GitHub.
+//
+//go:embed *.md
 var files embed.FS
 
 // rootPrefix names the repo-root docs (README.md with the quick start,
@@ -226,7 +229,6 @@ func Search(query string, limit int) []Hit {
 				}
 			}
 			if score > 0 {
-				score = score * docWeight(d.Path) / 4
 				hits = append(hits, Hit{Section: s, Score: score, Excerpt: excerpt(s.Text, terms)})
 			}
 		}
@@ -252,16 +254,6 @@ func stem(term string) string {
 		}
 	}
 	return term
-}
-
-// docWeight ranks the user guides above the API contract and the design
-// records (in quarters): "secret" should find secrets.md before the
-// mgmt API's secret operations or an ADR.
-func docWeight(p string) int {
-	if strings.HasPrefix(p, "contracts/") || strings.HasPrefix(p, "design/") {
-		return 2
-	}
-	return 4
 }
 
 // excerpt is the first non-heading line with a query word (else the

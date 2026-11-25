@@ -27,6 +27,10 @@ type appOpts struct {
 
 	// SourceMap: deploy follows upload_source_maps; tw dev sets it (sourcemap.go).
 	SourceMap sourceMapMode
+
+	// DevBuild: tw dev runs build.command itself, only when build.watch_dir
+	// changes (buildcmd.go), so a.build doesn't.
+	DevBuild bool
 }
 
 // builder names the bundler for messages and warnings.
@@ -81,6 +85,7 @@ func (a *app) loadWrangler(twName string) (string, error) {
 	if err != nil {
 		return "", fail("bad_request", file+": "+err.Error())
 	}
+	a.WranglerName, _ = cfg["name"].(string)
 	rebaseWranglerPaths(cfg, filepath.Dir(file)) // viteredirect.go: "." unless redirected
 	w, explicit, notes, err := applyWranglerEnv(cfg, a.Opts.Env, file)
 	if err != nil {
@@ -92,13 +97,7 @@ func (a *app) loadWrangler(twName string) (string, error) {
 	if err := a.detectPages(); err != nil { // pages.go
 		return "", err
 	}
-	base := twName
-	if base == "" {
-		base, _ = cfg["name"].(string)
-	}
-	if base == "" {
-		base = filepath.Base(a.Dir)
-	}
+	base := appBaseName(twName, a.WranglerName, a.Dir) // appworkload.go
 	switch {
 	case a.Opts.Env == "":
 		return base, nil
@@ -130,6 +129,9 @@ func (a *app) buildEsbuild(out string, np []string) (files map[string][]byte, ty
 	}
 	o.SourceMap, o.SourcesContent = a.wantSourceMap() // sourcemap.go
 	r, err := esbundle.BuildApp(o)
+	if ee := emailImportFailure(err); ee != nil { // emailimport.go
+		return nil, nil, 0, ee
+	}
 	if err != nil {
 		return nil, nil, 0, withBundleFix(fail("build_failed", "esbuild failed for "+a.Dir, strings.Split(strings.TrimSpace(err.Error()), "\n")...), err.Error()) // sourcehints.go
 	}

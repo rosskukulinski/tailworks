@@ -5,6 +5,7 @@ export type { Caller, Requester, PublicRequester, TailnetRequester } from "./cal
 export { TailnetError, isTailnetError, fromResponse, CATALOG, DOC_BASE } from "./errors.js";
 export type { TailnetErrorCode, TailnetErrorInit, Missing, CatalogEntry } from "./errors.js";
 export type { TailnetContext, SpawnOptions, Spawned } from "./runtime.js";
+export type { TailnetSelf } from "./runtime.js";
 import "./globals.js"; // ctx.tailnet on DurableObjectState and ExecutionContext
 import { TailnetError } from "./errors.js";
 import type { TailnetContext } from "./runtime.js";

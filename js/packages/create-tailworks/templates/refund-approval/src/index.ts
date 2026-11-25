@@ -17,13 +17,23 @@ import { AgentWorkflow, type AgentWorkflowEvent, type AgentWorkflowStep } from "
 import { NonRetryableError } from "cloudflare:workflows";
 import { getCaller } from "@tailworks/tailnet";
 
-// Env (APP_NAME, the RefundAgent namespace and REFUND_WORKFLOW) is the global
+// Env (the RefundAgent namespace and REFUND_WORKFLOW) is the global
 // interface `tw types` writes to worker-configuration.d.ts. Run `tw types`
 // again after changing wrangler.jsonc or tailworks.jsonc.
 
 type RefundParams = { order: string; amount: number; requester: string };
 
 export class RefundAgent extends Agent<Env> {
+  private app?: string;
+
+  // appName is this workload's name (ctx.tailnet.self().workload), for the
+  // `tw approve <app> <id>` hint. Off tailworks (no ctx.tailnet, as in vitest)
+  // a placeholder stands in.
+  private async appName(): Promise<string> {
+    this.app ??= this.ctx.tailnet ? ((await this.ctx.tailnet.self()).workload ?? "<app>") : "<app>";
+    return this.app;
+  }
+
   onStart() {
     this.sql`create table if not exists refunds (id text primary key, order_id text, amount real, state text, detail text)`;
   }
@@ -48,7 +58,7 @@ export class RefundAgent extends Agent<Env> {
       };
       const id = await this.runWorkflow("REFUND_WORKFLOW", params, { agentBinding: "RefundAgent" });
       this.sql`insert into refunds (id, order_id, amount, state) values (${id}, ${params.order}, ${params.amount}, 'waiting for approval')`;
-      return Response.json({ id, approve: `tw approve ${this.env.APP_NAME} ${id}` });
+      return Response.json({ id, approve: `tw approve ${await this.appName()} ${id}` });
     }
     // GET /agents/refund-agent/<customer>/refunds
     const rows = this.sql`select * from refunds order by rowid`;

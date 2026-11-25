@@ -59,9 +59,6 @@ func TestLLMsTxt(t *testing.T) {
 		linked[p] = true
 	}
 	for _, d := range List() {
-		if strings.HasPrefix(d.Path, "design/adr/") && d.Path != "design/adr/README.md" {
-			continue // the ADR index links them
-		}
 		if !linked[RepoPath(d.Path)] {
 			t.Errorf("llms.txt doesn't list %s", RepoPath(d.Path))
 		}
@@ -69,7 +66,7 @@ func TestLLMsTxt(t *testing.T) {
 }
 
 // TestSearchRanksGuides: a word that names a guide finds that guide first,
-// not the API contract or a design record that mentions it.
+// not a passing mention in another guide.
 func TestSearchRanksGuides(t *testing.T) {
 	for q, want := range map[string]string{"secret": "secrets.md", "kv": "kv.md", "logs": "observability.md", "upgrade": "upgrading.md", "public webhook": "public-ingress.md", "quick start": "../README.md", "changelog": "../CHANGELOG.md"} {
 		hits := Search(q, 3)
@@ -77,12 +74,31 @@ func TestSearchRanksGuides(t *testing.T) {
 		for _, h := range hits {
 			found = found || h.Doc == want
 		}
-		if !found || strings.HasPrefix(hits[0].Doc, "contracts/") || strings.HasPrefix(hits[0].Doc, "design/") {
+		if !found {
 			var got []string
 			for _, h := range hits {
 				got = append(got, h.Ref())
 			}
-			t.Errorf("search %q: want %s in the top 3 and a guide first, got %v", q, want, got)
+			t.Errorf("search %q: want %s in the top 3, got %v", q, want, got)
 		}
+	}
+}
+
+// TestDesignNotEmbedded: the CLI embeds the guides only (issue #479); a
+// design or contract ref points at GitHub.
+func TestDesignNotEmbedded(t *testing.T) {
+	for _, d := range List() {
+		if strings.HasPrefix(d.Path, "design/") || strings.HasPrefix(d.Path, "contracts/") {
+			t.Errorf("%s is embedded", d.Path)
+		}
+	}
+	if _, ok := Show("design/RFC.md"); ok {
+		t.Error("Show(design/RFC.md) found an embedded doc")
+	}
+	if u := OnGitHubOnly("docs/contracts/mgmt-api.md#secrets"); u != GitHubBlob+"docs/contracts/mgmt-api.md#secrets" {
+		t.Errorf("OnGitHubOnly(contracts/...) = %q", u)
+	}
+	if u := OnGitHubOnly("errors.md"); u != "" {
+		t.Errorf("OnGitHubOnly(errors.md) = %q, want empty", u)
 	}
 }

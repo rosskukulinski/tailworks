@@ -1,9 +1,38 @@
 # Debugging in tw dev
 
 `tw dev` runs your app on the same tw-hostd, netd and workerd as a deployed
-host. This page covers the debugging tools it has in common with
+host, with no tailnet. This page covers how to start it, then the
+debugging tools it has in common with
 `wrangler dev`: source-mapped exception stacks, `req.url`, the V8 inspector
 (Chrome DevTools, VS Code) and the terminal hotkeys.
+
+## Try it without a tailnet
+
+You don't need a tailnet, a credential or `tw up` to run an app. `tw dev`
+runs it on your machine with the same host agent (tw-hostd, netd) and
+workerd as production. In place of your tailnet, it starts a test control
+plane and relay on 127.0.0.1, with an in-memory mgmt. A local port reaches
+the app through a dev client node, so `getCaller()` sees a real (dev)
+caller.
+
+```sh
+tw init hello --template agent && cd hello
+tw dev                      # ready on http://127.0.0.1:8787 · edits reload · Ctrl-C to stop
+tw dev --once --json        # start, make one request, print it, exit (a smoke test)
+```
+
+`tw dev --help` lists the flags (`--port`, `--once`, `--test-scheduled`, and under Advanced `--workerd`, which defaults to `$TW_WORKERD`, and `-v`).
+
+The port is `--port`, else the wrangler config's `dev.port`, else 8787.
+A port you chose (either way) fails when it is busy, as `wrangler dev`
+does. When you chose none and 8787 is busy (another `tw dev`, or
+`wrangler dev`), `tw dev` takes a free port and prints one line naming
+both. `--port 0` always picks a free one.
+The `mcp` template serves on `/mcp` (its `/` answers 404); `tw dev` says
+so and its smoke test sends an MCP `initialize` there. Not in dev yet: a
+policy evaluator. Every dev node sees every other and gets the same test
+capabilities, so a call that works in dev can still need a grant on a
+tailnet.
 
 ## Exception stacks point at your sources
 

@@ -409,7 +409,7 @@ func TestE2EMbp(t *testing.T) {
 	// ai-agent (Vercel AI SDK + @ai-sdk/mcp) scaffolds on mbp with no npm;
 	// doctor above bundled it offline. Not deployed: its tags aren't in
 	// tailnet 1's policy, and M6 doesn't write policy.
-	if _, se, _, err := e.Tw("init", rWork+"/ai", "--template", "ai-agent", "--keep-tags", "--json"); err != nil {
+	if _, se, _, err := e.Tw("init", rWork+"/ai", "--template", "ai-agent", "--json"); err != nil {
 		t.Fatalf("tw init --template ai-agent on mbp: %v %s", err, se)
 	}
 	res.Pass("init_ai_agent_offline", "tw init --template ai-agent on mbp (no npm); bundled offline by doctor")

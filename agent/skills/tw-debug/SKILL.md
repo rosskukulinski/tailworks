@@ -24,6 +24,9 @@ tw logs hello-mcp --errors --json    # only failed requests: status >= 400, exce
   `{"event": "log", "line"}` per line.
 - `-f` follows. With `--json` that is a stream of one JSON object per
   line, so run it in the background and stop it when you've seen enough.
+- Without a workload, `tw logs` shows the app in the current directory,
+  else the tenant's only workload; with several it fails `bad_request`
+  and lists one `tw logs <workload>` per workload.
 - `--component mgmt|hostd|supervisor` prints tailworks' own daemons' logs
   instead. That only works on the machine that ran `tw up`.
 - With replicas, each line has the `host` it came from.
@@ -74,6 +77,7 @@ ones that are plain edits in the app.
 ```sh
 tw audit <object-id> --json     # one object's history: created, called, spawned, killed
 tw audit --trace <trace-id>     # every record of one request (trace_id comes with mgmt errors)
+tw audit --json                 # the newest 50 records (-n for more)
 tw audit --all --json           # the whole tenant's trail
 ```
 

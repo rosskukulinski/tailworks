@@ -22,7 +22,7 @@ import (
 // and a real run would have installed into the extracted directory and
 // restarted the real tailworks. Now the prefix is the one that owns the state
 // dir: the binary the service or the running supervisor was started from,
-// else the state dir itself (install.sh's default prefix is the default
+// else the prefix the last tw up recorded in tw.json, else the state dir itself (install.sh's default prefix is the default
 // state dir, ~/.tailworks). When that differs from the binary's own prefix,
 // tw upgrade refuses unless --prefix names the prefix to upgrade.
 
@@ -136,10 +136,26 @@ func statePrefixCandidates(s *state) []prefixCandidate {
 	if pid := s.supervisorPID(); pidAlive(pid) {
 		cs = append(cs, prefixCandidate{Prefix: prefixOfBinary(processBinary(pid)), From: "the running supervisor, pid " + strconv.Itoa(pid)})
 	}
+	// What the last tw up recorded: after the live sources (which can't be
+	// stale while tailworks runs), and only while it is still an install,
+	// so a moved or removed one falls through.
+	if isInstallPrefix(s.Cfg.InstallPrefix) {
+		cs = append(cs, prefixCandidate{Prefix: s.Cfg.InstallPrefix, From: "tw.json, recorded by tw up"})
+	}
 	if isInstallPrefix(s.Dir) {
 		cs = append(cs, prefixCandidate{Prefix: s.Dir, From: "the state dir is the install prefix"})
 	}
 	return cs
+}
+
+// upInstallPrefix is what tw up records as tw.json's installPrefix: the
+// install.sh prefix this tw runs from, or "" (npm, a dev build).
+func upInstallPrefix() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return prefixOfBinary(exe)
 }
 
 // serviceBinary is the tailworks binary a LaunchAgent plist or systemd unit

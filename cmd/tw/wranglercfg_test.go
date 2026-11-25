@@ -170,7 +170,6 @@ func TestWranglerWarnings(t *testing.T) {
 	got := wranglerWarnings("wrangler.toml", cfg, "esbuild")
 	want := []string{
 		"wrangler.toml: ai: no such binding on tailworks: env.AI will be undefined",
-		"wrangler.toml: build: needs wrangler's bundler",
 		"wrangler.toml: frobnicate: unknown key, ignored",
 		"wrangler.toml: observability: ignored by tailworks",
 		"wrangler.toml: routes: ignored",

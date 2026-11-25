@@ -1,6 +1,7 @@
 #!/bin/sh
 # install_test.sh: install.sh upgrade keeps .prev, --rollback swaps it back,
-# a same-version repair keeps the older .prev, --uninstall removes it all;
+# a same-version repair keeps the older .prev, another version over a running
+# tw is refused (install.sh and get.sh), --uninstall --purge removes it all;
 # install.sh and get.sh refuse a release that isn't signed by a pinned key
 # (issue #71). Hermetic (fake releases in a temp dir, signed by a throwaway
 # key that TW_RELEASE_SIGNERS pins); run: sh scripts/install_test.sh
@@ -70,12 +71,35 @@ pid=$!
 echo $pid >"$P/supervisor.pid"
 if sh "$P/install.sh" --rollback >/dev/null 2>&1; then fail "rollback while running"; fi
 sh "$P/install.sh" --rollback --force >/dev/null
+# Another version over a running tw: refused, pointing at tw upgrade
+# (issue #485); a same-version repair goes ahead; --force swaps anyway.
+[ "$(cat "$P/VERSION")" = 0.1.0 ] || fail "expected 0.1.0 after the forced rollback"
+if sh "$T/rel-0.2.0/install.sh" >"$T/out" 2>&1; then fail "installed 0.2.0 over a running 0.1.0"; fi
+grep -q "tw 0.1.0 is running from $P" "$T/out" || fail "running refusal message: $(cat "$T/out")"
+grep -q "tw upgrade --from $T/rel-0.2.0" "$T/out" || fail "the refusal doesn't name tw upgrade --from: $(cat "$T/out")"
+[ "$(cat "$P/VERSION")" = 0.1.0 ] || fail "the refused install changed VERSION"
+sh "$T/rel-0.1.0/install.sh" >"$T/out" 2>&1 || fail "a same-version repair while running: $(cat "$T/out")"
+# get.sh checks before it downloads anything (no such mirror).
+if TW_RELEASE_BASE="file://$T/no-such-mirror" sh "$ROOT/scripts/get.sh" v0.2.0 >"$T/out" 2>&1; then fail "get.sh over a running tw"; fi
+grep -q "tw 0.1.0 is running from $P" "$T/out" || fail "get.sh running refusal: $(cat "$T/out")"
+grep -q "upgrade 0.2.0" "$T/out" || fail "get.sh refusal doesn't name tw upgrade: $(cat "$T/out")"
+sh "$T/rel-0.2.0/install.sh" --force >/dev/null || fail "--force over a running tw"
+[ "$(cat "$P/VERSION")" = 0.2.0 ] || fail "--force did not install"
 kill $pid 2>/dev/null || true
 wait $pid 2>/dev/null || true
 rm -f "$P/supervisor.pid"
 
+# --uninstall keeps the state; --uninstall --purge removes the whole
+# prefix, backups/ and link.json included (issue #487: tw uninstall's end
+# state).
+mkdir -p "$P/mgmt" "$P/backups/b1" "$P/cli"
+echo '{}' >"$P/tw.json"
+echo '{}' >"$P/link.json"
 sh "$P/install.sh" --uninstall >/dev/null
-[ ! -e "$P" ] || fail "uninstall left: $(ls -A "$P")"
+[ ! -e "$P/bin" ] && [ ! -e "$P/share" ] || fail "uninstall left bin/share"
+[ -e "$P/tw.json" ] && [ -d "$P/backups/b1" ] || fail "uninstall without --purge removed state"
+sh "$T/rel-0.2.0/install.sh" --uninstall --purge >/dev/null
+[ ! -e "$P" ] || fail "uninstall --purge left: $(ls -A "$P")"
 if sh "$T/rel-0.1.0/install.sh" --rollback >/dev/null 2>&1; then fail "rollback with no .prev"; fi
 
 # install.sh: signatures.
@@ -134,6 +158,16 @@ get() { # dir version
 mkmirror "$T/m-good" 0.3.0
 get "$T/m-good" 0.3.0 || fail "get.sh a signed release: $(cat "$T/out")"
 [ "$(cat "$P/VERSION")" = 0.3.0 ] || fail "get.sh did not install"
+# Over a running tw: refused; TW_INSTALL_FORCE=1 installs anyway.
+sleep 30 &
+pid=$!
+echo $pid >"$P/supervisor.pid"
+mkmirror "$T/m-next" 0.4.0
+if get "$T/m-next" 0.4.0; then fail "get.sh installed over a running tw"; fi
+TW_INSTALL_FORCE=1 get "$T/m-next" 0.4.0 || fail "TW_INSTALL_FORCE=1 get.sh: $(cat "$T/out")"
+[ "$(cat "$P/VERSION")" = 0.4.0 ] || fail "TW_INSTALL_FORCE=1 did not install"
+kill $pid 2>/dev/null || true
+wait $pid 2>/dev/null || true
 rm -rf "$P"
 mkmirror "$T/m-bad" 0.3.0
 sign "$T/other" "$T/m-bad/SHA256SUMS"

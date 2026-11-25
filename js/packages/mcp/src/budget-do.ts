@@ -1,6 +1,6 @@
 // TwBudget: the Durable Object behind @tailworks/mcp budget(). Declare it in
-// wrangler.jsonc durable_objects and mark it `"node": false` in tailworks.jsonc
-// (it is internal state; it needs no tailnet node of its own).
+// wrangler.jsonc durable_objects and leave it out of tailworks.jsonc's
+// tailnet.objects (it is internal state; it needs no tailnet node of its own).
 // @ts-ignore: provided by workerd
 import { DurableObject } from "cloudflare:workers";
 

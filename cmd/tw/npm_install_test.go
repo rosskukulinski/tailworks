@@ -68,7 +68,7 @@ func TestNPMService(t *testing.T) {
 	if _, err := installService(nil); !errors.As(err, &ce) || ce.Code != "npm_install" {
 		t.Fatalf("installService from npx: %v", err)
 	}
-	if got := upgradeCommand(); got != "npx tailworks@latest …" {
+	if got := upgradeCommand("0.6.0"); got != "npx tailworks@latest …" {
 		t.Fatalf("upgradeCommand (npx) = %q", got)
 	}
 	if st, d, _ := doctorInstall(); st != "info" || installFact(d) != "npx" {
@@ -79,7 +79,7 @@ func TestNPMService(t *testing.T) {
 	if err := npmServiceErr(); err != nil {
 		t.Fatalf("global npm install: %v", err)
 	}
-	if got := upgradeCommand(); got != npminstall.UpgradeCommand {
+	if got := upgradeCommand("0.6.0"); got != "tw backup && tw down && npm install -g tailworks@0.6.0 && tw up" {
 		t.Fatalf("upgradeCommand (npm) = %q", got)
 	}
 	if st, d, _ := doctorInstall(); st != "ok" || installFact(d) != "npm" || !strings.Contains(d, "microVM") {

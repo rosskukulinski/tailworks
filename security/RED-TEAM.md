@@ -841,7 +841,8 @@ still `t.Skip`s.
 - **CLI and supply chain.** `tw dev` binds 127.0.0.1 only
   (`cmd/tw/dev.go:169`); `tw link` is client-only, 0600 state,
   WhoIs-authenticated; no sudo in `tw up --yes`/`doctor`; policy written
-  only with `--policy-apply` through the RT-06 checks; OAuth file
+  only with `--policy-apply` through the RT-06 checks (since #481: only
+  after an interactive y/N, or `--apply-policy --yes`); OAuth file
   0600-checked (`up.go:233-243`); lockfile present, workerd pinned and
   integrity-checked at release (`release.sh:29, 69-80`); `@tailworks/*` have no
   third-party deps; no postinstall, no `curl | sh`, no submodules; bundle

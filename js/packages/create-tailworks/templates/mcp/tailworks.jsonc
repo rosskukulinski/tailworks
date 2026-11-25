@@ -1,12 +1,9 @@
 {
   "$schema": "https://raw.githubusercontent.com/rosskukulinski/tailworks/master/schema/tailworks.schema.json",
-  "name": "mcp",
   "tailnet": {
-    "tags": ["tag:tw-wl-mcp"],
-    "objects": {
-      // budget counters are internal state: no tailnet node of their own
-      "TwBudget": { "egress": "workload", "node": false }
-    }
+    "tags": ["tag:tw-wl-mcp"]
+    // TwBudget (the budget counters) isn't in "objects", so it is internal:
+    // a plain Durable Object with no tailnet node of its own
   }
   // policy: grant callers the app cap, e.g.
   //   { "src": ["tag:tw-agent-support"], "dst": ["tag:tw-wl-mcp"], "ip": ["tcp:80"],

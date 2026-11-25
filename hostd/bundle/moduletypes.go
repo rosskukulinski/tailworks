@@ -11,9 +11,14 @@ import (
 func (a *App) setModuleTypes(files map[string][]byte, types map[string]string) error {
 	for p, t := range types {
 		switch t {
-		case "js", "json", "text", "data", "wasm":
+		case "js",
+			"json",
+			"text",
+			"data",
+			"wasm",
+			"py": // a Python module (python.go)
 		default:
-			return fmt.Errorf("bundle: tw-bundle.json modules[%q]: type %q: want js, json, text, data or wasm", p, t)
+			return fmt.Errorf("bundle: tw-bundle.json modules[%q]: type %q: want js, json, text, data, wasm or py", p, t)
 		}
 		if _, ok := files[p]; !ok {
 			return fmt.Errorf("bundle: tw-bundle.json modules[%q]: not in bundle", p)
@@ -27,8 +32,8 @@ func (a *App) setModuleTypes(files map[string][]byte, types map[string]string) e
 }
 
 // ModuleKind is p's module type: the bundler's explicit type, else by
-// extension (.js/.mjs js, .json json, .txt/.html text, .wasm wasm, else
-// data).
+// extension (.js/.mjs js, .json json, .txt/.html text, .wasm wasm, .py
+// py, else data).
 func (a *App) ModuleKind(p string) string {
 	if t, ok := a.ModuleTypes[p]; ok {
 		return t
@@ -47,6 +52,8 @@ func KindByExt(p string) string {
 		return "text"
 	case ".wasm":
 		return "wasm"
+	case ".py":
+		return "py"
 	}
 	return "data"
 }

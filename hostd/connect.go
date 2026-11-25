@@ -16,6 +16,7 @@ import (
 	"github.com/rosskukulinski/tailworks/hostd/gen"
 	"github.com/rosskukulinski/tailworks/hostd/mgmtapi"
 	"github.com/rosskukulinski/tailworks/internal/obs"
+	"github.com/rosskukulinski/tailworks/internal/wallclock"
 	"github.com/rosskukulinski/tailworks/netd"
 )
 
@@ -259,7 +260,7 @@ func spliceCount(c net.Conn, br *bufio.Reader, up net.Conn) (out, in int64) {
 // egressObjHandler does a fetch().
 func (h *Host) connectAsFacet(inst *instance) connectAuth {
 	return func(ctx context.Context, p *gen.ConnectPreamble, dst string) (*object, *apiError) {
-		cls, name, ok := gen.VerifyConnectOnce(inst.res.MACKey, p, dst, time.Now(), &inst.nonces)
+		cls, name, ok := gen.VerifyConnectOnce(inst.res.MACKey, p, dst, wallclock.Now(), &inst.nonces)
 		if !ok {
 			return nil, &apiError{Code: "unknown_object", Detail: "egress socket failed platform authentication"}
 		}

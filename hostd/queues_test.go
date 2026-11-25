@@ -47,7 +47,12 @@ func TestQueues(t *testing.T) {
 // testQueues is TestQueues against backend (realmgmt_test.go).
 func testQueues(t *testing.T, backend string) {
 	s := startSuiteCapsOpts(t, fakemgmt.Config{}, tailcfg.PeerCapMap{nettest.TestCap: []tailcfg.RawMessage{nettest.TestCapValue}}, onBackend(backend, func(o *hostdtest.Options) {
-		o.FenceAfter, o.HeartbeatEvery = time.Second, 100*time.Millisecond
+		// FenceAfter is short so FencedHostConsumesNothing fences quickly,
+		// but not 1 s: on a loaded runner a heartbeat round trip or an
+		// assignment sync now and then takes over a second, and every such
+		// moment stopped the consumer loops. A loop stopped just as its
+		// claim landed lost the claim, counted as an attempt (#392).
+		o.FenceAfter, o.HeartbeatEvery = 3*time.Second, 100*time.Millisecond
 		o.QueueVisibility = 3 * time.Second
 	}))
 	e := s.e
@@ -220,15 +225,15 @@ func testQueues(t *testing.T, backend string) {
 	})
 
 	t.Run("SlowHeartbeatReleasesBatch", func(t *testing.T) {
-		// A heartbeat later than FenceAfter (1 s here: a loaded host, a slow
+		// A heartbeat later than FenceAfter (3 s here: a loaded host, a slow
 		// mgmt) makes the host's lease stale, and its consumer loops stop
 		// until the next good one. The run they were in is cancelled; hostd
 		// hands the batch back uncounted, so the message comes again as
 		// attempt 1. (#387: it was retried as attempt 2, and a wait for
 		// attempt 1 never ended.)
-		call("/send", "k", "sh1", "do", "slow-once") // attempt 1 takes 4 s
+		call("/send", "k", "sh1", "do", "slow-once") // its first run takes 8 s
 		time.Sleep(1500 * time.Millisecond)          // past max_batch_timeout: queue() is running
-		e.Hooks.DelayHeartbeat(2 * time.Second)      // stale 1 s in, fresh again at 2 s
+		e.Hooks.DelayHeartbeat(4 * time.Second)      // stale 3 s in, fresh again at 4 s
 		wait("sh1", 1, 20*time.Second)
 		time.Sleep(time.Second)
 		for _, r := range recs() {

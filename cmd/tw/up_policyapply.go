@@ -122,8 +122,42 @@ func upPolicyWant(pol []byte) (policy.Snippet, error) {
 // the merged policy (policy_apply_failed), or the write scope is missing
 // and the policy lacks needed (policy_missing_tag_owners, as without the
 // flag).
-func upApplyPolicy(ctx context.Context, api policy.API, f *flags, pol []byte, readable bool, needed policy.Snippet, yes bool, out io.Writer) ([]byte, bool, error) {
+//
+// mode policyAskFirst (a terminal without the flag, issue #481) asks only
+// when the control plane would accept the write, and says nothing when it
+// wouldn't; "n", or a write that can't happen, goes on as print-only tw up
+// does (needed still missing: policy_missing_tag_owners).
+func upApplyPolicy(ctx context.Context, api policy.API, f *flags, pol []byte, readable bool, needed policy.Snippet, mode policyWriteMode, yes bool, out io.Writer) ([]byte, bool, error) {
 	const cmdline = "tw up --apply-policy"
+	ask := mode == policyAskFirst
+	if ask {
+		// What print-only tw up does instead (oauthPreflight's check).
+		printOnly := func() ([]byte, bool, error) {
+			return pol, false, oauthNeededCheck(pol, readable, needed) // oauth.go
+		}
+		if !readable {
+			return printOnly()
+		}
+		want, err := upPolicyWant(pol)
+		if err != nil {
+			return printOnly()
+		}
+		miss, err := policy.Missing(pol, want)
+		if err != nil || miss.Empty() {
+			return printOnly()
+		}
+		next, err := policy.MergeWith(slices.Clone(pol), want, upPolicyOptions())
+		if err != nil || api.ValidatePolicy(ctx, next) != nil {
+			return printOnly()
+		}
+		policyAskHint(out, "tw up")
+		if err := confirmBootstrapWrite(f, false, cmdline, controlTailscale, miss, out); err != nil {
+			if policyDeclined(err) {
+				return printOnly()
+			}
+			return pol, false, err
+		}
+	}
 	if !readable {
 		fmt.Fprintf(out, "› policy   not applied: --apply-policy needs the OAuth client's Policy File › Write scope, and this client can't even read the policy. Scopes can't be added to an existing client: create a new one with Policy File › Write, or make sure the policy has:\n")
 		for _, l := range snippetLines(operatorSnippet()) {
@@ -174,8 +208,10 @@ func upApplyPolicy(ctx context.Context, api policy.API, f *flags, pol []byte, re
 		}
 		return failed(err)
 	}
-	if err := confirmBootstrapWrite(f, yes, cmdline, controlTailscale, miss, out); err != nil {
-		return pol, false, err
+	if !ask {
+		if err := confirmBootstrapWrite(f, yes, cmdline, controlTailscale, miss, out); err != nil {
+			return pol, false, err
+		}
 	}
 	ar, err := policy.ApplyRetry(ctx, api, want, opts)
 	switch {

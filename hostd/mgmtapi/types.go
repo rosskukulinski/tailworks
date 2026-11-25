@@ -259,7 +259,6 @@ type DeployResponse struct {
 type NamespaceSpec struct {
 	Class string   `json:"class"`
 	Tags  []string `json:"tags"`
-	Agent bool     `json:"agent,omitempty"`
 }
 
 type Assignment struct {

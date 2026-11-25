@@ -64,6 +64,12 @@ func testTwUp(t *testing.T, extra []string) {
 		!strings.Contains(se, "policy_missing_tag_owners") || !strings.Contains(se, "tag:tw-mgmt") || strings.Contains(se, "autogroup:admin") {
 		t.Fatalf("tw up --control=headscale without the policy: %v\n%s", err, se)
 	}
+	// The same without --control=headscale: --api-key-file with a
+	// non-default --control-url selects the profile (#539).
+	if _, se, _, err := e.Tw("up", "--yes", "--json", "--control-url", hs.URL, "--tailnet", hs.Domain, "--api-key-file", hs.KeyFile); err == nil ||
+		!strings.Contains(se, "policy_missing_tag_owners") || strings.Contains(se, "mint_mode_removed") {
+		t.Fatalf("tw up --control-url <headscale> --api-key-file (profile inferred) without the policy: %v\n%s", err, se)
+	}
 	if devs, _ := hs.Client.ListDevices(ctx); len(devs) != 0 {
 		t.Fatalf("nodes joined before the policy was in place: %+v", devs)
 	}
@@ -81,8 +87,7 @@ func testTwUp(t *testing.T, extra []string) {
 	}
 	d := e.MustJSON(&up, append([]string{"up", "--yes", "--control=headscale", "--control-url", hs.URL, "--tailnet", hs.Domain,
 		"--api-key-file", hs.KeyFile, "--apply-policy", "--ephemeral", "--hostname-prefix", "tw-e2e-",
-		"--mgmt-hostname", "tw-e2e-mgmt", "--host-id", "e2e", "--allow-sibling-egress",
-		"--device-delete-delay", "1s", "--kill-tombstone", "3s"}, extra...)...)
+		"--mgmt-hostname", "tw-e2e-mgmt", "--host-id", "e2e", "--allow-sibling-egress"}, extra...)...)
 	if !up.PolicyOK || !up.Applied || up.MintMode != "headscale" {
 		t.Fatalf("tw up: %+v", up)
 	}
@@ -97,12 +102,12 @@ func testTwUp(t *testing.T, extra []string) {
 	}
 	// The workload's and the test client's tags and grants (what the
 	// operator adds for their app).
-	if _, err := policy.ApplyWith(ctx, hs.Client, workloadSnippet(), policy.Options{Headscale: true, AllowTags: []string{TestTag}}); err != nil {
+	if _, err := policy.ApplyWith(ctx, hs.Client, workloadSnippet(), policy.Options{Headscale: true, AllowTags: []string{TestTag}, AllowSrcs: []string{"autogroup:member"}}); err != nil {
 		t.Fatal(err)
 	}
 
 	app := filepath.Join(e.WorkDir, "hello")
-	e.MustJSON(nil, "init", app, "--template", "hello", "--keep-tags")
+	e.MustJSON(nil, "init", app, "--template", "hello")
 	editFile(t, filepath.Join(app, "tailworks.jsonc"), func(s string) string {
 		return strings.Replace(s, `"connects": ["tag:db"]`, `"connects": []`, 1)
 	})
@@ -143,9 +148,27 @@ func testTwUp(t *testing.T, extra []string) {
 	}
 	t.Logf("PASS call over the Headscale tailnet: caller nodeId %s tags %v", body.Caller.NodeID, body.Caller.Tags)
 
+	// A new app deployed with --apply-policy gets the caller grant
+	// (autogroup:member → its tag, #552): Headscale accepts that source.
+	callers := filepath.Join(e.WorkDir, "callers")
+	e.MustJSON(nil, "init", callers, "--template", "hello", "--keep-tags")
+	editFile(t, filepath.Join(callers, "tailworks.jsonc"), func(s string) string {
+		return strings.Replace(s, `"connects": ["tag:db"]`, `"connects": []`, 1)
+	})
+	e.MustJSON(nil, "deploy", callers, "--apply-policy", "--yes")
+	pol, _, err = hs.Client.GetPolicyHuJSON(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cg := policy.Snippet{Grants: []map[string]any{{"src": []string{"autogroup:member"}, "dst": []string{"tag:tw-wl-callers"}, "ip": []string{"tcp:80"}}}}
+	if miss, err := policy.Missing(pol, cg); err != nil || !miss.Empty() {
+		t.Fatalf("caller grant not written by deploy --apply-policy (missing %+v, %v):\n%s", miss, err, pol)
+	}
+	t.Log("PASS deploy --apply-policy wrote the autogroup:member caller grant")
+
 	// tailnet.service needs Tailscale Services.
 	svc := filepath.Join(e.WorkDir, "svc")
-	e.MustJSON(nil, "init", svc, "--template", "hello", "--keep-tags")
+	e.MustJSON(nil, "init", svc, "--template", "hello")
 	editFile(t, filepath.Join(svc, "tailworks.jsonc"), func(s string) string {
 		s = strings.Replace(s, `"connects": ["tag:db"]`, `"connects": []`, 1)
 		return strings.Replace(s, `"tailnet": {`, `"tailnet": { "service": true,`, 1)

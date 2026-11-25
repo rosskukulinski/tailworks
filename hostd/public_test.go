@@ -152,6 +152,11 @@ func TestPublicIngress(t *testing.T) {
 		t.Fatalf("forged cf blob reached the app: %s", js(seen))
 	}
 	assertNoCfGeo(t, "public /hook/echo", r) // cfgeo_test.go (#302)
+	// Funnel terminates TLS: the Worker sees the https:// URL it was
+	// called at (#360), as on Cloudflare.
+	if r["url"] != "https://pubprobe.ttest.ts.net/hook/echo?token=secret" {
+		t.Fatalf("public request.url %v, want https://", r["url"])
+	}
 
 	// The same handler over the tailnet still sees the tailnet caller.
 	tcode, tr := s.getJSON("http://" + wl.IP + "/hook/echo")
@@ -159,6 +164,9 @@ func TestPublicIngress(t *testing.T) {
 		t.Fatalf("tailnet /hook/echo: %d %s", tcode, js(tr))
 	}
 	assertNoCfGeo(t, "tailnet /hook/echo", tr)
+	if u, _ := tr["url"].(string); !strings.HasPrefix(u, "http://") {
+		t.Fatalf("tailnet request.url %v, want http:// (no tailnet.https)", tr["url"])
+	}
 
 	// 2. Routes: only the listed prefixes; /_tw and odd paths never.
 	for _, c := range []struct {

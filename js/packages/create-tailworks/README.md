@@ -9,7 +9,10 @@ cd my-app && npm install && npx tsc --noEmit
 ```
 
 With the `tw` CLI on your PATH this runs `tw init`; otherwise it copies
-the template. The templates are in [`templates/`](templates/):
+the template and renames it the way `tw init` does: the workload, the npm
+package and the template's `tag:tw-…` tags are named after the directory
+(or `--name`). `--tags` and `--object-tags` are passed to `tw init` and
+need it. The templates are in [`templates/`](templates/):
 
 - `hello`: a Worker that returns its verified caller and does a private fetch.
 - `agent`: a Cloudflare Agents SDK `Agent` (state, `this.sql`, per-object node

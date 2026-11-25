@@ -61,16 +61,23 @@ type devResult struct {
 
 func cmdDev(args []string) error {
 	f := newFlags("dev")
-	port := f.Int("port", 8787, "local port (127.0.0.1)")
+	port := f.Int("port", devDefaultPort, "local port on 127.0.0.1 (default: wrangler dev.port, else 8787, else a free port when 8787 is busy; 0 picks a free one)")
 	once := f.Bool("once", false, "start, make one request (GET /; for an MCP app an initialize to its route), print it and exit (smoke test)")
-	workerdFlag := f.String("workerd", "", "workerd binary")
+	workerdFlag := f.String("workerd", "", "workerd binary (default: $TW_WORKERD, the install's, or PATH)")
 	verbose := f.Bool("v", false, "hostd logs to stderr")
 	testScheduled := f.Bool("test-scheduled", false, "serve /__scheduled?cron=<expr>[&time=<ms>] on the local port: run a cron trigger's scheduled() now")
-	inspectorPort := f.Int("inspector-port", 0, "serve workerd's V8 inspector on 127.0.0.1:<port> for Chrome DevTools or VS Code (devinspector.go)")
+	inspectorPort := f.Int("inspector-port", 0, "serve workerd's V8 inspector on 127.0.0.1:<port> for Chrome DevTools or VS Code; any local web page can attach while it runs, so pass it only while you debug (docs/dev-debugging.md)")
 	consolePort := f.Int("console-port", 0, "serve the read-only data console (KV keys, D1 rows) on 127.0.0.1:<port>; 0 picks a free port, -1 turns it off (devconsole.go)")
 	var callers callerFlags
-	f.Var(&callers, "caller", "an extra identity: its own dev node (tagged with =tag:a,tag:b) and local URL, listed in the result (repeatable)")
+	f.Var(&callers, "caller", "an extra identity: its own dev node (tagged with =tag:a,tag:b) and local URL, listed in the result (repeatable; black-box tests of who may call what: docs/testing.md)")
 	ao := addAppFlags(f) // wranglerapp.go: --env, --wrangler, --from-wrangler-out
+	// --help lists these under Advanced (helpflags.go).
+	f.group(advancedFlags,
+		"console-port",
+		"inspector-port",
+		"workerd",
+		"v",
+	)
 	pos, err := f.parse(args)
 	if err != nil {
 		return err
@@ -80,13 +87,17 @@ func cmdDev(args []string) error {
 		dir = pos[0]
 	}
 	ao.SourceMap = devSourceMapMode(*inspectorPort) // sourcemap.go
+	ao.DevBuild = true                              // buildcmd.go: devBuild runs build.command
 	a, err := loadAppWith(dir, "", *ao)
 	if err != nil {
 		return err
 	}
 	a.printWarnings(os.Stderr)
-	printDevEgressVia(a.TwRaw, os.Stderr)                  // dev_egressvia.go
-	if err := checkDevPort(*port, os.Stderr); err != nil { // devlog.go
+	printDevEgressVia(a.TwRaw, os.Stderr)    // dev_egressvia.go
+	printDevTailnetHTTPS(a.TwRaw, os.Stderr) // tailnethttps.go
+	// --port, else wrangler dev.port, else 8787 or a free port (dev_port.go).
+	*port, err = resolveDevPort(*port, flagGiven(f.FlagSet, "port"), a, os.Stderr)
+	if err != nil {
 		return err
 	}
 	wd, err := findWorkerd(*workerdFlag)
@@ -139,8 +150,12 @@ func cmdDev(args []string) error {
 		ForceProcessTier: true,
 		// Workers reach the internet as on a host (tailnet.egress.internet).
 		WorkerInternet: hostd.DirectInternet(),
+		// The local control issues no certificates (tailnethttps.go).
+		TailnetHTTPSOff: true,
 		// --inspector-port: each workerd gets an inspector (hostd/inspector.go).
-		WorkerdInspector: *inspectorPort > 0})
+		WorkerdInspector: *inspectorPort > 0,
+		// Python Workers: the per-user Pyodide cache, fetched once (python.go).
+		PyodideDir: devPyodideDir()})
 	if err != nil {
 		return err
 	}
@@ -202,6 +217,10 @@ func cmdDev(args []string) error {
 		}
 		return hostd.ObjectStatus{}, fail("identity_pending", "dev deploy not ready after 60s")
 	}
+	var db devBuild // buildcmd.go: build.command, at start and on build.watch_dir changes
+	if _, err := db.run(a); err != nil {
+		return err
+	}
 	wl, err := deploy()
 	if err != nil {
 		return err
@@ -253,6 +272,7 @@ func cmdDev(args []string) error {
 		emit(f, res, func() { fmt.Printf("tw dev · %s → %v\n", res.Serves, res.Smoke) })
 		return nil
 	}
+	devRefreshTypes(a, os.Stderr) // dev_types.go: before the snapshot, so its write is no edit
 	// Snapshot before ready is announced: an edit made right after it
 	// (a test's, an agent's) must still trigger a reload.
 	last := snapshot(a.Dir, a.assetsDir())
@@ -334,6 +354,16 @@ func cmdDev(args []string) error {
 			rs := time.Now()
 			if na, err := loadAppWith(a.Dir, a.Name, a.Opts); err == nil {
 				a = na
+			}
+			if devRefreshTypes(a, os.Stderr) { // dev_types.go
+				last = snapshot(a.Dir, a.assetsDir()) // the refresh is not an edit
+			}
+			if ran, err := db.run(a); ran {
+				last = snapshot(a.Dir, a.assetsDir()) // the build's own output is not an edit
+				if err != nil {
+					printDevErr(ev, err)
+					continue
+				}
 			}
 			o, err := deploy()
 			if err != nil {

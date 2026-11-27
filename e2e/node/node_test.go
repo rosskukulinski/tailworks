@@ -555,10 +555,12 @@ func TestNodeWorkflow(t *testing.T) {
 	if c1["tool"] != "refund" || c1["isError"] != true || c1["code"] != "cap_missing" {
 		t.Fatalf("refund should be cap_missing: %v", c1)
 	}
-	// The MCP server authorized the deployment's own node (its denial names
-	// the caller chain), not the host or another identity.
-	if !strings.Contains(c1["text"].(string), wf.NodeID) {
-		t.Fatalf("MCP caller is not the workflow's node %s: %v", wf.NodeID, c1["text"])
+	// The MCP server authorized the deployment's own node, not the host or
+	// another identity: its denial names the caller by workload and tag
+	// (@tailworks/mcp who2). It used to carry the caller chain's node IDs;
+	// #621 dropped that unbuilt surface.
+	if text := c1["text"].(string); !strings.Contains(text, "node-workflow (tag:tw-wl-node-workflow)") {
+		t.Fatalf("MCP caller is not the workflow's node: %v", text)
 	}
 	if !strings.Contains(fmt.Sprint(get(r, "approval", "by")), "ttest-client") || r["triage"] != "triaged o1" {
 		t.Fatalf("result: %v", r)

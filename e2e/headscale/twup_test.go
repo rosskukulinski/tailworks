@@ -151,7 +151,7 @@ func testTwUp(t *testing.T, extra []string) {
 	// A new app deployed with --apply-policy gets the caller grant
 	// (autogroup:member → its tag, #552): Headscale accepts that source.
 	callers := filepath.Join(e.WorkDir, "callers")
-	e.MustJSON(nil, "init", callers, "--template", "hello", "--keep-tags")
+	e.MustJSON(nil, "init", callers, "--template", "hello")
 	editFile(t, filepath.Join(callers, "tailworks.jsonc"), func(s string) string {
 		return strings.Replace(s, `"connects": ["tag:db"]`, `"connects": []`, 1)
 	})
